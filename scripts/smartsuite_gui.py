@@ -194,18 +194,46 @@ class SmartSuiteGUI:
         tk.Label(center, textvariable=self._hint_lbl, font=("Microsoft YaHei", 8),
                  fg="#666").pack(fill=tk.X, padx=4)
 
-        # Results area
+        # ---- Results area (tabbed) ----
         res_frm = ttk.LabelFrame(center, text="分析结果", padding=4)
         res_frm.pack(fill=tk.BOTH, expand=True, pady=(4,0))
 
-        # Text result (top)
-        self.out = tk.Text(res_frm, height=10, font=("Consolas", 10), wrap=tk.WORD,
-                           bg="#1a1a2e", fg="#cdd6f4", insertbackground="white")
-        self.out.pack(fill=tk.BOTH, expand=True)
+        self._result_nb = ttk.Notebook(res_frm)
+        self._result_nb.pack(fill=tk.BOTH, expand=True)
 
-        # Export
-        exp = ttk.Frame(res_frm)
-        exp.pack(fill=tk.X, pady=2)
+        # Tab 1: Summary
+        sum_frm = ttk.Frame(self._result_nb)
+        self._result_nb.add(sum_frm, text="结论")
+        self._summary_text = tk.Text(sum_frm, font=("Microsoft YaHei", 11), wrap=tk.WORD,
+                                      height=6, bg="#f0f8e8", relief=tk.FLAT, padx=10, pady=8)
+        self._summary_text.pack(fill=tk.BOTH, expand=True)
+
+        # Tab 2: Tables
+        tbl_frm = ttk.Frame(self._result_nb)
+        self._result_nb.add(tbl_frm, text="表格")
+        self._table_tree = ttk.Treeview(tbl_frm, show="headings", height=10)
+        tbl_scroll_y = ttk.Scrollbar(tbl_frm, orient=tk.VERTICAL, command=self._table_tree.yview)
+        tbl_scroll_x = ttk.Scrollbar(tbl_frm, orient=tk.HORIZONTAL, command=self._table_tree.xview)
+        self._table_tree.configure(yscrollcommand=tbl_scroll_y.set, xscrollcommand=tbl_scroll_x.set)
+        self._table_tree.grid(row=0, column=0, sticky="nsew")
+        tbl_scroll_y.grid(row=0, column=1, sticky="ns")
+        tbl_scroll_x.grid(row=1, column=0, sticky="ew")
+        tbl_frm.grid_rowconfigure(0, weight=1)
+        tbl_frm.grid_columnconfigure(0, weight=1)
+
+        # Tab 3: Log
+        log_frm = ttk.Frame(self._result_nb)
+        self._result_nb.add(log_frm, text="日志")
+        self.out = tk.Text(log_frm, font=("Consolas", 9), wrap=tk.WORD,
+                           bg="#1a1a2e", fg="#cdd6f4")
+        log_scroll = ttk.Scrollbar(log_frm, command=self.out.yview)
+        self.out.configure(yscrollcommand=log_scroll.set)
+        self.out.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Export buttons (below results)
+        exp = ttk.Frame(center)
+        exp.pack(fill=tk.X, pady=(2,0))
         self.ppt_btn = ttk.Button(exp, text="导出 PPT 报告", command=self._export_ppt, state="disabled")
         self.ppt_btn.pack(side=tk.RIGHT, padx=2)
         self.xls_btn = ttk.Button(exp, text="导出 Excel 报告", command=self._export_xls, state="disabled")
@@ -376,17 +404,49 @@ class SmartSuiteGUI:
 
     def _show(self, result):
         self.last_result = result
-        self._log(f"[{result.status.upper()}] {result.summary}")
+        status_icon = "OK" if result.status == 'ok' else ("WARN" if result.status == 'warning' else "ERR")
+        self._log(f"[{status_icon}] {result.summary}")
         for msg in result.messages:
             self._log(f"  {msg}")
-        # Show top rows of each table
-        for name, tbl in result.tables.items():
-            self._log(f"\n  [{name}]")
-            lines = tbl.to_string(max_rows=5).split('\n')
-            for line in lines[:6]:
-                self._log(f"    {line.strip()}")
-            if len(tbl) > 5:
-                self._log(f"    ... 共 {len(tbl)} 行")
+
+        # Summary tab
+        self._summary_text.configure(state=tk.NORMAL)
+        self._summary_text.delete("1.0", tk.END)
+        color = "#2e7d32" if result.status == 'ok' else ("#e65100" if result.status == 'warning' else "#c62828")
+        self._summary_text.insert(tk.END, f"  {result.summary}\n\n", ("big",))
+        self._summary_text.tag_configure("big", font=("Microsoft YaHei", 13, "bold"), foreground=color)
+        if result.metadata:
+            meta_lines = "\n".join(f"  {k}: {v}" for k, v in list(result.metadata.items())[:8])
+            self._summary_text.insert(tk.END, meta_lines, ("meta",))
+            self._summary_text.tag_configure("meta", font=("Consolas", 10), foreground="#555")
+        self._summary_text.configure(state=tk.DISABLED)
+
+        # Table tab — show the first result table in Treeview
+        self._table_tree.delete(*self._table_tree.get_children())
+        if result.tables:
+            first_name = list(result.tables.keys())[0]
+            tbl = result.tables[first_name]
+            # Include index as first column
+            idx_name = str(tbl.index.name or "")
+            display_cols = [idx_name] + list(tbl.columns)
+            self._table_tree["columns"] = display_cols
+            self._table_tree.heading("#0", text="")
+            self._table_tree.column("#0", width=0, stretch=False)
+            for i, c in enumerate(display_cols):
+                self._table_tree.heading(f"#{i+1}", text=str(c))
+                self._table_tree.column(f"#{i+1}", width=100, anchor=tk.CENTER)
+            for idx_val, row in tbl.head(50).iterrows():
+                vals = []
+                for v in [idx_val] + list(row):
+                    if isinstance(v, float):
+                        vals.append(f"{v:7.4f}")   # 7-char right-aligned numbers
+                    else:
+                        vals.append(str(v))
+                self._table_tree.insert("", tk.END, values=vals)
+            self._result_nb.select(1)  # Show table tab
+            self._log(f"\n[{first_name}] - {len(tbl)} rows, shown in '表格' tab")
+
+        self._result_nb.select(0)  # Back to summary tab
 
     def _done(self):
         self._status_lbl.set("分析完成")
