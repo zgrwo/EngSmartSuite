@@ -74,13 +74,13 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"有效样本({len(df)})不足"],
         )
 
-    X1, X2 = df[c1].values, df[c2].values
-    y = df[req.target_col].values
-    X = np.column_stack([np.ones(len(df)), X1, X2, X1**2, X2**2, X1*X2])
-
     try:
+        X1, X2 = df[c1].values, df[c2].values
+        y = df[req.target_col].values
+        X = np.column_stack([np.ones(len(df)), X1, X2, X1**2, X2**2, X1*X2])
+
         beta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
-    except np.linalg.LinAlgError:
+    except Exception:
         return AnalysisResult(
             task="response_surface", status="error",
             messages=["响应面模型未能求解"],
