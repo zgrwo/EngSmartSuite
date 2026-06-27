@@ -1,9 +1,11 @@
+import matplotlib
 import numpy as np
 import pandas as pd
-import matplotlib
+
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
 from sklearn.linear_model import LinearRegression
+
 from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
 
 

@@ -1,0 +1,12 @@
+task: anova
+target_col: "不良率"
+feature_cols:
+  - "料温"
+  - "模温"
+  - "注射压力"
+  - "保压时间"
+params:
+  alpha: 0.05
+  interactions: true
+output:
+  format: [excel, ppt]

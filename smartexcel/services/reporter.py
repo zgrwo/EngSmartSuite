@@ -1,6 +1,7 @@
 """Reporter — 多格式报告输出：Excel 图表 / PDF / PPT。"""
 import io
 import os
+
 from smartexcel.core.contracts import AnalysisResult
 from smartexcel.core.exceptions import OutputError
 
@@ -38,8 +39,8 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
     """生成 PDF 报告。"""
     try:
         from reportlab.lib.pagesizes import A4
-        from reportlab.pdfgen import canvas
         from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas
 
         c = canvas.Canvas(output_path, pagesize=A4)
         w, h = A4

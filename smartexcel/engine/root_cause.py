@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
-from scipy import stats
 import statsmodels.api as sm
-from statsmodels.formula.api import ols
+from scipy import stats
 from sklearn.tree import DecisionTreeRegressor
+from statsmodels.formula.api import ols
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 from smartexcel.core.contracts import AnalysisRequest, AnalysisResult

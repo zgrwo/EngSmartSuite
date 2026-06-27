@@ -1,11 +1,20 @@
 """工作流编排 — 按 task 字段路由到对应引擎函数。"""
 from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
 from smartexcel.engine import (
-    correlation_analysis, anova_analysis, hypothesis_test,
-    decision_tree_analysis, vif_analysis,
-    regression_analysis, response_surface_analysis, grid_search,
-    multi_objective_opt, doe_analysis,
-    xbar_r_chart, process_capability_analysis, trend_forecast, anomaly_detect,
+    anomaly_detect,
+    anova_analysis,
+    correlation_analysis,
+    decision_tree_analysis,
+    doe_analysis,
+    grid_search,
+    hypothesis_test,
+    multi_objective_opt,
+    process_capability_analysis,
+    regression_analysis,
+    response_surface_analysis,
+    trend_forecast,
+    vif_analysis,
+    xbar_r_chart,
 )
 
 TASK_REGISTRY = {

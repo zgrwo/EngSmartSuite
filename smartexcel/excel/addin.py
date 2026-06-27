@@ -1,6 +1,8 @@
 """xlwings 加载项入口 — 注册 Ribbon 按钮回调。"""
 import os
+
 import xlwings as xw
+
 from smartexcel.core.contracts import AnalysisRequest
 from smartexcel.services.data_io import read_excel_range, validate_data
 from smartexcel.services.orchestrator import orchestrate
