@@ -342,14 +342,15 @@ class SmartSuiteGUI:
         cat_map = {}
 
         for col in features:
-            if col in self._categoricals or self.df[col].dtype == 'object':
-                dummies = pd.get_dummies(df[col], prefix=col, drop_first=True)
+            is_cat = col in self._categoricals or str(self.df[col].dtype) in ('object', 'string')
+            if is_cat:
+                dummies = pd.get_dummies(df[col].astype(str), prefix=col, drop_first=True)
                 for dc in dummies.columns:
                     df[dc] = dummies[dc].astype(float)
                     encoded_cols.append(dc)
                 cat_map[col] = list(dummies.columns)
             else:
-                # Numeric: ensure numeric, fill NaN with median
+                # Numeric: ensure numeric via the copied df
                 df[col] = pd.to_numeric(df[col], errors='coerce')
                 if df[col].isnull().any():
                     df[col] = df[col].fillna(df[col].median())
@@ -379,6 +380,28 @@ class SmartSuiteGUI:
 
         # Prepare data with encoding
         df_enc, feature_cols = self._prepare_data(targets, features)
+
+        # Special handling for hypothesis_test: find a 2-value categorical as group_col
+        extra_params = {}
+        if task == "hypothesis_test":
+            for col in features:
+                vals = self.df[col].dropna().unique()
+                if len(vals) == 2 and col not in feature_cols:
+                    # This column was encoded away — find its dummy or use original
+                    pass
+            # Try to find any original categorical with exactly 2 unique values
+            for col in features:
+                vals = self.df[col].dropna().unique()
+                if len(vals) == 2:
+                    extra_params["group_col"] = col
+                    # Re-prepare without encoding this column
+                    features_no_group = [f for f in features if f != col]
+                    df_enc, feature_cols = self._prepare_data(targets, features_no_group)
+                    # Add the un-encoded group column back to df_enc but not to features
+                    df_enc[col] = self.df[col].astype(str)
+                    if col not in feature_cols:
+                        feature_cols.append(col)
+                    break
         cat_count = len(self._categoricals & set(features))
         self._log(f"\n{'='*60}")
         self._log(f"  {METHOD_LABELS[task]}")
@@ -394,7 +417,7 @@ class SmartSuiteGUI:
             for target in targets:
                 self.root.after(0, lambda t=target: self._log(f"\n--- Y = {t} ---"))
                 req = AnalysisRequest(task=task, data=df_enc, target_col=target,
-                                      feature_cols=feature_cols)
+                                      feature_cols=feature_cols, params=extra_params)
                 result = orchestrate(req)
                 self.root.after(0, lambda r=result: self._show(r))
             self.root.after(0, self._done)
@@ -442,10 +465,10 @@ class SmartSuiteGUI:
                     else:
                         vals.append(str(v))
                 self._table_tree.insert("", tk.END, values=vals)
-            self._result_nb.select(1)  # Show table tab
             self._log(f"\n[{first_name}] - {len(tbl)} rows, shown in '表格' tab")
 
-        self._result_nb.select(0)  # Back to summary tab
+        # Show table if available, otherwise summary
+        self._result_nb.select(1 if result.tables else 0)
 
     def _done(self):
         self._status_lbl.set("分析完成")
