@@ -55,39 +55,38 @@ METHOD_HINTS = {
 
 
 class ColumnRow(ttk.Frame):
-    """One row: [Y] [X] [Cat] col_name — grid with fixed column widths."""
-    COL_Y = 0; COL_X = 1; COL_CAT = 2; COL_NAME = 3
+    """One row: col_name | [类] [X] [Y] — grid with fixed column widths."""
+    COL_NAME = 0; COL_CAT = 1; COL_X = 2; COL_Y = 3
 
     def __init__(self, parent, name, on_change, is_header=False):
         super().__init__(parent)
         self.name = name
 
-        # Force fixed column widths
-        for c, w in [(self.COL_Y, 36), (self.COL_X, 36), (self.COL_CAT, 44), (self.COL_NAME, 150)]:
+        for c, w in [(self.COL_NAME, 150), (self.COL_CAT, 44), (self.COL_X, 36), (self.COL_Y, 36)]:
             self.grid_columnconfigure(c, minsize=w)
 
         if is_header:
-            ttk.Label(self, text="Y", font=("Microsoft YaHei", 8, "bold"), width=2).grid(
-                row=0, column=self.COL_Y, padx=1, sticky="")
-            ttk.Label(self, text="X", font=("Microsoft YaHei", 8, "bold"), width=2).grid(
-                row=0, column=self.COL_X, padx=1, sticky="")
+            ttk.Label(self, text="列名", font=("Microsoft YaHei", 8, "bold")).grid(
+                row=0, column=self.COL_NAME, sticky=tk.W)
             ttk.Label(self, text="类", font=("Microsoft YaHei", 8, "bold"), width=2).grid(
                 row=0, column=self.COL_CAT, padx=1, sticky="")
-            ttk.Label(self, text="列名", font=("Microsoft YaHei", 8, "bold")).grid(
-                row=0, column=self.COL_NAME, padx=(8,0), sticky=tk.W)
+            ttk.Label(self, text="X", font=("Microsoft YaHei", 8, "bold"), width=2).grid(
+                row=0, column=self.COL_X, padx=1, sticky="")
+            ttk.Label(self, text="Y", font=("Microsoft YaHei", 8, "bold"), width=2).grid(
+                row=0, column=self.COL_Y, padx=1, sticky="")
         else:
             self.var_y = tk.BooleanVar(); self.var_x = tk.BooleanVar(); self.var_cat = tk.BooleanVar()
-            ttk.Checkbutton(self, variable=self.var_y,
-                command=lambda n=name: on_change(n, 'Y', self.var_y.get())).grid(
-                row=0, column=self.COL_Y, padx=1)
-            ttk.Checkbutton(self, variable=self.var_x,
-                command=lambda n=name: on_change(n, 'X', self.var_x.get())).grid(
-                row=0, column=self.COL_X, padx=1)
+            ttk.Label(self, text=name, anchor=tk.W).grid(
+                row=0, column=self.COL_NAME, sticky=tk.W)
             ttk.Checkbutton(self, variable=self.var_cat,
                 command=lambda n=name: on_change(n, 'cat', self.var_cat.get())).grid(
                 row=0, column=self.COL_CAT, padx=1)
-            ttk.Label(self, text=name, anchor=tk.W).grid(
-                row=0, column=self.COL_NAME, padx=(8,0), sticky=tk.W)
+            ttk.Checkbutton(self, variable=self.var_x,
+                command=lambda n=name: on_change(n, 'X', self.var_x.get())).grid(
+                row=0, column=self.COL_X, padx=1)
+            ttk.Checkbutton(self, variable=self.var_y,
+                command=lambda n=name: on_change(n, 'Y', self.var_y.get())).grid(
+                row=0, column=self.COL_Y, padx=1)
 
 
 class SmartSuiteGUI:
@@ -434,12 +433,12 @@ class SmartSuiteGUI:
             self._table_tree.column("#0", width=0, stretch=False)
             for i, c in enumerate(display_cols):
                 self._table_tree.heading(f"#{i+1}", text=str(c))
-                self._table_tree.column(f"#{i+1}", width=100, anchor=tk.CENTER)
+                self._table_tree.column(f"#{i+1}", width=84, anchor=tk.CENTER)
             for idx_val, row in tbl.head(50).iterrows():
                 vals = []
                 for v in [idx_val] + list(row):
                     if isinstance(v, float):
-                        vals.append(f"{v:8.4f}")   # 8-char right-aligned numbers
+                        vals.append(f"{v:6.4f}")   # 6-char right-aligned numbers
                     else:
                         vals.append(str(v))
                 self._table_tree.insert("", tk.END, values=vals)
