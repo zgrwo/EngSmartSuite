@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 import numpy as np
-import os, sys, threading, io
+import os, sys, threading, traceback, io
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from smartexcel.core.contracts import AnalysisRequest
@@ -413,13 +413,20 @@ class SmartSuiteGUI:
         self._status_lbl.set(f"运行中: {METHOD_LABELS[task]}...")
 
         def run_all():
-            all_results = []
-            for target in targets:
-                req = AnalysisRequest(task=task, data=df_enc, target_col=target,
-                                      feature_cols=feature_cols, params=extra_params)
-                result = orchestrate(req)
-                all_results.append((target, result))
-            self.root.after(0, lambda: self._show_all(task, all_results))
+            try:
+                all_results = []
+                for target in targets:
+                    req = AnalysisRequest(task=task, data=df_enc, target_col=target,
+                                          feature_cols=feature_cols, params=extra_params)
+                    result = orchestrate(req)
+                    all_results.append((target, result))
+                self.root.after(0, lambda: self._show_all(task, all_results))
+            except Exception as e:
+                tb = traceback.format_exc()
+                self.root.after(0, lambda: (
+                    self._log(f"\nERROR: {e}\n{tb}"),
+                    messagebox.showerror("分析错误", f"{e}\n\n详情见日志")
+                ))
 
         threading.Thread(target=run_all, daemon=True).start()
 
