@@ -1,5 +1,5 @@
 from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.engine.root_cause import correlation_analysis
+from smartexcel.engine.root_cause import anova_analysis, correlation_analysis
 
 
 def test_correlation_analysis_basic(sample_doe_data):
@@ -19,3 +19,20 @@ def test_correlation_analysis_basic(sample_doe_data):
     assert corr.values.min() >= -1.0
     assert corr.values.max() <= 1.0
     assert len(result.summary) > 0
+
+
+def test_anova_basic(sample_doe_data):
+    req = AnalysisRequest(
+        task="anova",
+        data=sample_doe_data,
+        target_col="强度",
+        feature_cols=["料温", "模温", "注射压力", "保压时间"],
+        params={"alpha": 0.05},
+    )
+    result = anova_analysis(req)
+
+    assert result.task == "anova"
+    assert result.status in ("ok", "warning")
+    assert "anova_table" in result.tables
+    assert len(result.summary) > 0
+    assert "r_squared" in result.metadata

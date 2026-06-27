@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from scipy import stats
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
 from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
 
 
@@ -30,4 +32,41 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         tables={"correlation_matrix": corr, "p_values": pmat.astype(float)},
         summary=f"与「{req.target_col}」相关性最强的因子是「{top_factor}」(r={top_value:.3f})",
         metadata={"target_correlations": target_corr.to_dict()},
+    )
+
+
+def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
+    """多因子 ANOVA 方差分析。"""
+    cols = [c for c in req.feature_cols if c in req.data.columns]
+    if req.target_col not in req.data.columns:
+        return AnalysisResult(task="anova", status="error",
+            messages=[f"目标列「{req.target_col}」不存在于数据中"])
+
+    formula = f"Q('{req.target_col}') ~ " + " + ".join(f"Q('{c}')" for c in cols)
+    model = ols(formula, data=req.data).fit()
+    anova_table = sm.stats.anova_lm(model, typ=2)
+
+    alpha = req.params.get("alpha", 0.05)
+    sig_factors = []
+    for col in cols:
+        try:
+            p_val = anova_table.loc[f"Q('{col}')", "PR(>F)"]
+            if p_val < alpha:
+                sig_factors.append(f"{col}(p={p_val:.4f})")
+        except KeyError:
+            pass
+
+    summary = f"显著影响「{req.target_col}」的因子: {', '.join(sig_factors)}" if sig_factors \
+        else f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})"
+
+    coef_df = pd.DataFrame({
+        "变量": model.params.index, "系数": model.params.values,
+        "标准误": model.bse.values, "t值": model.tvalues.values, "p值": model.pvalues.values,
+    })
+
+    return AnalysisResult(
+        task="anova",
+        tables={"anova_table": anova_table, "coefficients": coef_df},
+        summary=summary,
+        metadata={"r_squared": model.rsquared, "r_squared_adj": model.rsquared_adj},
     )
