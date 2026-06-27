@@ -63,7 +63,7 @@ class ColumnRow(ttk.Frame):
         self.name = name
 
         # Force fixed column widths
-        for c, w in [(self.COL_Y, 26), (self.COL_X, 26), (self.COL_CAT, 34), (self.COL_NAME, 200)]:
+        for c, w in [(self.COL_Y, 36), (self.COL_X, 36), (self.COL_CAT, 44), (self.COL_NAME, 150)]:
             self.grid_columnconfigure(c, minsize=w)
 
         if is_header:
@@ -145,7 +145,7 @@ class SmartSuiteGUI:
         ttk.Button(qf, text="清空全部", command=self._clear_all, width=7).pack(side=tk.LEFT, padx=1)
 
         # ---- Scrollable table with header and rows together ----
-        canvas = tk.Canvas(col_frm, width=310, height=300, highlightthickness=0)
+        canvas = tk.Canvas(col_frm, width=270, height=300, highlightthickness=0)
         scrollbar = ttk.Scrollbar(col_frm, orient=tk.VERTICAL, command=canvas.yview)
         self._col_container = ttk.Frame(canvas)
         self._col_container.bind("<Configure>",
@@ -439,7 +439,7 @@ class SmartSuiteGUI:
                 vals = []
                 for v in [idx_val] + list(row):
                     if isinstance(v, float):
-                        vals.append(f"{v:7.4f}")   # 7-char right-aligned numbers
+                        vals.append(f"{v:8.4f}")   # 8-char right-aligned numbers
                     else:
                         vals.append(str(v))
                 self._table_tree.insert("", tk.END, values=vals)
