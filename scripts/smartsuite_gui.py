@@ -207,18 +207,17 @@ class SmartSuiteGUI:
                                       height=6, bg="#f0f8e8", relief=tk.FLAT, padx=10, pady=8)
         self._summary_text.pack(fill=tk.BOTH, expand=True)
 
-        # Tab 2: Tables
+        # Tab 2: Tables (Text widget with monospace formatting)
         tbl_frm = ttk.Frame(self._result_nb)
         self._result_nb.add(tbl_frm, text="表格")
-        self._table_tree = ttk.Treeview(tbl_frm, show="headings", height=10)
-        tbl_scroll_y = ttk.Scrollbar(tbl_frm, orient=tk.VERTICAL, command=self._table_tree.yview)
-        tbl_scroll_x = ttk.Scrollbar(tbl_frm, orient=tk.HORIZONTAL, command=self._table_tree.xview)
-        self._table_tree.configure(yscrollcommand=tbl_scroll_y.set, xscrollcommand=tbl_scroll_x.set)
-        self._table_tree.grid(row=0, column=0, sticky="nsew")
-        tbl_scroll_y.grid(row=0, column=1, sticky="ns")
-        tbl_scroll_x.grid(row=1, column=0, sticky="ew")
-        tbl_frm.grid_rowconfigure(0, weight=1)
-        tbl_frm.grid_columnconfigure(0, weight=1)
+        self._table_text = tk.Text(tbl_frm, font=("Consolas", 10), wrap=tk.NONE,
+                                    bg="#fafafa", fg="#333", padx=8, pady=6)
+        tbl_scroll_y = ttk.Scrollbar(tbl_frm, orient=tk.VERTICAL, command=self._table_text.yview)
+        tbl_scroll_x = ttk.Scrollbar(tbl_frm, orient=tk.HORIZONTAL, command=self._table_text.xview)
+        self._table_text.configure(yscrollcommand=tbl_scroll_y.set, xscrollcommand=tbl_scroll_x.set)
+        self._table_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tbl_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        tbl_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Tab 3: Log
         log_frm = ttk.Frame(self._result_nb)
@@ -414,17 +413,59 @@ class SmartSuiteGUI:
         self._status_lbl.set(f"运行中: {METHOD_LABELS[task]}...")
 
         def run_all():
+            all_results = []
             for target in targets:
-                self.root.after(0, lambda t=target: self._log(f"\n--- Y = {t} ---"))
                 req = AnalysisRequest(task=task, data=df_enc, target_col=target,
                                       feature_cols=feature_cols, params=extra_params)
                 result = orchestrate(req)
-                self.root.after(0, lambda r=result: self._show(r))
-            self.root.after(0, self._done)
+                all_results.append((target, result))
+            self.root.after(0, lambda: self._show_all(task, all_results))
 
         threading.Thread(target=run_all, daemon=True).start()
 
-    def _show(self, result):
+    def _show_all(self, task, all_results):
+        """Render all results: log + summary + markdown tables."""
+        # Clear and fill log
+        self.out.delete("1.0", tk.END)
+        self._log(f"\n{'='*60}")
+        self._log(f"  {METHOD_LABELS[task]} — {len(all_results)} targets")
+        self._log(f"{'='*60}")
+
+        summary_lines = []
+        all_tables_md = []
+
+        for target, result in all_results:
+            status_icon = "OK" if result.status == 'ok' else ("WARN" if result.status == 'warning' else "ERR")
+            self._log(f"\n--- Y = {target} ---")
+            self._log(f"[{status_icon}] {result.summary}")
+            for msg in result.messages:
+                self._log(f"  {msg}")
+
+            summary_lines.append(f"**{target}**: {result.summary}")
+
+            for tname, tbl in result.tables.items():
+                md = tbl.head(25).to_markdown(floatfmt=".4f", index=True)
+                all_tables_md.append(f"### {target} — {tname} ({len(tbl)} rows)\n\n{md}\n")
+
+        # Summary tab
+        color = "#2e7d32"
+        self._summary_text.configure(state=tk.NORMAL)
+        self._summary_text.delete("1.0", tk.END)
+        self._summary_text.insert(tk.END, "\n".join(summary_lines), ("big",))
+        self._summary_text.tag_configure("big", font=("Microsoft YaHei", 12, "bold"), foreground=color)
+        self._summary_text.configure(state=tk.DISABLED)
+
+        # Table tab — markdown
+        self._table_text.configure(state=tk.NORMAL)
+        self._table_text.delete("1.0", tk.END)
+        self._table_text.insert("1.0", "\n".join(all_tables_md) if all_tables_md else "(no tables)")
+        self._table_text.configure(state=tk.DISABLED)
+
+        self._result_nb.select(1 if all_tables_md else 0)
+        self._status_lbl.set("分析完成")
+        self.ppt_btn.config(state="normal")
+        self.xls_btn.config(state="normal")
+        self.last_result = all_results[-1][1] if all_results else None
         self.last_result = result
         status_icon = "OK" if result.status == 'ok' else ("WARN" if result.status == 'warning' else "ERR")
         self._log(f"[{status_icon}] {result.summary}")
@@ -443,37 +484,23 @@ class SmartSuiteGUI:
             self._summary_text.tag_configure("meta", font=("Consolas", 10), foreground="#555")
         self._summary_text.configure(state=tk.DISABLED)
 
-        # Table tab — show the first result table in Treeview
-        self._table_tree.delete(*self._table_tree.get_children())
+        # Table tab — render ALL tables as formatted monospace text
         if result.tables:
-            first_name = list(result.tables.keys())[0]
-            tbl = result.tables[first_name]
-            # Include index as first column
-            idx_name = str(tbl.index.name or "")
-            display_cols = [idx_name] + list(tbl.columns)
-            self._table_tree["columns"] = display_cols
-            self._table_tree.heading("#0", text="")
-            self._table_tree.column("#0", width=0, stretch=False)
-            for i, c in enumerate(display_cols):
-                self._table_tree.heading(f"#{i+1}", text=str(c))
-                self._table_tree.column(f"#{i+1}", width=84, anchor=tk.CENTER)
-            for idx_val, row in tbl.head(50).iterrows():
-                vals = []
-                for v in [idx_val] + list(row):
-                    if isinstance(v, float):
-                        vals.append(f"{v:6.4f}")   # 6-char right-aligned numbers
-                    else:
-                        vals.append(str(v))
-                self._table_tree.insert("", tk.END, values=vals)
-            self._log(f"\n[{first_name}] - {len(tbl)} rows, shown in '表格' tab")
+            lines = []
+            for tname, tbl in result.tables.items():
+                lines.append(f"╔══ {tname} ({len(tbl)} rows x {len(tbl.columns)} cols) ══╗")
+                # Format: right-align index, fixed-width float columns
+                with pd.option_context('display.width', 120, 'display.max_columns', 15,
+                                       'display.float_format', '{:6.4f}'.format,
+                                       'display.colheader_justify', 'right'):
+                    lines.append(tbl.head(30).to_string())
+                lines.append("")
+            self._table_text.configure(state=tk.NORMAL)
+            self._table_text.delete("1.0", tk.END)
+            self._table_text.insert("1.0", "\n".join(lines))
+            self._table_text.configure(state=tk.DISABLED)
 
-        # Show table if available, otherwise summary
         self._result_nb.select(1 if result.tables else 0)
-
-    def _done(self):
-        self._status_lbl.set("分析完成")
-        self.ppt_btn.config(state="normal")
-        self.xls_btn.config(state="normal")
 
     # ============================================================
     # EXPORT
