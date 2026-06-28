@@ -219,17 +219,27 @@ class SmartSuiteGUI:
                                       height=6, bg="#f0f8e8", relief=tk.FLAT, padx=10, pady=8)
         self._summary_text.pack(fill=tk.BOTH, expand=True)
 
-        # Tab 2: Tables (Text widget with monospace formatting)
+        # Tab 2: Tables (Treeview with grid lines)
         tbl_frm = ttk.Frame(self._result_nb)
         self._result_nb.add(tbl_frm, text="表格")
-        self._table_text = tk.Text(tbl_frm, font=("Consolas", 10), wrap=tk.NONE,
-                                    bg="#fafafa", fg="#333", padx=8, pady=6)
-        tbl_scroll_y = ttk.Scrollbar(tbl_frm, orient=tk.VERTICAL, command=self._table_text.yview)
-        tbl_scroll_x = ttk.Scrollbar(tbl_frm, orient=tk.HORIZONTAL, command=self._table_text.xview)
-        self._table_text.configure(yscrollcommand=tbl_scroll_y.set, xscrollcommand=tbl_scroll_x.set)
-        self._table_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tbl_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        tbl_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+        # Table selector
+        self._tbl_selector = ttk.Combobox(tbl_frm, state="readonly", width=60)
+        self._tbl_selector.pack(fill=tk.X, padx=4, pady=(4,2))
+        self._tbl_selector.bind("<<ComboboxSelected>>", lambda e: self._show_selected_table())
+        # Treeview
+        tree_frm = ttk.Frame(tbl_frm)
+        tree_frm.pack(fill=tk.BOTH, expand=True, padx=4, pady=(2,4))
+        self._table_tree = ttk.Treeview(tree_frm, show="headings", height=18)
+        tbl_scroll_y = ttk.Scrollbar(tree_frm, orient=tk.VERTICAL, command=self._table_tree.yview)
+        tbl_scroll_x = ttk.Scrollbar(tree_frm, orient=tk.HORIZONTAL, command=self._table_tree.xview)
+        self._table_tree.configure(yscrollcommand=tbl_scroll_y.set, xscrollcommand=tbl_scroll_x.set)
+        self._table_tree.grid(row=0, column=0, sticky="nsew")
+        tbl_scroll_y.grid(row=0, column=1, sticky="ns")
+        tbl_scroll_x.grid(row=1, column=0, sticky="ew")
+        tree_frm.grid_rowconfigure(0, weight=1)
+        tree_frm.grid_columnconfigure(0, weight=1)
+        # 存储当前所有表格数据
+        self._all_table_data: dict[str, "pd.DataFrame"] = {}
 
         # Tab 3: Log
         log_frm = ttk.Frame(self._result_nb)
@@ -424,7 +434,7 @@ class SmartSuiteGUI:
         self._log(f"{'='*60}")
 
         summary_lines = []
-        all_tables_text = []
+        self._all_table_data.clear()
 
         for target, result in all_results:
             status_icon = "OK" if result.status == 'ok' else ("WARN" if result.status == 'warning' else "ERR")
@@ -433,37 +443,78 @@ class SmartSuiteGUI:
             for msg in result.messages:
                 self._log(f"  {msg}")
 
-            summary_lines.append(f"**{target}**: {result.summary}")
+            summary_lines.append(f"▸ {target}: {result.summary}")
 
             for tname, tbl in result.tables.items():
-                header = f"╔══ {target} — {tname} ({len(tbl)} rows × {len(tbl.columns)} cols) ══╗"
-                with pd.option_context(
-                    'display.width', 160, 'display.max_columns', 15,
-                    'display.float_format', '{:,.4f}'.format,
-                    'display.colheader_justify', 'right',
-                ):
-                    body = tbl.head(25).to_string()
-                all_tables_text.append(f"{header}\n{body}\n")
+                display_tbl = tbl
+                if tname in ("correlation_matrix", "p_values") and target in tbl.index:
+                    row = tbl.loc[[target]]
+                    others = [c for c in row.columns if c != target]
+                    display_tbl = row[others]
+                    if tname == "correlation_matrix":
+                        s = display_tbl.iloc[0].sort_values(ascending=False)
+                        top3 = s.head(3); bot3 = s.tail(3)
+                        summary_lines.append(
+                            f"   ↑ Top3正相关: {', '.join(f'{n}({v:+.3f})' for n,v in top3.items())}")
+                        summary_lines.append(
+                            f"   ↓ Top3负相关: {', '.join(f'{n}({v:+.3f})' for n,v in bot3.items())}")
+                    if tname == "p_values":
+                        sig = [o for o in others if display_tbl[o].iloc[0] < 0.05]
+                        if sig:
+                            summary_lines.append(f"   ★ 显著(p<0.05): {', '.join(sig)}")
+
+                key = f"{target} — {tname}"
+                self._all_table_data[key] = display_tbl.head(50)
+
+        # Populate table selector dropdown
+        names = list(self._all_table_data.keys())
+        self._tbl_selector["values"] = names
+        if names:
+            self._tbl_selector.current(0)
+            self._show_selected_table()
 
         # Summary tab
         color = "#2e7d32"
         self._summary_text.configure(state=tk.NORMAL)
         self._summary_text.delete("1.0", tk.END)
         self._summary_text.insert(tk.END, "\n".join(summary_lines), ("big",))
-        self._summary_text.tag_configure("big", font=("Microsoft YaHei", 12, "bold"), foreground=color)
+        self._summary_text.tag_configure("big", font=("Microsoft YaHei", 11, "bold"), foreground=color)
         self._summary_text.configure(state=tk.DISABLED)
 
-        # Table tab — pandas to_string() 等宽对齐
-        self._table_text.configure(state=tk.NORMAL)
-        self._table_text.delete("1.0", tk.END)
-        self._table_text.insert("1.0", "\n".join(all_tables_text) if all_tables_text else "(无表格数据)")
-        self._table_text.configure(state=tk.DISABLED)
-
-        self._result_nb.select(1 if all_tables_text else 0)
+        self._result_nb.select(0)
         self._status_lbl.set("分析完成")
         self.ppt_btn.config(state="normal")
         self.xls_btn.config(state="normal")
         self.last_result = all_results[-1][1] if all_results else None
+
+    def _show_selected_table(self, event=None):
+        """将下拉选中的表格渲染到 Treeview。"""
+        name = self._tbl_selector.get()
+        if not name or name not in self._all_table_data:
+            return
+        tbl = self._all_table_data[name]
+        tree = self._table_tree
+        # 清空
+        tree.delete(*tree.get_children())
+        # 列定义：第一列是索引列名
+        idx_name = str(tbl.index.name or tbl.index.name or "索引")
+        cols = [idx_name] + [str(c) for c in tbl.columns]
+        tree["columns"] = cols
+        tree.heading("#0", text="")
+        tree.column("#0", width=0, stretch=False)
+        for i, c in enumerate(cols):
+            tree.heading(f"#{i+1}", text=c)
+            w = max(len(c) * 18 + 10, 70)
+            tree.column(f"#{i+1}", width=w, anchor="center", minwidth=50)
+        # 数据行
+        for idx_val, row in tbl.iterrows():
+            vals = [str(idx_val)]
+            for v in row:
+                if isinstance(v, float):
+                    vals.append(f"{v:+.4f}" if abs(v) < 10 else f"{v:,.4f}")
+                else:
+                    vals.append(str(v))
+            tree.insert("", tk.END, values=vals)
 
     # ============================================================
     # EXPORT
