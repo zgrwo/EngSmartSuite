@@ -1,15 +1,15 @@
-"""Setup SmartExcel custom ribbon in Excel -- injects ribbon XML and VBA callbacks.
+"""Setup SmartSuite custom ribbon in Excel -- injects ribbon XML and VBA callbacks.
 
 Usage:
     python scripts/setup_excel_addin.py
 
-Creates smartsuite_addin/SmartExcel_Addin.xlam with custom ribbon tab "工艺分析".
+Creates smartsuite_addin/SmartSuite_Addin.xlam with custom ribbon tab "工艺分析".
 """
 import os, sys, shutil, zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADDIN_DIR = os.path.join(ROOT, 'smartsuite_addin')
-XLAM_NAME = 'SmartExcel_Addin.xlam'
+XLAM_NAME = 'SmartSuite_Addin.xlam'
 
 RIBBON_XML = r"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui">
@@ -58,7 +58,7 @@ RIBBON_XML = r"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </customUI>
 """
 
-VBA_CODE = r'''Attribute VB_Name = "SmartExcelRibbon"
+VBA_CODE = r'''Attribute VB_Name = "SmartSuiteRibbon"
 
 Public Sub ribbon_correlation(control As IRibbonControl)
     RunPython ("import smartsuite_addin; smartsuite_addin.run_correlation()")
@@ -129,7 +129,7 @@ def inject_customui(xlam_path):
 
 def main():
     print("=" * 60)
-    print("SmartExcel Suite -- Excel Add-in Setup")
+    print("SmartSuite -- Excel Add-in Setup")
     print("=" * 60)
 
     source = os.path.join(ADDIN_DIR, 'smartsuite_addin.xlsm')
@@ -152,7 +152,7 @@ def main():
             f.write(RIBBON_XML)
         print(f"Ribbon XML saved to: {ribbon_file}")
 
-    vba_file = os.path.join(ADDIN_DIR, 'SmartExcelRibbon.bas')
+    vba_file = os.path.join(ADDIN_DIR, 'SmartSuiteRibbon.bas')
     with open(vba_file, 'w', encoding='utf-8') as f:
         f.write(VBA_CODE)
     print(f"VBA module saved to: {vba_file}")

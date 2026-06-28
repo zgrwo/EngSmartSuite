@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smartsuite"
 version = "0.1.0"
-description = "SmartExcel Suite — 工艺数据分析工具箱 (Excel + Python)"
+description = "SmartSuite — 工艺数据分析工具箱 (Excel + Python)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "SmartExcel Team"}
+    {name = "SmartSuite Team"}
 ]
 keywords = ["excel", "analysis", "manufacturing", "doe", "spc", "anova"]
 classifiers = [

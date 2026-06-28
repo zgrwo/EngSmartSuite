@@ -1,6 +1,6 @@
-# SmartExcel Suite — 领域术语表
+# SmartSuite — 领域术语表
 
-> 本文件定义 SmartExcel Suite 项目的领域术语，用于统一团队沟通和代理协作。
+> 本文件定义 SmartSuite 项目的领域术语，用于统一团队沟通和代理协作。
 > 格式遵循 skills-main/domain-modeling 约定。
 
 ---

@@ -5,7 +5,7 @@
 
 ## 上下文
 
-SmartExcel Suite 需要在 Excel 交互和 Python 分析引擎之间建立清晰边界。如果引擎直接依赖 xlwings，会导致引擎代码与 Excel 耦合，无法独立测试和复用。
+SmartSuite 需要在 Excel 交互和 Python 分析引擎之间建立清晰边界。如果引擎直接依赖 xlwings，会导致引擎代码与 Excel 耦合，无法独立测试和复用。
 
 ## 决策
 

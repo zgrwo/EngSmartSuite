@@ -1,19 +1,19 @@
-class SmartExcelError(Exception):
-    """SmartExcel 所有异常的基类。"""
+class SmartSuiteError(Exception):
+    """SmartSuite 所有异常的基类。"""
     pass
 
 
-class DataSelectionError(SmartExcelError):
+class DataSelectionError(SmartSuiteError):
     """Excel 交互层 — 数据选区无效。"""
     pass
 
 
-class ValidationError(SmartExcelError):
+class ValidationError(SmartSuiteError):
     """Data I/O 层 — 数据校验不通过。"""
     pass
 
 
-class AnalysisError(SmartExcelError):
+class AnalysisError(SmartSuiteError):
     """分析引擎层 — 分析计算失败。"""
     pass
 
@@ -23,6 +23,6 @@ class ConvergenceError(AnalysisError):
     pass
 
 
-class OutputError(SmartExcelError):
+class OutputError(SmartSuiteError):
     """Reporter 层 — 报告输出失败。"""
     pass

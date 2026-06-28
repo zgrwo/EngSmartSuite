@@ -10,7 +10,7 @@ from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SmartExcel Suite — 工艺数据分析工具箱")
+        description="SmartSuite — 工艺数据分析工具箱")
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", help="运行分析")

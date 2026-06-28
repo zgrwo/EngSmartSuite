@@ -1,4 +1,4 @@
-# CLAUDE.md — SmartExcel Suite
+# CLAUDE.md — SmartSuite
 
 工艺数据分析工具箱，将 Python 统计分析能力与 Excel 交互体验深度整合。
 

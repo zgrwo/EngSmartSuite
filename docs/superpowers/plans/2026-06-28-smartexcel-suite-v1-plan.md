@@ -1,8 +1,8 @@
-# SmartExcel Suite V1 实施计划
+# SmartSuite V1 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 构建 SmartExcel Suite V1 —— 三层分离的 Python 工艺数据分析工具箱，含 14 个分析引擎函数 + 编排服务 + 三格式报告输出 + Excel 交互层。
+**Goal:** 构建 SmartSuite V1 —— 三层分离的 Python 工艺数据分析工具箱，含 14 个分析引擎函数 + 编排服务 + 三格式报告输出 + Excel 交互层。
 
 **Architecture:** 严格三层分离：`engine/`（纯 Python 分析，零 Excel 依赖）→ `services/`（编排+报告，唯一桥接层）→ `excel/`（xlwings 交互，很薄）。数据进出通过 `AnalysisRequest` / `AnalysisResult` 契约。
 
@@ -185,22 +185,22 @@ git commit -m "feat: project foundation — contracts, fixtures, package init"
 
 ```python
 # smartsuite/core/exceptions.py
-class SmartExcelError(Exception):
-    """SmartExcel 所有异常的基类。"""
+class SmartSuiteError(Exception):
+    """SmartSuite 所有异常的基类。"""
     pass
 
 
-class DataSelectionError(SmartExcelError):
+class DataSelectionError(SmartSuiteError):
     """Excel 交互层 — 数据选区无效。"""
     pass
 
 
-class ValidationError(SmartExcelError):
+class ValidationError(SmartSuiteError):
     """Data I/O 层 — 数据校验不通过。"""
     pass
 
 
-class AnalysisError(SmartExcelError):
+class AnalysisError(SmartSuiteError):
     """分析引擎层 — 分析计算失败。"""
     pass
 
@@ -210,7 +210,7 @@ class ConvergenceError(AnalysisError):
     pass
 
 
-class OutputError(SmartExcelError):
+class OutputError(SmartSuiteError):
     """Reporter 层 — 报告输出失败。"""
     pass
 ```
@@ -1726,7 +1726,7 @@ from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SmartExcel Suite — 工艺数据分析工具箱")
+        description="SmartSuite — 工艺数据分析工具箱")
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", help="运行分析")

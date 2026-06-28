@@ -1,4 +1,4 @@
-"""SmartExcel Suite xlwings Add-in."""
+"""SmartSuite xlwings Add-in."""
 import os
 import xlwings as xw
 from smartsuite.core.contracts import AnalysisRequest

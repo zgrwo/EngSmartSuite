@@ -1,4 +1,4 @@
-"""SmartExcel Suite V1 -- behaviour and result consistency verification."""
+"""SmartSuite V1 -- behaviour and result consistency verification."""
 import numpy as np
 import pandas as pd
 import sys, os, tempfile, subprocess
@@ -97,8 +97,8 @@ check("Missing target col -> error", orchestrate(AnalysisRequest('anova', d1, 'n
 r = orchestrate(AnalysisRequest('correlation', d1.assign(x1_nan=d1['x1'].where(d1.index>5)), 'y', ['x1','x2']))
 check("NaN data -> graceful return", r.status in ('ok','warning','error'), f"status={r.status}")
 
-from smartsuite.core.exceptions import SmartExcelError, ConvergenceError, AnalysisError
-check("ConvergenceError < AnalysisError < SmartExcelError",
+from smartsuite.core.exceptions import SmartSuiteError, ConvergenceError, AnalysisError
+check("ConvergenceError < AnalysisError < SmartSuiteError",
       isinstance(ConvergenceError("t"), AnalysisError))
 
 # ============================================================

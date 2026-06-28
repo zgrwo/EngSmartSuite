@@ -2,7 +2,7 @@
 <customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui">
   <ribbon>
     <tabs>
-      <tab id="smartexcel_tab" label="工艺分析">
+      <tab id="smartsuite_tab" label="工艺分析">
         <group id="root_cause_group" label="要因分析">
           <button id="btn_correlation" label="相关性分析" onAction="ribbon_correlation"
                   imageMso="TableAnalyze" size="large"
