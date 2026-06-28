@@ -1,7 +1,11 @@
 """Data I/O — Excel 数据读写与校验。"""
+import logging
+
 import pandas as pd
 
 from smartsuite.core.exceptions import ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 def read_excel_range(sheet, range_addr: str | None = None) -> pd.DataFrame:
@@ -31,7 +35,7 @@ def validate_data(df: pd.DataFrame, target_col: str,
             except (ValueError, TypeError):
                 messages.append(f"列「{col}」包含非数值数据")
 
-    null_count = df[[target_col] + feature_cols].isnull().sum().sum()
+    null_count = int(df[[target_col] + feature_cols].isna().sum(axis=None))
     if null_count > 0:
         messages.append(f"检测到 {null_count} 个缺失值，分析中将自动排除")
 
@@ -52,7 +56,8 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
         (encoded_df, encoded_cols, cat_map)
     """
     if categorical_cols is None:
-        categorical_cols = {c for c in features if str(df[c].dtype) in ('object', 'string')}
+        categorical_cols = {c for c in features
+                           if str(df[c].dtype) in ('object', 'string', 'category')}
 
     df = df.copy()
     encoded_cols: list[str] = []
@@ -67,8 +72,14 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
             cat_map[col] = list(dummies.columns)
         else:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            if df[col].isnull().any():
-                df[col] = df[col].fillna(df[col].median())
+            n_coerced = df[col].isnull().sum()
+            if n_coerced > 0:
+                median_val = df[col].median()
+                if pd.isna(median_val):
+                    logger.warning("列「%s」全部为非数值，填充为 0", col)
+                    df[col] = df[col].fillna(0)
+                else:
+                    df[col] = df[col].fillna(median_val)
             encoded_cols.append(col)
 
     return df, encoded_cols, cat_map

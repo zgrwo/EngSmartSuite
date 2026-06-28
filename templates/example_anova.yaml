@@ -8,5 +8,3 @@ feature_cols:
 params:
   alpha: 0.05
   interactions: true
-output:
-  format: [excel, ppt]

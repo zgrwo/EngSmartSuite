@@ -1,9 +1,14 @@
 """Reporter — 多格式报告输出：Excel 图表 / PDF / PPT。"""
 import io
+import logging
 import os
+
+import matplotlib.pyplot as plt
 
 from smartsuite.core.contracts import AnalysisResult
 from smartsuite.core.exceptions import OutputError
+
+logger = logging.getLogger(__name__)
 
 
 def to_excel(result: AnalysisResult, workbook,
@@ -30,9 +35,11 @@ def to_excel(result: AnalysisResult, workbook,
             pic = workbook.sheets.add(f"图表_{i + 1}", after=workbook.sheets[-1])
             pic.pictures.add(buf, left=pic.range("A1").left,
                              top=pic.range("A1").top, width=600, height=450)
+            plt.close(fig)
         return sheet_name
-    except Exception as e:
-        raise OutputError(f"Excel 输出失败: {e}") from e
+    except Exception:
+        logger.exception("Excel 输出失败")
+        raise OutputError("Excel 输出失败，请检查工作簿是否可写")
 
 
 def to_pdf(result: AnalysisResult, output_path: str) -> str:
@@ -53,16 +60,19 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
         y -= 50
 
         for name, df in list(result.tables.items())[:5]:
-            if y < 150:
+            if y < 200:
                 c.showPage()
                 y = h - 50
             c.setFont("Helvetica-Bold", 10)
             c.drawString(50, y, name)
             y -= 18
-            c.setFont("Helvetica", 8)
+            c.setFont("Courier", 7)
+            # 格式化表格行输出
             for _, row in df.head(15).iterrows():
-                c.drawString(55, y, str(row.to_dict()))
+                line = "  ".join(f"{k}={v}" for k, v in row.items())
+                c.drawString(55, y, line[:120])
                 y -= 12
+            y -= 10
 
         for fig in result.figures[:3]:
             if y < 350:
@@ -72,12 +82,14 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
             fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
             buf.seek(0)
             c.drawImage(ImageReader(buf), 50, y - 300, width=450, height=300)
+            plt.close(fig)
             y -= 320
 
         c.save()
         return output_path
-    except Exception as e:
-        raise OutputError(f"PDF 输出失败: {e}") from e
+    except Exception:
+        logger.exception("PDF 输出失败")
+        raise OutputError("PDF 输出失败，请检查输出路径是否可写")
 
 
 def to_ppt(result: AnalysisResult, output_path: str,
@@ -106,8 +118,10 @@ def to_ppt(result: AnalysisResult, output_path: str,
             slide = prs.slides.add_slide(prs.slide_layouts[6])
             slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5),
                                      Inches(12), Inches(6.5))
+            plt.close(fig)
 
         prs.save(output_path)
         return output_path
-    except Exception as e:
-        raise OutputError(f"PPT 输出失败: {e}") from e
+    except Exception:
+        logger.exception("PPT 输出失败")
+        raise OutputError("PPT 输出失败，请检查输出路径是否可写")

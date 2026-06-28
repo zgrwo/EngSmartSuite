@@ -28,7 +28,16 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     xbar_bar = xbar.mean()
     r_bar = r.mean()
-    n = int(subgroups.count().iloc[0]) if len(subgroups) > 0 else 5
+
+    # 校验子组大小一致性
+    subgroup_sizes = subgroups.count()
+    if subgroup_sizes.nunique() > 1:
+        return AnalysisResult(
+            task="spc_xbar", status="error",
+            messages=[f"各组大小不一致: min={subgroup_sizes.min()}, max={subgroup_sizes.max()}。X-bar/R 控制图要求各组大小相同。"]
+        )
+    n = int(subgroup_sizes.iloc[0]) if len(subgroups) > 0 else 5
+
     # X-bar/R 控制图常数表 (子组大小 n → A2, D3, D4)
     _XBR_CONSTANTS = {
         2: (1.880, 0, 3.267), 3: (1.023, 0, 2.574),
@@ -37,7 +46,12 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         8: (0.373, 0.136, 1.864), 9: (0.337, 0.184, 1.816),
         10: (0.308, 0.223, 1.777),
     }
-    A2, D3, D4 = _XBR_CONSTANTS.get(n, _XBR_CONSTANTS[5])
+    if n not in _XBR_CONSTANTS:
+        return AnalysisResult(
+            task="spc_xbar", status="error",
+            messages=[f"子组大小 n={n} 不在支持范围 (2-10)"],
+        )
+    A2, D3, D4 = _XBR_CONSTANTS[n]
 
     fig = Figure(figsize=(10, 8))
     ax1 = fig.add_subplot(211)
@@ -119,11 +133,15 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     ax.axvline(mean_val, color="green", linestyle="-", linewidth=2, label=f"Mean={mean_val:.2f}")
     if lsl: ax.axvline(lsl, color="red", linestyle="--", linewidth=2, label=f"LSL={lsl}")
     if usl: ax.axvline(usl, color="red", linestyle="--", linewidth=2, label=f"USL={usl}")
-    ax.set_xlabel(req.target_col, fontsize=9)
-    ax.set_ylabel("频数", fontsize=9)
-    ax.set_title(f"过程能力 — {req.target_col} (Cp={cp:.2f}, Cpk={cpk_val:.2f})" if cp else f"过程能力 — {req.target_col}")
-    ax.legend(fontsize=8)
-    fig.tight_layout()
+    # 安全地格式化标题，防止 cp 或 cpk 为 None 时崩溃
+    title_parts = [f"过程能力 — {req.target_col}"]
+    if cp is not None and cpk_val is not None:
+        title_parts.append(f"(Cp={cp:.2f}, Cpk={cpk_val:.2f})")
+    elif cp is not None:
+        title_parts.append(f"(Cp={cp:.2f})")
+    elif cpk_val is not None:
+        title_parts.append(f"(Cpk={cpk_val:.2f})")
+    ax.set_title(" ".join(title_parts))
 
     return AnalysisResult(
         task="process_capability",
@@ -153,7 +171,13 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         model = LinearRegression().fit(X, y)
         future_X = np.arange(len(data), len(data) + steps).reshape(-1, 1)
         predictions = model.predict(future_X)
-        conf = 1.96 * np.std(y - model.predict(X))
+        # 使用 t 分布（小样本更准确），而非正态近似的 1.96
+        n = len(data)
+        dof = max(1, n - 2)  # 自由度 (截距 + 斜率)
+        from scipy import stats as sp_stats
+        t_crit = sp_stats.t.ppf(0.975, dof)
+        resid_std = float(np.std(y - model.predict(X), ddof=2))
+        conf = t_crit * resid_std
 
         forecast_df = pd.DataFrame(
             {
@@ -188,7 +212,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
             summary=f"趋势{trend_dir}(斜率={model.coef_[0]:.4f}/步), 预测{steps}步",
             metadata={"slope": float(model.coef_[0]), "forecast_steps": steps},
         )
-    except Exception as e:
+    except Exception:
         return AnalysisResult(
             task="trend_forecast", status="error",
             messages=["趋势预测模型拟合失败，请检查数据是否包含缺失值"])
@@ -217,7 +241,14 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             )
         mask = (data < Q1 - 1.5 * IQR) | (data > Q3 + 1.5 * IQR)
     else:
-        z = np.abs((data - data.mean()) / (data.std() + 1e-10))
+        data_std = data.std()
+        if data_std < 1e-10:
+            return AnalysisResult(
+                task="anomaly_detect",
+                status="error",
+                messages=["数据标准差接近零，无法进行 Z-score 异常检测"],
+            )
+        z = np.abs((data - data.mean()) / data_std)
         mask = z > 3
 
     idx = data.index[mask]
@@ -230,11 +261,17 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     ax.plot(pos, data.values, "-", color="#6baed6", linewidth=1, label="数据")
     ax.scatter(pos, data.values, s=10, color="#2171b5")
     if mask.sum() > 0:
-        anomaly_pos = [list(pos).index(i) for i in idx if i in pos]
+        # 使用布尔掩码位置，不依赖 DataFrame 索引标签
+        anomaly_pos = np.where(mask)[0]
         ax.scatter(anomaly_pos, data.values[mask], s=60, color="red",
                    marker="x", linewidths=2, zorder=5, label=f"异常({mask.sum()}个)")
-    threshold = Q1 - 1.5 * IQR if method == "iqr" else data.mean() - 3 * data.std()
-    ax.axhline(threshold, color="orange", linestyle="--", linewidth=1, alpha=0.5)
+        # 绘制上下阈值线
+        if method == "iqr":
+            ax.axhline(Q1 - 1.5 * IQR, color="orange", linestyle="--", linewidth=1, alpha=0.5)
+            ax.axhline(Q3 + 1.5 * IQR, color="orange", linestyle="--", linewidth=1, alpha=0.5)
+        else:
+            ax.axhline(data.mean() + 3 * data.std(), color="orange", linestyle="--", linewidth=1, alpha=0.5)
+            ax.axhline(data.mean() - 3 * data.std(), color="orange", linestyle="--", linewidth=1, alpha=0.5)
     ax.set_xlabel("序号", fontsize=9)
     ax.set_ylabel(req.target_col, fontsize=9)
     ax.set_title(f"异常检测 — {req.target_col} (方法: {method})", fontsize=11)

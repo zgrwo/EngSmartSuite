@@ -1,5 +1,6 @@
 """CLI 入口 — 命令行直接运行分析。"""
 import argparse
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -8,6 +9,7 @@ import pandas as pd
 import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.data_io import preprocess_data
 from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
 
@@ -36,9 +38,21 @@ def main():
     if args.command == "run":
         with open(args.template, encoding="utf-8") as f:
             config = yaml.safe_load(f)
+
+        # 验证必需字段
+        required = ["task", "target_col"]
+        missing = [k for k in required if k not in config]
+        if missing:
+            print(f"错误: YAML 模板缺少必需字段: {missing}", file=sys.stderr)
+            sys.exit(1)
+
+        if config["task"] not in TASK_REGISTRY:
+            print(f"错误: 未知的分析任务「{config['task']}」，支持: {list(TASK_REGISTRY.keys())}",
+                  file=sys.stderr)
+            sys.exit(1)
+
         raw = pd.read_excel(args.input, sheet_name=args.sheet)
         features = config.get("feature_cols", [])
-        from smartsuite.services.data_io import preprocess_data
         df, feature_cols, _ = preprocess_data(raw, features)
         req = AnalysisRequest(
             task=config["task"], data=df,

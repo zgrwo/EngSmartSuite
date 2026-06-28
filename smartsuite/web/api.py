@@ -1,13 +1,15 @@
 """REST API — 将分析引擎能力暴露为 HTTP 端点。"""
+import base64
 import io
-import json
-import traceback
+import logging
 
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import preprocess_data
 from smartsuite.services.orchestrator import orchestrate
+
+logger = logging.getLogger(__name__)
 
 
 def column_info(df: pd.DataFrame) -> list[dict]:
@@ -33,15 +35,20 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         params = {}
     results = []
 
-    # 预处理：为 SPC 缺子组列时自动生成（不加入 features，避免被 One-Hot 编码）
+    # 预处理：为 SPC 缺子组列时自动生成（使用随机后缀避免列名冲突）
     if task == "spc_xbar" and "subgroup_col" not in params:
         n = len(df)
         default_n = min(n // 5, 10)
-        if default_n < 2: default_n = 2
+        if default_n < 2:
+            default_n = 2
         df = df.copy()
-        df["_子组"] = pd.cut(range(n), bins=default_n,
+        import random
+        subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
+        while subgroup_col_name in df.columns:
+            subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
+        df[subgroup_col_name] = pd.cut(range(n), bins=default_n,
             labels=[f"子组{i+1}" for i in range(default_n)]).astype(str)
-        params["subgroup_col"] = "_子组"
+        params["subgroup_col"] = subgroup_col_name
 
     # ── 相关性：先构建合并矩阵 ──
     merged_corr = None
@@ -63,21 +70,31 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
             merged_corr = pd.DataFrame(merged_rows).T
             merged_corr.index.name = "目标"
 
+    # 预处理只执行一次，避免每个目标列重复编码
+    cat_set = set(categoricals) if categoricals else set()
+    df_enc, feat_enc, _ = preprocess_data(df, features, cat_set)
+
     for target in targets:
         try:
-            cat_set = set(categoricals) if categoricals else set()
-            df_enc, feat_enc, _ = preprocess_data(df, features, cat_set)
 
             if task == "hypothesis_test" and "group_col" not in params:
                 extra = {}
+                # 自动寻找恰好有 2 个水平的列作为分组变量
                 candidates = [c for c in features if c in categoricals or
-                    str(df[c].dtype) in ('object', 'string')] or \
+                    str(df[c].dtype) in ('object', 'string', 'category')] or \
                     [c for c in features if df[c].nunique() <= 10]
                 for col in candidates:
                     if df[col].dropna().nunique() == 2:
                         extra["group_col"] = col
-                        feat_enc = [f for f in feat_enc if not f.startswith(col + "_")]
-                        feat_enc.append(col)
+                        # 从编码特征列表中移除该列的 one-hot 编码，保留原始列
+                        feat_enc_filtered = []
+                        col_prefix = col + "_"
+                        for f in feat_enc:
+                            if f == col or not f.startswith(col_prefix):
+                                feat_enc_filtered.append(f)
+                        if col not in feat_enc_filtered:
+                            feat_enc_filtered.append(col)
+                        feat_enc = feat_enc_filtered
                         break
                 if extra:
                     params = {**params, **extra}
@@ -111,7 +128,6 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
                 buf.seek(0)
-                import base64
                 charts.append(base64.b64encode(buf.read()).decode())
 
             # 序列化 metadata：保留 dict/list 结构，标量转为 float
@@ -130,11 +146,12 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 "charts": charts,
             })
         except Exception:
+            logger.exception("分析目标列 %s 时失败", target)
             results.append({
                 "target": target,
                 "status": "error",
                 "summary": "分析失败",
-                "messages": [traceback.format_exc()],
+                "messages": [f"目标列「{target}」分析过程中出现内部错误"],
                 "tables": {},
                 "charts": [],
             })

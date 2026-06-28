@@ -1,5 +1,6 @@
 """Flask application — SmartSuite Web UI 入口。"""
-import io
+import atexit
+import logging
 import os
 import tempfile
 
@@ -14,10 +15,27 @@ except Exception:
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 import pandas as pd
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request
 
 from smartsuite.services.orchestrator import TASK_REGISTRY
 from smartsuite.web.api import column_info, run_analysis
+
+logger = logging.getLogger(__name__)
+
+# 上传文件的临时追踪，确保进程退出时清理
+_UPLOAD_FILES: list[str] = []
+
+
+def _cleanup_uploads() -> None:
+    for path in _UPLOAD_FILES:
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+        except OSError:
+            pass
+
+
+atexit.register(_cleanup_uploads)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -56,9 +74,24 @@ def upload():
     f = request.files.get("file")
     if not f:
         return jsonify({"error": "请选择文件"}), 400
-    df = pd.read_excel(f)
+    try:
+        df = pd.read_excel(f)
+    except Exception:
+        logger.exception("Excel 文件解析失败")
+        return jsonify({"error": "无法解析 Excel 文件，请确认文件格式正确"}), 400
+
+    # 清理旧的上传文件
+    old_path = app.config.get("DATA_PATH")
+    if old_path and os.path.exists(old_path):
+        try:
+            os.unlink(old_path)
+        except OSError:
+            pass
+
     tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+    tmp.close()  # 关闭句柄，避免 Windows 上的权限问题
     df.to_parquet(tmp.name)
+    _UPLOAD_FILES.append(tmp.name)
     app.config["DATA_PATH"] = tmp.name
     return jsonify({"columns": column_info(df), "shape": list(df.shape)})
 
@@ -88,9 +121,11 @@ def list_tasks():
 
 
 def main(host="127.0.0.1", port=5050, debug=False):
+    logger.info("SmartSuite Web UI 启动: http://%s:%s", host, port)
     print(f"\n  SmartSuite Web UI\n  地址: http://{host}:{port}\n  按 Ctrl+C 停止\n")
     app.run(host=host, port=port, debug=debug)
 
 
 if __name__ == "__main__":
-    main(debug=True)
+    debug = os.environ.get("SMARTSUITE_DEBUG", "0") == "1"
+    main(debug=debug)

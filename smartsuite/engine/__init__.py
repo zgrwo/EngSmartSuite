@@ -1,5 +1,16 @@
 """分析引擎层 — 纯 Python 统计分析函数，零 Excel 依赖。"""
 
+# ── 引擎层全局 matplotlib 配置（必须在任何 Figure 创建之前执行）──
+import matplotlib
+matplotlib.use("Agg")
+
+try:
+    matplotlib.font_manager.fontManager.addfont("C:/Windows/Fonts/msyh.ttc")
+    matplotlib.rcParams["font.family"] = "Microsoft YaHei"
+except Exception:
+    matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
+
 from smartsuite.engine.doe_opt import (
     doe_analysis,
     grid_search,

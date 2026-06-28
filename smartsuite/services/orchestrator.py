@@ -1,4 +1,5 @@
 """工作流编排 — 按 task 字段路由到对应引擎函数。"""
+import logging
 from dataclasses import replace
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
@@ -18,6 +19,8 @@ from smartsuite.engine import (
     vif_analysis,
     xbar_r_chart,
 )
+
+logger = logging.getLogger(__name__)
 
 TASK_REGISTRY = {
     "correlation": correlation_analysis,
@@ -63,6 +66,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
 
     try:
         return TASK_REGISTRY[req.task](req)
-    except Exception as e:
+    except Exception:
+        logger.exception("分析任务 %s 执行失败", req.task)
         return AnalysisResult(task=req.task, status="error",
                               messages=["分析执行过程中发生内部错误，请联系开发者"])

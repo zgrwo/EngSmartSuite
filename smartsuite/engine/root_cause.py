@@ -12,7 +12,8 @@ from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 
 def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     """Pearson 相关性矩阵分析，含 p 值。"""
-    cols = req.feature_cols + [req.target_col]
+    # 去重：防止 target_col 同时出现在 feature_cols 中导致重复列
+    cols = list(dict.fromkeys(req.feature_cols + [req.target_col]))
     cols = [c for c in cols if c in req.data.columns]
     corr = req.data[cols].corr()
 
@@ -76,11 +77,11 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                 terms.append(f"Q('{cols[i]}'):Q('{cols[j]}')")
     formula = f"Q('{req.target_col}') ~ " + " + ".join(terms)
 
-    warnings: list[str] = []
+    warn_msgs: list[str] = []
     try:
         model = ols(formula, data=req.data).fit()
         anova_table = sm.stats.anova_lm(model, typ=2)
-    except Exception as e:
+    except Exception:
         return AnalysisResult(task="anova", status="error",
             messages=["ANOVA 模型拟合失败，请检查数据是否包含缺失值或非数值列"])
 
@@ -92,7 +93,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             if p_val < alpha:
                 sig_factors.append(f"{col}(p={p_val:.4f})")
         except KeyError:
-            warnings.append(f"因子「{col}」在 ANOVA 结果表中未找到")
+            warn_msgs.append(f"因子「{col}」在 ANOVA 结果表中未找到")
 
     summary = f"显著影响「{req.target_col}」的因子: {', '.join(sig_factors)}" if sig_factors \
         else f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})"
@@ -123,7 +124,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig_box],
         summary=summary,
         metadata={"r_squared": model.rsquared, "r_squared_adj": model.rsquared_adj},
-        messages=warnings if warnings else [],
+        messages=warn_msgs,
     )
 
 
@@ -239,16 +240,16 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     try:
         X = sm.add_constant(df)
-        vif_data = pd.DataFrame({
-            "变量": X.columns,
-            "VIF": [variance_inflation_factor(X.values, i) for i in range(X.shape[1])],
-        })
+        vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+        vif_full = pd.DataFrame({"变量": X.columns, "VIF": vif_vals})
+        # 排除无意义的 const 列
+        vif_data = vif_full[vif_full["变量"] != "const"].copy()
         high_vif = vif_data[vif_data["VIF"] > 5]
         warning = f"注意: {len(high_vif)} 个变量 VIF>5，存在共线性风险" if len(high_vif) > 0 \
             else "所有变量 VIF<=5，无明显共线性"
 
         # VIF 柱状图
-        vif_plot = vif_data[vif_data["变量"] != "const"]
+        vif_plot = vif_data
         fig = Figure(figsize=(max(len(vif_plot)*0.7, 5), 3.5))
         ax = fig.add_subplot(111)
         colors = ["#d94801" if v > 5 else "#2171b5" for v in vif_plot["VIF"]]
@@ -263,6 +264,6 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
             task="vif", tables={"vif_table": vif_data}, figures=[fig], summary=warning,
             metadata={"high_vif_count": len(high_vif)},
         )
-    except Exception as e:
+    except Exception:
         return AnalysisResult(task="vif", status="error",
                               messages=["VIF 计算失败，请检查数据是否存在共线性或数值异常"])

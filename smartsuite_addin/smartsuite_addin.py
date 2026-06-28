@@ -9,31 +9,51 @@ from smartsuite.services.reporter import to_excel, to_ppt
 
 def _prepare_request(sheet, target, features, task, **params):
     df = read_excel_range(sheet)
-    validate_data(df, target, features)
+    warnings = validate_data(df, target, features)
+    from smartsuite.services.data_io import preprocess_data
+    df, features_encoded, _ = preprocess_data(df, features)
     return AnalysisRequest(task=task, data=df, target_col=target,
-                           feature_cols=features, params=params)
+                           feature_cols=features_encoded, params=params), warnings
 
 
 def _run_and_report(task, output="excel", **params):
-    wb = xw.Book.caller()
-    sheet = wb.sheets.active
-    dlg = select_columns_dialog(sheet, title=f"配置: {task}")
-    if not dlg:
-        return
-    req = _prepare_request(sheet, dlg["target"], dlg["features"], task, **params)
-    result = orchestrate(req)
+    try:
+        wb = xw.Book.caller()
+        if wb is None:
+            xw.apps.active.api.MsgBox("无法获取工作簿，请确保从 Excel 中运行")
+            return
+        sheet = wb.sheets.active
+        dlg = select_columns_dialog(sheet, title=f"配置: {task}")
+        if not dlg:
+            xw.apps.active.api.MsgBox("分析已取消")
+            return
+        req, warnings = _prepare_request(sheet, dlg["target"], dlg["features"], task, **params)
+        result = orchestrate(req)
 
-    if output == "excel":
-        to_excel(result, wb, sheet_name=f"{task}_结果")
-    elif output == "ppt":
-        path = os.path.join(os.path.expanduser("~"), "Desktop", f"{task}_report.pptx")
-        to_ppt(result, path)
-        xw.apps.active.api.MsgBox(f"PPT 报告已保存至: {path}")
+        # 合并 validate_data 的警告消息
+        if warnings:
+            result.messages = warnings + result.messages
 
-    if result.status == "error":
-        xw.apps.active.api.MsgBox("; ".join(result.messages))
-    else:
-        xw.apps.active.api.MsgBox(result.summary)
+        if output == "excel":
+            to_excel(result, wb, sheet_name=f"{task}_结果")
+            if result.status == "error":
+                xw.apps.active.api.MsgBox("; ".join(result.messages))
+            else:
+                msg = result.summary
+                if result.messages:
+                    msg += "\n\n" + "\n".join(result.messages)
+                xw.apps.active.api.MsgBox(msg)
+        elif output == "ppt":
+            path = os.path.join(os.path.expanduser("~"), "Desktop", f"{task}_report.pptx")
+            to_ppt(result, path)
+            if result.status == "error":
+                xw.apps.active.api.MsgBox("; ".join(result.messages))
+            else:
+                msg = f"PPT 报告已保存至: {path}\n\n{result.summary}"
+                xw.apps.active.api.MsgBox(msg)
+    except Exception:
+        import traceback
+        xw.apps.active.api.MsgBox(f"分析执行失败:\n{traceback.format_exc()}")
 
 
 def select_columns_dialog(sheet, title="选择分析列"):

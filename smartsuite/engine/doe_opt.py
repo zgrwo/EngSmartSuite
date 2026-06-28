@@ -83,7 +83,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
                 "significant_vars": sig_vars["变量"].tolist(),
             },
         )
-    except Exception as e:
+    except Exception:
         return AnalysisResult(task="regression", status="error",
                               messages=["回归模型拟合失败，请检查数据是否存在缺失值或共线性"])
 
@@ -170,6 +170,16 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         )
 
     n_points = req.params.get("n_points", 10)
+    # 防止内存耗尽：限制搜索点数
+    n_points = min(n_points, 30)
+    if len(ranges) > 4:
+        return AnalysisResult(
+            task="grid_search", status="error",
+            messages=[f"搜索参数维度({len(ranges)})过高，最多支持 4 个参数"],
+        )
+    total_points = n_points ** len(ranges)
+    if total_points > 50000:
+        n_points = max(2, int(50000 ** (1.0 / len(ranges))))
     direction = req.params.get("direction", "maximize")
 
     grids = {col: np.linspace(lo, hi, n_points) for col, (lo, hi) in ranges.items()}
@@ -229,7 +239,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
                 "optimal_value": float(predictions[best_idx]),
             },
         )
-    except Exception as e:
+    except Exception:
         return AnalysisResult(task="grid_search", status="error",
                               messages=["网格搜索失败，请检查参数范围和样本量是否合理"])
 
@@ -242,6 +252,13 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             task="multi_objective", status="error",
             messages=["需要提供优化目标 (objectives)"],
         )
+    # 校验每个 objective 包含必需的 "col" 键
+    for i, obj in enumerate(objectives):
+        if "col" not in obj:
+            return AnalysisResult(
+                task="multi_objective", status="error",
+                messages=[f"第 {i+1} 个优化目标缺少 'col' 字段"],
+            )
 
     weights = req.params.get("weights", [1.0] * len(objectives))
     weights = np.array(weights) / np.sum(weights)
@@ -275,9 +292,14 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
 
     valid_idx = req.data.index[valid_rows]
     best_pos = np.argmax(scores[valid_rows])
-    best_idx = valid_idx[best_pos]
+    best_idx = valid_idx[best_pos]  # DataFrame 索引标签（用于 numpy 数组访问）
+    best_row_iloc = req.data.index.get_loc(best_idx)  # 转为位置索引（用于 iloc）
+    if isinstance(best_row_iloc, slice):
+        best_row_iloc = best_row_iloc.start
+    elif hasattr(best_row_iloc, '__iter__'):
+        best_row_iloc = list(best_row_iloc)[0]
     best_params = {
-        c: req.data.loc[best_idx, c]
+        c: req.data.iloc[best_row_iloc][c]
         for c in req.feature_cols
         if c in req.data.columns
     }
@@ -289,6 +311,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     top_n = min(20, len(score_valid))
     top_idx = np.argsort(score_valid)[-top_n:]
     ax.barh(range(top_n), score_valid[top_idx], color="#6baed6")
+    ax.invert_yaxis()  # 最高分在顶部
     ax.set_xlabel("综合得分", fontsize=9)
     ax.set_ylabel("参数组合排名", fontsize=9)
     ax.set_title(f"多目标优化 — {req.target_col} (Top{top_n})", fontsize=11)
@@ -324,14 +347,20 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     effects = []
     grand_mean = df[req.target_col].mean()
     for col in cols:
-        median = df[col].median()
-        hi = df[df[col] > median][req.target_col].mean()
-        lo = df[df[col] <= median][req.target_col].mean()
+        col_vals = df[col]
+        if col_vals.nunique() <= 1:
+            # 零方差因子：主效应为 0
+            effects.append({"因子": col, "主效应": 0.0, "效应占比": 0.0})
+            continue
+        median = col_vals.median()
+        hi = df[col_vals > median][req.target_col].mean()
+        lo = df[col_vals <= median][req.target_col].mean()
         effect = hi - lo
+        effect_ratio = abs(effect) / (abs(grand_mean) + 1e-10) if abs(grand_mean) > 1e-10 else 0.0
         effects.append({
             "因子": col,
             "主效应": effect,
-            "效应占比": abs(effect) / (abs(grand_mean) + 1e-10),
+            "效应占比": effect_ratio,
         })
 
     effects_df = pd.DataFrame(effects).sort_values("主效应", key=abs, ascending=False)
