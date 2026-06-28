@@ -3,11 +3,18 @@
 Three column checkboxes: Y (target), X (feature), Cat (categorical).
 Workflow: Step1 Filter -> Step2 Model -> Step3 Optimize + Monitor.
 """
+# ── matplotlib 后端必须在所有 smartsuite 导入之前设置 ──
+import matplotlib
+matplotlib.use("TkAgg")
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 import numpy as np
 import os, sys, threading, traceback, io
+
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from smartsuite.core.contracts import AnalysisRequest
@@ -259,6 +266,25 @@ class SmartSuiteGUI:
         self.xls_btn = ttk.Button(exp, text="导出 Excel 报告", command=self._export_xls, state="disabled")
         self.xls_btn.pack(side=tk.RIGHT, padx=2)
 
+        # RIGHT: Chart panel
+        chart_frm = ttk.LabelFrame(main, text="图表", padding=4)
+        chart_frm.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(8,0))
+        # Chart selector
+        self._chart_selector = ttk.Combobox(chart_frm, state="readonly", width=32)
+        self._chart_selector.pack(fill=tk.X, padx=2, pady=(2,4))
+        self._chart_selector.bind("<<ComboboxSelected>>", lambda e: self._show_selected_chart())
+        # Canvas area
+        self._chart_container = ttk.Frame(chart_frm)
+        self._chart_container.pack(fill=tk.BOTH, expand=True)
+        # 空状态提示
+        self._chart_placeholder = tk.Label(
+            self._chart_container, text="运行分析后\n图表将显示在此处",
+            font=("Microsoft YaHei", 11), fg="#999", bg="#fafafa")
+        self._chart_placeholder.pack(fill=tk.BOTH, expand=True)
+        # 存储图表数据
+        self._all_figures: dict[str, Figure] = {}
+        self._chart_canvas: FigureCanvasTkAgg | None = None
+
     # ============================================================
     # COLUMN SELECTION
     # ============================================================
@@ -473,6 +499,18 @@ class SmartSuiteGUI:
             self._tbl_selector.current(0)
             self._show_selected_table()
 
+        # Populate chart selector from all results' figures
+        self._all_figures.clear()
+        for target, result in all_results:
+            for i, fig in enumerate(result.figures):
+                key = f"{target} — 图{i+1}" if len(result.figures) > 1 else f"{target}"
+                self._all_figures[key] = fig
+        chart_names = list(self._all_figures.keys())
+        self._chart_selector["values"] = chart_names
+        if chart_names:
+            self._chart_selector.current(0)
+            self._show_selected_chart()
+
         # Summary tab
         color = "#2e7d32"
         self._summary_text.configure(state=tk.NORMAL)
@@ -515,6 +553,25 @@ class SmartSuiteGUI:
                 else:
                     vals.append(str(v))
             tree.insert("", tk.END, values=vals)
+
+    def _show_selected_chart(self, event=None):
+        """将下拉选中的图表渲染到右侧面板。"""
+        name = self._chart_selector.get()
+        # 清除旧内容
+        for w in self._chart_container.winfo_children():
+            w.destroy()
+        if not name or name not in self._all_figures:
+            # 无图表时显示占位提示
+            self._chart_placeholder = tk.Label(
+                self._chart_container, text="运行分析后\n图表将显示在此处",
+                font=("Microsoft YaHei", 11), fg="#999", bg="#fafafa")
+            self._chart_placeholder.pack(fill=tk.BOTH, expand=True)
+            return
+        fig = self._all_figures[name]
+        canvas = FigureCanvasTkAgg(fig, master=self._chart_container)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self._chart_canvas = canvas
 
     # ============================================================
     # EXPORT

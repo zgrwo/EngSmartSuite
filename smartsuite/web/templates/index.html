@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartSuite — 工艺数据分析工具箱</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <span class="logo">SmartSuite</span>
+  <span class="subtitle">工艺数据分析工具箱</span>
+  <div class="header-right">
+    <input type="file" id="file-input" accept=".xlsx,.xls,.xlsm" hidden>
+    <button id="btn-upload" onclick="document.getElementById('file-input').click()">📂 打开 Excel 文件</button>
+    <span id="filename" class="filename">未选择文件</span>
+    <span id="shape" class="shape"></span>
+  </div>
+</header>
+
+<div class="main">
+  <aside id="left-panel">
+    <div class="panel-header">列定义</div>
+    <div class="toolbar">
+      <button onclick="autoDetect()" class="btn-sm">智能识别</button>
+      <button onclick="setAll('y')" class="btn-sm">全选Y</button>
+      <button onclick="setAll('x')" class="btn-sm">全选X</button>
+      <button onclick="clearAll()" class="btn-sm">清空</button>
+    </div>
+    <div id="col-list" class="col-list">
+      <div class="empty-hint">请先加载 Excel 文件</div>
+    </div>
+    <div id="col-status" class="col-status">Y=0 X=0 类别=0</div>
+    <!-- 参数面板（按需显示） -->
+    <div id="param-panel" class="param-panel" style="display:none">
+      <div class="panel-header">分析参数</div>
+      <div class="param-body" id="param-body"></div>
+    </div>
+  </aside>
+
+  <main id="center-panel">
+    <div class="workflow">
+      {% for group, tasks in task_groups.items() %}
+      <div class="wf-group" style="--group-bg: {{ group_colors[group] }}">
+        <div class="wf-title">{{ group }}</div>
+        <div class="wf-buttons">
+          {% for t in tasks %}
+          <button onclick="runAnalysis('{{ t }}')" class="btn-analysis">{{ task_labels[t] }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div id="results" class="results">
+      <div class="empty-hint">选择分析方法开始</div>
+    </div>
+  </main>
+</div>
+
+<script src="/static/app.js?v=3"></script>
+</body>
+</html>

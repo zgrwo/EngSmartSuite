@@ -1,6 +1,9 @@
 """CLI 入口 — 命令行直接运行分析。"""
 import argparse
 
+import matplotlib
+matplotlib.use("Agg")
+
 import pandas as pd
 import yaml
 

@@ -1,8 +1,6 @@
-import matplotlib
 import numpy as np
 import pandas as pd
 
-matplotlib.use("Agg")
 from matplotlib.figure import Figure
 from sklearn.linear_model import LinearRegression
 
@@ -113,13 +111,28 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         else ("需改进" if cpk_val else "未提供规格限")
     )
 
+    # 过程能力直方图 + 规格限
+    fig = Figure(figsize=(8, 4))
+    ax = fig.add_subplot(111)
+    ax.hist(data, bins=20, color="#6baed6", edgecolor="white", alpha=0.8)
+    mean_val = float(mu)
+    ax.axvline(mean_val, color="green", linestyle="-", linewidth=2, label=f"Mean={mean_val:.2f}")
+    if lsl: ax.axvline(lsl, color="red", linestyle="--", linewidth=2, label=f"LSL={lsl}")
+    if usl: ax.axvline(usl, color="red", linestyle="--", linewidth=2, label=f"USL={usl}")
+    ax.set_xlabel(req.target_col, fontsize=9)
+    ax.set_ylabel("频数", fontsize=9)
+    ax.set_title(f"过程能力 — {req.target_col} (Cp={cp:.2f}, Cpk={cpk_val:.2f})" if cp else f"过程能力 — {req.target_col}")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+
     return AnalysisResult(
         task="process_capability",
         tables={
             "capability": pd.DataFrame({"指标": ["Cp", "Cpk"], "值": [cp, cpk_val]})
         },
+        figures=[fig],
         summary=f"Cpk={cpk_val:.3f}, {judge}" if cpk_val is not None else judge,
-        metadata={"cp": cp, "cpk": cpk_val, "mean": float(mu), "std": float(sigma)},
+        metadata={"cp": cp, "cpk": cpk_val, "mean": mean_val, "std": float(sigma)},
     )
 
 
@@ -152,9 +165,26 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         )
 
         trend_dir = "上升" if model.coef_[0] > 0 else "下降"
+
+        # 趋势预测图：历史数据 + 预测 + 置信带
+        fig = Figure(figsize=(8, 4))
+        ax = fig.add_subplot(111)
+        hist_idx = np.arange(len(data))
+        ax.plot(hist_idx, y, "o-", markersize=3, label="历史数据", color="#2171b5")
+        fut_idx = np.arange(len(data), len(data) + steps)
+        ax.plot(fut_idx, predictions, "o-", markersize=3, label="预测", color="#d94801")
+        ax.fill_between(fut_idx, predictions - conf, predictions + conf,
+                        alpha=0.2, color="#d94801", label=f"95% 置信带")
+        ax.set_xlabel("时间点", fontsize=9)
+        ax.set_ylabel(req.target_col, fontsize=9)
+        ax.set_title(f"趋势预测 — {req.target_col} ({trend_dir})", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
         return AnalysisResult(
             task="trend_forecast",
             tables={"forecast": forecast_df},
+            figures=[fig],
             summary=f"趋势{trend_dir}(斜率={model.coef_[0]:.4f}/步), 预测{steps}步",
             metadata={"slope": float(model.coef_[0]), "forecast_steps": steps},
         )
@@ -193,9 +223,28 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     idx = data.index[mask]
     anomalies = req.data.loc[idx] if mask.sum() > 0 else pd.DataFrame()
 
+    # 异常检测散点图
+    fig = Figure(figsize=(8, 4))
+    ax = fig.add_subplot(111)
+    pos = np.arange(len(data))
+    ax.plot(pos, data.values, "-", color="#6baed6", linewidth=1, label="数据")
+    ax.scatter(pos, data.values, s=10, color="#2171b5")
+    if mask.sum() > 0:
+        anomaly_pos = [list(pos).index(i) for i in idx if i in pos]
+        ax.scatter(anomaly_pos, data.values[mask], s=60, color="red",
+                   marker="x", linewidths=2, zorder=5, label=f"异常({mask.sum()}个)")
+    threshold = Q1 - 1.5 * IQR if method == "iqr" else data.mean() - 3 * data.std()
+    ax.axhline(threshold, color="orange", linestyle="--", linewidth=1, alpha=0.5)
+    ax.set_xlabel("序号", fontsize=9)
+    ax.set_ylabel(req.target_col, fontsize=9)
+    ax.set_title(f"异常检测 — {req.target_col} (方法: {method})", fontsize=11)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+
     return AnalysisResult(
         task="anomaly_detect",
         tables={"anomalies": anomalies},
+        figures=[fig],
         summary=f"检测到 {mask.sum()} 个异常点 (方法: {method})",
         metadata={"anomaly_count": int(mask.sum()), "method": method},
     )

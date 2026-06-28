@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from matplotlib.figure import Figure
 from scipy import stats
-from sklearn.tree import DecisionTreeRegressor
+from sklearn.tree import DecisionTreeRegressor, plot_tree
 from statsmodels.formula.api import ols
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
@@ -30,9 +31,27 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     top_factor = target_corr.index[0] if len(target_corr) > 0 else "N/A"
     top_value = target_corr.iloc[0] if len(target_corr) > 0 else 0
 
+    # 全矩阵热力图
+    n = len(cols)
+    fig = Figure(figsize=(max(n*0.85, 5), max(n*0.75, 4)))
+    ax = fig.add_subplot(111)
+    im = ax.imshow(corr.values, cmap="RdBu_r", aspect="auto", vmin=-1, vmax=1)
+    ax.set_xticks(range(n)); ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=8)
+    ax.set_yticks(range(n)); ax.set_yticklabels(cols, fontsize=8)
+    for i in range(n):
+        for j in range(n):
+            v = corr.values[i, j]
+            ax.text(j, i, f"{v:+.2f}", ha="center", va="center",
+                    fontsize=7, fontweight="bold",
+                    color="white" if abs(v) > 0.5 else "black")
+    fig.colorbar(im, ax=ax, shrink=0.8, label="r")
+    ax.set_title(f"相关性热力图 — {req.target_col}", fontsize=11)
+    fig.tight_layout()
+
     return AnalysisResult(
         task="correlation",
         tables={"correlation_matrix": corr, "p_values": pmat.astype(float)},
+        figures=[fig],
         summary=f"与「{req.target_col}」相关性最强的因子是「{top_factor}」(r={top_value:.3f})",
         metadata={"target_correlations": target_corr.to_dict()},
     )
@@ -49,7 +68,13 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="anova", status="error",
             messages=["没有可用于 ANOVA 分析的特征列"])
 
-    formula = f"Q('{req.target_col}') ~ " + " + ".join(f"Q('{c}')" for c in cols)
+    # 构建公式：可选两两交互项
+    terms = [f"Q('{c}')" for c in cols]
+    if req.params.get("interactions") and len(cols) >= 2:
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                terms.append(f"Q('{cols[i]}'):Q('{cols[j]}')")
+    formula = f"Q('{req.target_col}') ~ " + " + ".join(terms)
 
     warnings: list[str] = []
     try:
@@ -77,9 +102,25 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         "标准误": model.bse.values, "t值": model.tvalues.values, "p值": model.pvalues.values,
     })
 
+    # 箱线图：按第一个显著因子（或第一个因子）分组展示目标变量分布
+    fig_box = Figure(figsize=(max(len(cols)*1.6, 5), 4))
+    ax_box = fig_box.add_subplot(111)
+    group_col = sig_factors[0].split("(")[0] if sig_factors else cols[0]
+    groups = req.data[[req.target_col, group_col]].dropna()
+    group_names = sorted(groups[group_col].unique())
+    group_data = [groups[groups[group_col] == g][req.target_col].values for g in group_names]
+    bp = ax_box.boxplot(group_data, tick_labels=[str(g) for g in group_names], patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor("#6baed6")
+    ax_box.set_xlabel(group_col, fontsize=9)
+    ax_box.set_ylabel(req.target_col, fontsize=9)
+    ax_box.set_title(f"箱线图 — {req.target_col} by {group_col}", fontsize=11)
+    fig_box.tight_layout()
+
     return AnalysisResult(
         task="anova",
         tables={"anova_table": anova_table, "coefficients": coef_df},
+        figures=[fig_box],
         summary=summary,
         metadata={"r_squared": model.rsquared, "r_squared_adj": model.rsquared_adj},
         messages=warnings if warnings else [],
@@ -108,6 +149,16 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     alpha = req.params.get("alpha", 0.05)
     conclusion = "存在显著差异" if p < alpha else "未发现显著差异"
 
+    # 双样本箱线图
+    fig = Figure(figsize=(5, 4))
+    ax = fig.add_subplot(111)
+    bp = ax.boxplot([g1, g2], tick_labels=[str(groups[0]), str(groups[1])], patch_artist=True)
+    for patch, color in zip(bp['boxes'], ["#6baed6", "#fd8d3c"]):
+        patch.set_facecolor(color)
+    ax.set_ylabel(req.target_col, fontsize=9)
+    ax.set_title(f"{test_name} — {req.target_col} (p={p:.4f})", fontsize=11)
+    fig.tight_layout()
+
     return AnalysisResult(
         task="hypothesis_test",
         tables={"test_results": pd.DataFrame({
@@ -115,6 +166,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             "显著性水平": [alpha],
             "结论": [f"{groups[0]} vs {groups[1]}: {conclusion} (p={p:.4f})"],
         })},
+        figures=[fig],
         summary=f"{groups[0]} vs {groups[1]}: {conclusion} (p={p:.4f})",
         metadata={"test": test_name, "statistic": stat, "p_value": p, "alpha": alpha},
     )
@@ -143,9 +195,30 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     fi = fi.sort_values("重要性", ascending=False).reset_index(drop=True)
     top = fi.iloc[0] if len(fi) > 0 else None
 
+    # 图1: 特征重要性柱状图
+    fig_imp = Figure(figsize=(max(len(fi)*0.7, 5), 3.5))
+    ax = fig_imp.add_subplot(111)
+    colors = ["#2171b5" if v > 0.1 else "#6baed6" for v in fi["重要性"]]
+    ax.barh(fi["因子"], fi["重要性"], color=colors)
+    ax.set_xlabel("重要性", fontsize=9)
+    ax.set_title(f"决策树特征重要性 — {req.target_col}", fontsize=11)
+    ax.invert_yaxis()
+    fig_imp.tight_layout()
+
+    # 图2: 决策树分层结构图 (需 Canvas 支持 plot_tree)
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    fig_tree = Figure(figsize=(12, max(tree.get_depth() * 1.2, 4)))
+    FigureCanvasAgg(fig_tree)  # plot_tree 需要 renderer
+    ax_tree = fig_tree.add_subplot(111)
+    plot_tree(tree, ax=ax_tree, feature_names=cols, filled=True,
+              rounded=True, fontsize=8, precision=2, max_depth=4)
+    ax_tree.set_title(f"决策树结构 — {req.target_col}", fontsize=12)
+    fig_tree.tight_layout()
+
     return AnalysisResult(
         task="decision_tree",
         tables={"feature_importance": fi},
+        figures=[fig_imp, fig_tree],
         summary=f"关键影响因子: {top['因子']} (重要性={top['重要性']:.3f})" if top is not None
             else "分析完成",
         metadata={"top_factor": top["因子"] if top is not None else None},
@@ -174,8 +247,20 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         warning = f"注意: {len(high_vif)} 个变量 VIF>5，存在共线性风险" if len(high_vif) > 0 \
             else "所有变量 VIF<=5，无明显共线性"
 
+        # VIF 柱状图
+        vif_plot = vif_data[vif_data["变量"] != "const"]
+        fig = Figure(figsize=(max(len(vif_plot)*0.7, 5), 3.5))
+        ax = fig.add_subplot(111)
+        colors = ["#d94801" if v > 5 else "#2171b5" for v in vif_plot["VIF"]]
+        ax.barh(vif_plot["变量"], vif_plot["VIF"], color=colors)
+        ax.axvline(5, color="red", linestyle="--", linewidth=1, label="VIF=5 阈值")
+        ax.set_xlabel("VIF", fontsize=9)
+        ax.set_title("共线性诊断 — VIF", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
         return AnalysisResult(
-            task="vif", tables={"vif_table": vif_data}, summary=warning,
+            task="vif", tables={"vif_table": vif_data}, figures=[fig], summary=warning,
             metadata={"high_vif_count": len(high_vif)},
         )
     except Exception as e:

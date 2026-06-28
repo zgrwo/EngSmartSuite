@@ -34,6 +34,8 @@ dependencies = [
     "reportlab>=4.0",
     "pyyaml>=6.0",
     "tabulate>=0.9",
+    "flask>=3.0",
+    "pyarrow>=14.0",
 ]
 
 [project.optional-dependencies]

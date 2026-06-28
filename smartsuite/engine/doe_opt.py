@@ -1,9 +1,8 @@
-import matplotlib
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from scipy import stats
 
-matplotlib.use("Agg")
 from matplotlib.figure import Figure
 from sklearn.linear_model import Ridge
 
@@ -40,10 +39,40 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         })
 
         sig_vars = coef_df[(coef_df["p值"] < 0.05) & (coef_df["变量"] != "const")]
+        residuals = model.resid
+        fitted = model.fittedvalues
+
+        # 残差诊断图：Residual vs Fitted (上) + Q-Q (下)
+        fig_res = Figure(figsize=(8, 6))
+        ax1 = fig_res.add_subplot(2, 2, 1)
+        ax1.scatter(fitted, residuals, alpha=0.6, s=20)
+        ax1.axhline(0, color="red", linestyle="--", linewidth=1)
+        ax1.set_xlabel("拟合值", fontsize=9)
+        ax1.set_ylabel("残差", fontsize=9)
+        ax1.set_title("Residual vs Fitted", fontsize=10)
+        # Q-Q plot
+        ax2 = fig_res.add_subplot(2, 2, 2)
+        stats.probplot(residuals, dist="norm", plot=ax2)
+        ax2.set_title("Q-Q Plot", fontsize=10)
+        # 残差直方图
+        ax3 = fig_res.add_subplot(2, 2, 3)
+        ax3.hist(residuals, bins=15, color="#6baed6", edgecolor="white")
+        ax3.axvline(0, color="red", linestyle="--")
+        ax3.set_xlabel("残差", fontsize=9)
+        ax3.set_title("残差分布", fontsize=10)
+        # Actual vs Predicted
+        ax4 = fig_res.add_subplot(2, 2, 4)
+        ax4.scatter(fitted, y, alpha=0.5, s=15)
+        ax4.plot([y.min(), y.max()], [y.min(), y.max()], "r--", linewidth=1)
+        ax4.set_xlabel("预测值", fontsize=9)
+        ax4.set_ylabel("实际值", fontsize=9)
+        ax4.set_title("Actual vs Predicted", fontsize=10)
+        fig_res.tight_layout()
 
         return AnalysisResult(
             task="regression",
             tables={"coefficients": coef_df},
+            figures=[fig_res],
             summary=f"R²={model.rsquared:.4f}, 调整R²={model.rsquared_adj:.4f}, "
                     f"显著变量: {len(sig_vars)}/{len(cols)}",
             metadata={
@@ -169,8 +198,31 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             for i in range(len(col_names))
         }
 
+        # 可视化：2D 等高线 / 1D 折线
+        fig = Figure(figsize=(7, 4))
+        if len(col_names) == 2:
+            ax = fig.add_subplot(111)
+            Z = predictions.reshape(n_points, n_points)
+            X, Y = mesh
+            cs = ax.contourf(X, Y, Z, levels=15, cmap="viridis")
+            ax.scatter(points[best_idx, 0], points[best_idx, 1], marker="*",
+                       color="red", s=150, edgecolors="white", linewidths=1.5, zorder=5,
+                       label=f"最优 ({best[col_names[0]]}, {best[col_names[1]]})")
+            ax.set_xlabel(col_names[0], fontsize=9)
+            ax.set_ylabel(col_names[1], fontsize=9)
+            ax.set_title(f"网格搜索 — {req.target_col}", fontsize=11)
+            ax.legend(fontsize=8)
+            fig.colorbar(cs, ax=ax, label="预测值")
+        else:
+            ax = fig.add_subplot(111)
+            ax.bar(range(len(predictions)), predictions, color="#6baed6")
+            ax.set_xlabel("参数组合索引", fontsize=9)
+            ax.set_ylabel("预测值", fontsize=9)
+        fig.tight_layout()
+
         return AnalysisResult(
             task="grid_search",
+            figures=[fig],
             summary=f"最优参数: {best}, 预测值: {predictions[best_idx]:.4f}",
             metadata={
                 "optimal_params": best,
@@ -230,8 +282,21 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         if c in req.data.columns
     }
 
+    # 综合得分分布图
+    fig = Figure(figsize=(8, 3.5))
+    ax = fig.add_subplot(111)
+    score_valid = scores[valid_rows]
+    top_n = min(20, len(score_valid))
+    top_idx = np.argsort(score_valid)[-top_n:]
+    ax.barh(range(top_n), score_valid[top_idx], color="#6baed6")
+    ax.set_xlabel("综合得分", fontsize=9)
+    ax.set_ylabel("参数组合排名", fontsize=9)
+    ax.set_title(f"多目标优化 — {req.target_col} (Top{top_n})", fontsize=11)
+    fig.tight_layout()
+
     return AnalysisResult(
         task="multi_objective",
+        figures=[fig],
         summary=f"综合评分最优: {best_params}, 得分: {scores[best_idx]:.4f}",
         metadata={
             "optimal_params": best_params,
@@ -273,9 +338,21 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     top_name = effects_df["因子"].iloc[0] if len(effects_df) > 0 else "N/A"
     top_val = effects_df["主效应"].iloc[0] if len(effects_df) > 0 else 0
 
+    # 主效应 Pareto 图
+    fig = Figure(figsize=(max(len(effects_df)*0.8, 5), 3.5))
+    ax = fig.add_subplot(111)
+    ef = effects_df.sort_values("主效应", key=abs)
+    colors = ["#d94801" if v < 0 else "#2171b5" for v in ef["主效应"]]
+    ax.barh(ef["因子"], ef["主效应"], color=colors)
+    ax.axvline(0, color="black", linewidth=0.5)
+    ax.set_xlabel("主效应", fontsize=9)
+    ax.set_title(f"DOE主效应 — {req.target_col}", fontsize=11)
+    fig.tight_layout()
+
     return AnalysisResult(
         task="doe_analysis",
         tables={"effect_estimates": effects_df},
+        figures=[fig],
         summary=f"最强主效应: {top_name} (效应={top_val:.3f})",
         metadata={"grand_mean": grand_mean, "top_effect_factor": top_name},
     )
