@@ -10,9 +10,9 @@ import numpy as np
 import os, sys, threading, traceback, io
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate, TASK_REGISTRY
-from smartexcel.services.reporter import to_ppt
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.reporter import to_ppt
 
 CATEGORICAL_KEYWORDS = ['日期','班次','车间','机台','模具','编号','操作','检验',
     '原料','类型','批号','冷却','循环','模式','分区','保养','环境',
@@ -99,12 +99,24 @@ class SmartSuiteGUI:
         self.last_result = None
         self._file_path = None
         self._col_rows = {}
-        self._targets = set()
-        self._features = set()
-        self._categoricals = set()
         self._build_ui()
         if initial_file:
             self._load_file(os.path.abspath(initial_file))
+
+    # ============================================================
+    # DERIVED STATE — 列选择状态源自 BooleanVar，单一数据源
+    # ============================================================
+    @property
+    def _targets(self):
+        return {n for n, r in self._col_rows.items() if r.var_y.get()}
+
+    @property
+    def _features(self):
+        return {n for n, r in self._col_rows.items() if r.var_x.get()}
+
+    @property
+    def _categoricals(self):
+        return {n for n, r in self._col_rows.items() if r.var_cat.get()}
 
     # ============================================================
     # UI CONSTRUCTION
@@ -241,12 +253,6 @@ class SmartSuiteGUI:
     # COLUMN SELECTION
     # ============================================================
     def _on_col_change(self, name, role, checked):
-        if role == 'Y':
-            (self._targets.add(name) if checked else self._targets.discard(name))
-        elif role == 'X':
-            (self._features.add(name) if checked else self._features.discard(name))
-        elif role == 'cat':
-            (self._categoricals.add(name) if checked else self._categoricals.discard(name))
         self._update_status()
 
     def _update_status(self):
@@ -260,15 +266,15 @@ class SmartSuiteGUI:
             # Category detection
             is_cat = any(kw.lower() in lo for kw in CATEGORICAL_KEYWORDS)
             if is_cat or dtype == 'object':
-                row.var_cat.set(True); self._categoricals.add(name)
+                row.var_cat.set(True)
             # Y detection: keywords that suggest a response/quality metric
             y_kw = ['不良','强度','伸长','冲击','粗糙','偏差','波动','效率',
                     'defect','strength','rough','deviation']
             if any(k in lo for k in y_kw):
-                row.var_y.set(True); self._targets.add(name)
+                row.var_y.set(True)
             # X detection: numeric columns that aren't Y or Category
-            if dtype in ('float64','int64') and name not in self._targets and not is_cat:
-                row.var_x.set(True); self._features.add(name)
+            if dtype in ('float64','int64') and not any(k in lo for k in y_kw) and not is_cat:
+                row.var_x.set(True)
         self._update_status()
         self._log("智能识别完成: Y=响应指标, X=数值工艺参数, 类别=文本/分类变量")
 
@@ -276,16 +282,15 @@ class SmartSuiteGUI:
         for name, row in self._col_rows.items():
             dtype = str(self.df[name].dtype) if self.df is not None else ""
             if filter_type == 'numeric' and dtype in ('float64','int64'):
-                if role == 'X' and name not in self._targets:
-                    row.var_x.set(True); self._features.add(name)
+                if role == 'X':
+                    row.var_x.set(True)
             elif filter_type == 'response' and dtype in ('float64','int64'):
-                row.var_y.set(True); self._targets.add(name)
+                row.var_y.set(True)
         self._update_status()
 
     def _clear_all(self):
         for name, row in self._col_rows.items():
             row.var_y.set(False); row.var_x.set(False); row.var_cat.set(False)
-        self._targets.clear(); self._features.clear(); self._categoricals.clear()
         self._update_status()
 
     # ============================================================
@@ -314,7 +319,6 @@ class SmartSuiteGUI:
         for w in self._col_container.winfo_children():
             w.destroy()
         self._col_rows.clear()
-        self._targets.clear(); self._features.clear(); self._categoricals.clear()
 
         # Header row (grid-based, inside scrollable container)
         ColumnRow(self._col_container, "__header__", self._on_col_change, is_header=True).pack(fill=tk.X)
@@ -335,26 +339,11 @@ class SmartSuiteGUI:
     # DATA PREP: encode categoricals for analysis
     # ============================================================
     def _prepare_data(self, targets, features):
-        """One-hot encode categorical features, return (df_encoded, feature_cols_encoded)."""
-        df = self.df.copy()
-        encoded_cols = []
-        cat_map = {}
+        """预处理数据：委托给 services.data_io.preprocess_data。"""
+        from smartsuite.services.data_io import preprocess_data
 
-        for col in features:
-            is_cat = col in self._categoricals or str(self.df[col].dtype) in ('object', 'string')
-            if is_cat:
-                dummies = pd.get_dummies(df[col].astype(str), prefix=col, drop_first=True)
-                for dc in dummies.columns:
-                    df[dc] = dummies[dc].astype(float)
-                    encoded_cols.append(dc)
-                cat_map[col] = list(dummies.columns)
-            else:
-                # Numeric: ensure numeric via the copied df
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                if df[col].isnull().any():
-                    df[col] = df[col].fillna(df[col].median())
-                encoded_cols.append(col)
-
+        df, encoded_cols, cat_map = preprocess_data(
+            self.df, features, categorical_cols=self._categoricals)
         self._df_encoded = df
         self._cat_map = cat_map
         return df, encoded_cols
@@ -377,30 +366,26 @@ class SmartSuiteGUI:
             messagebox.showwarning("请选择因子列", "请勾选至少一个 X 列(因子)")
             return
 
-        # Prepare data with encoding
-        df_enc, feature_cols = self._prepare_data(targets, features)
-
-        # Special handling for hypothesis_test: find a 2-value categorical as group_col
+        # hypothesis_test: 先检测分组列，避免重复编码
         extra_params = {}
         if task == "hypothesis_test":
             for col in features:
                 vals = self.df[col].dropna().unique()
-                if len(vals) == 2 and col not in feature_cols:
-                    # This column was encoded away — find its dummy or use original
-                    pass
-            # Try to find any original categorical with exactly 2 unique values
-            for col in features:
-                vals = self.df[col].dropna().unique()
                 if len(vals) == 2:
                     extra_params["group_col"] = col
-                    # Re-prepare without encoding this column
-                    features_no_group = [f for f in features if f != col]
-                    df_enc, feature_cols = self._prepare_data(targets, features_no_group)
-                    # Add the un-encoded group column back to df_enc but not to features
-                    df_enc[col] = self.df[col].astype(str)
-                    if col not in feature_cols:
-                        feature_cols.append(col)
+                    # 从 features 中移除分组列，避免被 One-Hot 编码
+                    features = [f for f in features if f != col]
                     break
+
+        # Prepare data with encoding（仅调用一次）
+        df_enc, feature_cols = self._prepare_data(targets, features)
+
+        # hypothesis_test: 将原始分组列加回（不编码，保持原始值）
+        if "group_col" in extra_params:
+            col = extra_params["group_col"]
+            df_enc[col] = self.df[col].astype(str)
+            if col not in feature_cols:
+                feature_cols.append(col)
         cat_count = len(self._categoricals & set(features))
         self._log(f"\n{'='*60}")
         self._log(f"  {METHOD_LABELS[task]}")
@@ -439,7 +424,7 @@ class SmartSuiteGUI:
         self._log(f"{'='*60}")
 
         summary_lines = []
-        all_tables_md = []
+        all_tables_text = []
 
         for target, result in all_results:
             status_icon = "OK" if result.status == 'ok' else ("WARN" if result.status == 'warning' else "ERR")
@@ -451,8 +436,14 @@ class SmartSuiteGUI:
             summary_lines.append(f"**{target}**: {result.summary}")
 
             for tname, tbl in result.tables.items():
-                md = tbl.head(25).to_markdown(floatfmt=".4f", index=True)
-                all_tables_md.append(f"### {target} — {tname} ({len(tbl)} rows)\n\n{md}\n")
+                header = f"╔══ {target} — {tname} ({len(tbl)} rows × {len(tbl.columns)} cols) ══╗"
+                with pd.option_context(
+                    'display.width', 160, 'display.max_columns', 15,
+                    'display.float_format', '{:,.4f}'.format,
+                    'display.colheader_justify', 'right',
+                ):
+                    body = tbl.head(25).to_string()
+                all_tables_text.append(f"{header}\n{body}\n")
 
         # Summary tab
         color = "#2e7d32"
@@ -462,52 +453,17 @@ class SmartSuiteGUI:
         self._summary_text.tag_configure("big", font=("Microsoft YaHei", 12, "bold"), foreground=color)
         self._summary_text.configure(state=tk.DISABLED)
 
-        # Table tab — markdown
+        # Table tab — pandas to_string() 等宽对齐
         self._table_text.configure(state=tk.NORMAL)
         self._table_text.delete("1.0", tk.END)
-        self._table_text.insert("1.0", "\n".join(all_tables_md) if all_tables_md else "(no tables)")
+        self._table_text.insert("1.0", "\n".join(all_tables_text) if all_tables_text else "(无表格数据)")
         self._table_text.configure(state=tk.DISABLED)
 
-        self._result_nb.select(1 if all_tables_md else 0)
+        self._result_nb.select(1 if all_tables_text else 0)
         self._status_lbl.set("分析完成")
         self.ppt_btn.config(state="normal")
         self.xls_btn.config(state="normal")
         self.last_result = all_results[-1][1] if all_results else None
-        self.last_result = result
-        status_icon = "OK" if result.status == 'ok' else ("WARN" if result.status == 'warning' else "ERR")
-        self._log(f"[{status_icon}] {result.summary}")
-        for msg in result.messages:
-            self._log(f"  {msg}")
-
-        # Summary tab
-        self._summary_text.configure(state=tk.NORMAL)
-        self._summary_text.delete("1.0", tk.END)
-        color = "#2e7d32" if result.status == 'ok' else ("#e65100" if result.status == 'warning' else "#c62828")
-        self._summary_text.insert(tk.END, f"  {result.summary}\n\n", ("big",))
-        self._summary_text.tag_configure("big", font=("Microsoft YaHei", 13, "bold"), foreground=color)
-        if result.metadata:
-            meta_lines = "\n".join(f"  {k}: {v}" for k, v in list(result.metadata.items())[:8])
-            self._summary_text.insert(tk.END, meta_lines, ("meta",))
-            self._summary_text.tag_configure("meta", font=("Consolas", 10), foreground="#555")
-        self._summary_text.configure(state=tk.DISABLED)
-
-        # Table tab — render ALL tables as formatted monospace text
-        if result.tables:
-            lines = []
-            for tname, tbl in result.tables.items():
-                lines.append(f"╔══ {tname} ({len(tbl)} rows x {len(tbl.columns)} cols) ══╗")
-                # Format: right-align index, fixed-width float columns
-                with pd.option_context('display.width', 120, 'display.max_columns', 15,
-                                       'display.float_format', '{:6.4f}'.format,
-                                       'display.colheader_justify', 'right'):
-                    lines.append(tbl.head(30).to_string())
-                lines.append("")
-            self._table_text.configure(state=tk.NORMAL)
-            self._table_text.delete("1.0", tk.END)
-            self._table_text.insert("1.0", "\n".join(lines))
-            self._table_text.configure(state=tk.DISABLED)
-
-        self._result_nb.select(1 if result.tables else 0)
 
     # ============================================================
     # EXPORT

@@ -1,5 +1,5 @@
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.engine.root_cause import (
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine.root_cause import (
     anova_analysis,
     correlation_analysis,
     decision_tree_analysis,

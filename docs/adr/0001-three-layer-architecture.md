@@ -20,6 +20,6 @@ SmartExcel Suite 需要在 Excel 交互和 Python 分析引擎之间建立清晰
 
 ## 约束
 
-- `smartexcel/engine/` 禁止 `import xlwings`
-- `smartexcel/excel/` 禁止 `import sklearn` / `import statsmodels`
-- 唯一桥接层是 `smartexcel/services/`
+- `smartsuite/engine/` 禁止 `import xlwings`
+- `smartsuite/excel/` 禁止 `import sklearn` / `import statsmodels`
+- 唯一桥接层是 `smartsuite/services/`

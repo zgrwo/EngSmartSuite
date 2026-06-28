@@ -1,5 +1,5 @@
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate
 
 
 def test_orchestrate_anova(sample_doe_data):

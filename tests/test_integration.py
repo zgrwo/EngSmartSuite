@@ -1,8 +1,8 @@
 """端到端集成测试。"""
 import tempfile, os
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate, TASK_REGISTRY
-from smartexcel.services.reporter import to_pdf, to_ppt
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.reporter import to_pdf, to_ppt
 
 
 def test_full_pipeline_anova_to_pdf(sample_doe_data):
@@ -42,7 +42,7 @@ def test_full_pipeline_rsm_to_ppt(sample_doe_data):
 
 def test_all_tasks_registered():
     """确保所有引擎函数都在 TASK_REGISTRY 中注册。"""
-    import smartexcel.engine as eng
+    import smartsuite.engine as eng
     registered_func_names = {f.__name__ for f in TASK_REGISTRY.values()}
     missing = set(eng.__all__) - registered_func_names
     assert not missing, f"未注册的引擎函数: {missing}"
@@ -57,7 +57,7 @@ def test_invalid_task_returns_error():
 
 
 def test_missing_column_validation(sample_doe_data):
-    from smartexcel.services.data_io import validate_data
+    from smartsuite.services.data_io import validate_data
     try:
         validate_data(sample_doe_data, "不存在的列", ["料温"])
         assert False, "should have raised ValidationError"

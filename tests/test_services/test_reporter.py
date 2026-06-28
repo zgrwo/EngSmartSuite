@@ -1,11 +1,11 @@
 import tempfile
 import os
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate
 
 
 def test_reporter_pdf_output(sample_doe_data):
-    from smartexcel.services.reporter import to_pdf
+    from smartsuite.services.reporter import to_pdf
     req = AnalysisRequest(
         task="correlation", data=sample_doe_data,
         target_col="不良率", feature_cols=["料温", "模温"],
@@ -22,7 +22,7 @@ def test_reporter_pdf_output(sample_doe_data):
 
 
 def test_reporter_ppt_output(sample_doe_data):
-    from smartexcel.services.reporter import to_ppt
+    from smartsuite.services.reporter import to_ppt
     req = AnalysisRequest(
         task="response_surface", data=sample_doe_data,
         target_col="强度", feature_cols=["料温", "模温"],

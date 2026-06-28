@@ -1,5 +1,5 @@
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.engine.doe_opt import (
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine.doe_opt import (
     regression_analysis,
     response_surface_analysis,
     grid_search,

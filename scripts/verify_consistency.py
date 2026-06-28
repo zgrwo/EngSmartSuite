@@ -25,27 +25,27 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ============================================================
 section("0. Environment")
 # ============================================================
-import smartexcel
-check("smartexcel package importable", True)
+import smartsuite
+check("smartsuite package importable", True)
 
-from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 check("Data contracts importable", True)
 
-from smartexcel.engine import __all__ as engine_all
+from smartsuite.engine import __all__ as engine_all
 check(f"Engine: {len(engine_all)} functions exported", len(engine_all) == 14)
 
-from smartexcel.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
 check(f"Orchestrator: {len(TASK_REGISTRY)} tasks registered", len(TASK_REGISTRY) == 14)
 
 # ============================================================
 section("1. Architecture Constraints")
 # ============================================================
-r = subprocess.run(['grep', '-r', 'xlwings', 'smartexcel/engine/'],
+r = subprocess.run(['grep', '-r', 'xlwings', 'smartsuite/engine/'],
     capture_output=True, text=True, encoding='utf-8', cwd=ROOT)
 check("engine/ has zero xlwings references", r.returncode != 0,
       r.stdout[:100] if r.returncode == 0 else "")
 
-r = subprocess.run(['grep', '-rE', r'sklearn|statsmodels', 'smartexcel/excel/'],
+r = subprocess.run(['grep', '-rE', r'sklearn|statsmodels', 'smartsuite/excel/'],
     capture_output=True, text=True, encoding='utf-8', cwd=ROOT)
 check("excel/ has zero sklearn/statsmodels references", r.returncode != 0,
       r.stdout[:100] if r.returncode == 0 else "")
@@ -97,14 +97,14 @@ check("Missing target col -> error", orchestrate(AnalysisRequest('anova', d1, 'n
 r = orchestrate(AnalysisRequest('correlation', d1.assign(x1_nan=d1['x1'].where(d1.index>5)), 'y', ['x1','x2']))
 check("NaN data -> graceful return", r.status in ('ok','warning','error'), f"status={r.status}")
 
-from smartexcel.core.exceptions import SmartExcelError, ConvergenceError, AnalysisError
+from smartsuite.core.exceptions import SmartExcelError, ConvergenceError, AnalysisError
 check("ConvergenceError < AnalysisError < SmartExcelError",
       isinstance(ConvergenceError("t"), AnalysisError))
 
 # ============================================================
 section("5. Reporter Output (PDF/PPT)")
 # ============================================================
-from smartexcel.services.reporter import to_pdf, to_ppt
+from smartsuite.services.reporter import to_pdf, to_ppt
 r = orchestrate(AnalysisRequest('correlation', d1, 'y', ['x1','x2']))
 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f: pdf_p = f.name
 try:
@@ -160,7 +160,7 @@ check("pytest all pass", 'failed' not in r.stdout+r.stderr and r.returncode==0)
 # ============================================================
 section("9. CLI")
 # ============================================================
-r = subprocess.run([sys.executable, '-m', 'smartexcel.cli', 'list'],
+r = subprocess.run([sys.executable, '-m', 'smartsuite.cli', 'list'],
     capture_output=True, text=True, encoding='utf-8', cwd=ROOT,
     env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
 stdout = r.stdout or ""

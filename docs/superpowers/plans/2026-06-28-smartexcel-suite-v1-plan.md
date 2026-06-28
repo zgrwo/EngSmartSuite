@@ -13,7 +13,7 @@
 ## 文件结构
 
 ```
-smartexcel/
+smartsuite/
 ├── __init__.py
 ├── cli.py                          # CLI 入口 (Task 13)
 ├── core/
@@ -57,33 +57,33 @@ templates/
 ### Task 1: 项目基础 — 数据契约与测试基础设施
 
 **Files:**
-- Create: `smartexcel/__init__.py`
-- Create: `smartexcel/core/__init__.py`
-- Create: `smartexcel/core/contracts.py`
-- Create: `smartexcel/engine/__init__.py`
-- Create: `smartexcel/services/__init__.py`
-- Create: `smartexcel/excel/__init__.py`
+- Create: `smartsuite/__init__.py`
+- Create: `smartsuite/core/__init__.py`
+- Create: `smartsuite/core/contracts.py`
+- Create: `smartsuite/engine/__init__.py`
+- Create: `smartsuite/services/__init__.py`
+- Create: `smartsuite/excel/__init__.py`
 - Create: `tests/__init__.py`
 - Create: `tests/conftest.py`
 
 - [ ] **Step 1: 创建所有 `__init__.py` 文件**
 
 ```bash
-touch smartexcel/__init__.py
-touch smartexcel/core/__init__.py
-touch smartexcel/engine/__init__.py
-touch smartexcel/services/__init__.py
-touch smartexcel/excel/__init__.py
+touch smartsuite/__init__.py
+touch smartsuite/core/__init__.py
+touch smartsuite/engine/__init__.py
+touch smartsuite/services/__init__.py
+touch smartsuite/excel/__init__.py
 touch tests/__init__.py
 ```
 
-Run: `python -c "import smartexcel; print('OK')"`
+Run: `python -c "import smartsuite; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 2: 编写数据契约 dataclass**
 
 ```python
-# smartexcel/core/contracts.py
+# smartsuite/core/contracts.py
 from dataclasses import dataclass, field
 from typing import Any
 import pandas as pd
@@ -114,7 +114,7 @@ class AnalysisResult:
 
 - [ ] **Step 3: 验证 contracts 可导入**
 
-Run: `python -c "from smartexcel.core.contracts import AnalysisRequest, AnalysisResult; print('OK')"`
+Run: `python -c "from smartsuite.core.contracts import AnalysisRequest, AnalysisResult; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 4: 编写共享测试 fixtures**
@@ -170,7 +170,7 @@ Expected: `no tests ran` (fixtures 加载正常)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add smartexcel/ tests/ pyproject.toml
+git add smartsuite/ tests/ pyproject.toml
 git commit -m "feat: project foundation — contracts, fixtures, package init"
 ```
 
@@ -179,12 +179,12 @@ git commit -m "feat: project foundation — contracts, fixtures, package init"
 ### Task 2: 分层异常体系
 
 **Files:**
-- Create: `smartexcel/core/exceptions.py`
+- Create: `smartsuite/core/exceptions.py`
 
 - [ ] **Step 1: 创建异常类**
 
 ```python
-# smartexcel/core/exceptions.py
+# smartsuite/core/exceptions.py
 class SmartExcelError(Exception):
     """SmartExcel 所有异常的基类。"""
     pass
@@ -217,13 +217,13 @@ class OutputError(SmartExcelError):
 
 - [ ] **Step 2: 验证导入**
 
-Run: `python -c "from smartexcel.core.exceptions import DataSelectionError, ValidationError, AnalysisError, ConvergenceError, OutputError; print('OK')"`
+Run: `python -c "from smartsuite.core.exceptions import DataSelectionError, ValidationError, AnalysisError, ConvergenceError, OutputError; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add smartexcel/core/exceptions.py
+git add smartsuite/core/exceptions.py
 git commit -m "feat: layered exception hierarchy"
 ```
 
@@ -233,14 +233,14 @@ git commit -m "feat: layered exception hierarchy"
 
 **Files:**
 - Create: `tests/test_engine/test_root_cause.py`
-- Create: `smartexcel/engine/root_cause.py`
+- Create: `smartsuite/engine/root_cause.py`
 
 - [ ] **Step 1: 写失败测试**
 
 ```python
 # tests/test_engine/test_root_cause.py
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.engine.root_cause import correlation_analysis
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine.root_cause import correlation_analysis
 
 
 def test_correlation_analysis_basic(sample_doe_data):
@@ -270,11 +270,11 @@ Expected: FAIL with `ModuleNotFoundError` or `ImportError`
 - [ ] **Step 3: 实现相关性分析函数**
 
 ```python
-# smartexcel/engine/root_cause.py
+# smartsuite/engine/root_cause.py
 import numpy as np
 import pandas as pd
 from scipy import stats
-from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 
 
 def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -314,7 +314,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_engine/test_root_cause.py smartexcel/engine/root_cause.py
+git add tests/test_engine/test_root_cause.py smartsuite/engine/root_cause.py
 git commit -m "feat: correlation analysis with p-values"
 ```
 
@@ -324,14 +324,14 @@ git commit -m "feat: correlation analysis with p-values"
 
 **Files:**
 - Modify: `tests/test_engine/test_root_cause.py`
-- Modify: `smartexcel/engine/root_cause.py`
+- Modify: `smartsuite/engine/root_cause.py`
 
 - [ ] **Step 1: 写失败测试**
 
 在 `test_root_cause.py` 追加:
 
 ```python
-from smartexcel.engine.root_cause import anova_analysis
+from smartsuite.engine.root_cause import anova_analysis
 
 
 def test_anova_basic(sample_doe_data):
@@ -410,7 +410,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add smartexcel/engine/root_cause.py tests/test_engine/test_root_cause.py
+git add smartsuite/engine/root_cause.py tests/test_engine/test_root_cause.py
 git commit -m "feat: ANOVA analysis engine"
 ```
 
@@ -420,14 +420,14 @@ git commit -m "feat: ANOVA analysis engine"
 
 **Files:**
 - Modify: `tests/test_engine/test_root_cause.py`
-- Modify: `smartexcel/engine/root_cause.py`
+- Modify: `smartsuite/engine/root_cause.py`
 
 - [ ] **Step 1: 写三个新测试**
 
 在 `test_root_cause.py` 追加:
 
 ```python
-from smartexcel.engine.root_cause import hypothesis_test, decision_tree_analysis, vif_analysis
+from smartsuite.engine.root_cause import hypothesis_test, decision_tree_analysis, vif_analysis
 
 
 def test_hypothesis_test_two_sample(sample_two_group_data):
@@ -567,7 +567,7 @@ Expected: 5 PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add smartexcel/engine/root_cause.py tests/test_engine/test_root_cause.py
+git add smartsuite/engine/root_cause.py tests/test_engine/test_root_cause.py
 git commit -m "feat: hypothesis test, decision tree, VIF analysis"
 ```
 
@@ -577,14 +577,14 @@ git commit -m "feat: hypothesis test, decision tree, VIF analysis"
 
 **Files:**
 - Create: `tests/test_engine/test_doe_opt.py`
-- Create: `smartexcel/engine/doe_opt.py`
+- Create: `smartsuite/engine/doe_opt.py`
 
 - [ ] **Step 1: 写回归建模失败测试**
 
 ```python
 # tests/test_engine/test_doe_opt.py
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.engine.doe_opt import regression_analysis
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine.doe_opt import regression_analysis
 
 
 def test_regression_analysis_linear(sample_doe_data):
@@ -611,11 +611,11 @@ Expected: FAIL
 - [ ] **Step 3: 实现回归建模**
 
 ```python
-# smartexcel/engine/doe_opt.py
+# smartsuite/engine/doe_opt.py
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 
 
 def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -662,7 +662,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add smartexcel/engine/doe_opt.py tests/test_engine/test_doe_opt.py
+git add smartsuite/engine/doe_opt.py tests/test_engine/test_doe_opt.py
 git commit -m "feat: regression analysis engine (OLS)"
 ```
 
@@ -672,14 +672,14 @@ git commit -m "feat: regression analysis engine (OLS)"
 
 **Files:**
 - Modify: `tests/test_engine/test_doe_opt.py`
-- Modify: `smartexcel/engine/doe_opt.py`
+- Modify: `smartsuite/engine/doe_opt.py`
 
 - [ ] **Step 1: 写四个新测试**
 
 在 `test_doe_opt.py` 追加:
 
 ```python
-from smartexcel.engine.doe_opt import (
+from smartsuite.engine.doe_opt import (
     response_surface_analysis, grid_search, multi_objective_opt, doe_analysis,
 )
 
@@ -887,7 +887,7 @@ Expected: 5 PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add smartexcel/engine/doe_opt.py tests/test_engine/test_doe_opt.py
+git add smartsuite/engine/doe_opt.py tests/test_engine/test_doe_opt.py
 git commit -m "feat: response surface, grid search, multi-obj opt, DOE analysis"
 ```
 
@@ -897,14 +897,14 @@ git commit -m "feat: response surface, grid search, multi-obj opt, DOE analysis"
 
 **Files:**
 - Create: `tests/test_engine/test_spc_monitor.py`
-- Create: `smartexcel/engine/spc_monitor.py`
+- Create: `smartsuite/engine/spc_monitor.py`
 
 - [ ] **Step 1: 写 SPC 测试**
 
 ```python
 # tests/test_engine/test_spc_monitor.py
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.engine.spc_monitor import xbar_r_chart, process_capability_analysis
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine.spc_monitor import xbar_r_chart, process_capability_analysis
 
 
 def test_xbar_r_chart(sample_spc_data):
@@ -940,13 +940,13 @@ Expected: 2 FAIL
 - [ ] **Step 3: 实现 SPC 控制图和过程能力**
 
 ```python
-# smartexcel/engine/spc_monitor.py
+# smartsuite/engine/spc_monitor.py
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
-from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 
 
 def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -1028,7 +1028,7 @@ Expected: 2 PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add smartexcel/engine/spc_monitor.py tests/test_engine/test_spc_monitor.py
+git add smartsuite/engine/spc_monitor.py tests/test_engine/test_spc_monitor.py
 git commit -m "feat: SPC control chart and process capability"
 ```
 
@@ -1038,14 +1038,14 @@ git commit -m "feat: SPC control chart and process capability"
 
 **Files:**
 - Modify: `tests/test_engine/test_spc_monitor.py`
-- Modify: `smartexcel/engine/spc_monitor.py`
+- Modify: `smartsuite/engine/spc_monitor.py`
 
 - [ ] **Step 1: 写测试**
 
 在 `test_spc_monitor.py` 追加:
 
 ```python
-from smartexcel.engine.spc_monitor import trend_forecast, anomaly_detect
+from smartsuite.engine.spc_monitor import trend_forecast, anomaly_detect
 
 
 def test_trend_forecast(sample_spc_data):
@@ -1143,7 +1143,7 @@ Expected: 4 PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add smartexcel/engine/spc_monitor.py tests/test_engine/test_spc_monitor.py
+git add smartsuite/engine/spc_monitor.py tests/test_engine/test_spc_monitor.py
 git commit -m "feat: trend forecast and anomaly detection"
 ```
 
@@ -1152,23 +1152,23 @@ git commit -m "feat: trend forecast and anomaly detection"
 ### Task 10: 引擎层 — 导出公共 API
 
 **Files:**
-- Modify: `smartexcel/engine/__init__.py`
+- Modify: `smartsuite/engine/__init__.py`
 
 - [ ] **Step 1: 注册引擎公开 API**
 
 ```python
-# smartexcel/engine/__init__.py
+# smartsuite/engine/__init__.py
 """分析引擎层 — 纯 Python 统计分析函数，零 Excel 依赖。"""
 
-from smartexcel.engine.root_cause import (
+from smartsuite.engine.root_cause import (
     correlation_analysis, anova_analysis, hypothesis_test,
     decision_tree_analysis, vif_analysis,
 )
-from smartexcel.engine.doe_opt import (
+from smartsuite.engine.doe_opt import (
     regression_analysis, response_surface_analysis, grid_search,
     multi_objective_opt, doe_analysis,
 )
-from smartexcel.engine.spc_monitor import (
+from smartsuite.engine.spc_monitor import (
     xbar_r_chart, process_capability_analysis, trend_forecast, anomaly_detect,
 )
 
@@ -1189,7 +1189,7 @@ Expected: 14 PASS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add smartexcel/engine/__init__.py
+git add smartsuite/engine/__init__.py
 git commit -m "refactor: export engine public API"
 ```
 
@@ -1198,19 +1198,19 @@ git commit -m "refactor: export engine public API"
 ### Task 11: 服务层 — Data I/O + Orchestrator + Reporter
 
 **Files:**
-- Create: `smartexcel/services/data_io.py`
-- Create: `smartexcel/services/orchestrator.py`
-- Create: `smartexcel/services/reporter.py`
+- Create: `smartsuite/services/data_io.py`
+- Create: `smartsuite/services/orchestrator.py`
+- Create: `smartsuite/services/reporter.py`
 - Create: `tests/test_services/test_orchestrator.py`
 - Create: `tests/test_services/test_reporter.py`
-- Modify: `smartexcel/services/__init__.py`
+- Modify: `smartsuite/services/__init__.py`
 
 - [ ] **Step 1: 写 Orchestrator 测试**
 
 ```python
 # tests/test_services/test_orchestrator.py
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate
 
 
 def test_orchestrate_anova(sample_doe_data):
@@ -1251,10 +1251,10 @@ Expected: 3 FAIL
 - [ ] **Step 3: 实现服务层三个模块**
 
 ```python
-# smartexcel/services/data_io.py
+# smartsuite/services/data_io.py
 """Data I/O — Excel 数据读写与校验。"""
 import pandas as pd
-from smartexcel.core.exceptions import ValidationError
+from smartsuite.core.exceptions import ValidationError
 
 
 def read_excel_range(sheet, range_addr: str | None = None) -> pd.DataFrame:
@@ -1292,10 +1292,10 @@ def validate_data(df: pd.DataFrame, target_col: str,
 ```
 
 ```python
-# smartexcel/services/orchestrator.py
+# smartsuite/services/orchestrator.py
 """工作流编排 — 按 task 字段路由到对应引擎函数。"""
-from smartexcel.core.contracts import AnalysisRequest, AnalysisResult
-from smartexcel.engine import (
+from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.engine import (
     correlation_analysis, anova_analysis, hypothesis_test,
     decision_tree_analysis, vif_analysis,
     regression_analysis, response_surface_analysis, grid_search,
@@ -1352,12 +1352,12 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
 ```
 
 ```python
-# smartexcel/services/reporter.py
+# smartsuite/services/reporter.py
 """Reporter — 多格式报告输出：Excel 图表 / PDF / PPT。"""
 import io
 import os
-from smartexcel.core.contracts import AnalysisResult
-from smartexcel.core.exceptions import OutputError
+from smartsuite.core.contracts import AnalysisResult
+from smartsuite.core.exceptions import OutputError
 
 
 def to_excel(result: AnalysisResult, workbook,
@@ -1461,11 +1461,11 @@ def to_ppt(result: AnalysisResult, output_path: str,
 - [ ] **Step 4: 更新服务层 `__init__.py`**
 
 ```python
-# smartexcel/services/__init__.py
+# smartsuite/services/__init__.py
 """应用服务层 — 数据 I/O、工作流编排、报告生成。"""
-from smartexcel.services.orchestrator import orchestrate, TASK_REGISTRY
-from smartexcel.services.reporter import to_excel, to_pdf, to_ppt
-from smartexcel.services.data_io import read_excel_range, validate_data
+from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.reporter import to_excel, to_pdf, to_ppt
+from smartsuite.services.data_io import read_excel_range, validate_data
 
 __all__ = ["orchestrate", "TASK_REGISTRY", "to_excel", "to_pdf", "to_ppt",
            "read_excel_range", "validate_data"]
@@ -1476,12 +1476,12 @@ __all__ = ["orchestrate", "TASK_REGISTRY", "to_excel", "to_pdf", "to_ppt",
 ```python
 # tests/test_services/test_reporter.py
 import tempfile, os
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate
 
 
 def test_reporter_pdf_output(sample_doe_data):
-    from smartexcel.services.reporter import to_pdf
+    from smartsuite.services.reporter import to_pdf
     req = AnalysisRequest(
         task="correlation", data=sample_doe_data,
         target_col="不良率", feature_cols=["料温", "模温"],
@@ -1498,7 +1498,7 @@ def test_reporter_pdf_output(sample_doe_data):
 
 
 def test_reporter_ppt_output(sample_doe_data):
-    from smartexcel.services.reporter import to_ppt
+    from smartsuite.services.reporter import to_ppt
     req = AnalysisRequest(
         task="response_surface", data=sample_doe_data,
         target_col="强度", feature_cols=["料温", "模温"],
@@ -1523,7 +1523,7 @@ Expected: 5 PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add smartexcel/services/ tests/test_services/
+git add smartsuite/services/ tests/test_services/
 git commit -m "feat: data IO, orchestrator, reporter (Excel/PDF/PPT)"
 ```
 
@@ -1532,19 +1532,19 @@ git commit -m "feat: data IO, orchestrator, reporter (Excel/PDF/PPT)"
 ### Task 12: Excel 交互层 — xlwings 加载项
 
 **Files:**
-- Create: `smartexcel/excel/addin.py`
-- Create: `smartexcel/excel/ribbon.py`
-- Create: `smartexcel/excel/dialogs.py`
+- Create: `smartsuite/excel/addin.py`
+- Create: `smartsuite/excel/ribbon.py`
+- Create: `smartsuite/excel/dialogs.py`
 
 - [ ] **Step 1: 创建 Ribbon XML**
 
 ```python
-# smartexcel/excel/ribbon.py
+# smartsuite/excel/ribbon.py
 RIBBON_XML = """
 <customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui">
   <ribbon>
     <tabs>
-      <tab id="smartexcel_tab" label="工艺分析">
+      <tab id="smartsuite_tab" label="工艺分析">
         <group id="root_cause_group" label="要因分析">
           <button id="btn_correlation" label="相关性分析"
                   onAction="run_correlation" imageMso="TableAnalyze" size="large" />
@@ -1583,7 +1583,7 @@ RIBBON_XML = """
 - [ ] **Step 2: 创建对话框模块**
 
 ```python
-# smartexcel/excel/dialogs.py
+# smartsuite/excel/dialogs.py
 """对话框交互 — 列选择和参数配置。"""
 import xlwings as xw
 
@@ -1613,14 +1613,14 @@ def select_columns_dialog(sheet, title: str = "选择分析列") -> dict:
 - [ ] **Step 3: 创建加载项入口**
 
 ```python
-# smartexcel/excel/addin.py
+# smartsuite/excel/addin.py
 """xlwings 加载项入口 — 注册 Ribbon 按钮回调。"""
 import os
 import xlwings as xw
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.data_io import read_excel_range, validate_data
-from smartexcel.services.orchestrator import orchestrate
-from smartexcel.services.reporter import to_excel, to_ppt
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.data_io import read_excel_range, validate_data
+from smartsuite.services.orchestrator import orchestrate
+from smartsuite.services.reporter import to_excel, to_ppt
 
 
 def _prepare_request(sheet, target, features, task, **params):
@@ -1633,7 +1633,7 @@ def _prepare_request(sheet, target, features, task, **params):
 def _run_and_report(task, output="excel", **params):
     wb = xw.Book.caller()
     sheet = wb.sheets.active
-    from smartexcel.excel.dialogs import select_columns_dialog
+    from smartsuite.excel.dialogs import select_columns_dialog
     dlg = select_columns_dialog(sheet, title=f"配置: {task}")
     if not dlg:
         return
@@ -1692,15 +1692,15 @@ if __name__ == "__main__":
 
 ```bash
 # engine/ 不应包含 xlwings
-grep -r "xlwings" smartexcel/engine/ || echo "OK: engine/ clean"
+grep -r "xlwings" smartsuite/engine/ || echo "OK: engine/ clean"
 # excel/ 不应包含 sklearn/statsmodels
-grep -rE "sklearn|statsmodels" smartexcel/excel/ || echo "OK: excel/ clean"
+grep -rE "sklearn|statsmodels" smartsuite/excel/ || echo "OK: excel/ clean"
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add smartexcel/excel/
+git add smartsuite/excel/
 git commit -m "feat: Excel addin with ribbon, dialogs, and callbacks"
 ```
 
@@ -1709,19 +1709,19 @@ git commit -m "feat: Excel addin with ribbon, dialogs, and callbacks"
 ### Task 13: CLI 入口 + YAML 模板
 
 **Files:**
-- Create: `smartexcel/cli.py`
+- Create: `smartsuite/cli.py`
 - Create: `templates/example_anova.yaml`
 
 - [ ] **Step 1: 创建 CLI**
 
 ```python
-# smartexcel/cli.py
+# smartsuite/cli.py
 """CLI 入口 — 命令行直接运行分析。"""
 import argparse
 import yaml
 import pandas as pd
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
 
 
 def main():
@@ -1786,13 +1786,13 @@ output:
 
 - [ ] **Step 3: 验证 CLI**
 
-Run: `python -m smartexcel.cli list`
+Run: `python -m smartsuite.cli list`
 Expected: prints 14 analysis methods
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add smartexcel/cli.py templates/example_anova.yaml
+git add smartsuite/cli.py templates/example_anova.yaml
 git commit -m "feat: CLI entry point and YAML template"
 ```
 
@@ -1809,13 +1809,13 @@ git commit -m "feat: CLI entry point and YAML template"
 # tests/test_integration.py
 """端到端集成测试。"""
 import tempfile, os
-from smartexcel.core.contracts import AnalysisRequest
-from smartexcel.services.orchestrator import orchestrate, TASK_REGISTRY
-from smartexcel.services.reporter import to_pdf, to_ppt
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.reporter import to_pdf, to_ppt
 
 
 def test_full_pipeline_anova_to_pdf(sample_doe_data):
-    from smartexcel.services.reporter import to_pdf
+    from smartsuite.services.reporter import to_pdf
     req = AnalysisRequest(
         task="anova", data=sample_doe_data,
         target_col="强度", feature_cols=["料温", "模温", "注射压力", "保压时间"],
@@ -1852,7 +1852,7 @@ def test_full_pipeline_rsm_to_ppt(sample_doe_data):
 
 def test_all_tasks_registered():
     """确保所有引擎函数都在 TASK_REGISTRY 中注册。"""
-    import smartexcel.engine as eng
+    import smartsuite.engine as eng
     missing = set(eng.__all__) - set(TASK_REGISTRY.keys())
     assert not missing, f"未注册的引擎函数: {missing}"
 
@@ -1870,7 +1870,7 @@ def test_missing_column_error(sample_doe_data):
         task="anova", data=sample_doe_data,
         target_col="不存在的列", feature_cols=["料温"])
     try:
-        from smartexcel.services.data_io import validate_data
+        from smartsuite.services.data_io import validate_data
         validate_data(req.data, req.target_col, req.feature_cols)
         assert False, "should have raised"
     except Exception:
@@ -1882,7 +1882,7 @@ def test_missing_column_error(sample_doe_data):
 Run: `pytest tests/ -v`
 Expected: all tests PASS (~23 tests)
 
-Run: `ruff check smartexcel/`
+Run: `ruff check smartsuite/`
 Expected: no errors
 
 - [ ] **Step 3: Commit**
@@ -1898,7 +1898,7 @@ git commit -m "test: end-to-end integration and boundary tests"
 
 - [ ] **Step 1: 生成覆盖率报告**
 
-Run: `pytest tests/ --cov=smartexcel --cov-report=term`
+Run: `pytest tests/ --cov=smartsuite --cov-report=term`
 
 - [ ] **Step 2: 确认 .gitignore 完整**
 
@@ -1935,4 +1935,4 @@ Task 1 (Contracts + Tests infra)
 
 ---
 
-*本计划基于设计规范 `docs/superpowers/specs/2026-06-28-smartexcel-suite-design.md` 编写。*
+*本计划基于设计规范 `docs/superpowers/specs/2026-06-28-smartsuite-suite-design.md` 编写。*

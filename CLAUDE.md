@@ -9,16 +9,16 @@
 ## 架构约束（硬性规则）
 
 ```
-smartexcel/excel/     ← ① Excel 交互层：唯一可 import xlwings 的层
-smartexcel/services/  ← ② 应用服务层：桥接层，不可被 engine/ 依赖
-smartexcel/engine/    ← ③ 分析引擎层：纯 Python，零 Excel 依赖
+smartsuite/excel/     ← ① Excel 交互层：唯一可 import xlwings 的层
+smartsuite/services/  ← ② 应用服务层：桥接层，不可被 engine/ 依赖
+smartsuite/engine/    ← ③ 分析引擎层：纯 Python，零 Excel 依赖
 ```
 
 - `engine/` 文件不得 `import xlwings`，不得出现任何 Excel 概念（Range, Sheet, Workbook）
 - `excel/` 文件不得 `import sklearn` / `import statsmodels`
 - `services/` 是唯一桥接层，其他两层通过它通信
 - 引擎层所有公开函数签名为 `(AnalysisRequest) -> AnalysisResult`
-- 数据契约定义在 `smartexcel/core/contracts.py`
+- 数据契约定义在 `smartsuite/core/contracts.py`
 
 ## 代码风格
 
@@ -60,7 +60,7 @@ pip install -e ".[dev]"
 pytest
 
 # 代码检查
-ruff check smartexcel/
+ruff check smartsuite/
 
 # 安装 Excel 加载项
 xlwings addin install

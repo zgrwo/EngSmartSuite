@@ -52,20 +52,20 @@
 
 ```
 ┌─────────────────────────────────────────────┐
-│  ① Excel 交互层 (smartexcel/excel/)          │
+│  ① Excel 交互层 (smartsuite/excel/)          │
 │  ┌──────────┐ ┌──────────┐ ┌──────────────┐ │
 │  │ Ribbon   │ │ 对话框/   │ │ 结果写入      │ │
 │  │ 菜单按钮  │ │ 侧边面板   │ │ Sheet/图表    │ │
 │  └──────────┘ └──────────┘ └──────────────┘ │
 ├─────────────────────────────────────────────┤
-│  ② 应用服务层 (smartexcel/services/)         │
+│  ② 应用服务层 (smartsuite/services/)         │
 │  ┌─────────────────────────────────────────┐ │
 │  │ data_io      数据读取 & 参数校验          │ │
 │  │ orchestrator 工作流编排                   │ │
 │  │ reporter     Excel图表 / PDF / PPT       │ │
 │  └─────────────────────────────────────────┘ │
 ├─────────────────────────────────────────────┤
-│  ③ 分析引擎层 (smartexcel/engine/)           │
+│  ③ 分析引擎层 (smartsuite/engine/)           │
 │  ┌──────────┐ ┌──────────┐ ┌──────────────┐ │
 │  │ root_cause│ │ doe_opt  │ │ spc_monitor  │ │
 │  │ ANOVA     │ │ 响应面   │ │ SPC 控制图    │ │
@@ -194,7 +194,7 @@ output:
 
 | 阶段 | 方案 | 目标用户 |
 |------|------|---------|
-| V1 (当前) | `pip install smartexcel` + `xlwings addin install` | 有 Python 的工程师 |
+| V1 (当前) | `pip install smartsuite` + `xlwings addin install` | 有 Python 的工程师 |
 | V2 | PyInstaller 打包 .exe + 一键安装脚本 | 团队非编程用户 |
 | V3 | MSI 安装包 + 共享盘部署 + 自动更新 | 部门级推广 |
 

@@ -3,19 +3,19 @@
 Usage:
     python scripts/setup_excel_addin.py
 
-Creates smartexcel_addin/SmartExcel_Addin.xlam with custom ribbon tab "工艺分析".
+Creates smartsuite_addin/SmartExcel_Addin.xlam with custom ribbon tab "工艺分析".
 """
 import os, sys, shutil, zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ADDIN_DIR = os.path.join(ROOT, 'smartexcel_addin')
+ADDIN_DIR = os.path.join(ROOT, 'smartsuite_addin')
 XLAM_NAME = 'SmartExcel_Addin.xlam'
 
 RIBBON_XML = r"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui">
   <ribbon>
     <tabs>
-      <tab id="smartexcel_tab" label="工艺分析">
+      <tab id="smartsuite_tab" label="工艺分析">
         <group id="root_cause_group" label="要因分析">
           <button id="btn_correlation" label="相关性分析" onAction="ribbon_correlation"
                   imageMso="TableAnalyze" size="large"
@@ -61,43 +61,43 @@ RIBBON_XML = r"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 VBA_CODE = r'''Attribute VB_Name = "SmartExcelRibbon"
 
 Public Sub ribbon_correlation(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_correlation()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_correlation()")
 End Sub
 
 Public Sub ribbon_anova(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_anova()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_anova()")
 End Sub
 
 Public Sub ribbon_hypothesis(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_hypothesis_test()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_hypothesis_test()")
 End Sub
 
 Public Sub ribbon_regression(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_regression()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_regression()")
 End Sub
 
 Public Sub ribbon_rsm(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_response_surface()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_response_surface()")
 End Sub
 
 Public Sub ribbon_grid(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_grid_search()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_grid_search()")
 End Sub
 
 Public Sub ribbon_spc(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_spc()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_spc()")
 End Sub
 
 Public Sub ribbon_capability(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_process_capability()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_process_capability()")
 End Sub
 
 Public Sub ribbon_excel_report(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_report_excel()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_report_excel()")
 End Sub
 
 Public Sub ribbon_ppt_report(control As IRibbonControl)
-    RunPython ("import smartexcel_addin; smartexcel_addin.run_report_ppt()")
+    RunPython ("import smartsuite_addin; smartsuite_addin.run_report_ppt()")
 End Sub
 '''
 
@@ -132,10 +132,10 @@ def main():
     print("SmartExcel Suite -- Excel Add-in Setup")
     print("=" * 60)
 
-    source = os.path.join(ADDIN_DIR, 'smartexcel_addin.xlsm')
+    source = os.path.join(ADDIN_DIR, 'smartsuite_addin.xlsm')
     if not os.path.exists(source):
         print(f"ERROR: {source} not found.")
-        print("Run: xlwings quickstart smartexcel_addin")
+        print("Run: xlwings quickstart smartsuite_addin")
         sys.exit(1)
 
     xlam = os.path.join(ADDIN_DIR, XLAM_NAME)
