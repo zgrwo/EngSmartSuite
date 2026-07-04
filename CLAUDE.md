@@ -124,6 +124,6 @@ pytest
 # 代码检查
 ruff check smartsuite/
 
-# 安装 Excel 加载项
-xlwings addin install
+# 启动 Web UI
+python smartsuite/web/app.py
 ```
