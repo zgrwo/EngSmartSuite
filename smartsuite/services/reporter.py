@@ -131,79 +131,83 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
     """生成自包含 HTML 分析报告 (Base64 内嵌图表)。"""
     import base64
 
-    html_parts = [
-        "<!DOCTYPE html><html lang='zh-CN'><head>",
-        "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>",
-        "<title>SmartSuite 分析报告</title>",
-        "<style>",
-        "body{font-family:'Microsoft YaHei',sans-serif;max-width:1100px;margin:0 auto;padding:20px;color:#333}",
-        "h1{color:#2171b5;border-bottom:3px solid #2171b5;padding-bottom:10px}",
-        "h2{color:#2171b5;margin-top:30px;border-bottom:1px solid #deebf7}",
-        ".summary{background:#deebf7;padding:15px;border-radius:5px;margin:15px 0;font-size:14px}",
-        "table{border-collapse:collapse;width:100%;margin:10px 0;font-size:12px}",
-        "th{background:#2171b5;color:white;padding:8px 10px;text-align:left}",
-        "td{padding:6px 10px;border-bottom:1px solid #deebf7}",
-        "tr:nth-child(even){background:#f7fbff}",
-        "img{max-width:100%;height:auto;margin:15px 0;border:1px solid #deebf7;border-radius:3px}",
-        ".meta{color:#777;font-size:11px;margin-top:30px;border-top:1px solid #deebf7;padding-top:10px}",
-        ".status-ok{color:#238b45}.status-error{color:#e31a1c}.status-warn{color:#d94801}",
-        "</style></head><body>",
-        f"<h1>SmartSuite 分析报告: {result.task}</h1>",
-    ]
+    try:
+        html_parts = [
+            "<!DOCTYPE html><html lang='zh-CN'><head>",
+            "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>",
+            "<title>SmartSuite 分析报告</title>",
+            "<style>",
+            "body{font-family:'Microsoft YaHei',sans-serif;max-width:1100px;margin:0 auto;padding:20px;color:#333}",
+            "h1{color:#2171b5;border-bottom:3px solid #2171b5;padding-bottom:10px}",
+            "h2{color:#2171b5;margin-top:30px;border-bottom:1px solid #deebf7}",
+            ".summary{background:#deebf7;padding:15px;border-radius:5px;margin:15px 0;font-size:14px}",
+            "table{border-collapse:collapse;width:100%;margin:10px 0;font-size:12px}",
+            "th{background:#2171b5;color:white;padding:8px 10px;text-align:left}",
+            "td{padding:6px 10px;border-bottom:1px solid #deebf7}",
+            "tr:nth-child(even){background:#f7fbff}",
+            "img{max-width:100%;height:auto;margin:15px 0;border:1px solid #deebf7;border-radius:3px}",
+            ".meta{color:#777;font-size:11px;margin-top:30px;border-top:1px solid #deebf7;padding-top:10px}",
+            ".status-ok{color:#238b45}.status-error{color:#e31a1c}.status-warn{color:#d94801}",
+            "</style></head><body>",
+            f"<h1>SmartSuite 分析报告: {result.task}</h1>",
+        ]
 
-    # 状态 + 结论
-    status_class = f"status-{result.status}" if result.status in ("ok","error") else "status-warn"
-    html_parts.append(
-        f"<div class='summary'><strong>状态:</strong> "
-        f"<span class='{status_class}'>{result.status}</span><br>"
-        f"<strong>结论:</strong> {result.summary}</div>"
-    )
-
-    # 警告消息
-    if result.messages:
-        html_parts.append("<h2>诊断信息</h2><ul>")
-        for m in result.messages:
-            html_parts.append(f"<li>{m}</li>")
-        html_parts.append("</ul>")
-
-    # 数据表
-    for name, df in result.tables.items():
-        html_parts.append(f"<h2>📊 {name}</h2>")
-        html_parts.append(df.head(50).to_html(
-            index=False, classes="table", border=0, escape=False,
-            float_format=lambda x: f"{x:.4f}" if abs(x) < 1e6 else f"{x:.2e}"
-        ))
-        if len(df) > 50:
-            html_parts.append(f"<p style='color:#777;font-size:11px'>(仅显示前50行，共{len(df)}行)</p>")
-
-    # 图表 (Base64 内嵌)
-    for i, fig in enumerate(result.figures):
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-        buf.seek(0)
-        img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+        # 状态 + 结论
+        status_class = f"status-{result.status}" if result.status in ("ok","error") else "status-warn"
         html_parts.append(
-            f"<h2>📈 图表 {i+1}</h2>"
-            f"<img src='data:image/png;base64,{img_b64}' alt='图表{i+1}'>"
+            f"<div class='summary'><strong>状态:</strong> "
+            f"<span class='{status_class}'>{result.status}</span><br>"
+            f"<strong>结论:</strong> {result.summary}</div>"
         )
-        plt.close(fig)
 
-    # 元数据
-    if result.metadata:
-        html_parts.append("<h2>📋 元数据</h2><ul>")
-        for k, v in list(result.metadata.items())[:15]:
-            val_str = str(v)[:200]
-            html_parts.append(f"<li><strong>{k}:</strong> {val_str}</li>")
-        html_parts.append("</ul>")
+        # 警告消息
+        if result.messages:
+            html_parts.append("<h2>诊断信息</h2><ul>")
+            for m in result.messages:
+                html_parts.append(f"<li>{m}</li>")
+            html_parts.append("</ul>")
 
-    html_parts.append(
-        "<div class='meta'>Generated by SmartSuite | "
-        "工艺数据分析工具箱</div></body></html>"
-    )
+        # 数据表
+        for name, df in result.tables.items():
+            html_parts.append(f"<h2>📊 {name}</h2>")
+            html_parts.append(df.head(50).to_html(
+                index=False, classes="table", border=0, escape=False,
+                float_format=lambda x: f"{x:.4f}" if abs(x) < 1e6 else f"{x:.2e}"
+            ))
+            if len(df) > 50:
+                html_parts.append(f"<p style='color:#777;font-size:11px'>(仅显示前50行，共{len(df)}行)</p>")
 
-    html_content = "\n".join(html_parts)
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html_content)
+        # 图表 (Base64 内嵌)
+        for i, fig in enumerate(result.figures):
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+            buf.seek(0)
+            img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+            html_parts.append(
+                f"<h2>📈 图表 {i+1}</h2>"
+                f"<img src='data:image/png;base64,{img_b64}' alt='图表{i+1}'>"
+            )
+            plt.close(fig)
 
-    logger.info("HTML 报告已生成: %s", output_path)
-    return output_path
+        # 元数据
+        if result.metadata:
+            html_parts.append("<h2>📋 元数据</h2><ul>")
+            for k, v in list(result.metadata.items())[:15]:
+                val_str = str(v)[:200]
+                html_parts.append(f"<li><strong>{k}:</strong> {val_str}</li>")
+            html_parts.append("</ul>")
+
+        html_parts.append(
+            "<div class='meta'>Generated by SmartSuite | "
+            "工艺数据分析工具箱</div></body></html>"
+        )
+
+        html_content = "\n".join(html_parts)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        logger.info("HTML 报告已生成: %s", output_path)
+        return output_path
+    except Exception as e:
+        logger.exception("HTML 报告生成失败")
+        raise OutputError(f"HTML 报告生成失败: {e}") from e

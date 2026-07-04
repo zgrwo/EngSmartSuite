@@ -32,10 +32,10 @@ from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 check("Data contracts importable", True)
 
 from smartsuite.engine import __all__ as engine_all
-check(f"Engine: {len(engine_all)} functions exported", len(engine_all) == 14)
+check(f"Engine: {len(engine_all)} functions exported", len(engine_all) >= 30)
 
 from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
-check(f"Orchestrator: {len(TASK_REGISTRY)} tasks registered", len(TASK_REGISTRY) == 14)
+check(f"Orchestrator: {len(TASK_REGISTRY)} tasks registered", len(TASK_REGISTRY) >= 30)
 
 # ============================================================
 section("1. Architecture Constraints")
@@ -51,7 +51,7 @@ check("excel/ has zero sklearn/statsmodels references", r.returncode != 0,
       r.stdout[:100] if r.returncode == 0 else "")
 
 # ============================================================
-section("2. All 14 Engine Functions Runnable")
+section("2. All Engine Functions Runnable")
 # ============================================================
 np.random.seed(42)
 data = pd.DataFrame({

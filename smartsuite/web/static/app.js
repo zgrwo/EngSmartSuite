@@ -1,6 +1,7 @@
 // SmartSuite Web UI
 let columnData = [];
 let selectedY = new Set(), selectedX = new Set(), selectedCat = new Set();
+const escHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const catKw = ['日期','班次','车间','机台','模具','编号','操作','检验',
   '原料','类型','批号','冷却','循环','模式','分区','保养','环境',
   '产品代码','色母','嵌件','首件','外观','尺寸','需返工','报警','换料'];
@@ -20,19 +21,22 @@ document.getElementById('file-input').addEventListener('change', async e => {
 
 // Column rendering
 function renderCols() {
-  document.getElementById('col-list').innerHTML = columnData.map((c, i) => `
+  document.getElementById('col-list').innerHTML = columnData.map((c, i) => {
+    const safeName = escHtml(c.name);
+    const jsName = c.name.replace(/'/g, "\\'");
+    return `
     <div class="col-row">
-      <span class="col-name" title="${c.name} (${c.dtype}, ${c.nunique} unique, ${c.missing} NA)">${c.name}</span>
+      <span class="col-name" title="${safeName} (${c.dtype}, ${c.nunique} unique, ${c.missing} NA)">${safeName}</span>
       <input type="checkbox" id="cat${i}" ${selectedCat.has(c.name)?'checked':''}
-        onchange="toggle('${c.name}','cat',this.checked)">
+        onchange="toggle('${jsName}','cat',this.checked)">
       <span class="tag cat">类</span>
       <input type="checkbox" id="x${i}" ${selectedX.has(c.name)?'checked':''}
-        onchange="toggle('${c.name}','x',this.checked)">
+        onchange="toggle('${jsName}','x',this.checked)">
       <span class="tag x">X</span>
       <input type="checkbox" id="y${i}" ${selectedY.has(c.name)?'checked':''}
-        onchange="toggle('${c.name}','y',this.checked)">
+        onchange="toggle('${jsName}','y',this.checked)">
       <span class="tag y">Y</span>
-    </div>`).join('');
+    </div>`}).join('');
   updateStatus();
 }
 
@@ -273,8 +277,10 @@ function getParams(task) {
 
 // Analysis — 两步流程: 有参数→先显示面板, 无参数→直接运行
 let _pendingTask = null;  // 当前等待用户确认参数的任务
+let _running = false;     // 防抖标志
 
 async function runAnalysis(task) {
+  if (_running) return;  // 防抖：上一次分析尚未完成
   if (!selectedY.size) { alert('请至少选择一个 Y 列'); return; }
   if (task !== 'process_capability' && task !== 'trend_forecast' && task !== 'anomaly_detect'
       && task !== 'power_analysis' && task !== 'spc_nonparametric' && !selectedX.size) {
@@ -305,6 +311,7 @@ async function executeRequest(task) {
   task = task || _pendingTask;
   if (!task) return;
   _pendingTask = null;
+  _running = true;
   document.getElementById('param-panel').style.display = 'none';
   document.querySelectorAll('.btn-analysis').forEach(b => b.disabled = true);
   document.getElementById('results').innerHTML =
@@ -321,6 +328,7 @@ async function executeRequest(task) {
     document.getElementById('results').innerHTML =
       `<div class="empty-hint" style="color:#c62828">错误: ${e.message}</div>`;
   } finally {
+    _running = false;
     document.querySelectorAll('.btn-analysis').forEach(b => b.disabled = false);
   }
 }
@@ -353,10 +361,10 @@ function renderResults(results) {
   const mergedKey = '_merged_correlation';
   if (results[0]?.tables?.[mergedKey]) {
     const tbl = results[0].tables[mergedKey];
-    const hdr = '<th></th>' + tbl.columns.map(c => `<th>${c}</th>`).join('');
+    const hdr = '<th></th>' + tbl.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
     const rows = tbl.data.map((row, i) =>
-      `<tr><td><b>${tbl.index[i]}</b></td>${row.map(v =>
-        `<td style="color:${Math.abs(v)>0.2?'#c62828':'#333'}">${typeof v==='number'?v.toFixed(3):v}</td>`
+      `<tr><td><b>${escHtml(String(tbl.index[i]||''))}</b></td>${row.map(v =>
+        `<td style="color:${Math.abs(v)>0.2?'#c62828':'#333'}">${typeof v==='number'?v.toFixed(3):escHtml(String(v))}</td>`
       ).join('')}</tr>`
     ).join('');
     html += `<div class="result-card">
@@ -373,10 +381,10 @@ function renderResults(results) {
     let tHtml = '';
     for (const [tn, tbl] of Object.entries(r.tables || {})) {
       if (tn.startsWith('_merged')) continue; // 跳过合并表
-      const hdr = tbl.columns.map(c => `<th>${c}</th>`).join('');
+      const hdr = tbl.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
       const rows = tbl.data.map((row, i) =>
-        `<tr><td>${tbl.index[i]||''}</td>${row.map(v =>
-          `<td>${typeof v==='number'?v.toFixed(4):v}</td>`).join('')}</tr>`
+        `<tr><td>${escHtml(String(tbl.index[i]||''))}</td>${row.map(v =>
+          `<td>${typeof v==='number'?v.toFixed(4):escHtml(String(v))}</td>`).join('')}</tr>`
       ).join('');
       tHtml += `<div class="table-wrap"><h4>${tn} (${tbl.shape[0]}×${tbl.shape[1]})</h4>
         <table><thead><tr><th></th>${hdr}</tr></thead><tbody>${rows}</tbody></table></div>`;

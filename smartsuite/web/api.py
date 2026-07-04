@@ -135,6 +135,8 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
                 buf.seek(0)
                 charts.append(base64.b64encode(buf.read()).decode())
+                import matplotlib.pyplot as plt
+                plt.close(fig)
 
             # 序列化 metadata：递归处理嵌套结构，标量转为可序列化类型
             def _serialize_meta(val):

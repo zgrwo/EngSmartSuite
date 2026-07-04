@@ -13,6 +13,8 @@ from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 def _std_beta(model, X):
     """计算标准化回归系数 (Beta 权重)，用于比较不同量纲变量的重要性。"""
     y_std = np.std(model.model.endog)
+    if y_std < 1e-10:
+        return [0.0] * len(X.columns)
     beta = []
     for i, col in enumerate(X.columns):
         if col == "const":
@@ -37,7 +39,7 @@ def _breusch_pagan(model, X):
         aux_model = sm.OLS(resid_sq, X).fit()
         ess = np.sum((aux_model.fittedvalues - resid_sq_mean)**2)
         rss = np.sum((resid_sq - aux_model.fittedvalues)**2)
-        lm = n * ess / (ess + rss) * 0.5
+        lm = n * ess / (ess + rss)
         k = X.shape[1] - 1
         p_val = float(1 - sp_stats.chi2.cdf(lm, max(k, 1)))
         return float(lm), p_val

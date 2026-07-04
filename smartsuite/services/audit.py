@@ -58,6 +58,7 @@ def process_audit(
                 health_checks.append({"检查项": "关键因子识别", "状态": "⚠ 注意",
                                      "详情": "无强相关因子 (|r|≤0.5)"})
         except Exception:
+            logger.warning("关键因子识别失败", exc_info=True)
             health_checks.append({"检查项": "关键因子识别", "状态": "✗ 失败", "详情": "—"})
 
     # ── 3. 回归/VIF ──
@@ -75,6 +76,7 @@ def process_audit(
                 health_checks.append({"检查项": "共线性诊断", "状态": "⚠ 警告",
                                      "详情": f"{high_vif} 个因子 VIF>5"})
         except Exception:
+            logger.warning("共线性诊断失败", exc_info=True)
             health_checks.append({"检查项": "共线性诊断", "状态": "✗ 失败", "详情": "—"})
 
     # ── 4. 过程能力 ──
@@ -98,6 +100,7 @@ def process_audit(
                 health_checks.append({"检查项": "过程能力", "状态": "—",
                                      "详情": "未计算"})
         except Exception:
+            logger.warning("过程能力分析失败", exc_info=True)
             health_checks.append({"检查项": "过程能力", "状态": "✗ 失败", "详情": "—"})
 
     # ── 5. 趋势 (时序数据) ──
@@ -115,6 +118,7 @@ def process_audit(
                 health_checks.append({"检查项": "过程稳定性", "状态": "⚠ 注意",
                                      "详情": f"DW={dw:.3f} (存在自相关或趋势)"})
         except Exception:
+            logger.warning("过程稳定性分析失败", exc_info=True)
             health_checks.append({"检查项": "过程稳定性", "状态": "✗ 失败", "详情": "—"})
 
     # ── 6. 异常检测 ──
@@ -131,6 +135,7 @@ def process_audit(
             health_checks.append({"检查项": "异常值检测", "状态": "⚠ 注意",
                                  "详情": f"{high_conf} 个高置信异常点"})
     except Exception:
+        logger.warning("异常值检测失败", exc_info=True)
         health_checks.append({"检查项": "异常值检测", "状态": "✗ 失败", "详情": "—"})
 
     # ── 汇总评分 ──
@@ -206,7 +211,7 @@ def auto_report(df, target_col, feature_cols=None, output_path=None,
     # 批量分析
     tasks_to_run = ["correlation", "regression", "anova", "normality_check",
                    "distribution_summary"]
-    if usl and lsl:
+    if usl is not None and lsl is not None:
         tasks_to_run.append("process_capability")
     batch = batch_analyze(df, target_col, feature_cols, tasks=tasks_to_run,
                           **{"process_capability": {"usl": usl, "lsl": lsl}})
@@ -289,6 +294,7 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
                 row += 2
 
         except Exception:
+            logger.warning("导出工作表失败: %s", task, exc_info=True)
             continue
 
     wb.save(output_path)

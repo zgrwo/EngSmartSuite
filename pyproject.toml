@@ -45,10 +45,6 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.1",
 ]
-viz = [
-    "seaborn>=0.12",
-    "tabulate>=0.9",
-]
 all = [
     "smartsuite[web,report,viz]",
 ]

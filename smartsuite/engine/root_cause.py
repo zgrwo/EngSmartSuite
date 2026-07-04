@@ -1939,7 +1939,6 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(6, 3))
     ax = fig.add_subplot(111)
     methods = ["Wilson Score", "Clopper-Pearson"]
-    [p_hat - wilson_lower, p_hat - cp_lower]
     uppers = [wilson_upper - p_hat, cp_upper - p_hat]
     ax.barh(methods, uppers, left=[wilson_lower, cp_lower], height=0.3,
             color=["#6baed6", "#2171b5"], edgecolor="white")
@@ -1997,7 +1996,6 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="variance_test", status="error",
             messages=["有效分组不足"])
 
-    [g for g, _ in valid_groups]
     data_list = [d for _, d in valid_groups]
 
     # Levene (对非正态更鲁棒，推荐)
@@ -2379,8 +2377,8 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
     normal_count = sum(1 for r in results if "正态" in str(r.get("正态性", "")))
     summary = (
         f"正态性评估: {normal_count}/{len(cols)} 列满足正态性。"
-        + (f" 偏度最大列: {results_df.sort_values('偏度', key=lambda x: x.str.replace('-','').astype(float)).iloc[-1]['列名']}"
-           if len(results_df) > 0 else "")
+        + (f" 偏度最大列: {results_df.dropna(subset=['偏度']).sort_values('偏度', key=lambda x: x.str.replace('-','').astype(float)).iloc[-1]['列名']}"
+           if len(results_df.dropna(subset=['偏度'])) > 0 else "")
     )
 
     return AnalysisResult(

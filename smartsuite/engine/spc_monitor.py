@@ -153,7 +153,6 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     warn_unequal = ""
     if subgroup_sizes.nunique() > 1:
         min_n = int(subgroup_sizes.min())
-        int(subgroup_sizes.max())
         # 修剪每组到 min_n
         trimmed_data = []
         for name, group in subgroups:
@@ -579,7 +578,7 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     within_sigma = float(np.mean(mr) / 1.128) if len(mr) > 0 else sigma_overall
 
     # ── 计算各项能力指数 ──
-    has_spec = bool(usl and lsl)
+    has_spec = (usl is not None) and (lsl is not None)
 
     # Cp/Cpk (短期/组内)
     cp = float((usl - lsl) / (6 * within_sigma)) if has_spec and within_sigma > 0 else None
@@ -1062,6 +1061,10 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
 
     lam = req.params.get("lam", 0.2)
     L = req.params.get("L", 2.7)
+    if not 0 < lam <= 1:
+        return AnalysisResult(
+            task="spc_ewma", status="error",
+            messages=[f"λ (平滑参数) 必须在 (0, 1] 范围内，当前值: {lam}"])
 
     n = len(data)
     ewma = np.zeros(n)
@@ -1627,7 +1630,6 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
                         else "↓ 下降" if seg_i > 0 else "—"
                     ),
                 })
-        pd.DataFrame(segment_stats)
         cp_positions = ", ".join(str(cp) for cp in changepoints)
         summary = (
             f"检测到 {len(changepoints)} 个变点 (位置: {cp_positions})，"
@@ -1925,6 +1927,8 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             max_idx = np.argmax(g_scores)
             G = g_scores[max_idx]
             n_remain = len(vals)
+            if n_remain < 3:
+                break
             t_crit = sp_stats.t.ppf(1 - alpha_g / (2 * n_remain), n_remain - 2)
             G_crit = (n_remain - 1) / np.sqrt(n_remain) * np.sqrt(
                 t_crit**2 / (n_remain - 2 + t_crit**2)

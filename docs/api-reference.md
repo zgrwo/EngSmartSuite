@@ -261,7 +261,7 @@ class AnalysisResult:
 ### anomaly_detect
 - **Task Key**: `anomaly_detect`
 - **描述**: 异常检测 — IQR / Z-score (单变量) 或 Isolation Forest (多变量) 或 Grubbs 检验
-- **params**: `method` ("iqr"|"zscore"|"grubbs"|"isolation_forest"), `contamination` (IsoForest, 默认 0.05)
+- **params**: `method` ("iqr"|"zscore"|"grubbs"|"isolation_forest"|"mad"), `contamination` (IsoForest, 默认 0.05)
 - **返回**: `anomalies`
 - **图**: 异常点标记散点图 + 阈值线
 

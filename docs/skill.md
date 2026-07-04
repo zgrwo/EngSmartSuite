@@ -32,7 +32,11 @@
 │   ├── 两参数可视化最优区 → response_surface
 │   ├── 精确搜索最优值 → grid_search
 │   ├── 质量+成本权衡 → multi_objective
-│   └── 有 DOE 实验矩阵 → doe_analysis
+│   ├── 有 DOE 实验矩阵 → doe_analysis
+│   ├── 二分类结果预测 → logistic_regression
+│   ├── 自动变量选择 → lasso_regression
+│   ├── 抗异常值建模 → robust_regression
+│   └── 中位数/分位数建模 → quantile_regression
 │
 ├── "过程稳定吗？"
 │   ├── 日常监控 → spc_xbar
@@ -54,7 +58,10 @@
     ├── 趋势预测 → trend_forecast
     ├── 寿命/可靠度 → survival_analysis
     ├── 样本量规划 → power_analysis
-    └── 二分类区分力 → roc_analysis
+    ├── 二分类区分力 → roc_analysis
+    ├── 合格率估计 → proportion_ci
+    ├── 量表信度 → cronbach_alpha
+    └── 非参数区间 → bootstrap_ci / median_ci
 ```
 
 ## 工作流模式
