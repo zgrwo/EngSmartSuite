@@ -1423,11 +1423,11 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         "效应量": [f"{effect_name}={effect_size:.3f}"],
         "效应量解读": [effect_label],
         "统计功效": [f"{power:.1%}" if power is not None else "N/A"],
-        "结论": [f"{groups[0]} vs {groups[1]}: {conclusion}"],
+        "结论": [f"「{group_col}」: {groups[0]} vs {groups[1]} — {conclusion}"],
     })
 
     summary_parts = [
-        f"{groups[0]} vs {groups[1]}: {conclusion} (p={p:.4f})",
+        f"「{group_col}」中 {groups[0]} vs {groups[1]}: {conclusion} (p={p:.4f})",
         f"效应量 {effect_name}={effect_size:.3f}（{effect_label}）",
     ]
     if power is not None:
