@@ -140,13 +140,37 @@ function getParams(task) {
   return p;
 }
 
-// Analysis
+// Analysis — 两步流程: 有参数→先显示面板, 无参数→直接运行
+let _pendingTask = null;  // 当前等待用户确认参数的任务
+
 async function runAnalysis(task) {
   if (!selectedY.size) { alert('请至少选择一个 Y 列'); return; }
-  if (task !== 'process_capability' && task !== 'trend_forecast' && task !== 'anomaly_detect' && !selectedX.size) {
+  if (task !== 'process_capability' && task !== 'trend_forecast' && task !== 'anomaly_detect'
+      && task !== 'power_analysis' && task !== 'spc_nonparametric' && !selectedX.size) {
     alert('请至少选择一个 X 列'); return;
   }
-  showParams(task);
+  // 有参数配置 → 第一步: 显示参数面板, 等待用户编辑后点"运行"
+  if (TASK_PARAMS[task]) {
+    _pendingTask = task;
+    showParams(task);
+    // 在参数面板底部加"运行"按钮
+    const body = document.getElementById('param-body');
+    body.innerHTML += `<button onclick="executeAnalysis()" style="margin-top:8px;width:100%;
+      padding:6px;background:#2171b5;color:white;border:none;border-radius:3px;
+      font-size:12px;cursor:pointer">▶ 运行分析</button>`;
+    return;
+  }
+  // 无参数 → 直接执行
+  _pendingTask = null;
+  await executeRequest(task);
+}
+
+// 实际执行分析请求
+async function executeRequest(task) {
+  task = task || _pendingTask;
+  if (!task) return;
+  _pendingTask = null;
+  document.getElementById('param-panel').style.display = 'none';
   document.querySelectorAll('.btn-analysis').forEach(b => b.disabled = true);
   document.getElementById('results').innerHTML =
     '<div class="empty-hint"><div class="spinner"></div> 分析中...</div>';
@@ -164,6 +188,11 @@ async function runAnalysis(task) {
   } finally {
     document.querySelectorAll('.btn-analysis').forEach(b => b.disabled = false);
   }
+}
+
+// 兼容: param面板中的"运行"按钮调用
+function executeAnalysis() {
+  executeRequest(_pendingTask);
 }
 
 // Result rendering
