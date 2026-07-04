@@ -105,9 +105,12 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             stars = _significance_stars(p) if not (np.isnan(p) if isinstance(p, float) else p is None) else ""
             annotated.iloc[i, j] = f"{r:+.2f}{stars}"
 
+    # 按相关系数降序排列（展示用）
     target_corr = corr[req.target_col].drop(req.target_col).sort_values(ascending=False)
-    top_factor = target_corr.index[0] if len(target_corr) > 0 else "N/A"
-    top_value = target_corr.iloc[0] if len(target_corr) > 0 else 0
+    # 按绝对值找最强相关因子（正负同等对待）
+    target_corr_abs = target_corr.abs().sort_values(ascending=False)
+    top_factor = target_corr_abs.index[0] if len(target_corr_abs) > 0 else "N/A"
+    top_value = target_corr[top_factor] if top_factor != "N/A" else 0
 
     # ── p 值校正报告 ──
     sig_before = int((pmat.values[np.triu_indices_from(pmat.values, k=1)] < 0.05).sum())
@@ -216,9 +219,10 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     control_vars = req.params.get("control_vars", [])
     control_vars = [c for c in control_vars if c in req.data.columns and c != req.target_col
                     and pd.api.types.is_numeric_dtype(req.data[c])]
+    direction = "正相关" if top_value >= 0 else "负相关"
     summary_parts = [
-        f"与「{req.target_col}」相关性最强的因子是「{top_factor}」"
-        f"({corr_label.split()[0]}={top_value:.3f})",
+        f"与「{req.target_col}」相关性最强(|r|)的因子是「{top_factor}」"
+        f"({corr_label.split()[0]}={top_value:+.3f}, {direction}, |r|={abs(top_value):.3f})",
         correction_note,
     ]
     partial_corr_meta: dict = {}
