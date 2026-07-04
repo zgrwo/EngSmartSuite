@@ -124,12 +124,13 @@ python smartsuite/web/app.py
 
 | 指标 | 实际值 |
 |------|--------|
-| 最强相关因子 | 冷却时间 |
-| Pearson r | +0.038 |
+| 最强相关因子(\|r\|) | 注射压力（负相关） |
+| Pearson r | -0.052 |
+| \|r\| | 0.052 |
 | Bonferroni 校正 | 校正前后显著对数 |
 | 图表 | 1 张热力图（含显著性星号标注） |
 
-> 测试数据为随机生成，因子之间的相关性很弱（|r| < 0.05），这是正常的。
+> 相关系数很弱（\|r\| ≈ 0.05），测试数据为随机生成。注意：**最强按绝对值判断**，负相关(-0.052)比正相关(+0.038)更强。
 
 **Python 等价代码**:
 ```python
@@ -138,8 +139,9 @@ req = AnalysisRequest(task="correlation", data=df, target_col="不良率",
     feature_cols=["熔体温度", "模具温度", "注射压力", "冷却时间"])
 result = correlation_analysis(req)
 print(result.summary)
-# → "与「不良率」相关性最强的因子是「冷却时间」(Pearson=0.038)。
-#    Bonferroni校正前 1 对显著，校正后 0 对显著（10 对比较）"
+# → "与「不良率」相关性最强(|r|)的因子是「注射压力」
+#    (Pearson=-0.052, 负相关, |r|=0.052)。
+#    Bonferroni校正前 0 对显著，校正后 0 对显著（10 对比较）"
 ```
 
 ### 4.2 ANOVA 方差分析 (`anova`)
