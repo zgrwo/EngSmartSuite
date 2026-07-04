@@ -81,10 +81,22 @@ const TASK_PARAMS = {
   multi_objective: { objectives: '' },
   decision_tree: { max_depth: 5 },
   anova: { alpha: 0.05, interactions: 0 },
+  spc_nonparametric: { side: 'two-sided' },
+  spc_cusum: { k: 0.5, h: 5.0 },
+  spc_ewma: { lam: 0.2, L: 2.7 },
+  spc_attribute: { chart_type: 'c' },
+  power_analysis: { mode: 'required_n', test_type: 'ttest', effect_size: 0.5 },
+  bootstrap_ci: { statistic: 'mean', n_bootstrap: 500 },
+  median_ci: { ci_level: 0.95 },
+  quantile_regression: { quantile: 0.5 },
+  tolerance_interval: { coverage: 0.99, confidence: 0.95, side: 'two-sided' },
+  gage_rr: { part_col: '', operator_col: '' },
 };
 const PARAM_HINTS = {
   ranges: '格式: 料温:180,220;模具温度:40,80',
   objectives: '格式: 强度:maximize;不良率:minimize',
+  side: 'two-sided(双侧) | upper(越小越好) | lower(越大越好)',
+  chart_type: 'p(不良率) | np(不良数) | c(缺陷数) | u(单位缺陷率)',
 };
 
 function showParams(task) {
