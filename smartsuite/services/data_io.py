@@ -73,16 +73,19 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                 encoded_cols.append(dc)
             cat_map[col] = list(dummies.columns)
         else:
+            # 转为数值型；只填充因"非数值→NaN"产生的缺失，保留原有的合法NaN
+            was_na = df[col].isna()  # 转换前的NaN位置
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            n_coerced = df[col].isnull().sum()
+            new_na = df[col].isna() & ~was_na  # 仅因转换失败产生的新NaN
+            n_coerced = int(new_na.sum())
             if n_coerced > 0:
                 median_val = df[col].median()
                 if pd.isna(median_val):
                     logger.warning("列「%s」全部为非数值，填充为 0", col)
                     df[col] = df[col].fillna(0)
                 else:
-                    df[col] = df[col].fillna(median_val)
-                imputation_log[col] = int(n_coerced)
+                    df[col].loc[new_na] = median_val
+                imputation_log[col] = n_coerced
             encoded_cols.append(col)
 
     return df, encoded_cols, cat_map, imputation_log
