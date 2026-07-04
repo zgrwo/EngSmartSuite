@@ -2280,3 +2280,193 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             "group_col": group_col, "sub_col": sub_col, "has_sub": has_sub,
         },
     )
+
+
+# ── 注册非参数控制图 ──
+# (函数在文件末尾定义, 此处确保被导出)
+
+def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
+    """非参数控制图 — 基于最佳拟合分布的 CDF 逆推控制限，不假设正态。
+
+    方法与标准 SPC (±3σ) 不同：
+    1. 自动拟合 Normal / Lognormal / Weibull 三种分布，选 KS 检验最优者
+    2. 用拟合分布的 CDF 逆函数 (PPF) 精确计算控制限
+    3. 适用于偏态/非对称数据，且不受样本量限制
+
+    参数:
+        side: "two-sided"(默认) | "upper"(越小越好,只设上限) | "lower"(越大越好,只设下限)
+    """
+    data = req.data[req.target_col].dropna()
+    n = len(data)
+
+    if n < 10:
+        return AnalysisResult(task="spc_nonparametric", status="error",
+            messages=[f"有效数据不足(至少10个点, 当前{n}个)"])
+
+    side = req.params.get("side", "two-sided")
+    values = data.values
+
+    # ── 1. 分布拟合 (Normal / Lognormal / Weibull) ──
+    fits = {}
+    # Normal
+    mu, sigma = sp_stats.norm.fit(values)
+    ks_n = sp_stats.kstest(values, "norm", args=(mu, sigma))
+    fits["Normal"] = {"dist": sp_stats.norm, "args": (mu, sigma), "ks_p": ks_n.pvalue}
+
+    # Lognormal
+    if (values > 0).all():
+        shape_ln, loc_ln, scale_ln = sp_stats.lognorm.fit(values, floc=0)
+        ks_ln = sp_stats.kstest(values, "lognorm", args=(shape_ln, 0, scale_ln))
+        fits["Lognormal"] = {"dist": sp_stats.lognorm, "args": (shape_ln, 0, scale_ln),
+                            "ks_p": ks_ln.pvalue}
+
+    # Weibull
+    if (values > 0).all():
+        try:
+            shape_w, loc_w, scale_w = sp_stats.weibull_min.fit(values, floc=0)
+            ks_w = sp_stats.kstest(values, "weibull_min", args=(shape_w, 0, scale_w))
+            fits["Weibull"] = {"dist": sp_stats.weibull_min, "args": (shape_w, 0, scale_w),
+                              "ks_p": ks_w.pvalue}
+        except Exception:
+            pass
+
+    # 选 KS p 值最大的（拟合最优）
+    best_name = max(fits, key=lambda k: fits[k]["ks_p"])
+    best = fits[best_name]
+    dist = best["dist"]
+    args = best["args"]
+
+    # ── 2. 用拟合分布 PPF (CDF 逆函数) 计算控制限 ──
+    cl = float(dist.median(*args))
+
+    def _ppf(p):
+        """安全 PPF，防止极端值溢出"""
+        try:
+            return float(dist.ppf(p, *args))
+        except Exception:
+            return float(np.percentile(values, p * 100))
+
+    if side == "upper":
+        ucl = _ppf(0.99865)
+        ucl_2s = _ppf(0.97725)
+        ucl_1s = _ppf(0.8413)
+        lcl = lcl_2s = lcl_1s = None
+        violations = list(np.where(values > ucl)[0])
+        side_note = f"单侧上限 (越小越好, 拟合={best_name})"
+    elif side == "lower":
+        lcl = _ppf(0.00135)
+        lcl_2s = _ppf(0.02275)
+        lcl_1s = _ppf(0.1587)
+        ucl = ucl_2s = ucl_1s = None
+        violations = list(np.where(values < lcl)[0])
+        side_note = f"单侧下限 (越大越好, 拟合={best_name})"
+    else:
+        ucl = _ppf(0.99865)
+        lcl = _ppf(0.00135)
+        ucl_2s = _ppf(0.97725)
+        lcl_2s = _ppf(0.02275)
+        ucl_1s = _ppf(0.8413)
+        lcl_1s = _ppf(0.1587)
+        violations = sorted(set(
+            list(np.where(values > ucl)[0]) + list(np.where(values < lcl)[0])
+        ))
+        side_note = f"双侧控制限 (拟合={best_name})"
+
+    limit_label = []
+    if ucl is not None: limit_label.append(f"UCL={ucl:.4f}")
+    if lcl is not None: limit_label.append(f"LCL={lcl:.4f}")
+    limit_label = " / ".join(limit_label) if limit_label else "N/A"
+
+    # 偏度评估
+    skew_val = float(data.skew())
+    if abs(skew_val) > 0.5:
+        asym_parts = [f"数据偏度={skew_val:.2f}({'右偏' if skew_val > 0 else '左偏'})"]
+        if ucl is not None: asym_parts.append(f"上限距中位数={ucl-cl:.3f}")
+        if lcl is not None: asym_parts.append(f"下限距中位数={cl-lcl:.3f}")
+        asym_note = "，".join(asym_parts)
+    else:
+        asym_note = f"数据近似对称(偏度={skew_val:.2f})"
+
+    # ── 图表 ──
+    fig = Figure(figsize=(12, 7))
+    pos = np.arange(n)
+    ax = fig.add_subplot(111)
+
+    ax.plot(pos, values, "o-", markersize=3, color="#2171b5", linewidth=1, alpha=0.6, label="数据")
+    ax.axhline(cl, color="#238b45", linestyle="-", linewidth=2, label=f"CL (中位数)={cl:.4f}")
+
+    if ucl is not None:
+        ax.axhline(ucl, color="#e31a1c", linestyle="--", linewidth=1.5,
+                   label=f"UCL (P99.865)={ucl:.4f}")
+        if ucl_2s: ax.axhline(ucl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
+        if ucl_1s: ax.axhline(ucl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
+        ax.fill_between(pos, cl, ucl, alpha=0.04, color="green")
+
+    if lcl is not None:
+        ax.axhline(lcl, color="#e31a1c", linestyle="--", linewidth=1.5,
+                   label=f"LCL (P0.135)={lcl:.4f}")
+        if lcl_2s: ax.axhline(lcl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
+        if lcl_1s: ax.axhline(lcl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
+        ax.fill_between(pos, lcl, cl, alpha=0.04, color="green")
+
+    if violations:
+        ax.scatter(violations, values[violations], s=80, color="red",
+                  marker="x", linewidths=2.5, zorder=5,
+                  label=f"违规 ({len(violations)}个)")
+
+    ax.set_xlabel("序号", fontsize=10)
+    ax.set_ylabel(req.target_col, fontsize=10)
+    ax.set_title(
+        f"非参数控制图 — {req.target_col} ({side_note})\n"
+        f"CL={cl:.4f} | {limit_label}",
+        fontsize=10,
+    )
+    ax.legend(fontsize=7, loc="upper right", ncol=2)
+    fig.tight_layout()
+
+    # ── 汇总 ──
+    n_violations = len(violations)
+    is_stable = n_violations == 0
+    ucl_str = f"{ucl:.4f}" if ucl else "N/A"
+    lcl_str = f"{lcl:.4f}" if lcl else "N/A"
+    summary = (
+        f"非参数控制图({side_note}): {'过程稳定 ✓' if is_stable else f'{n_violations} 个点违规'}。"
+        f"CL(P50)={cl:.4f}, UCL={ucl_str}, LCL={lcl_str}。"
+    )
+
+    return AnalysisResult(
+        task="spc_nonparametric",
+        tables={
+            "control_limits": pd.DataFrame({
+                "统计量": [k for k, v in [
+                    ("CL (中位数/P50)", cl),
+                    ("UCL (P99.865)", ucl),
+                    ("LCL (P0.135)", lcl),
+                    ("UCL (P97.725, ~2σ)", ucl_2s),
+                    ("LCL (P2.275, ~2σ)", lcl_2s),
+                    ("UCL (P84.13, ~1σ)", ucl_1s),
+                    ("LCL (P15.87, ~1σ)", lcl_1s),
+                ] if v is not None],
+                "值": [f"{v:.4f}" for _, v in [
+                    ("CL (中位数/P50)", cl),
+                    ("UCL (P99.865)", ucl),
+                    ("LCL (P0.135)", lcl),
+                    ("UCL (P97.725, ~2σ)", ucl_2s),
+                    ("LCL (P2.275, ~2σ)", lcl_2s),
+                    ("UCL (P84.13, ~1σ)", ucl_1s),
+                    ("LCL (P15.87, ~1σ)", lcl_1s),
+                ] if v is not None],
+            }),
+            "violations": pd.DataFrame({
+                "序号": violations,
+                "值": values[violations].round(4),
+            }) if violations else pd.DataFrame({"状态": ["未检测到违规"]}),
+        },
+        figures=[fig],
+        summary=summary,
+        metadata={
+            "cl": cl, "ucl": ucl, "lcl": lcl, "side": side,
+            "ucl_2s": ucl_2s, "lcl_2s": lcl_2s,
+            "n": n, "n_violations": n_violations, "is_stable": is_stable,
+        },
+    )

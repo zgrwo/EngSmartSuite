@@ -58,6 +58,7 @@ from smartsuite.engine.spc_monitor import (
     median_ci,
     outlier_consensus,
     process_capability_analysis,
+    spc_nonparametric,
     survival_analysis,
     tolerance_interval,
     trend_forecast,
@@ -78,5 +79,6 @@ __all__ = [
     "xbar_r_chart", "attribute_chart", "cusum_chart", "ewma_chart", "change_point_detect",
     "process_capability_analysis", "trend_forecast", "anomaly_detect",
     "outlier_consensus", "bootstrap_ci", "box_chart", "gage_rr", "tolerance_interval",
+    "spc_nonparametric",
     "survival_analysis", "median_ci",
 ]

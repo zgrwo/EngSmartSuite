@@ -758,6 +758,44 @@ print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get
 # → 分组数=5, 次分类=车间, 分面=True
 ```
 
+### 7.11 非参数控制图 (`spc_nonparametric`) 🆕
+
+**功能**: 基于最佳拟合分布的 CDF 逆推控制限，不假设正态分布。自动拟合 Normal/Lognormal/Weibull 三种分布，选 KS 检验最优者，用 PPF(CDF 逆函数)精确计算控制限。
+
+**三种模式**:
+
+| 模式 | 参数 | 适用场景 | 控制限 |
+|------|------|---------|--------|
+| 双侧 | `side: two-sided` | 一般质量指标 | UCL(P99.865) + LCL(P0.135) |
+| 单侧上限 | `side: upper` | particle(越小越好) | 仅 UCL，超过=恶化 |
+| 单侧下限 | `side: lower` | yield(越大越好) | 仅 LCL，低于=恶化 |
+
+**操作（双侧）**: Y=`不良率`(Y), 参数 `side: two-sided` → 点击 **非参数控制图(分布拟合法)**
+
+**Web UI 输出表格**:
+
+| 统计量 | 值 |
+|--------|-----|
+| CL (分布中位数) | 4.073 |
+| UCL (P99.865) | 9.879 |
+| LCL (P0.135) | 1.679 |
+| 最佳拟合分布 | Lognormal |
+
+![非参数控制图(双侧)](images/spc_nonparametric_1.png)
+
+*非参数控制图(双侧) — 控制限由 Lognormal 分布 PPF 计算，上下限不对称。红线=控制限, 绿线=中位数, 红X=违规点。*
+
+> **解读**: 自动选择 Lognormal 拟合（偏度数据），控制限不对称——下限距中位数(2.39) > 上限距中位数(5.81)。相比传统 ±3σ（假设正态），此法更准确反映偏态数据的真实尾部概率。
+
+**Python 等价代码**:
+```python
+from smartsuite.engine.spc_monitor import spc_nonparametric
+req = AnalysisRequest(task="spc_nonparametric", data=df, target_col="不良率",
+    params={"side": "two-sided"})
+result = spc_nonparametric(req)
+print(f"拟合={result.metadata.get('best_fit','?')}, UCL={result.metadata['ucl']:.3f}")
+```
+
 ---
 
 ## 8. 高级分析
