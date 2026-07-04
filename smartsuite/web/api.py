@@ -71,8 +71,13 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
             merged_corr.index.name = "目标"
 
     # 预处理只执行一次，避免每个目标列重复编码
-    cat_set = set(categoricals) if categoricals else set()
-    df_enc, feat_enc, _, _ = preprocess_data(df, features, cat_set)
+    # box_chart需要原始类别列，跳过one-hot编码
+    if task == "box_chart":
+        df_enc = df.copy()
+        feat_enc = list(features)
+    else:
+        cat_set = set(categoricals) if categoricals else set()
+        df_enc, feat_enc, _, _ = preprocess_data(df, features, cat_set)
 
     for target in targets:
         try:
