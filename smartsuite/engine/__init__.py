@@ -50,6 +50,7 @@ from smartsuite.engine.spc_monitor import (
     anomaly_detect,
     attribute_chart,
     bootstrap_ci,
+    box_chart,
     change_point_detect,
     cusum_chart,
     ewma_chart,
@@ -76,6 +77,6 @@ __all__ = [
     "robust_regression", "quantile_regression",
     "xbar_r_chart", "attribute_chart", "cusum_chart", "ewma_chart", "change_point_detect",
     "process_capability_analysis", "trend_forecast", "anomaly_detect",
-    "outlier_consensus", "bootstrap_ci", "gage_rr", "tolerance_interval",
+    "outlier_consensus", "bootstrap_ci", "box_chart", "gage_rr", "tolerance_interval",
     "survival_analysis", "median_ci",
 ]

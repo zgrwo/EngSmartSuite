@@ -2153,3 +2153,130 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
             "n": n,
         },
     )
+
+
+def box_chart(req: AnalysisRequest) -> AnalysisResult:
+    """分组箱线图 — 按类别因子分组展示分布，支持次分类分面。
+
+    target_col: 数值型 Y 列
+    feature_cols[0]: 主分类列
+    feature_cols[1] (可选): 次分类列（用于分面着色）
+    """
+    if len(req.feature_cols) < 1:
+        return AnalysisResult(task="box_chart", status="error",
+            messages=["需要至少 1 个分类列作为分组依据"])
+
+    group_col = req.feature_cols[0]
+    sub_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
+
+    sub = req.data[[req.target_col, group_col] + ([sub_col] if sub_col else [])].dropna()
+    if len(sub) < 5:
+        return AnalysisResult(task="box_chart", status="error",
+            messages=["有效数据不足(至少5个点)"])
+
+    groups = sorted(sub[group_col].unique(), key=str)
+    if len(groups) < 2:
+        return AnalysisResult(task="box_chart", status="error",
+            messages=["分组列需要至少 2 个不同值"])
+    if len(groups) > 30:
+        return AnalysisResult(task="box_chart", status="error",
+            messages=[f"分组过多({len(groups)}个)，最多支持 30 个分组"])
+
+    # ── 描述统计 ──
+    stat_rows = []
+    for g in groups:
+        gdata = sub[sub[group_col] == g][req.target_col]
+        stat_rows.append({
+            "分组": str(g),
+            "样本量": len(gdata),
+            "均值": round(float(gdata.mean()), 3),
+            "中位数": round(float(gdata.median()), 3),
+            "标准差": round(float(gdata.std(ddof=1)), 3),
+            "IQR": round(float(gdata.quantile(0.75) - gdata.quantile(0.25)), 3),
+            "最小值": round(float(gdata.min()), 3),
+            "最大值": round(float(gdata.max()), 3),
+        })
+
+    # ── ANOVA + Kruskal-Wallis (3+组) / t检验 + MWU (2组) ──
+    group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
+    test_note = ""
+    if len(groups) >= 3:
+        try:
+            _, anova_p = sp_stats.f_oneway(*group_data)
+            _, kw_p = sp_stats.kruskal(*group_data)
+            test_note = f"ANOVA p={anova_p:.4f}, Kruskal-Wallis p={kw_p:.4f}"
+        except Exception:
+            pass
+    else:
+        try:
+            _, t_p = sp_stats.ttest_ind(*group_data)
+            _, mw_p = sp_stats.mannwhitneyu(*group_data)
+            test_note = f"t检验 p={t_p:.4f}, MWU p={mw_p:.4f}"
+        except Exception:
+            pass
+
+    # ── 箱线图 (支持次分类分面) ──
+    has_sub = sub_col and sub[sub_col].nunique() >= 2 and sub[sub_col].nunique() <= 8
+    if has_sub:
+        sub_groups = sorted(sub[sub_col].unique(), key=str)
+        n_cols = min(len(sub_groups), 4)
+        n_rows = (len(sub_groups) + n_cols - 1) // n_cols
+        fig = Figure(figsize=(n_cols * 4, n_rows * 4))
+        for si, sg in enumerate(sub_groups):
+            ax = fig.add_subplot(n_rows, n_cols, si + 1)
+            sg_data = sub[sub[sub_col] == sg]
+            sg_groups = [sg_data[sg_data[group_col] == g][req.target_col].values
+                        for g in groups
+                        if len(sg_data[sg_data[group_col] == g]) > 0]
+            valid_groups = [g for g in groups
+                          if len(sg_data[sg_data[group_col] == g]) > 0]
+            if len(valid_groups) >= 2:
+                bp = ax.boxplot(sg_groups, tick_labels=valid_groups,
+                               patch_artist=True, widths=0.5)
+                for patch in bp['boxes']:
+                    patch.set_facecolor("#6baed6")
+                for i, gdata in enumerate(sg_groups, 1):
+                    jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+                    ax.scatter(np.full(len(gdata), i)+jitter, gdata,
+                             alpha=0.3, s=8, color="black", zorder=3)
+            ax.set_title(f"{sub_col}={sg} (n={len(sg_data)})", fontsize=9)
+            ax.set_xlabel(group_col, fontsize=8)
+            ax.set_ylabel(req.target_col, fontsize=8)
+            ax.tick_params(labelsize=7)
+    else:
+        fig = Figure(figsize=(max(len(groups)*1.2, 6), 5))
+        ax = fig.add_subplot(111)
+        bp = ax.boxplot(group_data,
+                       tick_labels=[f"{g}\n(n={len(d)})"
+                                   for g, d in zip(groups, group_data)],
+                       patch_artist=True, widths=0.5)
+        for patch in bp['boxes']:
+            patch.set_facecolor("#6baed6")
+        for i, gdata in enumerate(group_data, 1):
+            jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+            ax.scatter(np.full(len(gdata), i)+jitter, gdata,
+                     alpha=0.3, s=10, color="black", zorder=3)
+        ax.set_xlabel(group_col, fontsize=10)
+        ax.set_ylabel(req.target_col, fontsize=10)
+        title = f"分组箱线图 — {req.target_col} by {group_col}"
+        if sub_col and not has_sub:
+            title += f" (次分类「{sub_col}」水平过多，未分面)"
+        ax.set_title(title, fontsize=11)
+    fig.tight_layout()
+
+    n_total = len(sub)
+    summary = (
+        f"{req.target_col} 按 {group_col} 分组 (共 {len(groups)} 组, n={n_total})。"
+        + (f" {test_note}。" if test_note else "")
+    )
+
+    return AnalysisResult(
+        task="box_chart",
+        tables={"group_statistics": pd.DataFrame(stat_rows)},
+        figures=[fig],
+        summary=summary,
+        metadata={
+            "n_groups": len(groups), "n_total": n_total,
+            "group_col": group_col, "sub_col": sub_col, "has_sub": has_sub,
+        },
+    )

@@ -65,6 +65,7 @@ TASK_LABELS = {
     "bootstrap_ci": "Bootstrap置信区间", "median_ci": "中位数置信区间",
     "gage_rr": "量具R&R分析", "tolerance_interval": "统计容许区间",
     "survival_analysis": "生存分析(Kaplan-Meier)",
+    "box_chart": "分组箱线图",
 }
 
 TASK_GROUPS = {
@@ -77,7 +78,7 @@ TASK_GROUPS = {
                  "lasso_regression", "robust_regression", "quantile_regression"],
     "过程监控": ["spc_xbar", "spc_attribute", "spc_cusum", "spc_ewma",
                  "process_capability", "trend_forecast", "anomaly_detect",
-                 "change_point", "outlier_consensus"],
+                 "change_point", "outlier_consensus", "box_chart"],
     "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval",
                  "survival_analysis"],
 }
