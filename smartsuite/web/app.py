@@ -42,24 +42,49 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 TASK_LABELS = {
+    # 要因分析
     "correlation": "相关性分析", "anova": "ANOVA方差分析",
-    "hypothesis_test": "假设检验", "vif": "VIF共线性诊断",
-    "regression": "回归建模", "decision_tree": "决策树建模",
-    "response_surface": "响应面分析", "multi_objective": "多目标优化",
-    "grid_search": "最优参数搜索", "doe_analysis": "DOE效应估计",
-    "spc_xbar": "SPC控制图", "process_capability": "过程能力Cp/Cpk",
-    "trend_forecast": "趋势预测", "anomaly_detect": "异常检测",
+    "hypothesis_test": "假设检验", "decision_tree": "决策树重要性",
+    "vif": "VIF共线性", "contingency": "列联表分析",
+    "proportion_ci": "比例置信区间", "variance_test": "方差齐性检验",
+    "cohens_kappa": "评定者一致性", "cronbach_alpha": "信度分析(Cronbach α)",
+    "distribution_summary": "分布特征摘要", "normality_check": "正态性评估",
+    "power_analysis": "统计功效分析",
+    # DOE/优化
+    "regression": "回归建模(OLS)", "response_surface": "响应面分析",
+    "grid_search": "网格搜索寻优", "multi_objective": "多目标优化",
+    "doe_analysis": "DOE效应估计", "roc_analysis": "ROC/AUC分析",
+    "logistic_regression": "Logistic回归", "lasso_regression": "Lasso回归",
+    "robust_regression": "稳健回归(Huber)", "quantile_regression": "分位数回归",
+    # 过程监控
+    "spc_xbar": "X-bar/R控制图", "spc_attribute": "计数型控制图(p/np/c/u)",
+    "spc_cusum": "CUSUM控制图", "spc_ewma": "EWMA控制图",
+    "process_capability": "过程能力Cp/Cpk", "trend_forecast": "趋势预测",
+    "anomaly_detect": "异常检测", "change_point": "变点检测",
+    "outlier_consensus": "异常共识(3方法投票)",
+    "bootstrap_ci": "Bootstrap置信区间", "median_ci": "中位数置信区间",
+    "gage_rr": "量具R&R分析", "tolerance_interval": "统计容许区间",
+    "survival_analysis": "生存分析(Kaplan-Meier)",
 }
 
 TASK_GROUPS = {
-    "要因筛选": ["correlation", "anova", "hypothesis_test"],
-    "建模诊断": ["vif", "regression", "decision_tree"],
-    "寻优预测": ["response_surface", "multi_objective", "grid_search", "doe_analysis"],
-    "过程监控": ["spc_xbar", "process_capability", "trend_forecast", "anomaly_detect"],
+    "要因筛选": ["correlation", "anova", "hypothesis_test", "decision_tree",
+                 "vif", "contingency", "proportion_ci", "variance_test"],
+    "信度诊断": ["cohens_kappa", "cronbach_alpha", "distribution_summary",
+                 "normality_check", "power_analysis"],
+    "建模优化": ["regression", "response_surface", "grid_search", "multi_objective",
+                 "doe_analysis", "roc_analysis", "logistic_regression",
+                 "lasso_regression", "robust_regression", "quantile_regression"],
+    "过程监控": ["spc_xbar", "spc_attribute", "spc_cusum", "spc_ewma",
+                 "process_capability", "trend_forecast", "anomaly_detect",
+                 "change_point", "outlier_consensus"],
+    "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval",
+                 "survival_analysis"],
 }
 
-GROUP_COLORS = {"要因筛选": "#e8f5e9", "建模诊断": "#e3f2fd",
-                "寻优预测": "#fff3e0", "过程监控": "#fce4ec"}
+GROUP_COLORS = {"要因筛选": "#e8f5e9", "信度诊断": "#fff8e1",
+                "建模优化": "#e3f2fd", "过程监控": "#fce4ec",
+                "高级分析": "#f3e5f5"}
 
 
 @app.route("/")

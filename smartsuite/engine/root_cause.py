@@ -439,6 +439,8 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             warn_msgs.append(f"因子「{col}」在 ANOVA 结果表中未找到")
 
     # ── 事后检验 (Tukey HSD) 仅当显著因子数≥1 时执行 ──
+    # 限制最多 50 个水平，避免组合爆炸导致超时 (50 水平 = 1225 对)
+    _MAX_TUKEY_GROUPS = 50
     posthoc_results: list[dict] = []
     if sig_factors:
         from itertools import combinations
@@ -447,7 +449,14 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         for col in cols:
             try:
                 p_val = anova_table.loc[f"Q('{col}')", "PR(>F)"]
-                if p_val < alpha and req.data[col].nunique() >= 2:
+                n_groups = req.data[col].nunique()
+                if p_val < alpha and n_groups >= 2:
+                    if n_groups > _MAX_TUKEY_GROUPS:
+                        warn_msgs.append(
+                            f"⚠ 因子「{col}」有 {n_groups} 个水平，超过事后检验上限"
+                            f"({_MAX_TUKEY_GROUPS})，跳过 Tukey HSD 以避免超时"
+                        )
+                        continue
                     tukey = pairwise_tukeyhsd(
                         req.data[req.target_col].dropna(),
                         req.data.loc[req.data[req.target_col].notna(), col],
