@@ -564,10 +564,17 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     )
 
 
-def _cohens_d(x, y):
-    """Cohen's d 效应量 (Hedges' g 校正小样本偏差)。"""
+def _cohens_d(x, y, warn_list: list[str] | None = None):
+    """Cohen's d 效应量 (Hedges' g 校正小样本偏差)。
+
+    当样本量不足时返回 0.0 并向 warn_list 追加警告消息。
+    """
     n1, n2 = len(x), len(y)
     if n1 < 2 or n2 < 2:
+        if warn_list is not None:
+            warn_list.append(
+                f"⚠ 效应量计算: 样本量不足 (n1={n1}, n2={n2})，Cohen's d 无法可靠估计，已返回 0"
+            )
         return 0.0
     s1, s2 = np.std(x, ddof=1), np.std(y, ddof=1)
     # 合并标准差
@@ -1338,7 +1345,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     else:
         stat, p = sp_stats.ttest_ind(g1, g2)
         test_name = "独立样本 t 检验"
-        effect_size = _cohens_d(g1.values, g2.values)
+        effect_size = _cohens_d(g1.values, g2.values, norm_warn)
         effect_name = "Cohen's d"
         effect_label = _effect_size_label(effect_size, "cohens_d")
 
