@@ -11,12 +11,25 @@ const yKw = ['不良','强度','伸长','冲击','粗糙','偏差','波动','效
 document.getElementById('file-input').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   document.getElementById('filename').textContent = f.name;
+  document.getElementById('shape').textContent = '上传中...';
   const fd = new FormData(); fd.append('file', f);
-  const r = await fetch('/api/upload', { method: 'POST', body: fd });
-  const d = await r.json();
-  columnData = d.columns || [];
-  document.getElementById('shape').textContent = d.shape ? `(${d.shape.join(' × ')})` : '';
-  renderCols(); autoDetect();
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) {
+      alert('上传失败: ' + (d.error || '未知错误'));
+      document.getElementById('filename').textContent = '未选择文件';
+      document.getElementById('shape').textContent = '';
+      return;
+    }
+    columnData = d.columns || [];
+    document.getElementById('shape').textContent = d.shape ? `(${d.shape.join(' × ')})` : '';
+    renderCols(); autoDetect();
+  } catch(err) {
+    alert('上传失败: 网络错误或服务器不可达');
+    document.getElementById('filename').textContent = '未选择文件';
+    document.getElementById('shape').textContent = '';
+  }
 });
 
 // Column rendering
@@ -248,7 +261,8 @@ function showParams(task) {
   const cfg = TASK_PARAMS[task];
   if (!cfg) { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
-  body.innerHTML = Object.entries(cfg).map(([k, v]) => buildParamInput(k, v, task)).join('');
+  body.innerHTML = Object.entries(cfg).map(([k, v]) => buildParamInput(k, v, task)).join('')
+    + `<button onclick="executeAnalysis()" class="btn-run">▶ 运行分析</button>`;
 }
 
 function getParams(task) {
@@ -296,9 +310,6 @@ async function runAnalysis(task) {
     }
     _pendingTask = task;
     showParams(task);
-    // 在参数面板底部加"运行"按钮
-    const body = document.getElementById('param-body');
-    body.innerHTML += `<button onclick="executeAnalysis()" class="btn-run">▶ 运行分析</button>`;
     return;
   }
   // 无参数 → 直接执行

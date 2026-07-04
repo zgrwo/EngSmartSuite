@@ -114,22 +114,34 @@ def upload():
     f = request.files.get("file")
     if not f:
         return jsonify({"error": "请选择文件"}), 400
+
+    # 服务端文件类型校验
+    filename = f.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".xlsx", ".xls", ".xlsm"):
+        return jsonify({"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xls 文件"}), 400
+
     try:
         df = pd.read_excel(f)
     except Exception:
         logger.exception("Excel 文件解析失败")
         return jsonify({"error": "无法解析 Excel 文件，请确认文件格式正确"}), 400
 
-    # 清理旧的上传文件
+    if df.empty:
+        return jsonify({"error": "文件为空或无法读取数据"}), 400
+
+    # 清理旧的上传文件并同步追踪列表
     old_path = app.config.get("DATA_PATH")
     if old_path and os.path.exists(old_path):
         try:
             os.unlink(old_path)
+            if old_path in _UPLOAD_FILES:
+                _UPLOAD_FILES.remove(old_path)
         except OSError:
             pass
 
     tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-    tmp.close()  # 关闭句柄，避免 Windows 上的权限问题
+    tmp.close()
     df.to_parquet(tmp.name)
     _UPLOAD_FILES.append(tmp.name)
     app.config["DATA_PATH"] = tmp.name
@@ -155,7 +167,7 @@ def analyze():
         return jsonify({"results": results})
     except Exception as e:
         logger.exception("分析请求处理失败")
-        return jsonify({"error": f"分析失败: {str(e)[:200]}"}), 500
+        return jsonify({"error": f"分析失败: {str(e)[:500]}"}), 500
 
 
 @app.route("/api/tasks")
