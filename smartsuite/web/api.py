@@ -72,7 +72,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
 
     # 预处理只执行一次，避免每个目标列重复编码
     cat_set = set(categoricals) if categoricals else set()
-    df_enc, feat_enc, _ = preprocess_data(df, features, cat_set)
+    df_enc, feat_enc, _, _ = preprocess_data(df, features, cat_set)
 
     for target in targets:
         try:
