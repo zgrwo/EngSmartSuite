@@ -503,7 +503,8 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         summary = (f"显著影响「{req.target_col}」的因子: {'; '.join(sig_factors)}。"
                    f"模型 R²={model.rsquared:.3f}, 调整 R²={model.rsquared_adj:.3f}")
     else:
-        summary = f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})"
+        summary = (f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})。"
+                   f"模型 R²={model.rsquared:.4f}, 调整 R²={model.rsquared_adj:.4f}")
 
     coef_df = pd.DataFrame({
         "变量": list(model.params.index) if hasattr(model.params, 'index') else model.model.exog_names,

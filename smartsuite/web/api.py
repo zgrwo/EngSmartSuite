@@ -71,8 +71,9 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
             merged_corr.index.name = "目标"
 
     # 预处理只执行一次，避免每个目标列重复编码
-    # box_chart需要原始类别列，跳过one-hot编码
-    if task == "box_chart":
+    # 以下任务需要原始类别列（不做one-hot编码，让引擎自行处理因子水平）
+    _raw_cat_tasks = {"box_chart", "anova", "variance_test"}
+    if task in _raw_cat_tasks:
         df_enc = df.copy()
         feat_enc = list(features)
     else:
