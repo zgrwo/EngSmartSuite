@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from matplotlib import cm
 from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 from sklearn.linear_model import LinearRegression
@@ -2245,8 +2246,9 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             if len(valid_groups) >= 2:
                 bp = ax.boxplot(sg_groups, tick_labels=valid_groups,
                                patch_artist=True, widths=0.5)
-                for patch in bp['boxes']:
-                    patch.set_facecolor("#6baed6")
+                cmap = cm.tab10
+                for pi, patch in enumerate(bp['boxes']):
+                    patch.set_facecolor(cmap(pi % 10))
                 for i, gdata in enumerate(sg_groups, 1):
                     jitter = np.random.uniform(-0.12, 0.12, len(gdata))
                     ax.scatter(np.full(len(gdata), i)+jitter, gdata,
@@ -2262,8 +2264,9 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
                        tick_labels=[f"{g}\n(n={len(d)})"
                                    for g, d in zip(groups, group_data)],
                        patch_artist=True, widths=0.5)
-        for patch in bp['boxes']:
-            patch.set_facecolor("#6baed6")
+        cmap = cm.tab10
+        for pi, patch in enumerate(bp['boxes']):
+            patch.set_facecolor(cmap(pi % 10))
         for i, gdata in enumerate(group_data, 1):
             jitter = np.random.uniform(-0.12, 0.12, len(gdata))
             ax.scatter(np.full(len(gdata), i)+jitter, gdata,

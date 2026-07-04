@@ -158,6 +158,12 @@ async function runAnalysis(task) {
   }
   // 有参数配置 → 第一步: 显示参数面板, 等待用户编辑后点"运行"
   if (TASK_PARAMS[task]) {
+    // 如果同一个任务已显示参数面板 → 直接执行（用户已经编辑过参数）
+    if (_pendingTask === task && document.getElementById('param-panel').style.display !== 'none') {
+      _pendingTask = null;
+      await executeRequest(task);
+      return;
+    }
     _pendingTask = task;
     showParams(task);
     // 在参数面板底部加"运行"按钮
