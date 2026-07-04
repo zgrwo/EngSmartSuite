@@ -39,7 +39,6 @@ smartsuite/engine/    ← ③ 分析引擎层：纯 Python，零外部依赖（x
 smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine/
 ```
 
-- `engine/` 文件不得 `import xlwings`，不得出现任何 Excel 概念（Range, Sheet, Workbook）
 - `services/` 是唯一桥接层，engine 和 web 通过它通信
 - `web/` 依赖 `services/`，不直接依赖 `engine/`（通过 `orchestrate` 间接调用）
 - 引擎层所有公开函数签名为 `(AnalysisRequest) -> AnalysisResult`
@@ -60,7 +59,7 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 - 引擎层：pytest 单元测试，每个分析函数至少一个标准输入→断言输出正确性
 - 服务层：集成测试，验证 Orchestrator 路由 + Reporter 文件输出
-- Excel 层：已移除，不再维护
+- Web E2E 测试：`tests/test_web_e2e.py`
 - 回归：基准 Excel 文件 + 已知正确结果，pandas.testing 自动比对
 - 测试文件放在 `tests/test_engine/` 和 `tests/test_services/`
 - Web E2E 测试：`tests/test_web_e2e.py`

@@ -43,7 +43,7 @@ def check_core_deps():
 def check_optional_dep(pkg: str) -> None:
     """检查单个可选依赖，缺失时给出明确的安装提示。
 
-    用于延迟检查仅在特定功能路径上才需要的包（如 Flask、xlwings），
+    用于延迟检查仅在特定功能路径上才需要的包（如 Flask），
     避免在不需要该功能的用户那里触发不必要的安装。
     """
     if pkg not in _OPTIONAL_DEPS:
