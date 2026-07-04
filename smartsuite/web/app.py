@@ -2,6 +2,7 @@
 import atexit
 import logging
 import os
+import sys
 import tempfile
 
 # ── matplotlib 中文字体必须在所有图表创建之前配置 ──
@@ -16,7 +17,17 @@ except Exception:
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 import pandas as pd
-from flask import Flask, jsonify, render_template, request
+
+try:
+    from flask import Flask, jsonify, render_template, request
+except ImportError:
+    print("=" * 60)
+    print("  ❌ SmartSuite Web UI 需要 Flask，但未安装。")
+    print()
+    print("  请运行：pip install smartsuite[web]")
+    print("  或单独安装：pip install flask pyarrow")
+    print("=" * 60)
+    sys.exit(1)
 
 from smartsuite.services.orchestrator import TASK_REGISTRY
 from smartsuite.web.api import column_info, run_analysis

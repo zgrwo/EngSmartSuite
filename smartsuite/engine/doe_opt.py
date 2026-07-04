@@ -679,7 +679,6 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
 def _lenth_pse(effects):
     """Lenth 伪标准误 — 用于无重复 DOE 的效应显著性判断。"""
     abs_effects = np.sort(np.abs(effects))
-    len(abs_effects)
     # 取中位数的一半作为初始 s0
     median_abs = np.median(abs_effects)
     s0 = 1.5 * median_abs
@@ -1152,8 +1151,6 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         y = sub[req.target_col].values
         huber = HuberRegressor(epsilon=1.35, max_iter=1000)
         huber.fit(X, y)
-        y_pred = huber.predict(X)
-        y - y_pred
 
         # OLS 对比
         import statsmodels.api as sm_ols

@@ -76,6 +76,16 @@ TASKS_TO_TEST = [
     ("change_point", "y", [], {}),
     ("roc_analysis", "binary", ["x1"]),
     ("tolerance_interval", "y", [], {}),
+    ("box_chart", "y", ["group"]),
+    ("box_chart", "y", ["group", "binary"], {"mode": "nested"}),
+    ("spc_nonparametric", "y", [], {"side": "two-sided"}),
+    ("spc_nonparametric", "y", [], {"side": "upper"}),
+    ("quantile_regression", "y", ["x1", "x2"], {"quantile": 0.5}),
+    ("robust_regression", "y", ["x1", "x2"]),
+    ("grid_search", "y", ["x1"], {"ranges": {"x1": (5, 15)}, "n_points": 5}),
+    ("multi_objective", "y", ["x1", "x2"], {"objectives": [{"col": "y", "direction": "maximize"}]}),
+    ("spc_attribute", "y", [], {"chart_type": "c"}),
+    ("gage_rr", "y", ["group", "binary"], {"part_col": "group", "operator_col": "binary"}),
 ]
 
 
@@ -101,7 +111,7 @@ def test_all_registered_tasks(df, task, target, features):
 
 def test_all_tasks_registered_count():
     """验证任务注册表完整性。"""
-    assert len(TASK_REGISTRY) >= 35
+    assert len(TASK_REGISTRY) >= 39
     required = ["correlation", "anova", "regression", "hypothesis_test",
                "decision_tree", "vif", "normality_check", "distribution_summary"]
     for t in required:

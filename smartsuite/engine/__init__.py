@@ -1,5 +1,9 @@
 """分析引擎层 — 纯 Python 统计分析函数，零 Excel 依赖。"""
 
+# ── 启动时自动检查核心依赖 ──
+from smartsuite import check_core_deps
+check_core_deps()
+
 # ── 引擎层全局 matplotlib 配置（必须在任何 Figure 创建之前执行）──
 import matplotlib
 
@@ -19,51 +23,58 @@ _palette_style = get_palette_style()
 for key, val in _palette_style.items():
     matplotlib.rcParams[key] = val
 
-from smartsuite.engine.doe_opt import (
-    doe_analysis,
-    grid_search,
-    lasso_regression,
-    logistic_regression,
-    multi_objective_opt,
-    quantile_regression,
-    regression_analysis,
-    response_surface_analysis,
-    robust_regression,
-    roc_analysis,
-)
-from smartsuite.engine.root_cause import (
-    anova_analysis,
-    cohens_kappa,
-    contingency_analysis,
-    correlation_analysis,
-    cronbach_alpha,
-    decision_tree_analysis,
-    distribution_summary,
-    hypothesis_test,
-    normality_check,
-    power_analysis,
-    proportion_ci,
-    variance_test,
-    vif_analysis,
-)
-from smartsuite.engine.spc_monitor import (
-    anomaly_detect,
-    attribute_chart,
-    bootstrap_ci,
-    box_chart,
-    change_point_detect,
-    cusum_chart,
-    ewma_chart,
-    gage_rr,
-    median_ci,
-    outlier_consensus,
-    process_capability_analysis,
-    spc_nonparametric,
-    survival_analysis,
-    tolerance_interval,
-    trend_forecast,
-    xbar_r_chart,
-)
+try:
+    from smartsuite.engine.doe_opt import (
+        doe_analysis,
+        grid_search,
+        lasso_regression,
+        logistic_regression,
+        multi_objective_opt,
+        quantile_regression,
+        regression_analysis,
+        response_surface_analysis,
+        robust_regression,
+        roc_analysis,
+    )
+    from smartsuite.engine.root_cause import (
+        anova_analysis,
+        cohens_kappa,
+        contingency_analysis,
+        correlation_analysis,
+        cronbach_alpha,
+        decision_tree_analysis,
+        distribution_summary,
+        hypothesis_test,
+        normality_check,
+        power_analysis,
+        proportion_ci,
+        variance_test,
+        vif_analysis,
+    )
+    from smartsuite.engine.spc_monitor import (
+        anomaly_detect,
+        attribute_chart,
+        bootstrap_ci,
+        box_chart,
+        change_point_detect,
+        cusum_chart,
+        ewma_chart,
+        gage_rr,
+        median_ci,
+        outlier_consensus,
+        process_capability_analysis,
+        spc_nonparametric,
+        survival_analysis,
+        tolerance_interval,
+        trend_forecast,
+        xbar_r_chart,
+    )
+except ImportError as e:
+    raise ImportError(
+        f"SmartSuite 引擎初始化失败，缺少依赖包：{e}\n"
+        "请确保已安装所有核心依赖：pip install smartsuite\n"
+        "核心依赖包括：pandas, numpy, scipy, statsmodels, scikit-learn, matplotlib"
+    ) from e
 
 __all__ = [
     "correlation_analysis", "anova_analysis", "contingency_analysis",

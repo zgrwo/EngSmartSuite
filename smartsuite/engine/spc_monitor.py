@@ -282,7 +282,6 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             "违规点数": len(idxs),
         })
 
-    sum(len(set(v)) for v in xbar_violations.values()) + sum(len(set(v)) for v in r_violations.values())
     is_stable = len(xbar_violations) == 0 and len(r_violations) == 0
 
     # ── 控制限表 ──
@@ -553,7 +552,6 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     warn_msgs: list[str] = []
     boxcox_lambda: float | None = None
-    data.copy()
 
     # ── Box-Cox 变换（非正态数据处理）──
     if transform == "boxcox":
@@ -1716,18 +1714,15 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             sub = req.data[feature_cols + [req.target_col]].dropna()
             common_idx = data.index.intersection(sub.index)
             iso_preds = iso.fit_predict(sub.loc[common_idx, feature_cols + [req.target_col]].values)
-            iso.decision_function(sub.loc[common_idx, feature_cols + [req.target_col]].values)
             iso_mask = pd.Series(False, index=data.index)
             for i, idx in enumerate(common_idx):
                 iso_mask[idx] = iso_preds[i] == -1
         else:
             X = data.values.reshape(-1, 1)
             iso_preds = iso.fit_predict(X)
-            iso.decision_function(X)
             iso_mask = pd.Series(iso_preds == -1, index=data.index)
     except Exception:
         iso_mask = pd.Series(False, index=data.index)
-        np.zeros(n)
 
     # ── 投票: ≥2 票 → 高置信异常 ──
     votes = iqr_mask.astype(int) + z_mask.astype(int) + iso_mask.astype(int)
@@ -2389,16 +2384,20 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         side_note = f"双侧控制限 (拟合={best_name})"
 
     limit_label = []
-    if ucl is not None: limit_label.append(f"UCL={ucl:.4f}")
-    if lcl is not None: limit_label.append(f"LCL={lcl:.4f}")
+    if ucl is not None:
+        limit_label.append(f"UCL={ucl:.4f}")
+    if lcl is not None:
+        limit_label.append(f"LCL={lcl:.4f}")
     limit_label = " / ".join(limit_label) if limit_label else "N/A"
 
     # 偏度评估
     skew_val = float(data.skew())
     if abs(skew_val) > 0.5:
         asym_parts = [f"数据偏度={skew_val:.2f}({'右偏' if skew_val > 0 else '左偏'})"]
-        if ucl is not None: asym_parts.append(f"上限距中位数={ucl-cl:.3f}")
-        if lcl is not None: asym_parts.append(f"下限距中位数={cl-lcl:.3f}")
+        if ucl is not None:
+            asym_parts.append(f"上限距中位数={ucl-cl:.3f}")
+        if lcl is not None:
+            asym_parts.append(f"下限距中位数={cl-lcl:.3f}")
         asym_note = "，".join(asym_parts)
     else:
         asym_note = f"数据近似对称(偏度={skew_val:.2f})"
@@ -2414,15 +2413,19 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     if ucl is not None:
         ax.axhline(ucl, color="#e31a1c", linestyle="--", linewidth=1.5,
                    label=f"UCL (P99.865)={ucl:.4f}")
-        if ucl_2s: ax.axhline(ucl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
-        if ucl_1s: ax.axhline(ucl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
+        if ucl_2s:
+            ax.axhline(ucl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
+        if ucl_1s:
+            ax.axhline(ucl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
         ax.fill_between(pos, cl, ucl, alpha=0.04, color="green")
 
     if lcl is not None:
         ax.axhline(lcl, color="#e31a1c", linestyle="--", linewidth=1.5,
                    label=f"LCL (P0.135)={lcl:.4f}")
-        if lcl_2s: ax.axhline(lcl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
-        if lcl_1s: ax.axhline(lcl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
+        if lcl_2s:
+            ax.axhline(lcl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
+        if lcl_1s:
+            ax.axhline(lcl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
         ax.fill_between(pos, lcl, cl, alpha=0.04, color="green")
 
     if violations:
@@ -2447,7 +2450,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     lcl_str = f"{lcl:.4f}" if lcl else "N/A"
     summary = (
         f"非参数控制图({side_note}): {'过程稳定 ✓' if is_stable else f'{n_violations} 个点违规'}。"
-        f"CL(P50)={cl:.4f}, UCL={ucl_str}, LCL={lcl_str}。"
+        f"CL(P50)={cl:.4f}, UCL={ucl_str}, LCL={lcl_str}。{asym_note}。"
     )
 
     return AnalysisResult(

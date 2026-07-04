@@ -11,7 +11,7 @@
 4. [要因筛选（8 个方法）](#4-要因筛选)
 5. [信度诊断（5 个方法）](#5-信度诊断)
 6. [建模优化（10 个方法）](#6-建模优化)
-7. [过程监控（9 个方法）](#7-过程监控)
+7. [过程监控（11 个方法）](#7-过程监控)
 8. [高级分析（5 个方法）](#8-高级分析)
 9. [结果验证](#9-结果验证)
 10. [排错 FAQ](#10-排错-faq)
@@ -106,7 +106,7 @@ python smartsuite/web/app.py
 
 ---
 
-## 4. 要因筛选
+## 4. 要因筛选（8 个方法）
 
 > "哪些因子对质量有显著影响？"
 
@@ -575,7 +575,7 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 ---
 
-## 7. 过程监控
+## 7. 过程监控（11 个方法）
 
 > "生产过程是否稳定？会不会快出问题了？"
 
@@ -798,7 +798,7 @@ print(f"拟合={result.metadata.get('best_fit','?')}, UCL={result.metadata['ucl'
 
 ---
 
-## 8. 高级分析
+## 8. 高级分析（5 个方法）
 
 > "需要更专业的统计分析。"
 
@@ -917,9 +917,9 @@ print(f"拟合={result.metadata.get('best_fit','?')}, UCL={result.metadata['ucl'
 | contingency | ok | ok | ✓ | < 1s |
 | lasso_regression | ok | ok | ✓ | < 1s |
 | robust_regression | ok | ok | ✓ | < 1s |
-| ... (全部 37 个) | ok | ok | ✓ | — |
+| ... (全部 39 个) | ok | ok | ✓ | — |
 
-**结论**: 全部 37 个分析方法在 Web UI 和 Python 直接调用下产生一致的结果。
+**结论**: 全部 39 个分析方法在 Web UI 和 Python 直接调用下产生一致的结果。
 
 ### 9.3 快速验证脚本
 
@@ -933,7 +933,7 @@ python tests/test_web_e2e.py
 #   OK correlation                 0.2s  ok
 #   OK anova                       0.3s  ok
 #   ...
-# Results: 37/37 responded, 0 failed
+# Results: 39/39 responded, 0 failed
 ```
 
 ---

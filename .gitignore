@@ -1,7 +1,29 @@
+# Python 编译产物
 *.egg-info/
 __pycache__/
+*.pyc
+
+# 缓存 & 工具
 .pytest_cache/
 .ruff_cache/
-dist/
 .superpowers/
+
+# 构建输出
+dist/
+
+# 生成的分析输出（运行时产物）
+smartsuite_report.html
+tests/results.pptx
 tests/demo_output/
+
+# 文档中自动生成的截图
+docs/images/
+
+# 历史开发规划文档
+docs/superpowers/
+
+# 尚未完成的文档（完成后再提交）
+docs/skill.md
+
+# 个人配置（不在团队间共享）
+.claude/settings.local.json

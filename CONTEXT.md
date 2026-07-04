@@ -32,19 +32,19 @@ _Avoid_: 配置文件、preset、recipe
 ## 架构术语
 
 ### 引擎层 (engine/)
-三层架构的底层。纯 Python 包，实现所有分析方法。零外部依赖（xlwings, Excel 概念）。输入 `AnalysisRequest`，输出 `AnalysisResult`。
+三层架构的底层。纯 Python 包，实现所有分析方法。输入 `AnalysisRequest`，输出 `AnalysisResult`。
 
 _Avoid_: 核心层、算法层、计算层
 
 ### 服务层 (services/)
-三层架构的中间层。负责：数据 I/O（Excel → DataFrame）、工作流编排（路由 task 到引擎函数）、报告生成（Excel 图表/PDF/PPT）。
+三层架构的中间层。负责：数据 I/O（Excel → DataFrame）、工作流编排（路由 task 到引擎函数）、报告生成（PDF/PPT/HTML）。
 
 _Avoid_: 业务层、逻辑层、中间件
 
-### Excel 层 (excel/)
-三层架构的顶层。唯一依赖 xlwings 的层。负责：Ribbon 菜单定义、对话框交互、结果写回 Excel Sheet。很薄——不做任何计算。
+### Web 层 (web/)
+Flask Web UI。依赖服务层，不直接依赖引擎层。提供文件上传、列定义、一键分析和结果展示。
 
-_Avoid_: 表现层、UI 层、前端
+_Avoid_: 前端
 
 ### 工作流编排 (Orchestrator)
 服务层中的路由模块。接收 `AnalysisRequest`，按 `task` 字段分发到对应引擎函数，注入默认参数，返回 `AnalysisResult`。
@@ -93,9 +93,6 @@ _Avoid_: 目标变量、响应变量、输出变量
 ---
 
 ## 输出术语
-
-### Excel 图表输出
-将 matplotlib Figure 通过 xlwings 插入 Excel 工作簿。图表与数据在同一文件内，便于追溯。
 
 ### PDF 报告
 通过 reportlab 将分析表格、图表、结论汇编为单一 PDF 文件。适合归档和质量体系审核。

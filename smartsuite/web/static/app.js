@@ -70,41 +70,173 @@ function setAll(role) {
 
 function clearAll() { selectedY.clear(); selectedX.clear(); selectedCat.clear(); renderCols(); }
 
-// Parameter config per task
+// ── 参数配置：默认值 + 元数据（类型 & 下拉选项） ──
 const TASK_PARAMS = {
-  grid_search: { ranges: '', direction: 'maximize', n_points: 10 },
-  process_capability: { usl: '', lsl: '' },
-  hypothesis_test: { test: 'ttest_ind' },
-  trend_forecast: { forecast_steps: 5 },
-  anomaly_detect: { method: 'iqr' },
-  response_surface: { direction: 'maximize' },
-  multi_objective: { objectives: '' },
-  decision_tree: { max_depth: 5 },
-  anova: { alpha: 0.05, interactions: 0 },
+  grid_search:       { ranges: '', direction: 'maximize', n_points: 10 },
+  process_capability:{ usl: '', lsl: '' },
+  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05 },
+  trend_forecast:    { forecast_steps: 5 },
+  anomaly_detect:    { method: 'iqr' },
+  response_surface:  { direction: 'maximize' },
+  multi_objective:   { objectives: '' },
+  decision_tree:     { max_depth: 5 },
+  anova:             { alpha: 0.05, interactions: 0 },
   spc_nonparametric: { side: 'two-sided' },
-  spc_cusum: { k: 0.5, h: 5.0 },
-  spc_ewma: { lam: 0.2, L: 2.7 },
-  spc_attribute: { chart_type: 'c' },
-  power_analysis: { mode: 'required_n', test_type: 'ttest', effect_size: 0.5 },
-  bootstrap_ci: { statistic: 'mean', n_bootstrap: 500 },
-  median_ci: { ci_level: 0.95 },
-  quantile_regression: { quantile: 0.5 },
-  tolerance_interval: { coverage: 0.99, confidence: 0.95, side: 'two-sided' },
-  gage_rr: { part_col: '', operator_col: '' },
-  spc_xbar: { subgroup_col: '子组' },
-  lasso_regression: { alpha_lasso: '' },
-  change_point: { min_segment: 10, n_changepoints: 5 },
-  doe_analysis: { alpha: 0.05 },
-  variance_test: { group_col: '' },
-  box_chart: { mode: 'facet' },
+  spc_cusum:         { k: 0.5, h: 5.0 },
+  spc_ewma:          { lam: 0.2, L: 2.7 },
+  spc_attribute:     { chart_type: 'c' },
+  power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5 },
+  bootstrap_ci:      { statistic: 'mean', n_bootstrap: 500 },
+  median_ci:         { ci_level: 0.95 },
+  quantile_regression:{ quantile: 0.5 },
+  tolerance_interval:{ coverage: 0.99, confidence: 0.95, side: 'two-sided' },
+  gage_rr:           { part_col: '', operator_col: '' },
+  spc_xbar:          { subgroup_col: '子组' },
+  lasso_regression:  { alpha_lasso: '' },
+  regression:        { model_type: 'linear' },
+  change_point:      { min_segment: 10, n_changepoints: 5 },
+  doe_analysis:      { alpha: 0.05 },
+  variance_test:     { group_col: '' },
+  box_chart:         { mode: 'facet' },
 };
+
+// 参数元数据：定义类型和下拉选项
+const PARAM_META = {
+  direction: {
+    type: 'select', label: '优化方向',
+    options: [['maximize', '最大化'], ['minimize', '最小化']]
+  },
+  test: {
+    type: 'select', label: '检验方法',
+    options: [
+      ['ttest_ind', '独立样本 t 检验'], ['mannwhitney', 'Mann-Whitney U 检验'],
+      ['wilcoxon_paired', 'Wilcoxon 配对检验'], ['kruskal', 'Kruskal-Wallis 检验'],
+      ['anova', '单因素 ANOVA'], ['ttest_1samp', '单样本 t 检验'],
+    ]
+  },
+  method: {
+    type: 'select', label: '异常检测方法',
+    options: [
+      ['iqr', 'IQR (四分位距法)'], ['zscore', 'Z-Score (标准差法)'],
+      ['isolation_forest', 'Isolation Forest (隔离森林)'], ['grubbs', 'Grubbs 检验'],
+      ['mad', 'MAD (中位数绝对偏差)'],
+    ]
+  },
+  side: {
+    type: 'select', label: '检验侧',
+    options: [
+      ['two-sided', '双侧'], ['upper', '上侧 (越大越好)'], ['lower', '下侧 (越小越好)']
+    ]
+  },
+  chart_type: {
+    type: 'select', label: '控制图类型',
+    options: [
+      ['p', 'p 图 (不良率)'], ['np', 'np 图 (不良数)'],
+      ['c', 'c 图 (缺陷数)'], ['u', 'u 图 (单位缺陷率)']
+    ]
+  },
+  mode: {
+    type: 'select', label: '模式',
+    options: [
+      ['facet', '分面 (各 X₂ 一张子图)'], ['nested', '嵌套 (组合标签如 ABS/否)']
+    ]
+  },
+  model_type: {
+    type: 'select', label: '模型类型',
+    options: [
+      ['linear', '线性回归'], ['quadratic', '二次回归'],
+      ['interaction', '交互效应'], ['stepwise', '逐步回归']
+    ]
+  },
+  statistic: {
+    type: 'select', label: '统计量',
+    options: [
+      ['mean', '均值'], ['median', '中位数'], ['std', '标准差'], ['var', '方差']
+    ]
+  },
+  test_type: {
+    type: 'select', label: '检验类型',
+    options: [
+      ['ttest', 't 检验'], ['anova', 'ANOVA'],
+      ['chi2', '卡方检验'], ['correlation', '相关性检验']
+    ]
+  },
+  'mode@power_analysis': {
+    type: 'select', label: '功效分析模式',
+    options: [
+      ['required_n', '计算所需样本量'], ['achieved_power', '计算实际功效']
+    ]
+  },
+  quantile: {
+    type: 'select', label: '分位数',
+    options: [['0.1','0.1'], ['0.25','0.25'], ['0.5','0.5 (中位数)'], ['0.75','0.75'], ['0.9','0.9']]
+  },
+  subgroup_col:   { type: 'column', label: '子组列', hint: '选择用于分组的列' },
+  part_col:       { type: 'column', label: '部件列', hint: '选择部件标识列' },
+  operator_col:   { type: 'column', label: '操作员列', hint: '选择操作员标识列' },
+  group_col:      { type: 'column', label: '分组列', hint: '选择分组标识列' },
+};
+
+// 参数标签（中文显示名）
+const PARAM_LABELS = {
+  ranges: '搜索范围', objectives: '目标定义', direction: '优化方向',
+  n_points: '网格点数', usl: '规格上限 (USL)', lsl: '规格下限 (LSL)',
+  test: '检验方法', alpha: '显著性水平 α', interactions: '交互阶数',
+  forecast_steps: '预测步数', method: '异常检测方法', side: '检验侧',
+  k: 'K 值 (松弛因子)', h: 'H 值 (决策区间)', lam: 'λ (平滑系数)',
+  L: 'L (控制限宽度)', chart_type: '控制图类型', mode: '模式',
+  test_type: '检验类型', effect_size: '效应量', statistic: '统计量',
+  n_bootstrap: 'Bootstrap 次数', ci_level: '置信水平', quantile: '分位数',
+  coverage: '覆盖比例', confidence: '置信度', part_col: '部件列',
+  operator_col: '操作员列', subgroup_col: '子组列', alpha_lasso: 'α (正则化强度)',
+  model_type: '模型类型', min_segment: '最小段长', n_changepoints: '变点数',
+  group_col: '分组列', max_depth: '最大深度',
+};
+
 const PARAM_HINTS = {
-  ranges: '格式: 料温:180,220;模具温度:40,80',
-  objectives: '格式: 强度:maximize;不良率:minimize',
-  side: 'two-sided(双侧) | upper(越小越好) | lower(越大越好)',
-  chart_type: 'p(不良率) | np(不良数) | c(缺陷数) | u(单位缺陷率)',
-  mode: 'facet(分面,各X2一张子图) | nested(嵌套,组合标签如ABS/否)',
+  ranges: '格式: 料温:180,220; 模具温度:40,80',
+  objectives: '格式: 强度:maximize; 不良率:minimize',
 };
+
+// ── 构建参数输入控件 ──
+function buildParamInput(k, v, task) {
+  // 支持 task.key 格式的覆盖查找（如 power_analysis.mode vs box_chart.mode）
+  const meta = PARAM_META[k + '@' + task] || PARAM_META[k];
+  const label = PARAM_LABELS[k] || k;
+  const hint = PARAM_HINTS[k];
+  const id = `param_${k}`;
+
+  if (meta?.type === 'select') {
+    const opts = meta.options.map(([val, text]) =>
+      `<option value="${val}" ${String(v) === val ? 'selected' : ''}>${text}</option>`
+    ).join('');
+    return `<div class="param-item">
+      <label class="param-label" for="${id}">${label}</label>
+      <select id="${id}" class="param-select">${opts}</select>
+    </div>`;
+  }
+
+  if (meta?.type === 'column') {
+    const opts = columnData.map(c =>
+      `<option value="${c.name}" ${String(v) === c.name ? 'selected' : ''}>${c.name}</option>`
+    ).join('');
+    return `<div class="param-item">
+      <label class="param-label" for="${id}">${label}</label>
+      <select id="${id}" class="param-select"><option value="">— 自动 —</option>${opts}</select>
+    </div>`;
+  }
+
+  // 默认：文本/数字输入
+  let inputType = 'text';
+  let step = '';
+  if (typeof v === 'number') { inputType = 'number'; step = v < 1 ? '0.01' : '1'; }
+  return `<div class="param-item">
+    <label class="param-label" for="${id}">${label}</label>
+    ${hint ? `<div class="param-hint">${hint}</div>` : ''}
+    <input type="${inputType}" id="${id}" value="${v}" step="${step}"
+      class="param-input" placeholder="${hint || ''}">
+  </div>`;
+}
 
 function showParams(task) {
   const panel = document.getElementById('param-panel');
@@ -112,13 +244,7 @@ function showParams(task) {
   const cfg = TASK_PARAMS[task];
   if (!cfg) { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
-  body.innerHTML = Object.entries(cfg).map(([k,v]) => `
-    <div style="margin:4px 0;font-size:11px">
-      <label style="display:block;color:#666;margin-bottom:1px">${k}</label>
-      ${PARAM_HINTS[k] ? `<div style="font-size:9px;color:#999;margin-bottom:2px">${PARAM_HINTS[k]}</div>` : ''}
-      <input type="text" id="param_${k}" value="${v}" placeholder="${PARAM_HINTS[k]||''}"
-        style="width:100%;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px">
-    </div>`).join('');
+  body.innerHTML = Object.entries(cfg).map(([k, v]) => buildParamInput(k, v, task)).join('');
 }
 
 function getParams(task) {
@@ -129,15 +255,13 @@ function getParams(task) {
     const el = document.getElementById('param_'+k);
     if (!el) return;
     let v = el.value.trim();
-    if (v === '') return; // empty means skip this param
+    if (v === '') return;
 
     if (k === 'ranges') {
-      // Parse: "料温:180,220; 模具温度:40,80" -> {料温:[180,220],模具温度:[40,80]}
-      try { v = v.split(';').filter(Boolean).reduce((o,s) => { const [ky,lo,hi]=s.split(':'); o[ky.trim()]=[+lo,+hi]; return o; }, {}); if (!Object.keys(v).length) return; }
+      try { v = v.split(';').filter(Boolean).reduce((o, s) => { const [ky, lo, hi] = s.split(':'); o[ky.trim()] = [+lo, +hi]; return o; }, {}); if (!Object.keys(v).length) return; }
       catch(e) { return; }
     } else if (k === 'objectives') {
-      // Parse: "强度:maximize;不良率:minimize" -> [{col:'强度',direction:'maximize'},...]
-      try { v = v.split(';').filter(Boolean).map(s => { const [col,dir] = s.trim().split(':'); return {col:col.trim(),direction:dir?.trim()||'maximize'}; }); if (!v.length) return; }
+      try { v = v.split(';').filter(Boolean).map(s => { const [col, dir] = s.trim().split(':'); return {col:col.trim(), direction:dir?.trim()||'maximize'}; }); if (!v.length) return; }
       catch(e) { return; }
     } else if (!isNaN(v)) {
       v = Number(v);
@@ -168,9 +292,7 @@ async function runAnalysis(task) {
     showParams(task);
     // 在参数面板底部加"运行"按钮
     const body = document.getElementById('param-body');
-    body.innerHTML += `<button onclick="executeAnalysis()" style="margin-top:8px;width:100%;
-      padding:6px;background:#2171b5;color:white;border:none;border-radius:3px;
-      font-size:12px;cursor:pointer">▶ 运行分析</button>`;
+    body.innerHTML += `<button onclick="executeAnalysis()" class="btn-run">▶ 运行分析</button>`;
     return;
   }
   // 无参数 → 直接执行

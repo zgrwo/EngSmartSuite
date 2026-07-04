@@ -1,4 +1,4 @@
-"""xlwings 加载项入口 — 注册 Ribbon 按钮回调。"""
+"""xlwings 加载项入口 — 注册 Ribbon 按钮回调。（Excel 层已移除，本模块不再维护。）"""
 import os
 
 import xlwings as xw

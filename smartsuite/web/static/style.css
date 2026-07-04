@@ -94,7 +94,26 @@ table tr:hover td { background: #f0f4ff; }
 
 /* Parameter panel */
 .param-panel { border-top: 1px solid var(--border); background: #fafafa; }
-.param-body { padding: 6px 8px; }
+.param-body { padding: 8px 10px; }
+.param-item { margin-bottom: 10px; }
+.param-label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 4px; }
+.param-hint { font-size: 11px; color: #999; margin-bottom: 3px; }
+.param-input {
+  width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
+  font-size: 13px; font-family: inherit; background: #fff;
+}
+.param-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(63,81,181,0.15); }
+.param-select {
+  width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
+  font-size: 13px; font-family: inherit; background: #fff; cursor: pointer;
+  appearance: auto;
+}
+.param-select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(63,81,181,0.15); }
+.btn-run {
+  margin-top: 10px; width: 100%; padding: 8px; background: #2171b5; color: #fff;
+  border: none; border-radius: 4px; font-size: 14px; font-family: inherit; cursor: pointer;
+}
+.btn-run:hover { background: #1a5a9a; }
 
 /* Spinner */
 .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ddd;

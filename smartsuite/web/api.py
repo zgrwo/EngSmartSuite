@@ -2,6 +2,7 @@
 import base64
 import io
 import logging
+import random
 
 import pandas as pd
 
@@ -42,7 +43,6 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         if default_n < 2:
             default_n = 2
         df = df.copy()
-        import random
         subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
         while subgroup_col_name in df.columns:
             subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"

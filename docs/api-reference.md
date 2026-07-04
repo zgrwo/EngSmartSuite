@@ -1,6 +1,7 @@
 # SmartSuite API Reference
 
-> 全部 37 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
+> 全部 39 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
+> 开发规范见 `CLAUDE.md`，分析场景选择见 `docs/skill.md`。
 
 ## 数据契约
 
@@ -278,6 +279,21 @@ class AnalysisResult:
 - **返回**: `anomalies`, `method_counts`
 - **图**: 高/低置信异常标记散点图
 
+### box_chart
+- **Task Key**: `box_chart`
+- **描述**: 分组箱线图 — 按类别因子展示数值分布，支持主分类 + 次分类分面，自动附 ANOVA/Kruskal-Wallis 或 t 检验/MWU 统计检验
+- **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签)
+- **feature_cols**: `[主分类列]` 或 `[主分类列, 次分类列]`
+- **返回**: `group_statistics` (含各分组均值/中位数/标准差/IQR), `test_result`
+- **图**: 分组箱线图 + 散点叠加；次分类 ≤ 8 水平时分面展示
+
+### spc_nonparametric
+- **Task Key**: `spc_nonparametric`
+- **描述**: 非参数控制图 — 基于最佳拟合分布 (Normal/Lognormal/Weibull) 的 CDF 逆推控制限，不假设正态分布
+- **params**: `side` ("two-sided" 双侧 | "upper" 单侧上限 | "lower" 单侧下限)
+- **返回**: `control_limits` (含 CL/UCL/LCL + 最佳拟合分布), `violations`
+- **图**: 原始数据 + 分布拟合控制限 + 违规点标记
+
 ### bootstrap_ci
 - **Task Key**: `bootstrap_ci`
 - **描述**: Bootstrap 置信区间 — 百分位法，不依赖分布假设
@@ -321,7 +337,7 @@ class AnalysisResult:
 路由分析请求到对应引擎函数，注入默认参数，统一异常处理。
 
 ### TASK_REGISTRY: dict[str, Callable]
-全部 37 个 task key → 引擎函数的映射表。
+全部 39 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/web/app.py` 的 `TASK_GROUPS` 中）。
 
 ### DEFAULT_PARAMS: dict[str, dict]
 各 task key 的默认参数。编排器会自动合并用户参数到默认参数之上。

@@ -2,34 +2,29 @@
 
 工艺数据分析工具箱，将 Python 统计分析能力与 Excel 交互体验深度整合。
 
-## 领域术语
+> **本文档面向 AI 编程助手和开发者**，定义项目开发规范与架构约束。
+> 领域术语见 `CONTEXT.md`，分析工作流模式见 `docs/skill.md`，API 参考见 `docs/api-reference.md`。
 
-见 `CONTEXT.md`。关键术语：分析请求/结果、引擎层/服务层/Excel 层、要因分析、DOE、SPC、工艺参数、质量指标。
-
-## 模块地图
+## 模块结构
 
 ```
 smartsuite/
 ├── core/
 │   ├── contracts.py       # AnalysisRequest / AnalysisResult 数据契约
-│   └── exceptions.py      # 分层异常体系 (SmartSuiteError 及其子类)
-├── engine/                # ③ 分析引擎层 — 纯 Python，零 Excel 依赖
-│   ├── root_cause.py      # 要因分析: correlation, ANOVA, 假设检验, 决策树, VIF, 列联表, 比例CI, 方差检验, Kappa, Cronbach α, 分布摘要, 正态性检验, 功效分析
-│   ├── doe_opt.py         # DOE/优化: 回归, 响应面, 网格搜索, 多目标优化, DOE效应, ROC, Logistic, Lasso, 稳健回归, 分位数回归
-│   ├── spc_monitor.py     # 过程监控: X-bar/R, 属性图, CUSUM, EWMA, 过程能力, 趋势预测, 变点检测, 异常检测, Gage R&R, 容许区间, 生存分析, Bootstrap CI, 中位数CI
-│   ├── _palette.py        # 统一可视化配色方案 (PALETTE 字典)
+│   └── exceptions.py      # 分层异常体系
+├── engine/                # ③ 分析引擎层：纯 Python，零 Excel 依赖
+│   ├── root_cause.py      # 要因分析（13 个函数）
+│   ├── doe_opt.py         # DOE/优化（10 个函数）
+│   ├── spc_monitor.py     # 过程监控（16 个函数）
+│   ├── _palette.py        # 统一可视化配色方案
 │   └── __init__.py        # 全局 matplotlib 配置 + 公开 API 导出
-├── services/              # ② 应用服务层 — 唯一桥接层
-│   ├── orchestrator.py    # 任务路由 (TASK_REGISTRY) + 默认参数注入
+├── services/              # ② 应用服务层：唯一桥接层
+│   ├── orchestrator.py    # 任务路由 (TASK_REGISTRY, 39 项) + 默认参数注入
 │   ├── reporter.py        # 多格式输出: to_excel / to_pdf / to_ppt / to_html
 │   ├── data_io.py         # Excel 数据读写 + 校验 + 预处理 + 智能推荐
 │   └── audit.py           # 过程综合审计 + 批量分析 + 自动报告
-├── excel/                 # ① Excel 交互层 — 唯一可 import xlwings 的层
-│   ├── ribbon.py          # Ribbon 功能区 XML 定义
-│   ├── dialogs.py         # Excel 对话框交互
-│   └── addin.py           # 加载项主入口
-├── web/                   # Web UI 层 (Flask) — 独立于 Excel 层的可选入口
-│   ├── app.py             # Flask 应用入口
+├── web/                   # Web UI 层 (Flask)
+│   ├── app.py             # Flask 入口 + 任务分组 (TASK_GROUPS) + 标签 (TASK_LABELS)
 │   ├── api.py             # REST API: run_analysis / column_info
 │   ├── templates/         # Jinja2 模板
 │   └── static/            # JS + CSS
@@ -39,15 +34,13 @@ smartsuite/
 ## 架构约束（硬性规则）
 
 ```
-smartsuite/excel/     ← ① Excel 交互层：唯一可 import xlwings 的层
 smartsuite/services/  ← ② 应用服务层：桥接层，不可被 engine/ 依赖
-smartsuite/engine/    ← ③ 分析引擎层：纯 Python，零 Excel 依赖
+smartsuite/engine/    ← ③ 分析引擎层：纯 Python，零外部依赖（xlwings 等）
 smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine/
 ```
 
 - `engine/` 文件不得 `import xlwings`，不得出现任何 Excel 概念（Range, Sheet, Workbook）
-- `excel/` 文件不得 `import sklearn` / `import statsmodels`
-- `services/` 是唯一桥接层，其他两层通过它通信
+- `services/` 是唯一桥接层，engine 和 web 通过它通信
 - `web/` 依赖 `services/`，不直接依赖 `engine/`（通过 `orchestrate` 间接调用）
 - 引擎层所有公开函数签名为 `(AnalysisRequest) -> AnalysisResult`
 - 数据契约定义在 `smartsuite/core/contracts.py`
@@ -61,14 +54,16 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 - 错误信息使用中文工艺术语，不暴露 Python traceback 给最终用户
 - `from scipy import stats` 使用模块级别名 `sp_stats = stats`，不要在函数内重复导入
 - 使用 ruff 做 lint（E, F, I, N, W, UP 规则）
+- Web UI 的任务分组和标签集中定义在 `smartsuite/web/app.py`（`TASK_GROUPS`, `TASK_LABELS`）
 
 ## 测试策略
 
 - 引擎层：pytest 单元测试，每个分析函数至少一个标准输入→断言输出正确性
 - 服务层：集成测试，验证 Orchestrator 路由 + Reporter 文件输出
-- Excel 层：手工验证清单，不走自动化
+- Excel 层：已移除，不再维护
 - 回归：基准 Excel 文件 + 已知正确结果，pandas.testing 自动比对
 - 测试文件放在 `tests/test_engine/` 和 `tests/test_services/`
+- Web E2E 测试：`tests/test_web_e2e.py`
 
 ## 开发原则
 
@@ -82,11 +77,13 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 1. 在对应引擎文件中实现 `(AnalysisRequest) -> AnalysisResult` 函数
 2. 在 `engine/__init__.py` 中导出
-3. 在 `services/orchestrator.py` 的 `TASK_REGISTRY` 中注册（添加 task key 映射）
+3. 在 `services/orchestrator.py` 的 `TASK_REGISTRY` 中注册
 4. 如有默认参数，添加到 `DEFAULT_PARAMS`
-5. 创建 YAML 模板到 `templates/`
-6. 添加测试：至少 1 个集成测试 (`test_master_integration.py`) + 1 个正确性测试 (`test_correctness.py`)
-7. 在数据分析方法速查表（`api-reference.md` 和 `README.md`）中添加条目
+5. 在 `web/app.py` 的 `TASK_LABELS` 和 `TASK_GROUPS` 中添加条目
+6. 在 `web/static/app.js` 的 `TASK_PARAMS` 中添加参数默认值（如有）
+7. 创建 YAML 模板到 `templates/`
+8. 添加测试：至少 1 个集成测试 + 1 个正确性测试
+9. 更新 `docs/api-reference.md`
 
 ## 常见陷阱
 
@@ -95,22 +92,11 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 3. **Cochran Q 二值化**: 逐列独立编码，每列必须恰好 2 个唯一值。使用 `_binary_encode()` 工具函数
 4. **Tukey HSD 事后检验**: 使用公开 API (`tukey.pvalues`/`tukey.meandiffs`/`tukey.reject`)，不要访问 `_results_table`
 5. **异常消息语言**: `engine/` 和 `services/` 的错误消息必须使用中文工艺术语。`orchestrate()` 中的 `except` 子句使用异常类型映射表翻译
+6. **Web 与 Python 结果一致性**: Web UI 的 `preprocess_data` 会做中位数填充和 One-Hot 编码，与 Python 直接调用结果略有差异（~0.002）。验证时应走相同预处理路径
 
 ## 架构决策
 
-见 `docs/adr/`。当前决策：
-- ADR-001：三层分离架构
-
-## 文档体系
-
-| 文档 | 用途 |
-|------|------|
-| `README.md` | 项目入口：是什么、安装、快速开始 |
-| `CONTEXT.md` | 领域术语表 |
-| `api-reference.md` | 全部 37 个分析函数的 API 参考 |
-| `CLAUDE.md` | 本文件：开发规范 |
-| `user-manual.md` | 用户操作手册（规划中） |
-| `skill.md` | AI Agent 领域知识（规划中） |
+见 `docs/adr/`。当前决策：ADR-001：三层分离架构。
 
 ## 常用命令
 
@@ -126,4 +112,7 @@ ruff check smartsuite/
 
 # 启动 Web UI
 python smartsuite/web/app.py
+
+# 列出所有分析方法
+python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"
 ```
