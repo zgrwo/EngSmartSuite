@@ -22,8 +22,5 @@ docs/images/
 # 历史开发规划文档
 docs/superpowers/
 
-# 尚未完成的文档（完成后再提交）
-docs/skill.md
-
 # 个人配置（不在团队间共享）
 .claude/settings.local.json
