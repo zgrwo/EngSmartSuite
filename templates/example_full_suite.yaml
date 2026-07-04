@@ -1,0 +1,25 @@
+# 全流程综合分析模板 — 从要因筛选到过程监控的完整分析链
+# 使用方式: smartsuite run templates/example_full_suite.yaml -i data.xlsx
+#
+# 注意: 此模板需要分步运行，每次修改 task 字段:
+#   1. task: correlation  → 筛选关键因子
+#   2. task: regression   → 量化影响
+#   3. task: doe_analysis → 评估效应
+#   4. task: process_capability → 评估能力
+
+task: correlation
+target_col: "不良率"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+  - "注射压力"
+  - "保压压力"
+  - "注射速度"
+  - "冷却时间"
+  - "螺杆转速"
+  - "背压"
+  - "锁模力"
+params:
+  method: pearson
+  control_vars:
+    - "原料类型"

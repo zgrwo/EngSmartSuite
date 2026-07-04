@@ -38,8 +38,8 @@ def test_anova_basic(sample_doe_data):
     result = anova_analysis(req)
 
     assert result.task == "anova"
-    assert result.status in ("ok", "warning")
-    assert "anova_table" in result.tables
+    assert result.status == "ok"
+    assert "anova_enhanced" in result.tables
     assert len(result.summary) > 0
     assert "r_squared" in result.metadata
 
@@ -67,7 +67,7 @@ def test_decision_tree(sample_doe_data):
     assert result.status == "ok"
     assert "feature_importance" in result.tables
     fi = result.tables["feature_importance"]
-    assert "重要性" in fi.columns
+    assert "综合重要性" in fi.columns
     assert len(fi) >= 1
 
 

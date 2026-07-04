@@ -1,0 +1,6 @@
+# SPC 控制图模板 — X-bar/R 控制图监控过程稳定性
+task: spc_xbar
+target_col: "拉伸强度"
+feature_cols: []
+params:
+  subgroup_col: "子组"

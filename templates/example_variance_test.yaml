@@ -1,0 +1,8 @@
+# 方差齐性检验 — Levene + Bartlett
+task: variance_test
+target_col: "拉伸强度"
+feature_cols:
+  - "冷却方式"
+params:
+  group_col: "冷却方式"
+  alpha: 0.05

@@ -1,0 +1,7 @@
+# 变点检测 — 识别过程结构性变化的位置
+task: change_point
+target_col: "拉伸强度"
+feature_cols: []
+params:
+  min_segment: 20      # 最小段长度（避免过短的分段）
+  n_changepoints: 5    # 最多检测的变点数

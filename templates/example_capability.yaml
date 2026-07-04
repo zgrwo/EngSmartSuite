@@ -1,0 +1,8 @@
+# 过程能力分析模板 — 评估过程是否满足规格要求
+task: process_capability
+target_col: "拉伸强度"
+feature_cols: []
+params:
+  usl: 40.0
+  lsl: 32.0
+  target: 36.0

@@ -1,0 +1,9 @@
+# Kruskal-Wallis H 检验 — 非参数多组比较
+task: hypothesis_test
+target_col: "缺陷数"
+feature_cols:
+  - "产线"
+params:
+  test: kruskal_wallis      # 或 "kruskal"
+  group_col: "产线"
+  alpha: 0.05

@@ -53,7 +53,8 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
         categorical_cols: 需做 One-Hot 编码的类别列名集合，为 None 则自动检测
 
     Returns:
-        (encoded_df, encoded_cols, cat_map)
+        (encoded_df, encoded_cols, cat_map, imputation_log)
+        imputation_log: 每列被插补的行数统计
     """
     if categorical_cols is None:
         categorical_cols = {c for c in features
@@ -62,6 +63,7 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
     df = df.copy()
     encoded_cols: list[str] = []
     cat_map: dict[str, list[str]] = {}
+    imputation_log: dict[str, int] = {}
 
     for col in features:
         if col in categorical_cols:
@@ -80,6 +82,223 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                     df[col] = df[col].fillna(0)
                 else:
                     df[col] = df[col].fillna(median_val)
+                imputation_log[col] = int(n_coerced)
             encoded_cols.append(col)
 
-    return df, encoded_cols, cat_map
+    return df, encoded_cols, cat_map, imputation_log
+
+
+def missing_pattern_analysis(df: pd.DataFrame) -> dict:
+    """缺失模式诊断：返回缺失统计、模式计数、高基数列警告。
+
+    用于数据质量审查，帮助用户了解数据缺失的结构和严重程度。
+    """
+    n_total = len(df)
+
+    # ── 逐列缺失统计 ──
+    col_stats = []
+    for col in df.columns:
+        n_miss = int(df[col].isna().sum())
+        col_stats.append({
+            "列名": col,
+            "缺失数": n_miss,
+            "缺失率(%)": round(n_miss / n_total * 100, 2) if n_total > 0 else 0.0,
+            "数据类型": str(df[col].dtype),
+            "唯一值": int(df[col].nunique()),
+        })
+    col_missing_df = pd.DataFrame(col_stats).sort_values("缺失率(%)", ascending=False)
+
+    # ── 缺失模式 ──
+    miss_pattern = df.isna().astype(int)
+    pattern_counts = miss_pattern.groupby(
+        list(miss_pattern.columns)
+    ).size().reset_index(name="行数")
+    pattern_counts = pattern_counts.sort_values("行数", ascending=False)
+
+    # ── 高基数列检测 ──
+    high_cardinality: list[dict] = []
+    for col in df.columns:
+        n_unique = int(df[col].nunique())
+        if n_unique > 50 and str(df[col].dtype) in ("object", "string", "category"):
+            high_cardinality.append({
+                "列名": col,
+                "唯一值数": n_unique,
+                "基数比(%)": round(n_unique / n_total * 100, 2) if n_total > 0 else 0.0,
+                "警告": "One-Hot 编码将产生大量列，建议先分组归并",
+            })
+
+    # ── 零方差别检测 ──
+    zero_variance: list[str] = []
+    for col in df.columns:
+        if df[col].nunique(dropna=True) <= 1:
+            zero_variance.append(col)
+
+    # ── 汇总 ──
+    total_missing = int(df.isna().sum().sum())
+    rows_with_missing = int(df.isna().any(axis=1).sum())
+    cols_with_missing = int((df.isna().sum() > 0).sum())
+
+    return {
+        "total_rows": n_total,
+        "total_columns": len(df.columns),
+        "total_missing_values": total_missing,
+        "rows_with_missing": rows_with_missing,
+        "rows_missing_pct": round(rows_with_missing / n_total * 100, 2) if n_total > 0 else 0.0,
+        "cols_with_missing": cols_with_missing,
+        "column_missing_stats": col_missing_df,
+        "missing_patterns": pattern_counts.head(20),
+        "high_cardinality_columns": pd.DataFrame(high_cardinality) if high_cardinality
+        else pd.DataFrame({"信息": ["未检测到高基数列"]}),
+        "zero_variance_columns": zero_variance,
+        "summary": (
+            f"数据质量诊断: {n_total} 行 × {len(df.columns)} 列, "
+            f"缺失值 {total_missing} 个 ({rows_with_missing} 行受影响), "
+            f"{cols_with_missing} 列含缺失。"
+            + (f" 高基数列: {len(high_cardinality)} 个。" if high_cardinality else "")
+            + (f" 零方差别: {len(zero_variance)} 个。" if zero_variance else "")
+        ),
+    }
+
+
+def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
+    """智能分析推荐 — 根据数据结构自动推荐合适的分析方法。
+
+    检查维度：数据量、列类型、分组结构、时序特征、变异程度。
+    """
+    n_rows, n_cols = df.shape
+    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    cat_cols = [c for c in df.columns if c not in numeric_cols]
+    binary_cols = [c for c in df.columns if df[c].nunique(dropna=True) <= 2]
+    date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    high_card = [c for c in cat_cols if df[c].nunique() > 50]
+
+    recommendations: list[dict] = []
+
+    # ── 数据量检查 ──
+    if n_rows < 10:
+        recommendations.append({
+            "优先级": "P0",
+            "类别": "数据质量",
+            "推荐分析": "数据不足",
+            "原因": f"仅 {n_rows} 行数据，大部分统计方法需要更多样本",
+        })
+        return {"recommendations": pd.DataFrame(recommendations), "summary": "数据不足，建议先扩充样本量"}
+
+    # ── 缺失值检查 ──
+    missing_pct = df.isna().mean().max() * 100
+    if missing_pct > 10:
+        recommendations.append({
+            "优先级": "P0", "类别": "数据质量",
+            "推荐分析": "missing_pattern_analysis",
+            "原因": f"最高缺失率达 {missing_pct:.0f}%，需先诊断缺失模式",
+        })
+
+    # ── 相关性/要因分析 ──
+    if len(numeric_cols) >= 3:
+        recommendations.append({
+            "优先级": "P1", "类别": "要因分析",
+            "推荐分析": "correlation" if target_col else "correlation (需选目标列)",
+            "原因": f"{len(numeric_cols)} 个数值列，相关性分析可快速筛选关键因子",
+        })
+    if target_col and len(numeric_cols) >= 2:
+        recommendations.append({
+            "优先级": "P1", "类别": "要因分析",
+            "推荐分析": "regression",
+            "原因": "量化各因子对目标变量的影响大小 (含标准化系数)",
+        })
+    if len(numeric_cols) >= 4:
+        recommendations.append({
+            "优先级": "P2", "类别": "要因分析",
+            "推荐分析": "vif",
+            "原因": f"{len(numeric_cols)} 个变量，建议检查共线性",
+        })
+
+    # ── 分组/对比 ──
+    if len(binary_cols) >= 1 and target_col:
+        recommendations.append({
+            "优先级": "P1", "类别": "对比分析",
+            "推荐分析": "hypothesis_test",
+            "原因": f"存在二分类列 ({binary_cols[0]})，可进行组间差异检验",
+        })
+    if len(cat_cols) >= 1 and target_col:
+        group_col = cat_cols[0]
+        n_groups = df[group_col].nunique()
+        if 2 <= n_groups <= 10:
+            recommendations.append({
+                "优先级": "P2", "类别": "对比分析",
+                "推荐分析": "anova",
+                "原因": f"「{group_col}」有 {n_groups} 个水平，可用 ANOVA 检测组间差异",
+            })
+
+    # ── DOE/优化 ──
+    if target_col and len(numeric_cols) >= 3:
+        recommendations.append({
+            "优先级": "P2", "类别": "工艺优化",
+            "推荐分析": "doe_analysis",
+            "原因": "评估各因子的主效应大小，识别优化方向",
+        })
+    if target_col and len(numeric_cols) >= 2:
+        recommendations.append({
+            "优先级": "P2", "类别": "工艺优化",
+            "推荐分析": "response_surface",
+            "原因": "可探索两个关键因子的最优组合区域",
+        })
+
+    # ── 时序/SPC ──
+    has_time = len(date_cols) > 0
+    if n_rows >= 20:
+        recommendations.append({
+            "优先级": "P1" if has_time else "P2",
+            "类别": "过程监控",
+            "推荐分析": "trend_forecast" if has_time else "spc_xbar (需子组列)",
+            "原因": f"{n_rows} 行数据{'，含日期列' if has_time else ''}，可进行趋势分析或过程监控",
+        })
+    if target_col:
+        recommendations.append({
+            "优先级": "P2", "类别": "过程监控",
+            "推荐分析": "process_capability",
+            "原因": "评估当前过程是否满足规格要求 (需提供 USL/LSL)",
+        })
+
+    # ── 异常检测 ──
+    if n_rows >= 30:
+        recommendations.append({
+            "优先级": "P2", "类别": "异常检测",
+            "推荐分析": "outlier_consensus",
+            "原因": "多方法投票检测异常点，减少误报",
+        })
+
+    # ── 数据质量 ──
+    if len(high_card) > 0:
+        recommendations.append({
+            "优先级": "P1", "类别": "数据质量",
+            "推荐分析": "preprocess_data (高基数处理)",
+            "原因": f"列「{high_card[0]}」有 {df[high_card[0]].nunique()} 个唯一值，建模前需处理",
+        })
+
+    # 排序
+    priority_order = {"P0": 0, "P1": 1, "P2": 2}
+    recommendations.sort(key=lambda r: priority_order.get(r["优先级"], 99))
+
+    rec_df = pd.DataFrame(recommendations)
+
+    # 汇总
+    p0_count = len([r for r in recommendations if r["优先级"] == "P0"])
+    summary = (
+        f"基于 {n_rows}×{n_cols} 数据推荐 {len(recommendations)} 项分析"
+        + (f" (含 {p0_count} 项数据质量建议)" if p0_count > 0 else "")
+        + f"。优先: {recommendations[0]['推荐分析'] if recommendations else '无'}"
+    )
+
+    return {
+        "recommendations": rec_df,
+        "summary": summary,
+        "data_profile": {
+            "n_rows": n_rows, "n_cols": n_cols,
+            "numeric_cols": len(numeric_cols),
+            "categorical_cols": len(cat_cols),
+            "binary_cols": len(binary_cols),
+            "has_dates": has_time,
+            "target_specified": target_col is not None,
+        },
+    }

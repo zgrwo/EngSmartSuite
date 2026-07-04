@@ -1,0 +1,11 @@
+# DOE 主效应分析模板 — 评估实验因子的主效应和显著性
+task: doe_analysis
+target_col: "拉伸强度"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+  - "注射压力"
+  - "注射速度"
+  - "冷却时间"
+params:
+  alpha: 0.05

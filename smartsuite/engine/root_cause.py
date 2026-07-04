@@ -10,12 +10,35 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 
 
+def _significance_stars(p):
+    """显著性星号标记。"""
+    if p is None or np.isnan(p):
+        return ""
+    if p < 0.001:
+        return "***"
+    elif p < 0.01:
+        return "**"
+    elif p < 0.05:
+        return "*"
+    return ""
+
+
 def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
-    """Pearson 相关性矩阵分析，含 p 值。"""
+    """相关性矩阵分析（Pearson/Spearman），含多重比较校正和显著性标记。"""
     # 去重：防止 target_col 同时出现在 feature_cols 中导致重复列
     cols = list(dict.fromkeys(req.feature_cols + [req.target_col]))
     cols = [c for c in cols if c in req.data.columns]
-    corr = req.data[cols].corr()
+
+    method = req.params.get("method", "pearson")  # "pearson" | "spearman" | "kendall"
+    if method == "spearman":
+        corr = req.data[cols].corr(method="spearman")
+        corr_label = "Spearman ρ"
+    elif method == "kendall":
+        corr = req.data[cols].corr(method="kendall")
+        corr_label = "Kendall τ"
+    else:
+        corr = req.data[cols].corr(method="pearson")
+        corr_label = "Pearson r"
 
     # p 值矩阵
     pmat = pd.DataFrame(index=cols, columns=cols, dtype=float)
@@ -23,43 +46,301 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         for c2 in cols:
             mask = req.data[c1].notna() & req.data[c2].notna()
             if mask.sum() >= 3:
-                _, p = stats.pearsonr(req.data.loc[mask, c1], req.data.loc[mask, c2])
+                if method == "spearman":
+                    _, p = stats.spearmanr(
+                        req.data.loc[mask, c1], req.data.loc[mask, c2]
+                    )
+                elif method == "kendall":
+                    _, p = stats.kendalltau(
+                        req.data.loc[mask, c1], req.data.loc[mask, c2]
+                    )
+                else:
+                    _, p = stats.pearsonr(
+                        req.data.loc[mask, c1], req.data.loc[mask, c2]
+                    )
                 pmat.loc[c1, c2] = p
             else:
                 pmat.loc[c1, c2] = np.nan
+
+    # ── 多重比较校正 (Bonferroni) ──
+    # 只对非对角线的上三角唯一 p 值做校正
+    n_comparisons = len(cols) * (len(cols) - 1) // 2
+    pmat_corrected = pmat.copy()
+    if n_comparisons > 0:
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                raw_p = pmat.iloc[i, j]
+                if not np.isnan(raw_p):
+                    corrected = min(raw_p * n_comparisons, 1.0)
+                    pmat_corrected.iloc[i, j] = corrected
+                    pmat_corrected.iloc[j, i] = corrected
+
+    # ── 相关性 + 显著性标记矩阵 ──
+    annotated = pd.DataFrame(index=cols, columns=cols, dtype=str)
+    for i, c1 in enumerate(cols):
+        for j, c2 in enumerate(cols):
+            r = corr.iloc[i, j]
+            p = pmat.iloc[i, j]
+            stars = _significance_stars(p) if not (np.isnan(p) if isinstance(p, float) else p is None) else ""
+            annotated.iloc[i, j] = f"{r:+.2f}{stars}"
 
     target_corr = corr[req.target_col].drop(req.target_col).sort_values(ascending=False)
     top_factor = target_corr.index[0] if len(target_corr) > 0 else "N/A"
     top_value = target_corr.iloc[0] if len(target_corr) > 0 else 0
 
-    # 全矩阵热力图
+    # ── p 值校正报告 ──
+    sig_before = int((pmat.values[np.triu_indices_from(pmat.values, k=1)] < 0.05).sum())
+    sig_after = int((pmat_corrected.values[np.triu_indices_from(pmat_corrected.values, k=1)] < 0.05).sum())
+    correction_note = (
+        f"Bonferroni校正前 {sig_before} 对显著，校正后 {sig_after} 对显著"
+        f"（{n_comparisons} 对比较）"
+    )
+
+    # ── 热力图增强：只标注显著单元格，添加星号 ──
     n = len(cols)
-    fig = Figure(figsize=(max(n*0.85, 5), max(n*0.75, 4)))
+    fig = Figure(figsize=(max(n*0.95, 6), max(n*0.85, 4.5)))
     ax = fig.add_subplot(111)
     im = ax.imshow(corr.values, cmap="RdBu_r", aspect="auto", vmin=-1, vmax=1)
-    ax.set_xticks(range(n)); ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=8)
-    ax.set_yticks(range(n)); ax.set_yticklabels(cols, fontsize=8)
+    ax.set_xticks(range(n))
+    ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=9)
+    ax.set_yticks(range(n))
+    ax.set_yticklabels(cols, fontsize=9)
     for i in range(n):
         for j in range(n):
             v = corr.values[i, j]
-            ax.text(j, i, f"{v:+.2f}", ha="center", va="center",
-                    fontsize=7, fontweight="bold",
-                    color="white" if abs(v) > 0.5 else "black")
-    fig.colorbar(im, ax=ax, shrink=0.8, label="r")
-    ax.set_title(f"相关性热力图 — {req.target_col}", fontsize=11)
+            p_raw = pmat.iloc[i, j]
+            p_adj = pmat_corrected.iloc[i, j]
+            if i == j:
+                continue
+            # 只标注 |r|>0.3 或显著的单元格
+            is_sig = not np.isnan(p_adj) and p_adj < 0.05
+            if abs(v) > 0.3 or is_sig:
+                stars = _significance_stars(p_raw) if not np.isnan(p_raw) else ""
+                ax.text(j, i, f"{v:+.2f}{stars}", ha="center", va="center",
+                        fontsize=8 if n <= 15 else 6,
+                        fontweight="bold" if is_sig else "normal",
+                        color="white" if abs(v) > 0.5 else "black")
+    fig.colorbar(im, ax=ax, shrink=0.8, label=corr_label)
+    ax.set_title(
+        f"相关性热力图 — {req.target_col}\n"
+        f"({corr_label} | {correction_note})",
+        fontsize=10,
+    )
     fig.tight_layout()
+
+    # ── 目标变量排序相关表 ──
+    target_p_adj = {}
+    for c in target_corr.index:
+        ci = cols.index(c)
+        ti = cols.index(req.target_col)
+        target_p_adj[c] = float(pmat_corrected.iloc[ci, ti])
+
+    # ── 散点矩阵：目标 vs Top-N 相关性变量 ──
+    top_n_scatter = min(6, len(target_corr))
+    if top_n_scatter >= 2:
+        top_vars = list(target_corr.index[:top_n_scatter])
+        scatter_cols = [req.target_col] + [c for c in top_vars if c != req.target_col]
+        scatter_cols = scatter_cols[:5]  # 最多 5x5
+        if len(scatter_cols) >= 2:
+            try:
+                n_s = len(scatter_cols)
+                fig_scatter = Figure(figsize=(n_s * 2.5, n_s * 2.2))
+                for ri, cv1 in enumerate(scatter_cols):
+                    for ci, cv2 in enumerate(scatter_cols):
+                        ax = fig_scatter.add_subplot(n_s, n_s, ri * n_s + ci + 1)
+                        sub = req.data[[cv1, cv2]].dropna()
+                        if len(sub) < 2:
+                            continue
+                        if ri == ci:
+                            vals = sub[cv1].values
+                            ax.hist(vals, bins=min(15, len(vals)//2), color="#6baed6",
+                                   edgecolor="white", alpha=0.8)
+                            ax.set_title(cv1, fontsize=8)
+                        else:
+                            ax.scatter(sub[cv1].values, sub[cv2].values, s=8,
+                                      alpha=0.5, color="#2171b5")
+                            # LOWESS 平滑趋势线
+                            if len(sub) >= 20:
+                                try:
+                                    from statsmodels.nonparametric.smoothers_lowess import lowess
+                                    smoothed = lowess(sub[cv2].values, sub[cv1].values,
+                                                     frac=0.3, return_sorted=True)
+                                    ax.plot(smoothed[:, 0], smoothed[:, 1], "-",
+                                           color="#d94801", linewidth=1.5, alpha=0.7)
+                                except Exception:
+                                    pass
+                            r_val = corr.loc[cv1, cv2] if cv1 in corr.index and cv2 in corr.columns else 0
+                            ax.annotate(f"r={r_val:.2f}", xy=(0.95, 0.05),
+                                       xycoords="axes fraction",
+                                       ha="right", fontsize=7, color="#d94801",
+                                       bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.7))
+                        if ri == n_s - 1:
+                            ax.set_xlabel(cv2, fontsize=7)
+                        if ci == 0:
+                            ax.set_ylabel(cv1, fontsize=7)
+                        ax.tick_params(labelsize=6)
+                fig_scatter.suptitle(
+                    f"散点矩阵 — {req.target_col} vs Top{top_n_scatter} 相关变量",
+                    fontsize=10,
+                )
+                fig_scatter.tight_layout()
+                figures.append(fig_scatter)
+            except Exception:
+                pass  # 散点矩阵失败不影响主分析
+
+    # ── 偏相关分析（控制混淆变量）──
+    control_vars = req.params.get("control_vars", [])
+    control_vars = [c for c in control_vars if c in req.data.columns and c != req.target_col
+                    and pd.api.types.is_numeric_dtype(req.data[c])]
+    figures = [fig]
+    summary_parts = [
+        f"与「{req.target_col}」相关性最强的因子是「{top_factor}」"
+        f"({corr_label.split()[0]}={top_value:.3f})",
+        correction_note,
+    ]
+    partial_corr_meta: dict = {}
+    partial_tables: dict = {}
+
+    if control_vars and len(control_vars) > 0:
+        # 计算偏相关：对每一对 (target, feature)，控制 control_vars
+        feature_cols_only = [c for c in cols if c != req.target_col and c not in control_vars]
+        partial_results = []
+        for fc in feature_cols_only:
+            all_vars = [req.target_col, fc] + control_vars
+            sub = req.data[all_vars].dropna()
+            if len(sub) < len(control_vars) + 3:
+                continue
+            # 回归 target ~ control_vars，取残差
+            X_ctrl_target = sm.add_constant(sub[control_vars].astype(float))
+            resid_target = sm.OLS(sub[req.target_col].astype(float), X_ctrl_target).fit().resid
+            # 回归 feature ~ control_vars，取残差
+            X_ctrl_feat = sm.add_constant(sub[control_vars].astype(float))
+            resid_feat = sm.OLS(sub[fc].astype(float), X_ctrl_feat).fit().resid
+            # 残差相关
+            if len(resid_target) >= 3:
+                r_partial, p_partial = stats.pearsonr(resid_target, resid_feat)
+            else:
+                r_partial, p_partial = np.nan, np.nan
+            # 零阶相关（原始）
+            r_zero = corr.loc[req.target_col, fc] if req.target_col in corr.index and fc in corr.columns else np.nan
+            partial_results.append({
+                "因子": fc,
+                "零阶相关(r)": round(float(r_zero), 4) if not np.isnan(r_zero) else None,
+                "偏相关(r_partial)": round(float(r_partial), 4),
+                "p值": round(float(p_partial), 4),
+                "变化": (
+                    "抑制" if not np.isnan(r_zero) and abs(r_partial) > abs(r_zero) + 0.05
+                    else "削弱" if not np.isnan(r_zero) and abs(r_partial) < abs(r_zero) - 0.05
+                    else "稳定"
+                ),
+            })
+            partial_corr_meta[fc] = {
+                "r_zero": float(r_zero) if not np.isnan(r_zero) else None,
+                "r_partial": float(r_partial),
+                "p_partial": float(p_partial),
+            }
+
+        if partial_results:
+            partial_df = pd.DataFrame(partial_results).sort_values(
+                "偏相关(r_partial)", key=abs, ascending=False
+            )
+            partial_tables["partial_correlations"] = partial_df
+
+            # 偏相关柱状图对比
+            fig_partial = Figure(figsize=(max(len(partial_df)*0.9, 6), 4))
+            ax_p = fig_partial.add_subplot(111)
+            x = np.arange(len(partial_df))
+            width = 0.35
+            zero_vals = [v if v is not None else 0 for v in partial_df["零阶相关(r)"]]
+            partial_vals = partial_df["偏相关(r_partial)"].values
+            ax_p.bar(x - width/2, zero_vals, width, label="零阶相关",
+                    color="#6baed6", alpha=0.8)
+            ax_p.bar(x + width/2, partial_vals, width, label="偏相关(控制混淆)",
+                    color="#2171b5", alpha=0.9)
+            ax_p.axhline(0, color="black", linewidth=0.5)
+            ax_p.set_xticks(x)
+            ax_p.set_xticklabels(partial_df["因子"], rotation=45, ha="right", fontsize=9)
+            ax_p.set_ylabel("相关系数", fontsize=10)
+            ax_p.set_title(
+                f"偏相关分析 — {req.target_col} | "
+                f"控制变量: {', '.join(control_vars)}",
+                fontsize=10,
+            )
+            ax_p.legend(fontsize=8)
+            fig_partial.tight_layout()
+            figures.append(fig_partial)
+
+            # 最显著偏相关
+            top_partial = partial_df.iloc[0]
+            change_note = (
+                f"（控制{', '.join(control_vars)}后"
+                f"{'增强' if top_partial['变化'] == '抑制' else '减弱'}）"
+                if top_partial["变化"] != "稳定" else ""
+            )
+            summary_parts.append(
+                f"控制「{', '.join(control_vars)}」后，"
+                f"最强偏相关: {top_partial['因子']} "
+                f"(r_partial={top_partial['偏相关(r_partial)']:.3f}){change_note}"
+            )
 
     return AnalysisResult(
         task="correlation",
-        tables={"correlation_matrix": corr, "p_values": pmat.astype(float)},
-        figures=[fig],
-        summary=f"与「{req.target_col}」相关性最强的因子是「{top_factor}」(r={top_value:.3f})",
-        metadata={"target_correlations": target_corr.to_dict()},
+        tables={
+            "correlation_matrix": corr,
+            "p_values_raw": pmat.astype(float),
+            "p_values_corrected": pmat_corrected.astype(float),
+            "annotated_matrix": annotated,
+            **partial_tables,
+        },
+        figures=figures,
+        summary="。".join(summary_parts),
+        metadata={
+            "target_correlations": target_corr.to_dict(),
+            "method": method,
+            "n_comparisons": n_comparisons,
+            "sig_before_correction": sig_before,
+            "sig_after_correction": sig_after,
+            "target_p_adjusted": target_p_adj,
+            "partial_correlations": partial_corr_meta,
+            "control_vars": control_vars,
+        },
     )
 
 
+def _eta_squared(aov_table, model):
+    """计算偏 η² 效应量。"""
+    ss_residual = aov_table["sum_sq"].get("Residual", 0)
+    ss_total = sum(aov_table["sum_sq"])
+    effect_sizes = {}
+    for idx in aov_table.index:
+        if idx == "Residual":
+            continue
+        ss_effect = aov_table.loc[idx, "sum_sq"]
+        # 偏 η² = SS_effect / (SS_effect + SS_residual)
+        eta2 = ss_effect / (ss_effect + ss_residual) if (ss_effect + ss_residual) > 0 else 0
+        # ω² 近似
+        df_effect = aov_table.loc[idx, "df"]
+        ms_residual = ss_residual / aov_table.loc["Residual", "df"] if "Residual" in aov_table.index else 1
+        omega2 = (ss_effect - df_effect * ms_residual) / (ss_total + ms_residual) if (ss_total + ms_residual) > 0 else 0
+        omega2 = max(0, omega2)
+        effect_sizes[idx] = {"η²": float(eta2), "ω²": float(omega2)}
+    return effect_sizes
+
+
+def _effect_interpretation(eta2):
+    """η² 效应量解读 (Cohen 准则)。"""
+    if eta2 < 0.01:
+        return "可忽略"
+    elif eta2 < 0.06:
+        return "小"
+    elif eta2 < 0.14:
+        return "中"
+    else:
+        return "大"
+
+
 def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
-    """多因子 ANOVA 方差分析。"""
+    """多因子 ANOVA 方差分析，含效应量、假设检验前提验证和事后比较。"""
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if req.target_col not in req.data.columns:
         return AnalysisResult(task="anova", status="error",
@@ -85,51 +366,905 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="anova", status="error",
             messages=["ANOVA 模型拟合失败，请检查数据是否包含缺失值或非数值列"])
 
+    # ── 假设检验前提验证 ──
+    from scipy import stats as sp_stats
+
+    # Levene 方差齐性检验（按第一个因子分组）
+    first_col = cols[0]
+    clean = req.data[[req.target_col, first_col]].dropna()
+    group_levels = clean[first_col].unique()
+    if len(group_levels) >= 2 and len(group_levels) <= 20:
+        group_samples = [clean[clean[first_col] == lv][req.target_col].values
+                        for lv in group_levels]
+        if all(len(gs) >= 2 for gs in group_samples):
+            _, levene_p = sp_stats.levene(*group_samples)
+            if levene_p < 0.05:
+                warn_msgs.append(
+                    f"⚠ 方差齐性检验 (Levene) p={levene_p:.4f}<0.05，"
+                    f"方差不等，ANOVA 结果可能不可靠"
+                )
+
+    # 残差正态性检验
+    residuals = model.resid
+    if len(residuals) >= 3 and len(residuals) <= 5000:
+        _, sw_p = sp_stats.shapiro(residuals)
+        if sw_p < 0.05:
+            warn_msgs.append(
+                f"⚠ 残差正态性检验 (Shapiro-Wilk) p={sw_p:.4f}<0.05，"
+                f"残差不满足正态性假设"
+            )
+
+    # ── 效应量计算 ──
+    effect_sizes = _eta_squared(anova_table, model)
+
     alpha = req.params.get("alpha", 0.05)
-    sig_factors = []
+    sig_factors: list[str] = []
     for col in cols:
         try:
             p_val = anova_table.loc[f"Q('{col}')", "PR(>F)"]
+            es = effect_sizes.get(f"Q('{col}')", {})
+            eta2 = es.get("η²", 0)
             if p_val < alpha:
-                sig_factors.append(f"{col}(p={p_val:.4f})")
+                sig_factors.append(f"{col}(p={p_val:.4f}, η²={eta2:.3f})")
         except KeyError:
             warn_msgs.append(f"因子「{col}」在 ANOVA 结果表中未找到")
 
-    summary = f"显著影响「{req.target_col}」的因子: {', '.join(sig_factors)}" if sig_factors \
-        else f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})"
+    # ── 事后检验 (Tukey HSD) 仅当显著因子数≥1 时执行 ──
+    posthoc_results: list[dict] = []
+    if sig_factors:
+        from statsmodels.stats.multicomp import pairwise_tukeyhsd
+        for col in cols:
+            try:
+                p_val = anova_table.loc[f"Q('{col}')", "PR(>F)"]
+                if p_val < alpha and req.data[col].nunique() >= 2:
+                    tukey = pairwise_tukeyhsd(
+                        req.data[req.target_col].dropna(),
+                        req.data.loc[req.data[req.target_col].notna(), col],
+                        alpha=alpha
+                    )
+                    for row_idx in range(len(tukey._results_table.data[1:])):
+                        row = tukey._results_table.data[1 + row_idx]
+                        posthoc_results.append({
+                            "因子": col,
+                            "对比": f"{row[0]} vs {row[1]}",
+                            "均值差": float(row[2]),
+                            "p值": float(row[3]),
+                            "显著": "是" if float(row[3]) < alpha else "否",
+                        })
+            except (KeyError, Exception):
+                pass
+
+    # ── 构建 ANOVA 增强表 (含效应量) ──
+    anova_enhanced_rows = []
+    for idx in anova_table.index:
+        row = {
+            "来源": idx,
+            "自由度": int(anova_table.loc[idx, "df"]),
+            "平方和": float(anova_table.loc[idx, "sum_sq"]),
+            "均方": float(anova_table.loc[idx, "sum_sq"]) / max(anova_table.loc[idx, "df"], 1),
+            "F值": float(anova_table.loc[idx, "F"]) if not pd.isna(anova_table.loc[idx, "F"]) else None,
+            "p值": float(anova_table.loc[idx, "PR(>F)"]) if not pd.isna(anova_table.loc[idx, "PR(>F)"]) else None,
+        }
+        es = effect_sizes.get(idx, {})
+        row["η²"] = es.get("η²", None)
+        row["ω²"] = es.get("ω²", None)
+        row["效应量解读"] = _effect_interpretation(es.get("η²", 0)) if es.get("η²") else ""
+        anova_enhanced_rows.append(row)
+    anova_enhanced = pd.DataFrame(anova_enhanced_rows)
+
+    # ── 汇总 ──
+    if sig_factors:
+        summary = (f"显著影响「{req.target_col}」的因子: {'; '.join(sig_factors)}。"
+                   f"模型 R²={model.rsquared:.3f}, 调整 R²={model.rsquared_adj:.3f}")
+    else:
+        summary = f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})"
 
     coef_df = pd.DataFrame({
         "变量": model.params.index, "系数": model.params.values,
         "标准误": model.bse.values, "t值": model.tvalues.values, "p值": model.pvalues.values,
     })
 
-    # 箱线图：按第一个显著因子（或第一个因子）分组展示目标变量分布
-    fig_box = Figure(figsize=(max(len(cols)*1.6, 5), 4))
+    # ── 箱线图：按第一个显著因子分组，含显著性注释 ──
+    fig_box = Figure(figsize=(max(len(cols)*2.0, 6), 4.5))
     ax_box = fig_box.add_subplot(111)
     group_col = sig_factors[0].split("(")[0] if sig_factors else cols[0]
     groups = req.data[[req.target_col, group_col]].dropna()
-    group_names = sorted(groups[group_col].unique())
+    group_names = sorted(groups[group_col].unique(), key=str)
     group_data = [groups[groups[group_col] == g][req.target_col].values for g in group_names]
-    bp = ax_box.boxplot(group_data, tick_labels=[str(g) for g in group_names], patch_artist=True)
+    bp = ax_box.boxplot(group_data, tick_labels=[
+        f"{g}\n(n={len(d)})" for g, d in zip(group_names, group_data)
+    ], patch_artist=True, widths=0.5)
     for patch in bp['boxes']:
         patch.set_facecolor("#6baed6")
-    ax_box.set_xlabel(group_col, fontsize=9)
-    ax_box.set_ylabel(req.target_col, fontsize=9)
+    # 叠加散点
+    for i, gdata in enumerate(group_data, 1):
+        jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+        ax_box.scatter(np.full(len(gdata), i) + jitter, gdata,
+                       alpha=0.3, s=10, color="black", zorder=3)
+    ax_box.set_xlabel(group_col, fontsize=10)
+    ax_box.set_ylabel(req.target_col, fontsize=10)
     ax_box.set_title(f"箱线图 — {req.target_col} by {group_col}", fontsize=11)
     fig_box.tight_layout()
+    figures = [fig_box]
+
+    # ── 交互效应图 (≥2个因子时) ──
+    if len(cols) >= 2:
+        f1, f2 = cols[0], cols[1]
+        sub_int = req.data[[req.target_col, f1, f2]].dropna()
+        # 仅对类别有限的列做交互图
+        if sub_int[f1].nunique() <= 10 and sub_int[f2].nunique() <= 10:
+            try:
+                means = sub_int.groupby([f1, f2])[req.target_col].mean().unstack()
+                fig_int = Figure(figsize=(max(len(means.columns)*1.5, 5), 4))
+                ax_int = fig_int.add_subplot(111)
+                for col_name in means.columns:
+                    ax_int.plot(means.index, means[col_name], "o-", markersize=6,
+                               linewidth=1.5, label=str(col_name))
+                ax_int.set_xlabel(f1, fontsize=10)
+                ax_int.set_ylabel(f"{req.target_col} 均值", fontsize=10)
+                ax_int.set_title(f"交互效应图 — {f1} × {f2}", fontsize=11)
+                ax_int.legend(title=f2, fontsize=8, title_fontsize=8)
+                ax_int.grid(True, alpha=0.3)
+                fig_int.tight_layout()
+                figures.append(fig_int)
+            except Exception:
+                pass  # 交互图生成失败不影响主分析
+
+    # ── 返回 ──
+    result_tables = {
+        "anova_enhanced": anova_enhanced,
+        "coefficients": coef_df,
+    }
+    if posthoc_results:
+        result_tables["posthoc_tukey"] = pd.DataFrame(posthoc_results)
 
     return AnalysisResult(
         task="anova",
-        tables={"anova_table": anova_table, "coefficients": coef_df},
-        figures=[fig_box],
+        tables=result_tables,
+        figures=figures,
         summary=summary,
-        metadata={"r_squared": model.rsquared, "r_squared_adj": model.rsquared_adj},
+        metadata={
+            "r_squared": model.rsquared,
+            "r_squared_adj": model.rsquared_adj,
+            "effect_sizes": effect_sizes,
+        },
         messages=warn_msgs,
     )
 
 
+def _cohens_d(x, y):
+    """Cohen's d 效应量 (Hedges' g 校正小样本偏差)。"""
+    n1, n2 = len(x), len(y)
+    s1, s2 = np.std(x, ddof=1), np.std(y, ddof=1)
+    # 合并标准差
+    sp = np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / (n1 + n2 - 2))
+    if sp < 1e-10:
+        return 0.0
+    d = (np.mean(x) - np.mean(y)) / sp
+    # Hedges' g 小样本校正因子
+    correction = 1 - 3 / (4 * (n1 + n2) - 9)
+    return float(d * correction)
+
+
+def _cliffs_delta(x, y):
+    """Cliff's delta — 非参数效应量，适用于 Mann-Whitney。值域 [-1, 1]。"""
+    n1, n2 = len(x), len(y)
+    # 对所有 (xi, yj) 对进行比较
+    dominance = 0
+    for xi in x:
+        for yj in y:
+            if xi > yj:
+                dominance += 1
+            elif xi < yj:
+                dominance -= 1
+    return float(dominance / (n1 * n2))
+
+
+def _effect_size_label(d, test_type="cohens_d"):
+    """效应量大小解读标签。"""
+    if test_type == "cohens_d":
+        ad = abs(d)
+        if ad < 0.2:
+            return "可忽略"
+        elif ad < 0.5:
+            return "小"
+        elif ad < 0.8:
+            return "中"
+        else:
+            return "大"
+    else:  # cliffs_delta
+        ad = abs(d)
+        if ad < 0.147:
+            return "可忽略"
+        elif ad < 0.33:
+            return "小"
+        elif ad < 0.474:
+            return "中"
+        else:
+            return "大"
+
+
 def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
-    """两样本假设检验 (t-test / Mann-Whitney U)。"""
+    """假设检验：独立样本、配对样本、单样本 t 检验 / Mann-Whitney U，含效应量。"""
+    test_type = req.params.get("test", "ttest_ind")
+
+    # ── 单样本检验 ──
+    if test_type == "ttest_1samp":
+        data = req.data[req.target_col].dropna()
+        popmean = req.params.get("popmean", 0)
+        if len(data) < 3:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["有效数据不足(至少3个点)"])
+
+        from scipy import stats as sp_stats
+        stat, p = sp_stats.ttest_1samp(data, popmean)
+        test_name = f"单样本 t 检验 (H₀: μ={popmean})"
+        d = (float(data.mean()) - popmean) / (float(data.std(ddof=1)) + 1e-10)
+        effect_size = float(d)
+        effect_name = "Cohen's d (单样本)"
+        effect_label = _effect_size_label(abs(d), "cohens_d")
+        desc_df = pd.DataFrame({
+            "统计量": ["样本量", "均值", "标准差", "标准误", "H₀均值"],
+            "值": [str(len(data)), f"{data.mean():.4f}", f"{data.std(ddof=1):.4f}",
+                   f"{data.sem():.4f}", str(popmean)],
+        })
+
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = f"显著偏离 {popmean}" if p < alpha else f"未显著偏离 {popmean}"
+
+        fig = Figure(figsize=(6, 4))
+        ax = fig.add_subplot(111)
+        ax.hist(data, bins=min(20, len(data)//2), color="#6baed6", edgecolor="white", alpha=0.8)
+        mean_val = float(data.mean())
+        ax.axvline(mean_val, color="#2171b5", linewidth=2, label=f"μ={mean_val:.3f}")
+        ax.axvline(popmean, color="#d94801", linestyle="--", linewidth=2, label=f"H₀={popmean}")
+        # 95% CI
+        ci = sp_stats.t.interval(0.95, len(data)-1, loc=mean_val, scale=data.sem())
+        ax.axvspan(ci[0], ci[1], alpha=0.1, color="#2171b5", label=f"95%CI")
+        ax.set_xlabel(req.target_col, fontsize=10)
+        ax.set_ylabel("频数", fontsize=10)
+        ax.set_title(f"{test_name} (p={p:.4f})", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={
+                "test_results": pd.DataFrame({
+                    "检验方法": [test_name], "统计量": [f"{stat:.4f}"], "p值": [f"{p:.4f}"],
+                    "显著性水平": [str(alpha)], "效应量": [f"{effect_name}={effect_size:.3f}"],
+                    "效应量解读": [effect_label], "结论": [conclusion],
+                }),
+                "descriptive_stats": desc_df,
+            },
+            figures=[fig],
+            summary=f"单样本检验: {conclusion} (p={p:.4f}, d={effect_size:.3f}, {effect_label})",
+            metadata={
+                "test": test_name, "statistic": float(stat), "p_value": float(p),
+                "alpha": alpha, "effect_size": effect_size, "popmean": popmean,
+            },
+        )
+
+    # ── 配对检验 ──
+    if test_type == "ttest_paired":
+        # 配对检验：使用两个 feature_cols 作为配对的列
+        if len(req.feature_cols) < 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["配对检验需要 2 个特征列（前后测量）"])
+        col1, col2 = req.feature_cols[0], req.feature_cols[1]
+        sub = req.data[[col1, col2]].dropna()
+        if len(sub) < 3:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["有效配对数据不足(至少3对)"])
+
+        from scipy import stats as sp_stats
+        stat, p = sp_stats.ttest_rel(sub[col1], sub[col2])
+        test_name = f"配对 t 检验 ({col1} vs {col2})"
+        diff = sub[col1].values - sub[col2].values
+        # 配对 Cohen's d: mean(diff) / sd(diff)
+        d_val = float(np.mean(diff) / (np.std(diff, ddof=1) + 1e-10))
+        effect_size = d_val
+        effect_name = "Cohen's d (配对)"
+        effect_label = _effect_size_label(abs(d_val), "cohens_d")
+
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = "前后存在显著差异" if p < alpha else "前后未发现显著差异"
+
+        desc_df = pd.DataFrame({
+            "统计量": ["配对对数", f"{col1}均值", f"{col2}均值",
+                      "差值均值", "差值标准差", "差值标准误"],
+            "值": [str(len(sub)), f"{sub[col1].mean():.4f}", f"{sub[col2].mean():.4f}",
+                   f"{diff.mean():.4f}", f"{diff.std(ddof=1):.4f}",
+                   f"{sp_stats.sem(diff):.4f}"],
+        })
+
+        # 配对图：前后连线
+        fig = Figure(figsize=(6, 4.5))
+        ax = fig.add_subplot(111)
+        x_pos = np.arange(len(sub))
+        ax.plot(x_pos, sub[col1].values, "o-", markersize=4, color="#6baed6", label=col1)
+        ax.plot(x_pos, sub[col2].values, "s-", markersize=4, color="#fd8d3c", label=col2)
+        for i in range(len(sub)):
+            ax.plot([i, i], [sub[col1].iloc[i], sub[col2].iloc[i]],
+                   "-", color="gray", alpha=0.4, linewidth=0.8)
+        ax.set_xlabel("配对序号", fontsize=10)
+        ax.set_ylabel("值", fontsize=10)
+        ax.set_title(f"{test_name} (p={p:.4f}, d={d_val:.3f})", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={
+                "test_results": pd.DataFrame({
+                    "检验方法": [test_name], "统计量": [f"{stat:.4f}"], "p值": [f"{p:.4f}"],
+                    "显著性水平": [str(alpha)], "效应量": [f"{effect_name}={effect_size:.3f}"],
+                    "效应量解读": [effect_label], "结论": [conclusion],
+                }),
+                "descriptive_stats": desc_df,
+            },
+            figures=[fig],
+            summary=f"配对检验: {conclusion} (p={p:.4f}, d={d_val:.3f}, {effect_label})",
+            metadata={
+                "test": test_name, "statistic": float(stat), "p_value": float(p),
+                "alpha": alpha, "effect_size": effect_size, "n_pairs": len(sub),
+            },
+        )
+
+    # ── 单样本 Wilcoxon 符号秩检验 ──
+    if test_type == "wilcoxon_1samp":
+        data = req.data[req.target_col].dropna()
+        popmedian = req.params.get("popmedian", 0)
+        if len(data) < 5:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["有效数据不足(至少5个点)"])
+
+        from scipy import stats as sp_stats
+        # Wilcoxon 符号秩检验 (双边): 检验中位数是否等于 popmedian
+        stat, p = sp_stats.wilcoxon(data.values - popmedian)
+        test_name = f"单样本 Wilcoxon 检验 (H₀: 中位数={popmedian})"
+        # 效应量: 匹配对秩相关 r = Z / sqrt(N)
+        n = len(data)
+        z_stat_abs = abs(sp_stats.norm.ppf(max(p, 1e-15) / 2))
+        r_effect = float(z_stat_abs / np.sqrt(n))
+        effect_size = r_effect
+        effect_name = "秩相关 r"
+        effect_label = _effect_size_label(r_effect, "cliffs_delta")
+
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = f"中位数显著偏离 {popmedian}" if p < alpha else f"中位数未显著偏离 {popmedian}"
+
+        fig = Figure(figsize=(6, 4))
+        ax = fig.add_subplot(111)
+        ax.hist(data, bins=min(20, n//2), color="#6baed6", edgecolor="white", alpha=0.8)
+        ax.axvline(np.median(data), color="#2171b5", linewidth=2,
+                   label=f"中位数={np.median(data):.3f}")
+        ax.axvline(popmedian, color="#d94801", linestyle="--", linewidth=2,
+                   label=f"H₀={popmedian}")
+        ax.set_xlabel(req.target_col, fontsize=10)
+        ax.set_ylabel("频数", fontsize=10)
+        ax.set_title(f"{test_name} (p={p:.4f})", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={
+                "test_results": pd.DataFrame({
+                    "检验方法": [test_name], "统计量": [f"{stat:.1f}"],
+                    "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+                    "效应量": [f"{effect_name}={effect_size:.3f}"],
+                    "效应量解读": [effect_label], "结论": [conclusion],
+                }),
+                "descriptive_stats": pd.DataFrame({
+                    "统计量": ["样本量", "中位数", "IQR", "H₀中位数",
+                              "高于H₀数", "低于H₀数"],
+                    "值": [str(n), f"{data.median():.4f}",
+                           f"{data.quantile(0.75)-data.quantile(0.25):.4f}",
+                           str(popmedian), str(int((data > popmedian).sum())),
+                           str(int((data < popmedian).sum()))],
+                }),
+            },
+            figures=[fig],
+            summary=f"单样本Wilcoxon: {conclusion} (p={p:.4f}, r={r_effect:.3f})",
+            metadata={
+                "test": test_name, "statistic": float(stat), "p_value": float(p),
+                "alpha": alpha, "effect_size": effect_size, "popmedian": popmedian,
+            },
+        )
+
+    # ── Kruskal-Wallis H 检验 (非参数 ANOVA) ──
+    if test_type in ("kruskal_wallis", "kruskal"):
+        group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
+        sub = req.data[[req.target_col, group_col]].dropna()
+        groups = sub[group_col].unique()
+        if len(groups) < 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["至少需要 2 个分组"])
+
+        from scipy import stats as sp_stats
+        group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
+        stat, p = sp_stats.kruskal(*group_data)
+        test_name = "Kruskal-Wallis H 检验 (非参数 ANOVA)"
+        n_total = len(sub)
+        # 效应量: η²_H = H / (N-1) 近似
+        eta2_h = float(stat / (n_total - 1)) if n_total > 1 else 0.0
+        effect_size = eta2_h
+        effect_name = "η²_H"
+        effect_label = _effect_interpretation(eta2_h)
+
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = "组间存在显著差异" if p < alpha else "未发现组间显著差异"
+
+        fig = Figure(figsize=(max(len(groups)*1.5, 5), 4))
+        ax = fig.add_subplot(111)
+        bp = ax.boxplot(group_data, tick_labels=[str(g) for g in groups],
+                       patch_artist=True, widths=0.5)
+        for patch in bp["boxes"]:
+            patch.set_facecolor("#6baed6")
+        ax.set_xlabel(group_col, fontsize=10)
+        ax.set_ylabel(req.target_col, fontsize=10)
+        ax.set_title(f"{test_name} (H={stat:.2f}, p={p:.4f})", fontsize=11)
+        fig.tight_layout()
+
+        # ── Dunn 事后多重比较 ──
+        tables = {
+            "test_results": pd.DataFrame({
+                "检验方法": [test_name], "统计量(H)": [f"{stat:.3f}"],
+                "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+                "效应量": [f"{effect_name}={effect_size:.3f}"],
+                "效应量解读": [effect_label], "结论": [conclusion],
+            }),
+        }
+        if p < alpha and len(groups) >= 3:
+            # Dunn 检验：基于秩和的成对比较
+            from itertools import combinations
+            all_vals = np.concatenate(group_data)
+            ranks = sp_stats.rankdata(all_vals)
+            rank_sums = {}
+            start = 0
+            for g, gd in zip(groups, group_data):
+                rank_sums[g] = np.sum(ranks[start:start + len(gd)])
+                start += len(gd)
+
+            dunn_rows = []
+            n_comparisons = len(groups) * (len(groups) - 1) // 2
+            for g1, g2 in combinations(groups, 2):
+                n1, n2 = len(group_data[list(groups).index(g1)]), len(group_data[list(groups).index(g2)])
+                z_num = abs(rank_sums[g1] / n1 - rank_sums[g2] / n2)
+                z_denom = np.sqrt((len(all_vals) * (len(all_vals) + 1) / 12) * (1/n1 + 1/n2))
+                z_stat_dunn = z_num / (z_denom + 1e-10)
+                p_dunn = float(2 * sp_stats.norm.sf(abs(z_stat_dunn)))
+                # Bonferroni 校正
+                p_adj = min(p_dunn * n_comparisons, 1.0)
+                dunn_rows.append({
+                    "对比": f"{g1} vs {g2}",
+                    "Z值": round(float(z_stat_dunn), 3),
+                    "原始p值": round(float(p_dunn), 4),
+                    "校正p值": round(float(p_adj), 4),
+                    "显著": "是" if p_adj < alpha else "否",
+                })
+            tables["posthoc_dunn"] = pd.DataFrame(dunn_rows)
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables=tables,
+            figures=[fig],
+            summary=f"Kruskal-Wallis: {conclusion} (H={stat:.2f}, p={p:.4f}, η²_H={eta2_h:.3f})",
+            metadata={
+                "test": test_name, "statistic": float(stat), "p_value": float(p),
+                "alpha": alpha, "effect_size": effect_size, "n_groups": len(groups),
+            },
+        )
+
+    # ── McNemar 检验 (配对二分类数据) ──
+    if test_type == "mcnemar":
+        if len(req.feature_cols) < 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["McNemar 检验需要 2 个特征列 (前后二分类测量)"])
+
+        col1, col2 = req.feature_cols[0], req.feature_cols[1]
+        sub = req.data[[col1, col2]].dropna()
+        if len(sub) < 5:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["有效配对数据不足(至少5对)"])
+
+        # 构建 2×2 列联表
+        vals1 = sub[col1].values
+        vals2 = sub[col2].values
+        # 自动二值化
+        unique_vals = np.unique(np.concatenate([vals1, vals2]))
+        if len(unique_vals) > 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["McNemar 检验需要二分类数据 (每列恰好 2 个不同值)"])
+
+        pos = str(unique_vals[1]) if len(unique_vals) > 1 else str(unique_vals[0])
+        neg = str(unique_vals[0])
+
+        a = int(((vals1 == pos) & (vals2 == pos)).sum())  # 都为正
+        b = int(((vals1 == pos) & (vals2 == neg)).sum())  # 前正后负
+        c = int(((vals1 == neg) & (vals2 == pos)).sum())  # 前负后正
+        d = int(((vals1 == neg) & (vals2 == neg)).sum())  # 都为负
+
+        from scipy import stats as sp_stats
+        # McNemar 连续性校正
+        stat = (abs(b - c) - 1)**2 / (b + c + 1e-10) if (b + c) > 0 else 0
+        p = float(1 - sp_stats.chi2.cdf(stat, 1))
+
+        test_name = f"McNemar 检验 ({col1} → {col2})"
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = "前后存在显著变化" if p < alpha else "前后未发现显著变化"
+        # Odds Ratio = b/c
+        or_val = b / (c + 1e-10)
+        effect_size = float(or_val) if or_val < 100 else float("inf")
+
+        # 可视化：前后对比堆叠柱状图
+        fig = Figure(figsize=(5, 4))
+        ax = fig.add_subplot(111)
+        categories = [f"{neg}→{neg}", f"{neg}→{pos}", f"{pos}→{neg}", f"{pos}→{pos}"]
+        counts = [d, c, b, a]
+        ax.bar(categories, counts, color=["#9ecae1", "#2171b5", "#d94801", "#6baed6"],
+               edgecolor="white")
+        for i, (cat, cnt) in enumerate(zip(categories, counts)):
+            ax.text(i, cnt + max(counts)*0.02, str(cnt), ha="center", fontsize=9)
+        ax.set_ylabel("频数", fontsize=10)
+        ax.set_title(f"{test_name} (p={p:.4f}, OR={or_val:.2f})", fontsize=10)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={
+                "test_results": pd.DataFrame({
+                    "检验方法": [test_name], "统计量(χ²)": [f"{stat:.3f}"],
+                    "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+                    "效应量(OR)": [f"{or_val:.3f}"],
+                    "结论": [conclusion],
+                }),
+                "contingency_2x2": pd.DataFrame({
+                    f"{col2}={neg}": [d, a], f"{col2}={pos}": [c, b],
+                }, index=[f"{col1}={neg}", f"{col1}={pos}"]),
+            },
+            figures=[fig],
+            summary=f"McNemar: {conclusion} (χ²={stat:.2f}, p={p:.4f}, OR=b/c={or_val:.2f})",
+            metadata={
+                "test": test_name, "statistic": float(stat), "p_value": float(p),
+                "alpha": alpha, "odds_ratio": float(or_val) if not np.isinf(or_val) else None,
+                "n_pairs": len(sub), "discordant_pairs": b + c,
+            },
+        )
+
+    # ── Cochran's Q 检验 (3+ 配对二分类) ──
+    if test_type == "cochran_q":
+        measure_cols = [c for c in req.feature_cols if c in req.data.columns]
+        if len(measure_cols) < 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["Cochran Q 需要至少 2 个二分类条件列"])
+        sub = req.data[measure_cols].dropna()
+        if len(sub) < 3:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["有效数据不足(至少3行)"])
+        # 二值化
+        for c in measure_cols:
+            vals = sub[c].unique()
+            if len(vals) > 2:
+                return AnalysisResult(task="hypothesis_test", status="error",
+                    messages=[f"列「{c}」不是二分类数据"])
+        from scipy import stats as sp_stats
+        # Cochran Q: Q = (k-1)[k*sum(Cj²) - (sum Cj)²] / [k*sum(Ri) - sum(Ri²)]
+        k = len(measure_cols)
+        binary = (sub == sub.iloc[0, :].values).astype(int)  # 简化二值化
+        col_sums = binary.sum(axis=0).values
+        row_sums = binary.sum(axis=1).values
+        Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
+        denom = k * np.sum(row_sums) - np.sum(row_sums**2)
+        Q = Q / (denom + 1e-10)
+        p = float(1 - sp_stats.chi2.cdf(Q, k - 1))
+
+        test_name = f"Cochran Q 检验 ({k} 条件)"
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={"test_results": pd.DataFrame({
+                "检验方法": [test_name], "统计量(Q)": [f"{Q:.3f}"],
+                "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+                "条件数": [str(k)], "样本量": [str(len(sub))],
+                "结论": [conclusion],
+            })},
+            summary=f"Cochran Q: {conclusion} (Q={Q:.2f}, p={p:.4f}, k={k})",
+            metadata={"test": test_name, "statistic": float(Q), "p_value": float(p),
+                     "alpha": alpha, "k": k, "n": len(sub)},
+        )
+
+    # ── Kolmogorov-Smirnov 双样本检验 ──
+    if test_type == "ks":
+        group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
+        groups = req.data[group_col].unique()
+        if len(groups) != 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["KS 检验需要恰好 2 个分组"])
+        from scipy import stats as sp_stats
+        g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
+        g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
+        stat, p = sp_stats.ks_2samp(g1, g2)
+        test_name = f"Kolmogorov-Smirnov 检验 ({groups[0]} vs {groups[1]})"
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = "两样本分布存在显著差异" if p < alpha else "未发现分布差异"
+        # 效应量: D statistic itself
+        effect_size = float(stat)
+
+        fig = Figure(figsize=(7, 4))
+        ax = fig.add_subplot(111)
+        ax.hist(g1, bins=20, alpha=0.6, color="#6baed6", density=True, label=str(groups[0]))
+        ax.hist(g2, bins=20, alpha=0.6, color="#fd8d3c", density=True, label=str(groups[1]))
+        ax.set_xlabel(req.target_col, fontsize=10)
+        ax.set_title(f"{test_name} (D={stat:.3f}, p={p:.4f})", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={"test_results": pd.DataFrame({
+                "检验方法": [test_name], "统计量(D)": [f"{stat:.4f}"],
+                "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+                "结论": [conclusion],
+            })},
+            figures=[fig],
+            summary=f"KS 检验: {conclusion} (D={stat:.3f}, p={p:.4f})",
+            metadata={"test": test_name, "statistic": float(stat),
+                     "p_value": float(p), "alpha": alpha},
+        )
+
+    # ── Mann-Kendall 趋势检验 ──
+    if test_type == "mann_kendall":
+        data = req.data[req.target_col].dropna()
+        n = len(data)
+        if n < 4:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["有效数据不足(至少4个点)"])
+        from scipy import stats as sp_stats
+
+        # MK 统计量: sum of sign(x_j - x_i) for all i < j
+        vals = data.values
+        S = 0
+        for i in range(n - 1):
+            for j in range(i + 1, n):
+                if vals[j] > vals[i]:
+                    S += 1
+                elif vals[j] < vals[i]:
+                    S -= 1
+
+        # 方差 (处理结)
+        unique_vals, counts = np.unique(vals, return_counts=True)
+        ties = np.sum(counts * (counts - 1) * (2 * counts + 5))
+        var_S = (n * (n - 1) * (2 * n + 5) - ties) / 18
+        var_S = max(var_S, 1e-10)
+
+        z_mk = (S - np.sign(S)) / np.sqrt(var_S)
+        p = float(2 * sp_stats.norm.sf(abs(z_mk)))
+
+        # Kendall's tau 效应量
+        tau_mk = 2 * S / (n * (n - 1))
+        effect_size = float(tau_mk)
+
+        test_name = "Mann-Kendall 趋势检验"
+        alpha = req.params.get("alpha", 0.05)
+        trend_dir = "上升趋势" if S > 0 else "下降趋势" if S < 0 else "无趋势"
+        conclusion = f"存在显著{trend_dir}" if p < alpha else f"未发现显著趋势"
+
+        fig = Figure(figsize=(8, 4))
+        ax = fig.add_subplot(111)
+        ax.plot(range(n), vals, "o-", markersize=3, color="#2171b5", linewidth=1)
+        # 简单趋势线
+        z_poly = np.polyfit(range(n), vals, 1)
+        ax.plot(range(n), np.polyval(z_poly, range(n)), "-", color="#d94801",
+               linewidth=2, alpha=0.7, label=f"线性趋势 (τ={tau_mk:.3f})")
+        ax.set_xlabel("时间序号", fontsize=10)
+        ax.set_ylabel(req.target_col, fontsize=10)
+        ax.set_title(f"{test_name} (S={S}, p={p:.4f})", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={"test_results": pd.DataFrame({
+                "检验方法": [test_name], "S统计量": [str(S)],
+                "Z值": [f"{z_mk:.3f}"], "p值": [f"{p:.4f}"],
+                "显著性水平": [str(alpha)], "Kendall τ": [f"{tau_mk:.4f}"],
+                "结论": [conclusion],
+            })},
+            figures=[fig],
+            summary=f"Mann-Kendall: {conclusion} (τ={tau_mk:.3f}, p={p:.4f})",
+            metadata={"test": test_name, "S": int(S), "z": float(z_mk),
+                     "p_value": float(p), "tau": float(tau_mk), "alpha": alpha},
+        )
+
+    # ── Jonckheere-Terpstra 趋势检验 ──
+    if test_type == "jonckheere":
+        group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
+        sub = req.data[[req.target_col, group_col]].dropna()
+        groups = sub[group_col].unique()
+        if len(groups) < 3:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["Jonckheere-Terpstra 需要至少 3 个有序分组"])
+        from scipy import stats as sp_stats
+        # 转换分组为有序秩次
+        group_order = {g: i for i, g in enumerate(groups)}
+        sub_ordered = sub.copy()
+        sub_ordered["_order"] = sub[group_col].map(group_order)
+        sub_sorted = sub_ordered.sort_values("_order")
+        group_data_ordered = [sub_sorted[sub_sorted["_order"] == i][req.target_col].values
+                             for i in range(len(groups))]
+
+        # JT 统计量: 所有 (i<j) 对中，组i值 < 组j值的计数 - 组i值 > 组j值的计数
+        JT = 0
+        for i in range(len(groups)):
+            for j in range(i + 1, len(groups)):
+                for vi in group_data_ordered[i]:
+                    for vj in group_data_ordered[j]:
+                        if vi < vj:
+                            JT += 1
+                        elif vi > vj:
+                            JT -= 1
+
+        # 正态近似
+        n_total = sum(len(g) for g in group_data_ordered)
+        n_i = np.array([len(g) for g in group_data_ordered])
+        E_JT = (n_total**2 - np.sum(n_i**2)) / 4
+        V_JT = (n_total**2 * (2*n_total + 3) - np.sum(n_i**2 * (2*n_i + 3))) / 72
+        z_JT = (JT - E_JT) / np.sqrt(V_JT + 1e-10)
+        p = float(2 * sp_stats.norm.sf(abs(z_JT)))
+
+        test_name = f"Jonckheere-Terpstra 趋势检验"
+        alpha = req.params.get("alpha", 0.05)
+        trend_dir = "递增趋势" if z_JT > 0 else "递减趋势"
+        conclusion = f"存在显著{trend_dir}" if p < alpha else f"未发现显著趋势"
+
+        # Kendall's tau-b 效应量近似
+        tau_b = 2 * JT / (n_total**2 - np.sum(n_i**2) + 1e-10)
+        effect_size = float(tau_b)
+        effect_label = _effect_size_label(abs(tau_b), "cohens_d")
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={"test_results": pd.DataFrame({
+                "检验方法": [test_name], "统计量(JT)": [str(JT)],
+                "Z值": [f"{z_JT:.3f}"], "p值": [f"{p:.4f}"],
+                "显著性水平": [str(alpha)], "效应量(τ)": [f"{tau_b:.3f}"],
+                "结论": [conclusion],
+            })},
+            summary=f"Jonckheere-Terpstra: {conclusion} (Z={z_JT:.2f}, p={p:.4f}, τ={tau_b:.3f})",
+            metadata={"test": test_name, "statistic": float(JT), "p_value": float(p),
+                     "alpha": alpha, "effect_size": effect_size, "z": float(z_JT)},
+        )
+
+    # ── Friedman 检验 (非参数重复测量) ──
+    if test_type == "friedman":
+        # 需要多个 feature_cols 作为重复测量的不同条件
+        measure_cols = [c for c in req.feature_cols if c in req.data.columns]
+        if len(measure_cols) < 2:
+            measure_cols = [req.target_col] + [c for c in req.feature_cols[:2] if c in req.data.columns]
+        sub = req.data[measure_cols].dropna()
+        if len(sub) < 3 or len(measure_cols) < 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["Friedman 检验需要至少 2 个重复测量条件和 3 个完整观测"])
+
+        from scipy import stats as sp_stats
+        stat, p = sp_stats.friedmanchisquare(*[sub[c].values for c in measure_cols])
+        test_name = f"Friedman 检验 (非参数重复测量, {len(measure_cols)} 条件)"
+        n = len(sub)
+        k = len(measure_cols)
+        # Kendall's W 效应量: W = χ² / (n*(k-1))
+        kendall_w = float(stat / (n * (k - 1))) if n > 0 and k > 1 else 0.0
+        effect_size = kendall_w
+        effect_name = "Kendall's W"
+        if kendall_w > 0.5:
+            effect_label = "强一致"
+        elif kendall_w > 0.3:
+            effect_label = "中等一致"
+        elif kendall_w > 0.1:
+            effect_label = "弱一致"
+        else:
+            effect_label = "可忽略"
+
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
+
+        fig = Figure(figsize=(6, 4))
+        ax = fig.add_subplot(111)
+        means = [sub[c].median() for c in measure_cols]
+        ax.bar(range(len(measure_cols)), means, color="#6baed6", edgecolor="white")
+        ax.set_xticks(range(len(measure_cols)))
+        ax.set_xticklabels(measure_cols, rotation=45, ha="right", fontsize=9)
+        ax.set_ylabel("中位数", fontsize=10)
+        ax.set_title(f"{test_name} (χ²={stat:.2f}, p={p:.4f})", fontsize=11)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={
+                "test_results": pd.DataFrame({
+                    "检验方法": [test_name], "统计量(χ²)": [f"{stat:.3f}"],
+                    "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+                    "效应量": [f"{effect_name}={effect_size:.3f} ({effect_label})"],
+                    "结论": [conclusion],
+                }),
+            },
+            figures=[fig],
+            summary=f"Friedman: {conclusion} (χ²={stat:.2f}, p={p:.4f}, W={kendall_w:.3f})",
+            metadata={
+                "test": test_name, "statistic": float(stat), "p_value": float(p),
+                "alpha": alpha, "effect_size": effect_size,
+                "n": n, "k": k,
+            },
+        )
+
+    # ── 配对 Wilcoxon 符号秩检验 ──
+    if test_type == "wilcoxon_paired":
+        if len(req.feature_cols) < 2:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["配对检验需要 2 个特征列"])
+        col1, col2 = req.feature_cols[0], req.feature_cols[1]
+        sub = req.data[[col1, col2]].dropna()
+        if len(sub) < 5:
+            return AnalysisResult(task="hypothesis_test", status="error",
+                messages=["有效配对数据不足(至少5对)"])
+
+        from scipy import stats as sp_stats
+        # Wilcoxon 符号秩检验
+        stat, p = sp_stats.wilcoxon(sub[col1], sub[col2])
+        test_name = f"Wilcoxon 符号秩检验 ({col1} vs {col2})"
+        diff = sub[col1].values - sub[col2].values
+        # 匹配对效应量: r = Z / sqrt(N)
+        n_pairs = len(sub)
+        z_stat = float(sp_stats.norm.ppf(p / 2)) if p > 1e-15 else float(sp_stats.norm.ppf(1e-15))
+        r_effect = abs(z_stat) / np.sqrt(n_pairs)
+        effect_size = float(r_effect)
+        effect_name = "匹配对秩相关 r"
+        effect_label = _effect_size_label(r_effect, "cohens_d")
+
+        alpha = req.params.get("alpha", 0.05)
+        conclusion = "前后存在显著差异" if p < alpha else "前后未发现显著差异"
+
+        # 配对差值分布图
+        fig = Figure(figsize=(7, 4.5))
+        ax = fig.add_subplot(111)
+        ax.hist(diff, bins=min(15, n_pairs//2), color="#6baed6", edgecolor="white", alpha=0.8)
+        ax.axvline(0, color="#e31a1c", linestyle="--", linewidth=1.5, label="零差异线")
+        ax.axvline(np.median(diff), color="#2171b5", linewidth=2,
+                   label=f"中位数差={np.median(diff):.3f}")
+        ax.set_xlabel(f"{col1} - {col2}", fontsize=10)
+        ax.set_ylabel("频数", fontsize=10)
+        ax.set_title(f"{test_name} (p={p:.4f}, r={r_effect:.3f})", fontsize=11)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="hypothesis_test",
+            tables={
+                "test_results": pd.DataFrame({
+                    "检验方法": [test_name], "统计量": [f"{stat:.1f}"], "p值": [f"{p:.4f}"],
+                    "显著性水平": [str(alpha)], "效应量": [f"{effect_name}={effect_size:.3f}"],
+                    "效应量解读": [effect_label], "结论": [conclusion],
+                }),
+                "descriptive_stats": pd.DataFrame({
+                    "统计量": ["配对对数", f"{col1}中位数", f"{col2}中位数",
+                              "差值中位数", "正差值对数", "负差值对数"],
+                    "值": [str(n_pairs), f"{sub[col1].median():.4f}", f"{sub[col2].median():.4f}",
+                           f"{np.median(diff):.4f}", str(int((diff > 0).sum())),
+                           str(int((diff < 0).sum()))],
+                }),
+            },
+            figures=[fig],
+            summary=f"Wilcoxon配对检验: {conclusion} (p={p:.4f}, r={r_effect:.3f}, {effect_label})",
+            metadata={
+                "test": test_name, "statistic": float(stat), "p_value": float(p),
+                "alpha": alpha, "effect_size": effect_size, "n_pairs": n_pairs,
+            },
+        )
+
+    # ── 独立双样本检验 ──
     group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
     groups = req.data[group_col].unique()
     if len(groups) != 2:
@@ -138,43 +1273,135 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
-    test_type = req.params.get("test", "ttest_ind")
+
+    from scipy import stats as sp_stats
+
+    # ── 自动选择参数/非参数检验 ──
+    norm_warn: list[str] = []
+    if test_type == "auto":
+        normal = True
+        if len(g1) >= 3 and len(g2) >= 3 and len(g1) <= 5000 and len(g2) <= 5000:
+            _, sw1 = sp_stats.shapiro(g1)
+            _, sw2 = sp_stats.shapiro(g2)
+            normal = min(sw1, sw2) >= 0.05
+        if normal:
+            test_type = "ttest_ind"
+        else:
+            test_type = "mannwhitney"
+            norm_warn.append(
+                f"自动选择 Mann-Whitney U (正态性p={min(sw1,sw2):.4f}<0.05)"
+            )
+
+    if len(g1) >= 3 and len(g2) >= 3 and test_type != "mannwhitney":
+        _, sw1 = sp_stats.shapiro(g1) if len(g1) <= 5000 else (None, 1.0)
+        _, sw2 = sp_stats.shapiro(g2) if len(g2) <= 5000 else (None, 1.0)
+        if min(sw1, sw2) < 0.05:
+            norm_warn.append(
+                f"正态性检验 p={min(sw1,sw2):.4f}<0.05，建议使用 Mann-Whitney U 检验"
+            )
 
     if test_type == "mannwhitney":
-        stat, p = stats.mannwhitneyu(g1, g2)
+        stat, p = sp_stats.mannwhitneyu(g1, g2)
         test_name = "Mann-Whitney U 检验"
+        effect_size = _cliffs_delta(g1.values, g2.values)
+        effect_name = "Cliff's δ"
+        effect_label = _effect_size_label(effect_size, "cliffs_delta")
     else:
-        stat, p = stats.ttest_ind(g1, g2)
+        stat, p = sp_stats.ttest_ind(g1, g2)
         test_name = "独立样本 t 检验"
+        effect_size = _cohens_d(g1.values, g2.values)
+        effect_name = "Cohen's d"
+        effect_label = _effect_size_label(effect_size, "cohens_d")
 
     alpha = req.params.get("alpha", 0.05)
     conclusion = "存在显著差异" if p < alpha else "未发现显著差异"
 
-    # 双样本箱线图
-    fig = Figure(figsize=(5, 4))
+    # ── 统计功效估计 ──
+    n1, n2 = len(g1), len(g2)
+    from math import sqrt
+    # 非中心参数近似
+    ncp = abs(effect_size) * sqrt(n1 * n2 / (n1 + n2)) if (n1 + n2) > 0 else 0
+    from scipy.stats import nct
+    dof = n1 + n2 - 2
+    if test_type != "mannwhitney" and dof > 0:
+        try:
+            t_crit = sp_stats.t.ppf(1 - alpha / 2, dof)
+            power = float(1 - nct.cdf(t_crit, dof, ncp) + nct.cdf(-t_crit, dof, ncp))
+        except Exception:
+            power = None
+    else:
+        power = None
+
+    # 双样本箱线图 + 散点叠加
+    fig = Figure(figsize=(6, 4.5))
     ax = fig.add_subplot(111)
-    bp = ax.boxplot([g1, g2], tick_labels=[str(groups[0]), str(groups[1])], patch_artist=True)
+    bp = ax.boxplot([g1, g2], tick_labels=[
+        f"{groups[0]}\n(n={n1})", f"{groups[1]}\n(n={n2})"
+    ], patch_artist=True, widths=0.5)
     for patch, color in zip(bp['boxes'], ["#6baed6", "#fd8d3c"]):
         patch.set_facecolor(color)
-    ax.set_ylabel(req.target_col, fontsize=9)
-    ax.set_title(f"{test_name} — {req.target_col} (p={p:.4f})", fontsize=11)
+    # 叠加散点
+    for i, gdata in enumerate([g1, g2], 1):
+        jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+        ax.scatter(np.full(len(gdata), i) + jitter, gdata.values,
+                   alpha=0.35, s=12, color="black", zorder=3)
+    ax.set_ylabel(req.target_col, fontsize=10)
+    ax.set_title(
+        f"{test_name} — {req.target_col}\n"
+        f"p={p:.4f} | {effect_name}={effect_size:.3f} ({effect_label}) | "
+        f"功效={power:.1%}" if power else f"p={p:.4f} | {effect_name}={effect_size:.3f} ({effect_label})",
+        fontsize=10
+    )
     fig.tight_layout()
+
+    # ── 描述统计表 ──
+    desc_df = pd.DataFrame({
+        "分组": [str(groups[0]), str(groups[1])],
+        "样本量": [n1, n2],
+        "均值": [float(g1.mean()), float(g2.mean())],
+        "标准差": [float(g1.std(ddof=1)), float(g2.std(ddof=1))],
+        "标准误": [float(g1.sem()), float(g2.sem())],
+    })
+
+    result_table = pd.DataFrame({
+        "检验方法": [test_name],
+        "统计量": [f"{stat:.4f}"],
+        "p值": [f"{p:.4f}"],
+        "显著性水平": [str(alpha)],
+        "效应量": [f"{effect_name}={effect_size:.3f}"],
+        "效应量解读": [effect_label],
+        "统计功效": [f"{power:.1%}" if power is not None else "N/A"],
+        "结论": [f"{groups[0]} vs {groups[1]}: {conclusion}"],
+    })
+
+    summary_parts = [
+        f"{groups[0]} vs {groups[1]}: {conclusion} (p={p:.4f})",
+        f"效应量 {effect_name}={effect_size:.3f}（{effect_label}）",
+    ]
+    if power is not None:
+        summary_parts.append(f"统计功效 {power:.1%}")
+    else:
+        summary_parts.append("统计功效 N/A")
 
     return AnalysisResult(
         task="hypothesis_test",
-        tables={"test_results": pd.DataFrame({
-            "检验方法": [test_name], "统计量": [stat], "p值": [p],
-            "显著性水平": [alpha],
-            "结论": [f"{groups[0]} vs {groups[1]}: {conclusion} (p={p:.4f})"],
-        })},
+        tables={
+            "test_results": result_table,
+            "descriptive_stats": desc_df,
+        },
         figures=[fig],
-        summary=f"{groups[0]} vs {groups[1]}: {conclusion} (p={p:.4f})",
-        metadata={"test": test_name, "statistic": stat, "p_value": p, "alpha": alpha},
+        summary="；".join(summary_parts),
+        metadata={
+            "test": test_name, "statistic": float(stat), "p_value": float(p),
+            "alpha": alpha, "effect_size": effect_size, "effect_name": effect_name,
+            "effect_label": effect_label, "power": power,
+        },
+        messages=norm_warn,
     )
 
 
 def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
-    """决策树特征重要性分析。"""
+    """决策树特征重要性分析，含排列重要性和交叉验证。"""
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 1:
         return AnalysisResult(task="decision_tree", status="error",
@@ -188,41 +1415,117 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     X = df[cols]
     y = df[req.target_col]
     max_depth = req.params.get("max_depth", 5)
+    random_state = req.params.get("random_state", 42)
 
-    tree = DecisionTreeRegressor(max_depth=max_depth, random_state=42)
+    tree = DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
     tree.fit(X, y)
 
-    fi = pd.DataFrame({"因子": cols, "重要性": tree.feature_importances_})
-    fi = fi.sort_values("重要性", ascending=False).reset_index(drop=True)
+    # ── 内置特征重要性 ──
+    fi_builtin = pd.DataFrame({
+        "因子": cols,
+        "内置重要性": tree.feature_importances_,
+    })
+
+    # ── 排列重要性 (更可靠，不受树结构偏差影响) ──
+    from sklearn.inspection import permutation_importance
+    try:
+        perm_result = permutation_importance(
+            tree, X, y, n_repeats=10, random_state=random_state, scoring="r2"
+        )
+        fi_perm = pd.DataFrame({
+            "因子": cols,
+            "排列重要性": perm_result.importances_mean,
+            "排列重要性_std": perm_result.importances_std,
+        })
+    except Exception:
+        # 样本量太小时回退
+        fi_perm = pd.DataFrame({
+            "因子": cols,
+            "排列重要性": tree.feature_importances_,
+            "排列重要性_std": [0.0] * len(cols),
+        })
+
+    # 合并两种重要性
+    fi = fi_builtin.merge(fi_perm, on="因子")
+    fi["综合重要性"] = fi["排列重要性"].clip(lower=0)
+    fi = fi.sort_values("综合重要性", ascending=False).reset_index(drop=True)
     top = fi.iloc[0] if len(fi) > 0 else None
 
-    # 图1: 特征重要性柱状图
-    fig_imp = Figure(figsize=(max(len(fi)*0.7, 5), 3.5))
+    # ── 交叉验证评估过拟合 ──
+    from sklearn.model_selection import cross_val_score
+    warn_msgs: list[str] = []
+    cv_scores = []
+    if len(df) >= 10:
+        try:
+            cv_scores = cross_val_score(
+                tree, X, y, cv=min(5, len(df) // 3), scoring="r2"
+            )
+            cv_r2 = float(np.mean(cv_scores))
+            train_r2 = float(tree.score(X, y))
+            if train_r2 - cv_r2 > 0.3:
+                warn_msgs.append(
+                    f"⚠ 过拟合警告: 训练R²={train_r2:.3f}, "
+                    f"交叉验证R²={cv_r2:.3f} (差距={train_r2-cv_r2:.2f})"
+                )
+        except Exception:
+            cv_r2 = None
+    else:
+        cv_r2 = None
+
+    # ── 图1: 特征重要性对比柱状图 ──
+    n_factors = len(fi)
+    fig_imp = Figure(figsize=(max(n_factors*0.8, 6), 4.5))
+    # 只显示重要性>0的因子
+    fi_plot = fi[fi["综合重要性"] > 0] if fi["综合重要性"].sum() > 0 else fi
+    x = np.arange(len(fi_plot))
+    width = 0.35
     ax = fig_imp.add_subplot(111)
-    colors = ["#2171b5" if v > 0.1 else "#6baed6" for v in fi["重要性"]]
-    ax.barh(fi["因子"], fi["重要性"], color=colors)
-    ax.set_xlabel("重要性", fontsize=9)
-    ax.set_title(f"决策树特征重要性 — {req.target_col}", fontsize=11)
+    ax.barh(x + width/2, fi_plot["内置重要性"], width,
+            label="内置重要性 (Gini)", color="#6baed6", alpha=0.8)
+    ax.barh(x - width/2, fi_plot["排列重要性"], width,
+            label="排列重要性 (±1σ)", color="#2171b5", alpha=0.9,
+            xerr=fi_plot["排列重要性_std"] if "排列重要性_std" in fi_plot.columns else None,
+            capsize=2)
+    ax.set_yticks(x)
+    ax.set_yticklabels(fi_plot["因子"], fontsize=9)
     ax.invert_yaxis()
+    ax.set_xlabel("重要性", fontsize=10)
+    cv_note = f" | CV R²={cv_r2:.3f}" if cv_r2 is not None else ""
+    ax.set_title(f"决策树特征重要性对比 — {req.target_col}{cv_note}", fontsize=11)
+    ax.legend(fontsize=8, loc="lower right")
     fig_imp.tight_layout()
 
-    # 图2: 决策树分层结构图 (需 Canvas 支持 plot_tree)
+    # ── 图2: 决策树结构图 ──
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     fig_tree = Figure(figsize=(12, max(tree.get_depth() * 1.2, 4)))
-    FigureCanvasAgg(fig_tree)  # plot_tree 需要 renderer
+    FigureCanvasAgg(fig_tree)
     ax_tree = fig_tree.add_subplot(111)
     plot_tree(tree, ax=ax_tree, feature_names=cols, filled=True,
               rounded=True, fontsize=8, precision=2, max_depth=4)
-    ax_tree.set_title(f"决策树结构 — {req.target_col}", fontsize=12)
+    ax_tree.set_title(f"决策树结构 — {req.target_col} (深度={tree.get_depth()})", fontsize=12)
     fig_tree.tight_layout()
+
+    # ── 汇总 ──
+    cv_str = f"CV R²={cv_r2:.3f}" if cv_r2 is not None else "CV R²=N/A"
+    summary = (
+        f"关键影响因子: {top['因子']} "
+        f"(排列重要性={top['排列重要性']:.3f}, "
+        f"内置重要性={top['内置重要性']:.3f})。{cv_str}"
+    ) if top is not None else f"分析完成。{cv_str}"
 
     return AnalysisResult(
         task="decision_tree",
         tables={"feature_importance": fi},
         figures=[fig_imp, fig_tree],
-        summary=f"关键影响因子: {top['因子']} (重要性={top['重要性']:.3f})" if top is not None
-            else "分析完成",
-        metadata={"top_factor": top["因子"] if top is not None else None},
+        summary=summary,
+        metadata={
+            "top_factor": top["因子"] if top is not None else None,
+            "cv_r2": cv_r2,
+            "train_r2": float(tree.score(X, y)),
+            "max_depth": max_depth,
+            "n_samples": len(df),
+        },
+        messages=warn_msgs,
     )
 
 
@@ -267,3 +1570,782 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
     except Exception:
         return AnalysisResult(task="vif", status="error",
                               messages=["VIF 计算失败，请检查数据是否存在共线性或数值异常"])
+
+
+def power_analysis(req: AnalysisRequest) -> AnalysisResult:
+    """统计功效分析 — 估计所需样本量或已达功效。
+
+    参数 (通过 params):
+        effect_size: 预期效应量 (Cohen's d 或 η²)
+        alpha: 显著性水平 (默认 0.05)
+        target_power: 目标功效 (默认 0.80)
+        mode: "required_n" (计算所需样本量) 或 "achieved" (计算已达功效)
+        current_n: 当前样本量 (mode="achieved" 时必需)
+        test_type: "ttest" (默认) | "anova" | "correlation"
+        n_groups: ANOVA 分组数 (test_type="anova" 时使用)
+    """
+    from scipy import stats as sp_stats
+    from math import ceil
+
+    effect_size = req.params.get("effect_size", 0.5)
+    alpha = req.params.get("alpha", 0.05)
+    target_power = req.params.get("target_power", 0.80)
+    mode = req.params.get("mode", "required_n")  # "required_n" | "achieved"
+    test_type = req.params.get("test_type", "ttest")
+    current_n = req.params.get("current_n")
+
+    if mode == "required_n":
+        # 计算所需样本量
+        if test_type == "ttest":
+            from statsmodels.stats.power import TTestIndPower
+            analysis = TTestIndPower()
+            required = ceil(analysis.solve_power(
+                effect_size=abs(effect_size), alpha=alpha,
+                power=target_power, alternative="two-sided"
+            ))
+            label = f"独立样本 t 检验所需每组样本量: {required} (总计 {required*2})"
+        elif test_type == "anova":
+            n_groups = req.params.get("n_groups", 3)
+            from statsmodels.stats.power import FTestAnovaPower
+            analysis = FTestAnovaPower()
+            required = ceil(float(analysis.solve_power(
+                effect_size=abs(effect_size), alpha=alpha,
+                power=target_power, k_groups=n_groups
+            )))
+            label = f"ANOVA ({n_groups}组) 所需每组样本量: {required} (总计 {required*n_groups})"
+        elif test_type == "proportion":
+            p0 = req.params.get("p0", 0.5)
+            p1 = req.params.get("p1", 0.6)
+            from math import ceil
+            z_alpha = abs(sp_stats.norm.ppf(alpha / 2))
+            z_beta = abs(sp_stats.norm.ppf(1 - target_power))
+            d = abs(p1 - p0)
+            required = ceil((z_alpha + z_beta)**2 * p0 * (1 - p0) / (d**2 + 1e-10))
+            label = f"比例检验所需样本量: {required} (p0={p0}, p1={p1}, d={d:.3f})"
+        else:
+            return AnalysisResult(
+                task="power_analysis", status="error",
+                messages=[f"不支持的检验类型: {test_type}"],
+            )
+
+        power_df = pd.DataFrame({
+            "参数": ["效应量", "显著性水平(α)", "目标功效", "检验类型", "所需每组样本量"],
+            "值": [str(effect_size), str(alpha), str(target_power),
+                  test_type, str(required)],
+        })
+
+        # 功效曲线图
+        n_range = np.arange(max(2, required // 2), required * 3 + 1, max(1, required // 20))
+        if test_type == "ttest":
+            powers = [TTestIndPower().power(effect_size=abs(effect_size),
+                     nobs1=n, alpha=alpha) for n in n_range]
+        else:
+            n_groups = req.params.get("n_groups", 3)
+            powers = [FTestAnovaPower().power(effect_size=abs(effect_size),
+                     nobs=n * n_groups, k_groups=n_groups, alpha=alpha)
+                     for n in n_range]
+
+        fig = Figure(figsize=(7, 4))
+        ax = fig.add_subplot(111)
+        ax.plot(n_range, powers, "-", color="#2171b5", linewidth=2)
+        ax.axhline(target_power, color="#d94801", linestyle="--", linewidth=1.2,
+                   label=f"目标功效={target_power}")
+        ax.axvline(required, color="#238b45", linestyle="--", linewidth=1.2,
+                   label=f"所需N={required}")
+        ax.set_xlabel("每组样本量", fontsize=10)
+        ax.set_ylabel("统计功效", fontsize=10)
+        ax.set_title(f"功效曲线 — {test_type} (效应量={effect_size}, α={alpha})", fontsize=11)
+        ax.legend(fontsize=8)
+        ax.set_ylim(0, 1.05)
+        fig.tight_layout()
+
+        return AnalysisResult(
+            task="power_analysis",
+            tables={"power_result": power_df},
+            figures=[fig],
+            summary=label,
+            metadata={
+                "required_n": required, "effect_size": effect_size,
+                "alpha": alpha, "target_power": target_power, "test_type": test_type,
+                "mode": "required_n",
+            },
+        )
+
+    elif mode == "achieved":
+        # 计算已达功效
+        if current_n is None:
+            return AnalysisResult(
+                task="power_analysis", status="error",
+                messages=["mode='achieved' 需要提供 current_n 参数"],
+            )
+
+        if test_type == "ttest":
+            from statsmodels.stats.power import TTestIndPower
+            power = float(TTestIndPower().power(
+                effect_size=abs(effect_size), nobs1=current_n, alpha=alpha
+            ))
+        elif test_type == "anova":
+            n_groups = req.params.get("n_groups", 3)
+            from statsmodels.stats.power import FTestAnovaPower
+            power = float(FTestAnovaPower().power(
+                effect_size=abs(effect_size), nobs=current_n * n_groups,
+                k_groups=n_groups, alpha=alpha
+            ))
+        else:
+            return AnalysisResult(
+                task="power_analysis", status="error",
+                messages=[f"不支持的检验类型: {test_type}"],
+            )
+
+        judge = "充足 (≥0.80)" if power >= 0.80 else ("一般 (0.50-0.80)" if power >= 0.50 else "不足 (<0.50)")
+        summary = f"当前功效={power:.1%} ({judge})，效应量={effect_size}, 每组N={current_n}"
+
+        return AnalysisResult(
+            task="power_analysis",
+            tables={
+                "power_result": pd.DataFrame({
+                    "参数": ["效应量", "显著性水平(α)", "每组样本量", "检验类型", "已达功效", "判定"],
+                    "值": [str(effect_size), str(alpha), str(current_n),
+                          test_type, f"{power:.3f}", judge],
+                }),
+            },
+            summary=summary,
+            metadata={
+                "achieved_power": power, "effect_size": effect_size,
+                "alpha": alpha, "current_n": current_n, "test_type": test_type,
+                "mode": "achieved",
+            },
+        )
+
+    else:
+        return AnalysisResult(
+            task="power_analysis", status="error",
+            messages=[f"未知模式: {mode}，支持 'required_n' 和 'achieved'"],
+        )
+
+
+def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
+    """列联表分析 — 检验两个分类变量是否独立。
+
+    自动选择：期望频数≥5 用 Chi-square，否则用 Fisher's exact test。
+    效应量: Cramér's V (Chi-square) 或 Odds Ratio (2×2 Fisher)。
+    """
+    if len(req.feature_cols) < 1:
+        return AnalysisResult(task="contingency", status="error",
+            messages=["需要至少 1 个因子列"])
+
+    col1 = req.target_col
+    col2 = req.feature_cols[0]
+    if col1 not in req.data.columns or col2 not in req.data.columns:
+        return AnalysisResult(task="contingency", status="error",
+            messages=["目标列或因子列不存在"])
+
+    sub = req.data[[col1, col2]].dropna()
+    if len(sub) < 4:
+        return AnalysisResult(task="contingency", status="error",
+            messages=["有效数据不足"])
+
+    # 列联表
+    ctab = pd.crosstab(sub[col1], sub[col2])
+    from scipy import stats as sp_stats
+
+    # Chi-square
+    chi2, chi_p, dof, expected = sp_stats.chi2_contingency(ctab)
+    min_expected = expected.min()
+
+    # 自动选择
+    if min_expected < 5 or ctab.shape == (2, 2) and len(sub) < 100:
+        # Fisher's exact test
+        if ctab.shape == (2, 2):
+            odds_ratio, fish_p = sp_stats.fisher_exact(ctab)
+            test_name = "Fisher 精确检验 (2×2)"
+            stat = odds_ratio
+            stat_label = "Odds Ratio"
+            effect = float(odds_ratio)
+            effect_name = "Odds Ratio (OR)"
+            if effect > 2:
+                effect_label = "强关联"
+            elif effect > 1.5:
+                effect_label = "中等关联"
+            else:
+                effect_label = "弱/无关联"
+        else:
+            test_name = "Fisher 精确检验 (模拟)"
+            try:
+                _, fish_p = sp_stats.fisher_exact(ctab, simulate_p_value=True)
+            except Exception:
+                fish_p = chi_p
+            stat = chi2
+            stat_label = "Chi²"
+            effect = float(np.sqrt(chi2 / (len(sub) * (min(*ctab.shape) - 1) + 1e-10)))
+            effect_name = "Cramér's V"
+            effect_label = _effect_interpretation(effect**2)
+        p_val = fish_p
+    else:
+        test_name = "卡方独立性检验"
+        stat = chi2
+        stat_label = "Chi²"
+        p_val = chi_p
+        # Cramér's V
+        n_total = ctab.sum().sum()
+        min_dim = min(*ctab.shape) - 1
+        effect = float(np.sqrt(chi2 / (n_total * min_dim + 1e-10)))
+        effect_name = "Cramér's V"
+        if effect > 0.3:
+            effect_label = "强关联"
+        elif effect > 0.15:
+            effect_label = "中等关联"
+        else:
+            effect_label = "弱关联"
+
+    alpha = req.params.get("alpha", 0.05)
+    conclusion = "两变量存在显著关联" if p_val < alpha else "两变量未发现显著关联"
+
+    # 可视化：堆叠柱状图
+    fig = Figure(figsize=(8, 4.5))
+    ax = fig.add_subplot(111)
+    ctab_pct = ctab.div(ctab.sum(axis=0), axis=1) * 100
+    ctab_pct.plot(kind="bar", stacked=True, ax=ax, colormap="Set2",
+                  edgecolor="white", linewidth=0.5)
+    ax.set_xlabel(col1, fontsize=10)
+    ax.set_ylabel("比例 (%)", fontsize=10)
+    ax.set_title(
+        f"{test_name}: {col1} vs {col2} "
+        f"({stat_label}={stat:.3f}, p={p_val:.4f}, {effect_name}={effect:.3f})",
+        fontsize=10,
+    )
+    ax.legend(title=col2, fontsize=8, title_fontsize=8)
+    ax.tick_params(axis="x", rotation=45)
+    fig.tight_layout()
+
+    summary = (
+        f"{test_name}: {conclusion} (p={p_val:.4f}), "
+        f"{effect_name}={effect:.3f} ({effect_label})"
+    )
+
+    return AnalysisResult(
+        task="contingency",
+        tables={
+            "contingency_table": ctab,
+            "expected_frequencies": pd.DataFrame(expected, index=ctab.index, columns=ctab.columns),
+        },
+        figures=[fig],
+        summary=summary,
+        metadata={
+            "test": test_name, "statistic": float(stat),
+            "p_value": float(p_val), "alpha": alpha,
+            "effect_size": effect, "effect_name": effect_name,
+            "effect_label": effect_label,
+            "degrees_of_freedom": int(dof) if min_expected >= 5 else None,
+            "min_expected": float(min_expected),
+        },
+    )
+
+
+def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
+    """二项比例置信区间 — Wilson Score 和 Clopper-Pearson 精确方法。
+
+    适用于合格率、不良率、通过率等二项数据的区间估计。
+    """
+    data = req.data[req.target_col].dropna()
+    # 将数据转为 0/1
+    unique_vals = data.unique()
+    if len(unique_vals) > 2:
+        return AnalysisResult(task="proportion_ci", status="error",
+            messages=[f"列「{req.target_col}」包含超过 2 个不同值，需要二值数据"])
+
+    # 自动识别"成功"标签
+    success_val = req.params.get("success_value")
+    if success_val is not None:
+        successes = int((data == success_val).sum())
+    else:
+        # 尝试常见标签
+        for label in ["合格", "是", "pass", "ok", "1", 1, True]:
+            if label in unique_vals:
+                successes = int((data == label).sum())
+                break
+        else:
+            # 默认取出现最多的值
+            successes = int(data.value_counts().iloc[0])
+
+    n = len(data)
+    p_hat = successes / n
+
+    from scipy import stats as sp_stats
+    from math import sqrt
+
+    # Wilson Score CI
+    z = sp_stats.norm.ppf(0.975)
+    denominator = 1 + z**2 / n
+    center = (p_hat + z**2 / (2 * n)) / denominator
+    margin = z * sqrt((p_hat * (1 - p_hat) + z**2 / (4 * n)) / n) / denominator
+    wilson_lower = max(0, center - margin)
+    wilson_upper = min(1, center + margin)
+
+    # Clopper-Pearson 精确 CI
+    cp_lower = sp_stats.beta.ppf(0.025, successes, n - successes + 1) if successes > 0 else 0
+    cp_upper = sp_stats.beta.ppf(0.975, successes + 1, n - successes) if successes < n else 1
+
+    # 可视化
+    fig = Figure(figsize=(6, 3))
+    ax = fig.add_subplot(111)
+    methods = ["Wilson Score", "Clopper-Pearson"]
+    midpoints = [p_hat, p_hat]
+    lowers = [p_hat - wilson_lower, p_hat - cp_lower]
+    uppers = [wilson_upper - p_hat, cp_upper - p_hat]
+    ax.barh(methods, uppers, left=[wilson_lower, cp_lower], height=0.3,
+            color=["#6baed6", "#2171b5"], edgecolor="white")
+    ax.axvline(p_hat, color="#d94801", linewidth=2, label=f"p̂={p_hat:.4f}")
+    ax.set_xlabel("比例", fontsize=10)
+    ax.set_title(f"二项比例 95% CI — {req.target_col} (n={n})", fontsize=11)
+    ax.legend(fontsize=8)
+    ax.set_xlim(0, 1)
+    fig.tight_layout()
+
+    summary = (
+        f"比例估计: {successes}/{n} = {p_hat:.2%}。"
+        f"Wilson 95%CI: [{wilson_lower:.2%}, {wilson_upper:.2%}]"
+    )
+
+    return AnalysisResult(
+        task="proportion_ci",
+        tables={
+            "proportion_ci": pd.DataFrame({
+                "方法": ["点估计", "Wilson Score (推荐)", "Clopper-Pearson (精确)"],
+                "下限": [f"{p_hat:.4f}", f"{wilson_lower:.4f}", f"{cp_lower:.4f}"],
+                "上限": [f"{p_hat:.4f}", f"{wilson_upper:.4f}", f"{cp_upper:.4f}"],
+            }),
+        },
+        figures=[fig],
+        summary=summary,
+        metadata={
+            "successes": successes, "n": n, "p_hat": p_hat,
+            "wilson_ci": (float(wilson_lower), float(wilson_upper)),
+            "clopper_pearson_ci": (float(cp_lower), float(cp_upper)),
+        },
+    )
+
+
+def variance_test(req: AnalysisRequest) -> AnalysisResult:
+    """方差齐性检验 — Levene 和 Bartlett 检验。
+
+    用于 ANOVA 前验证方差齐性假设，或比较不同组的离散程度。
+    """
+    group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else None)
+    if group_col is None or group_col not in req.data.columns:
+        return AnalysisResult(task="variance_test", status="error",
+            messages=["需要提供分组列 (group_col)"])
+
+    sub = req.data[[req.target_col, group_col]].dropna()
+    groups = sub[group_col].unique()
+    if len(groups) < 2:
+        return AnalysisResult(task="variance_test", status="error",
+            messages=["至少需要 2 个分组"])
+
+    from scipy import stats as sp_stats
+    group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
+    valid_groups = [(str(g), d) for g, d in zip(groups, group_data) if len(d) >= 2]
+
+    if len(valid_groups) < 2:
+        return AnalysisResult(task="variance_test", status="error",
+            messages=["有效分组不足"])
+
+    labels = [g for g, _ in valid_groups]
+    data_list = [d for _, d in valid_groups]
+
+    # Levene (对非正态更鲁棒，推荐)
+    try:
+        lev_stat, lev_p = sp_stats.levene(*data_list, center="median")
+    except Exception:
+        lev_stat, lev_p = None, None
+
+    # Bartlett (要求正态，更敏感)
+    try:
+        bart_stat, bart_p = sp_stats.bartlett(*data_list)
+    except Exception:
+        bart_stat, bart_p = None, None
+
+    alpha = req.params.get("alpha", 0.05)
+
+    # 判定
+    if lev_p is not None:
+        levene_result = "方差齐性 ✓" if lev_p >= alpha else f"方差不齐 (p={lev_p:.4f})"
+    else:
+        levene_result = "N/A"
+    if bart_p is not None:
+        bartlett_result = "方差齐性 ✓" if bart_p >= alpha else f"方差不齐 (p={bart_p:.4f})"
+    else:
+        bartlett_result = "N/A"
+
+    # 各组建模统计
+    desc_rows = []
+    for g, d in valid_groups:
+        desc_rows.append({
+            "分组": g, "样本量": len(d), "均值": f"{np.mean(d):.4f}",
+            "标准差": f"{np.std(d, ddof=1):.4f}",
+            "方差": f"{np.var(d, ddof=1):.4f}",
+            "IQR": f"{np.percentile(d, 75) - np.percentile(d, 25):.4f}",
+        })
+
+    return AnalysisResult(
+        task="variance_test",
+        tables={
+            "variance_tests": pd.DataFrame({
+                "检验方法": ["Levene (中位数, 推荐)", "Bartlett (需正态)"],
+                "统计量": [f"{lev_stat:.4f}" if lev_stat else "N/A",
+                          f"{bart_stat:.4f}" if bart_stat else "N/A"],
+                "p值": [f"{lev_p:.4f}" if lev_p else "N/A",
+                       f"{bart_p:.4f}" if bart_p else "N/A"],
+                "结论": [levene_result, bartlett_result],
+            }),
+            "group_statistics": pd.DataFrame(desc_rows),
+        },
+        summary=(
+            f"方差齐性检验: Levene {levene_result}"
+            + (f", Bartlett {bartlett_result}" if bart_p is not None else "")
+        ),
+        metadata={
+            "levene_p": float(lev_p) if lev_p else None,
+            "bartlett_p": float(bart_p) if bart_p else None,
+            "n_groups": len(valid_groups),
+        },
+    )
+
+
+def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
+    """Cohen's Kappa — 两个评定者之间的一致性评估。
+
+    feature_cols[0] 和 feature_cols[1] 分别对应两个评定者的评定结果。
+    """
+    if len(req.feature_cols) < 2:
+        return AnalysisResult(task="cohens_kappa", status="error",
+            messages=["需要 2 个评定者列"])
+
+    c1, c2 = req.feature_cols[0], req.feature_cols[1]
+    sub = req.data[[c1, c2]].dropna()
+    if len(sub) < 3:
+        return AnalysisResult(task="cohens_kappa", status="error",
+            messages=["有效数据不足"])
+
+    # 构建一致性矩阵
+    ctab = pd.crosstab(sub[c1], sub[c2])
+    n = ctab.sum().sum()
+    # 观察一致率
+    p_o = np.trace(ctab.values) / n
+    # 期望一致率
+    row_sums = ctab.sum(axis=1).values
+    col_sums = ctab.sum(axis=0).values
+    p_e = np.sum(row_sums * col_sums) / n**2
+    # Kappa
+    kappa = (p_o - p_e) / (1 - p_e + 1e-10)
+    # 标准误
+    se_kappa = np.sqrt((p_o * (1 - p_o)) / (n * (1 - p_e)**2 + 1e-10))
+    z_kappa = kappa / (se_kappa + 1e-10)
+    p_val = float(2 * (1 - stats.norm.cdf(abs(z_kappa))))
+
+    # 判读
+    if kappa > 0.8:
+        level = "几乎完美一致"
+    elif kappa > 0.6:
+        level = "高度一致"
+    elif kappa > 0.4:
+        level = "中等一致"
+    elif kappa > 0.2:
+        level = "一般一致"
+    elif kappa > 0:
+        level = "轻微一致"
+    else:
+        level = "低于随机一致"
+
+    return AnalysisResult(
+        task="cohens_kappa",
+        tables={
+            "agreement_matrix": ctab,
+            "kappa_result": pd.DataFrame({
+                "指标": ["Kappa", "观察一致率", "期望一致率", "Z值", "p值", "样本量", "判读"],
+                "值": [f"{kappa:.4f}", f"{p_o:.1%}", f"{p_e:.1%}",
+                      f"{z_kappa:.3f}", f"{p_val:.4f}", str(n), level],
+            }),
+        },
+        summary=f"Cohen's Kappa={kappa:.3f} ({level}), p_o={p_o:.1%}, n={n}",
+        metadata={"kappa": float(kappa), "p_o": float(p_o), "p_e": float(p_e),
+                  "z": float(z_kappa), "level": level},
+    )
+
+
+def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
+    """Cronbach's α — 内部一致性信度分析。
+
+    feature_cols 中的列视为量表的各个题项，计算 Cronbach's α 系数。
+    α ≥ 0.9: 优秀, ≥ 0.8: 良好, ≥ 0.7: 可接受, < 0.7: 需改进。
+    """
+    items = [c for c in req.feature_cols if c in req.data.columns]
+    if len(items) < 2:
+        return AnalysisResult(task="cronbach_alpha", status="error",
+            messages=["至少需要 2 个题项列"])
+
+    sub = req.data[items].dropna()
+    k = len(items)
+    n = len(sub)
+    if n < 3:
+        return AnalysisResult(task="cronbach_alpha", status="error",
+            messages=["有效数据不足"])
+
+    # 各项方差 + 总分方差
+    item_vars = sub.var(ddof=1).values
+    total_var = float(sub.sum(axis=1).var(ddof=1))
+    if total_var < 1e-10:
+        return AnalysisResult(task="cronbach_alpha", status="error",
+            messages=["总分方差为零，无法计算 α"])
+
+    alpha = (k / (k - 1)) * (1 - np.sum(item_vars) / total_var)
+
+    # 如果删除某项后的 α
+    alpha_if_deleted = []
+    for i, col in enumerate(items):
+        sub_drop = sub.drop(columns=[col])
+        kd = k - 1
+        item_vars_drop = sub_drop.var(ddof=1).values
+        total_var_drop = float(sub_drop.sum(axis=1).var(ddof=1))
+        if total_var_drop > 1e-10 and kd > 1:
+            a_drop = (kd / (kd - 1)) * (1 - np.sum(item_vars_drop) / total_var_drop)
+        else:
+            a_drop = None
+        alpha_if_deleted.append({
+            "题项": col,
+            "删除后α": f"{a_drop:.4f}" if a_drop else "N/A",
+            "变化": (
+                f"+{a_drop-alpha:.4f}" if a_drop and a_drop > alpha + 0.01
+                else f"{a_drop-alpha:.4f}" if a_drop else "—"
+            ),
+            "方差": f"{item_vars[i]:.4f}",
+            "项总相关": f"{float(sub[col].corr(sub.sum(axis=1))):.3f}",
+        })
+
+    if alpha >= 0.9:
+        level = "优秀"
+    elif alpha >= 0.8:
+        level = "良好"
+    elif alpha >= 0.7:
+        level = "可接受"
+    elif alpha >= 0.6:
+        level = "需改进"
+    else:
+        level = "不可接受"
+
+    return AnalysisResult(
+        task="cronbach_alpha",
+        tables={
+            "alpha_summary": pd.DataFrame({
+                "指标": ["Cronbach's α", "题项数", "样本量", "判读"],
+                "值": [f"{alpha:.4f}", str(k), str(n), level],
+            }),
+            "item_analysis": pd.DataFrame(alpha_if_deleted),
+        },
+        summary=f"Cronbach's α={alpha:.3f} ({level}), {k} 题项, n={n}",
+        metadata={"alpha": float(alpha), "k": k, "n": n, "level": level},
+    )
+
+
+def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
+    """分布特征摘要 — 描述性统计 + 正态/对数正态/Weibull 拟合。
+
+    提供全面的单变量分布描述和拟合诊断。
+    """
+    data = req.data[req.target_col].dropna()
+    n = len(data)
+    if n < 3:
+        return AnalysisResult(task="distribution_summary", status="error",
+            messages=["有效数据不足(至少3个点)"])
+
+    from scipy import stats as sp_stats
+
+    # 描述性统计
+    desc = {
+        "样本量": n, "均值": float(data.mean()), "中位数": float(data.median()),
+        "标准差": float(data.std(ddof=1)), "方差": float(data.var(ddof=1)),
+        "偏度": float(data.skew()), "峰度": float(data.kurtosis()),
+        "最小值": float(data.min()), "最大值": float(data.max()),
+        "极差": float(data.max() - data.min()),
+        "P1": float(data.quantile(0.01)), "P5": float(data.quantile(0.05)),
+        "P10": float(data.quantile(0.10)), "P25": float(data.quantile(0.25)),
+        "P75": float(data.quantile(0.75)), "P90": float(data.quantile(0.90)),
+        "P95": float(data.quantile(0.95)), "P99": float(data.quantile(0.99)),
+        "IQR": float(data.quantile(0.75) - data.quantile(0.25)),
+        "CV(%)": round(float(data.std(ddof=1) / (abs(data.mean()) + 1e-10) * 100), 2),
+    }
+
+    # 正态性
+    sw_p = float(sp_stats.shapiro(data)[1]) if n <= 5000 else None
+    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p else "N/A"
+
+    # 分布拟合
+    fits = {}
+    # Normal
+    mu, sigma = sp_stats.norm.fit(data)
+    ks_norm = float(sp_stats.kstest(data, "norm", args=(mu, sigma))[1])
+    fits["Normal"] = {"params": f"μ={mu:.3f}, σ={sigma:.3f}", "KS p": round(ks_norm, 4)}
+
+    # Lognormal (only if all positive)
+    if (data > 0).all():
+        shape, loc, scale = sp_stats.lognorm.fit(data, floc=0)
+        ks_ln = float(sp_stats.kstest(data, "lognorm", args=(shape, 0, scale))[1])
+        fits["Lognormal"] = {"params": f"σ={shape:.3f}, μ={np.log(scale):.3f}", "KS p": round(ks_ln, 4)}
+
+    # Weibull (only if all positive)
+    if (data > 0).all():
+        try:
+            shape_w, loc_w, scale_w = sp_stats.weibull_min.fit(data, floc=0)
+            ks_w = float(sp_stats.kstest(data, "weibull_min", args=(shape_w, 0, scale_w))[1])
+            fits["Weibull"] = {"params": f"β={shape_w:.3f}, η={scale_w:.3f}", "KS p": round(ks_w, 4)}
+        except Exception:
+            pass
+
+    # 直方图 + 拟合曲线
+    fig = Figure(figsize=(8, 5))
+    ax = fig.add_subplot(111)
+    ax.hist(data, bins=min(30, int(np.sqrt(n))*2), density=True,
+            color="#6baed6", edgecolor="white", alpha=0.7, label="数据")
+    x_fit = np.linspace(data.min(), data.max(), 200)
+    ax.plot(x_fit, sp_stats.norm.pdf(x_fit, mu, sigma), "-", color="#2171b5",
+            linewidth=2, label=f"Normal (KS p={ks_norm:.3f})")
+    if "Lognormal" in fits:
+        ax.plot(x_fit, sp_stats.lognorm.pdf(x_fit, shape, 0, scale), "--",
+                color="#d94801", linewidth=1.5, label=f"Lognormal (KS p={ks_ln:.3f})")
+    if "Weibull" in fits:
+        ax.plot(x_fit, sp_stats.weibull_min.pdf(x_fit, shape_w, 0, scale_w), ":",
+                color="#238b45", linewidth=1.5, label=f"Weibull (KS p={ks_w:.3f})")
+    ax.axvline(data.mean(), color="#2171b5", linestyle="--", linewidth=1, alpha=0.5)
+    ax.axvline(data.median(), color="#d94801", linestyle="--", linewidth=1, alpha=0.5)
+    ax.set_xlabel(req.target_col, fontsize=10)
+    ax.set_ylabel("密度", fontsize=10)
+    ax.set_title(f"分布特征 — {req.target_col} (n={n})", fontsize=11)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+
+    # 最佳拟合
+    best_fit = max(fits, key=lambda k: fits[k]["KS p"]) if fits else "None"
+
+    return AnalysisResult(
+        task="distribution_summary",
+        tables={
+            "descriptive_stats": pd.DataFrame([desc]).T.rename(columns={0: "值"}),
+            "distribution_fits": pd.DataFrame(fits).T,
+        },
+        figures=[fig],
+        summary=(
+            f"{req.target_col}: μ={desc['均值']:.3f}, M={desc['中位数']:.3f}, "
+            f"σ={desc['标准差']:.3f}, CV={desc['CV(%)']:.1f}%。"
+            f"最佳拟合: {best_fit} (KS p={fits[best_fit]['KS p']:.3f})"
+        ),
+        metadata={"descriptive": desc, "fits": fits, "best_fit": best_fit},
+    )
+
+
+def normality_check(req: AnalysisRequest) -> AnalysisResult:
+    """正态性评估 — 对多个列执行 Shapiro-Wilk 检验，推荐变换方法。
+
+    返回偏度/峰度统计量和变换建议 (log, sqrt, Box-Cox, Yeo-Johnson)。
+    """
+    cols = [c for c in ([req.target_col] + req.feature_cols) if c in req.data.columns]
+    if not cols:
+        return AnalysisResult(task="normality_check", status="error",
+            messages=["没有可分析的列"])
+
+    from scipy import stats as sp_stats
+    results = []
+    for col in cols:
+        d = req.data[col].dropna()
+        n = len(d)
+        if n < 3:
+            results.append({
+                "列名": col, "样本量": n, "Shapiro-Wilk p": None,
+                "偏度": None, "峰度": None, "正态性": "样本不足",
+                "建议变换": "—",
+            })
+            continue
+
+        _, sw_p = sp_stats.shapiro(d) if n <= 5000 else (None, None)
+        # Anderson-Darling (更稳健的大样本检验)
+        try:
+            ad_result = sp_stats.anderson(d, dist="norm", method="interpolate")
+            ad_stat = float(ad_result.statistic)
+            # 取 5% 显著性水平的临界值
+            ad_crit = float(ad_result.critical_values[2]) if len(ad_result.critical_values) > 2 else 0
+            ad_normal = ad_stat < ad_crit
+        except Exception:
+            ad_stat, ad_crit, ad_normal = None, None, None
+
+        skew = float(d.skew())
+        kurt = float(d.kurtosis())
+
+        # 判断和建议变换 (综合 S-W 和 A-D)
+        sw_normal = sw_p is not None and sw_p > 0.05
+        is_normal = sw_normal or (ad_normal if ad_normal is not None else False)
+
+        if is_normal:
+            normality = "正态 ✓"
+            recommendation = "无需变换"
+        else:
+            normality = f"非正态 (S-W p={sw_p:.4f})" if sw_p else "—"
+            if skew > 1.5:
+                if (d > 0).all():
+                    recommendation = "Box-Cox (右偏严重)"
+                else:
+                    recommendation = "Yeo-Johnson (右偏严重)"
+            elif skew > 0.5:
+                if (d > 0).all():
+                    recommendation = "对数变换 log(x)"
+                else:
+                    recommendation = "平方根变换 √(x+const)"
+            elif skew < -1.5:
+                recommendation = "平方变换 x²"
+            elif skew < -0.5:
+                if (d > 0).all():
+                    recommendation = "倒数变换 1/x"
+                else:
+                    recommendation = "反射+对数变换"
+            else:
+                recommendation = "Box-Cox / Yeo-Johnson"
+
+        ad_info = f"A-D stat={ad_stat:.3f}" if ad_stat else "N/A"
+        results.append({
+            "列名": col, "样本量": n,
+            "Shapiro-Wilk p": f"{sw_p:.4f}" if sw_p else "N/A",
+            "Anderson-Darling": ad_info,
+            "偏度": f"{skew:.3f}", "峰度": f"{kurt:.3f}",
+            "正态性": normality, "建议变换": recommendation,
+        })
+
+    results_df = pd.DataFrame(results)
+
+    # Q-Q 子图矩阵
+    n_cols_plot = min(len(cols), 6)
+    n_rows = (n_cols_plot + 2) // 3
+    fig = Figure(figsize=(4 * min(3, n_cols_plot), 3.5 * n_rows))
+    for i, col in enumerate(cols[:n_cols_plot]):
+        ax = fig.add_subplot(n_rows, min(3, n_cols_plot), i + 1)
+        d = req.data[col].dropna()
+        sp_stats.probplot(d, dist="norm", plot=ax)
+        ax.set_title(col, fontsize=9)
+    fig.tight_layout()
+
+    # 汇总
+    normal_count = sum(1 for r in results if "正态" in str(r.get("正态性", "")))
+    summary = (
+        f"正态性评估: {normal_count}/{len(cols)} 列满足正态性。"
+        + (f" 偏度最大列: {results_df.sort_values('偏度', key=lambda x: x.str.replace('-','').astype(float)).iloc[-1]['列名']}"
+           if len(results_df) > 0 else "")
+    )
+
+    return AnalysisResult(
+        task="normality_check",
+        tables={"normality_results": results_df},
+        figures=[fig],
+        summary=summary,
+        metadata={
+            "n_columns": len(cols),
+            "normal_count": normal_count,
+            "recommendations": {r["列名"]: r["建议变换"] for r in results},
+        },
+    )

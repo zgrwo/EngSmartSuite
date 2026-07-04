@@ -1,0 +1,8 @@
+# 属性控制图 — 计数型数据控制图 (p/np/c/u)
+task: spc_attribute
+target_col: "首件合格"
+feature_cols: []
+params:
+  chart_type: p        # p=不良率, np=不良数, c=缺陷数, u=单位缺陷率
+  subgroup_col: "班次" # 分组列 (可选, 用于划分子组)
+  # n_col: "检验数"    # 样本量列 (p/u 图变样本量时需要)

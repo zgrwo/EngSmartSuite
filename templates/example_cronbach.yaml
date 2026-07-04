@@ -1,0 +1,10 @@
+# Cronbach's α — 量表内部一致性信度分析
+task: cronbach_alpha
+target_col: ""
+feature_cols:
+  - "题项1"
+  - "题项2"
+  - "题项3"
+  - "题项4"
+  - "题项5"
+params: {}

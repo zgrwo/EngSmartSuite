@@ -13,7 +13,10 @@ N = 1000
 start_date = datetime(2026, 3, 1)
 dates = [start_date + timedelta(days=random.randint(0, 90)) for _ in range(N)]
 shifts = np.random.choice(['白班', '中班', '夜班'], N, p=[0.5, 0.3, 0.2])
-times = [datetime(2026, 3, 1, random.randint(6, 22), random.randint(0, 59), random.randint(0, 59)) for _ in range(N)]
+times = [
+    d + timedelta(hours=random.randint(6, 22), minutes=random.randint(0, 59), seconds=random.randint(0, 59))
+    for d in dates
+]
 
 # ============ LOCATION (3 cols) ============
 workshops = np.random.choice(['一车间', '二车间', '三车间'], N, p=[0.4, 0.35, 0.25])

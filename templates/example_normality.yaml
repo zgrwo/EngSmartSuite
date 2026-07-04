@@ -1,0 +1,10 @@
+# 正态性评估 — 多列 Shapiro-Wilk + 偏度/峰度 + 变换建议
+task: normality_check
+target_col: "收率"
+feature_cols:
+  - "实际温度"
+  - "压力"
+  - "反应时间"
+  - "pH值"
+  - "纯度"
+params: {}

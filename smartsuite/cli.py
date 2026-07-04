@@ -53,7 +53,7 @@ def main():
 
         raw = pd.read_excel(args.input, sheet_name=args.sheet)
         features = config.get("feature_cols", [])
-        df, feature_cols, _ = preprocess_data(raw, features)
+        df, feature_cols, _, _ = preprocess_data(raw, features)
         req = AnalysisRequest(
             task=config["task"], data=df,
             target_col=config["target_col"],

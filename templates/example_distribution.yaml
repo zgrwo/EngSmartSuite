@@ -1,0 +1,5 @@
+# 分布特征摘要 — 描述统计 + 分布拟合
+task: distribution_summary
+target_col: "拉伸强度"
+feature_cols: []
+params: {}

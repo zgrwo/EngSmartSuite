@@ -1,0 +1,12 @@
+# 网格搜索 — 参数优化 + RidgeCV 交叉验证
+task: grid_search
+target_col: "拉伸强度"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+params:
+  ranges:
+    熔体温度: [180, 230]
+    模具温度: [30, 80]
+  direction: maximize
+  n_points: 15

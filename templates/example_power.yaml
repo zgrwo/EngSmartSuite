@@ -1,0 +1,12 @@
+# 统计功效分析 — 估计所需样本量或已达功效
+task: power_analysis
+target_col: ""
+feature_cols: []
+params:
+  effect_size: 0.5     # 预期效应量 (Cohen's d = 0.5 为中效应)
+  alpha: 0.05          # 显著性水平
+  target_power: 0.80   # 目标功效
+  mode: required_n     # "required_n" 计算所需样本量 | "achieved" 计算已达功效
+  test_type: ttest     # "ttest" | "anova"
+  # current_n: 30      # mode="achieved" 时需要
+  # n_groups: 3        # test_type="anova" 时需要

@@ -13,7 +13,7 @@ def _prepare_request(sheet, target, features, task, **params):
     df = read_excel_range(sheet)
     warnings = validate_data(df, target, features)
     from smartsuite.services.data_io import preprocess_data
-    df, features_encoded, _ = preprocess_data(df, features)
+    df, features_encoded, _, _ = preprocess_data(df, features)
     return AnalysisRequest(task=task, data=df, target_col=target,
                            feature_cols=features_encoded, params=params), warnings
 

@@ -1,0 +1,9 @@
+# McNemar 检验 — 配对二分类数据的前后对比
+task: hypothesis_test
+target_col: ""
+feature_cols:
+  - "改善前"       # 前测量 (二分类)
+  - "改善后"       # 后测量 (二分类)
+params:
+  test: mcnemar
+  alpha: 0.05

@@ -1,0 +1,14 @@
+# 多目标优化 — 加权期望函数法 + Pareto 前沿
+task: multi_objective
+target_col: ""
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+  - "注射压力"
+params:
+  objectives:
+    - col: "拉伸强度"
+      direction: maximize
+    - col: "不良率"
+      direction: minimize
+  weights: [0.6, 0.4]

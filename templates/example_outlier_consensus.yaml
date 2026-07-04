@@ -1,0 +1,7 @@
+# 多方法异常共识检测 — IQR + Z-score + Isolation Forest 三方法投票
+task: outlier_consensus
+target_col: "拉伸强度"
+feature_cols:
+  - "熔体温度"
+  - "注射压力"
+params: {}

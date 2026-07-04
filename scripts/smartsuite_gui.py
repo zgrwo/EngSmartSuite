@@ -378,7 +378,7 @@ class SmartSuiteGUI:
         """预处理数据：委托给 services.data_io.preprocess_data。"""
         from smartsuite.services.data_io import preprocess_data
 
-        df, encoded_cols, cat_map = preprocess_data(
+        df, encoded_cols, cat_map, _ = preprocess_data(
             self.df, features, categorical_cols=self._categoricals)
         self._df_encoded = df
         self._cat_map = cat_map

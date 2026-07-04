@@ -1,0 +1,8 @@
+# 统计容许区间 — 规格限设定决策支持
+task: tolerance_interval
+target_col: "拉伸强度"
+feature_cols: []
+params:
+  coverage: 0.99        # 覆盖总体比例
+  confidence: 0.95      # 置信水平
+  side: two-sided       # two-sided | upper | lower

@@ -54,7 +54,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     merged_corr = None
     if task == "correlation" and len(targets) > 1:
         cat_set = set(categoricals) if categoricals else set()
-        df_enc, feat_enc, _ = preprocess_data(df, features, cat_set)
+        df_enc, feat_enc, _, _ = preprocess_data(df, features, cat_set)
         merged_rows = {}
         for target in targets:
             try:

@@ -1,0 +1,7 @@
+# Cohen's Kappa — 评定者一致性评估
+task: cohens_kappa
+target_col: ""
+feature_cols:
+  - "评定者A"
+  - "评定者B"
+params: {}
