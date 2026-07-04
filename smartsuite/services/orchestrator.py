@@ -114,7 +114,13 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
 
     try:
         return TASK_REGISTRY[req.task](req)
-    except Exception:
+    except Exception as e:
         logger.exception("分析任务 %s 执行失败", req.task)
-        return AnalysisResult(task=req.task, status="error",
-                              messages=["分析执行过程中发生内部错误，请联系开发者"])
+        error_detail = str(e)[:300]
+        return AnalysisResult(
+            task=req.task, status="error",
+            messages=[
+                f"分析执行失败: {error_detail}",
+                "如问题持续出现，请检查数据格式或联系开发者",
+            ],
+        )

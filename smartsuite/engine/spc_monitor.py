@@ -1,10 +1,20 @@
 import numpy as np
 import pandas as pd
+from scipy import stats as sp_stats
 
 from matplotlib.figure import Figure
 from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+
+# ── X-bar/R 控制图常数表 (子组大小 n → A2, D3, D4) ──
+_XBR_CONSTANTS: dict[int, tuple[float, float, float]] = {
+    2: (1.880, 0, 3.267), 3: (1.023, 0, 2.574),
+    4: (0.729, 0, 2.282), 5: (0.577, 0, 2.114),
+    6: (0.483, 0, 2.004), 7: (0.419, 0.076, 1.924),
+    8: (0.373, 0.136, 1.864), 9: (0.337, 0.184, 1.816),
+    10: (0.308, 0.223, 1.777),
+}
 
 
 def _we_rules_xbar(values, cl, sigma):
@@ -162,14 +172,6 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     else:
         n = int(subgroup_sizes.iloc[0]) if len(subgroups) > 0 else 5
 
-    # X-bar/R 控制图常数表 (子组大小 n → A2, D3, D4)
-    _XBR_CONSTANTS = {
-        2: (1.880, 0, 3.267), 3: (1.023, 0, 2.574),
-        4: (0.729, 0, 2.282), 5: (0.577, 0, 2.114),
-        6: (0.483, 0, 2.004), 7: (0.419, 0.076, 1.924),
-        8: (0.373, 0.136, 1.864), 9: (0.337, 0.184, 1.816),
-        10: (0.308, 0.223, 1.777),
-    }
     if n not in _XBR_CONSTANTS:
         return AnalysisResult(
             task="spc_xbar", status="error",
@@ -493,7 +495,6 @@ def _cpk_confidence_interval(cpk, n, alpha=0.05):
     if cpk is None or n < 2:
         return (None, None)
     se = np.sqrt(1 / (9 * n) + cpk**2 / (2 * (n - 1)))
-    from scipy import stats as sp_stats
     z = sp_stats.norm.ppf(1 - alpha / 2)
     ci_lower = cpk - z * se
     ci_upper = cpk + z * se
@@ -504,7 +505,6 @@ def _sigma_level(cpk_val):
     """Cpk → Sigma Level (短期) 和 DPMO 估算。"""
     # Sigma Level ≈ 3 * Cpk（长期 Z 值）
     # DPMO = 2 * Φ(-3*Cpk) * 1e6（双边正态）
-    from scipy import stats as sp_stats
     sigma = 3 * cpk_val
     dpmo = int(2 * sp_stats.norm.cdf(-3 * cpk_val) * 1_000_000)
     return float(sigma), dpmo
@@ -512,7 +512,6 @@ def _sigma_level(cpk_val):
 
 def _box_cox_transform(data):
     """Box-Cox 幂变换，返回 (变换后数据, lambda)。仅用于正值数据。"""
-    from scipy import stats as sp_stats
     if (data <= 0).any():
         return None, None
     try:
@@ -524,7 +523,6 @@ def _box_cox_transform(data):
 
 def _normality_warning(data):
     """检测非正态性并给出警告。"""
-    from scipy import stats as sp_stats
     n = len(data)
     if n < 3 or n > 5000:
         return None
@@ -565,13 +563,10 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
             boxcox_lambda = lam
             # 对规格限和目标值同样做 Box-Cox 变换
             if usl is not None and usl > 0:
-                from scipy import stats as sp_stats
                 usl = sp_stats.boxcox(np.array([usl]), lmbda=lam)[0]
             if lsl is not None and lsl > 0:
-                from scipy import stats as sp_stats
                 lsl = sp_stats.boxcox(np.array([lsl]), lmbda=lam)[0]
             if target is not None and target > 0:
-                from scipy import stats as sp_stats
                 target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
         else:
             warn_msgs.append("⚠ Box-Cox 变换失败（数据必须全部为正值），使用原始数据分析")
@@ -674,7 +669,6 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # 正态拟合曲线
     x_fit = np.linspace(data.min(), data.max(), 200)
-    from scipy import stats as sp_stats
     pdf_fit = sp_stats.norm.pdf(x_fit, mu, sigma_overall)
     ax.plot(x_fit, pdf_fit, color="#2171b5", linewidth=2,
             label=f"正态拟合 (μ={mu:.3f}, σ={sigma_overall:.3f})")
@@ -760,7 +754,6 @@ def _durbin_watson(residuals):
 
 def _ljung_box(residuals, lags=None):
     """Ljung-Box 检验 — 残差自相关的整体显著性检验。"""
-    from scipy import stats as sp_stats
     n = len(residuals)
     if lags is None:
         lags = min(10, n // 5)
@@ -828,7 +821,6 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
         # 使用 t 分布（小样本更准确）
         dof = max(1, n - 2)
-        from scipy import stats as sp_stats
         t_crit = sp_stats.t.ppf(0.975, dof)
         resid_std_se = float(np.std(residuals, ddof=2))
         # 预测区间（比置信区间更宽，包含单点不确定性）
@@ -1321,7 +1313,6 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
     mu = float(data.mean())
     sigma = float(data.std(ddof=1))
 
-    from scipy import stats as sp_stats
     from math import sqrt
 
     if side == "two-sided":
@@ -1430,7 +1421,6 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     median_survival = float(km_times[median_idx[0]]) if len(median_idx) > 0 else None
 
     # Weibull 拟合 (仅失效数据)
-    from scipy import stats as sp_stats
     fail_times = times[events == 1]
     weibull_shape, weibull_scale = None, None
     if len(fail_times) >= 5:
@@ -1565,7 +1555,6 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效数据不足(至少20个点)"],
         )
 
-    from scipy import stats as sp_stats
     min_segment = req.params.get("min_segment", max(10, n // 20))
     max_cp = req.params.get("n_changepoints", 5)
 
@@ -1802,7 +1791,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
         task="outlier_consensus",
         tables={
             "anomalies": pd.DataFrame(anomaly_rows) if anomaly_rows
-            else pd.DataFrame({"信息": ["3种方法均未检测到异常"]}),
+            else pd.DataFrame(),
             "method_counts": pd.DataFrame({
                 "方法": ["IQR", "Z-Score", "Isolation Forest", "高置信(≥2票)", "任意标记"],
                 "检测数": [int(iqr_mask.sum()), int(z_mask.sum()),
@@ -1903,7 +1892,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             task="anomaly_detect",
             tables={
                 "anomalies": pd.DataFrame(anomaly_rows) if anomaly_rows
-                else pd.DataFrame({"信息": ["未检测到异常"]}),
+                else pd.DataFrame(),
             },
             figures=[fig],
             summary=(
@@ -1931,7 +1920,6 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         # Grubbs 检验：每次检测最大偏差，迭代最多 5 个异常点
         alpha_g = req.params.get("alpha", 0.05)
         max_outliers = req.params.get("max_outliers", 5)
-        from scipy import stats as sp_stats
         vals = data.values.copy()
         mask = np.zeros(len(data), dtype=bool)
         for _ in range(max_outliers):
@@ -2026,7 +2014,6 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
     ci_level = req.params.get("ci_level", 0.95)
     alpha = 1 - ci_level
 
-    from scipy import stats as sp_stats
     from math import comb
 
     sorted_data = np.sort(data.values)
@@ -2077,7 +2064,7 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
         n_bootstrap: 重抽样次数 (默认 2000)
         ci_level: 置信水平 (默认 0.95)
 
-    返回百分位法和 BCa 两种置信区间。
+    返回百分位法（Percentile）Bootstrap 置信区间。
     """
     data = req.data[req.target_col].dropna()
     n = len(data)
@@ -2118,8 +2105,6 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     ci_upper_pct = float(np.percentile(boot_stats, (1 - alpha / 2) * 100))
 
     # 百分位法 CI（最常用的 Bootstrap CI 方法）
-    from scipy import stats as sp_stats
-
     # 可视化：Bootstrap 分布 + CI
     fig = Figure(figsize=(8, 4))
     ax = fig.add_subplot(111)

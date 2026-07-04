@@ -104,3 +104,175 @@ def test_anova_known_group_diff():
     assert result.metadata["r_squared"] > 0.7, (
         f"Expected R²>0.7, got {result.metadata['r_squared']:.3f}"
     )
+
+
+# ── Lasso 回归正确性 ──
+
+def test_lasso_shrinks_coefficients():
+    """Lasso 应能将冗余变量的系数压缩到零。"""
+    from smartsuite.engine.doe_opt import lasso_regression
+    np.random.seed(42)
+    n = 200
+    x1 = np.random.normal(0, 1, n)
+    x2 = x1 + np.random.normal(0, 0.01, n)  # 与 x1 几乎共线
+    x3 = np.random.normal(0, 1, n)
+    y = 3.0 * x1 + 0.0 * x2 + 1.5 * x3 + np.random.normal(0, 0.5, n)
+    df = pd.DataFrame({"x1": x1, "x2": x2, "x3": x3, "y": y})
+    req = AnalysisRequest(task="lasso_regression", data=df, target_col="y",
+                          feature_cols=["x1", "x2", "x3"])
+    result = lasso_regression(req)
+    assert result.status == "ok"
+    # Lasso 应选中 x1 和 x3，但 x2 可能被压缩（接近零或未选中）
+    coef = result.tables["coefficients"]
+    x2_row = coef[coef["变量"] == "x2"]
+    x2_coef = float(x2_row["标准化系数"].iloc[0])
+    # x2 系数应显著小于 x1
+    x1_coef = float(coef[coef["变量"] == "x1"]["标准化系数"].iloc[0])
+    assert abs(x2_coef) < abs(x1_coef) * 0.5, (
+        f"Lasso 应将共线变量 x2 系数压缩，x1={x1_coef:.3f}, x2={x2_coef:.3f}"
+    )
+    assert result.metadata["n_selected"] >= 2  # 至少选 x1 和 x3
+
+
+# ── 稳健回归正确性 ──
+
+def test_robust_resists_outliers():
+    """Huber 回归在有异常值时系数应比 OLS 更接近真实值。"""
+    from smartsuite.engine.doe_opt import robust_regression
+    np.random.seed(42)
+    n = 100
+    x = np.random.uniform(0, 10, n)
+    y_true = 2.0 + 3.0 * x
+    y = y_true + np.random.normal(0, 1, n)
+    # 注入 5 个极端异常值
+    y[-5:] += 50.0
+    df = pd.DataFrame({"x": x, "y": y})
+    req = AnalysisRequest(task="robust_regression", data=df, target_col="y",
+                          feature_cols=["x"])
+    result = robust_regression(req)
+    assert result.status == "ok"
+    coef = result.tables["coefficient_comparison"]
+    huber_slope = float(coef[coef["变量"] == "x"]["Huber系数"].iloc[0])
+    ols_slope = float(coef[coef["变量"] == "x"]["OLS系数"].iloc[0])
+    # Huber 斜率应比 OLS 更接近真值 3.0
+    assert abs(huber_slope - 3.0) < abs(ols_slope - 3.0), (
+        f"Huber 应对异常值不敏感: Huber={huber_slope:.3f}, OLS={ols_slope:.3f}, true=3.0"
+    )
+
+
+# ── 网格搜索正确性 ──
+
+def test_grid_search_finds_optimum():
+    """网格搜索应在已知线性趋势下找到正确的最优方向。"""
+    from smartsuite.engine.doe_opt import grid_search
+    np.random.seed(42)
+    n = 100
+    x1 = np.random.uniform(-5, 5, n)
+    # y = 3*x1 + noise → 最大化时 x1 应取最大值
+    y = 3.0 * x1 + np.random.normal(0, 0.5, n)
+    df = pd.DataFrame({"x1": x1, "y": y})
+    req = AnalysisRequest(task="grid_search", data=df, target_col="y",
+                          feature_cols=["x1"],
+                          params={"ranges": {"x1": (-5, 5)},
+                                  "n_points": 20, "direction": "maximize"})
+    result = grid_search(req)
+    assert result.status == "ok"
+    optimal = result.metadata["optimal_params"]
+    # 线性趋势下，最大化方向 x1 应接近上界 5
+    assert optimal["x1"] > 2.0, f"x1 应在正方向, 实际={optimal['x1']}"
+    assert result.metadata["optimal_value"] > 5.0, "预测最优值应显著大于均值"
+
+
+# ── 多目标优化正确性 ──
+
+def test_multi_objective_correct_ranking():
+    """多目标优化应对两个目标正确加权排序。"""
+    from smartsuite.engine.doe_opt import multi_objective_opt
+    np.random.seed(42)
+    n = 50
+    df = pd.DataFrame({
+        "param1": np.random.uniform(0, 10, n),
+        "param2": np.random.uniform(0, 10, n),
+        "strength": np.random.normal(45, 5, n),    # 越大越好
+        "defect": np.random.normal(2, 0.5, n),      # 越小越好
+    })
+    # 人为制造一个明显最优：param1=5, param2=5 时 strength=max, defect=min
+    best_idx = 25
+    df.loc[best_idx, "strength"] = 60.0
+    df.loc[best_idx, "defect"] = 0.1
+    df.loc[best_idx, "param1"] = 5.0
+    df.loc[best_idx, "param2"] = 5.0
+
+    req = AnalysisRequest(task="multi_objective", data=df, target_col="",
+                          feature_cols=["param1", "param2"],
+                          params={"objectives": [
+                              {"col": "strength", "direction": "maximize"},
+                              {"col": "defect", "direction": "minimize"},
+                          ], "weights": [1.0, 1.0]})
+    result = multi_objective_opt(req)
+    assert result.status == "ok"
+    optimal = result.metadata["optimal_params"]
+    # 最优方案 param1 应接近 5
+    assert 4.0 < optimal["param1"] < 6.0, f"最优 param1 应接近 5, 实际={optimal['param1']}"
+
+
+# ── 分位数回归正确性 ──
+
+def test_quantile_regression_median():
+    """中位数回归应在对称分布下给出与 OLS 接近的系数。"""
+    from smartsuite.engine.doe_opt import quantile_regression
+    np.random.seed(42)
+    n = 200
+    x = np.random.uniform(0, 10, n)
+    y = 2.0 + 3.0 * x + np.random.normal(0, 1, n)
+    df = pd.DataFrame({"x": x, "y": y})
+    req = AnalysisRequest(task="quantile_regression", data=df, target_col="y",
+                          feature_cols=["x"], params={"quantile": 0.5})
+    result = quantile_regression(req)
+    assert result.status == "ok"
+    coef = result.tables["coefficients"]
+    x_row = coef[coef["变量"] == "x"]
+    beta_x = float(x_row["系数"].iloc[0])
+    # 中位数回归斜率应接近 3.0
+    assert 2.6 < beta_x < 3.4, f"中位数回归斜率应接近 3.0, 实际={beta_x:.3f}"
+
+
+# ── 属性控制图边缘情况 ──
+
+def test_attribute_chart_types():
+    """p/np/c/u 四种属性控制图均应正常返回。"""
+    from smartsuite.engine.spc_monitor import attribute_chart
+    np.random.seed(42)
+
+    # p-chart: 不良率数据
+    df_p = pd.DataFrame({
+        "batch": np.repeat(range(1, 21), 50),
+        "defect": np.random.binomial(1, 0.05, 1000),
+    })
+    req = AnalysisRequest(task="spc_attribute", data=df_p, target_col="defect",
+                          params={"chart_type": "p", "subgroup_col": "batch"})
+    r = attribute_chart(req)
+    assert r.status == "ok"
+    assert r.metadata["chart_type"] == "p"
+
+    # c-chart: 缺陷数数据
+    df_c = pd.DataFrame({
+        "unit": range(1, 26),
+        "defects": np.random.poisson(4, 25),
+    })
+    req = AnalysisRequest(task="spc_attribute", data=df_c, target_col="defects",
+                          params={"chart_type": "c"})
+    r = attribute_chart(req)
+    assert r.status == "ok"
+    assert r.metadata["chart_type"] == "c"
+
+    # u-chart: 单位缺陷率
+    df_u = pd.DataFrame({
+        "batch": np.repeat(range(1, 16), 2),
+        "defects": np.random.poisson(2, 30),
+    })
+    req = AnalysisRequest(task="spc_attribute", data=df_u, target_col="defects",
+                          params={"chart_type": "u", "subgroup_col": "batch"})
+    r = attribute_chart(req)
+    assert r.status == "ok"
+    assert r.metadata["chart_type"] == "u"

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy import stats
+sp_stats = stats  # 别名，供函数内统一使用
 
 from matplotlib.figure import Figure
 from sklearn.linear_model import Ridge
@@ -27,7 +28,6 @@ def _std_beta(model, X):
 
 def _breusch_pagan(model, X):
     """Breusch-Pagan 异方差检验。返回 (LM统计量, p值)。"""
-    from scipy import stats as sp_stats
     residuals = model.resid
     resid_sq = residuals**2
     resid_sq_mean = np.mean(resid_sq)
@@ -723,7 +723,6 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     grand_std = float(df[req.target_col].std(ddof=1))
 
     # ── 回归法估计效应（编码变量 -1/+1，比中位数分割更准确）──
-    from scipy import stats as sp_stats
     effects = []
     for col in cols:
         col_vals = df[col]
@@ -1164,7 +1163,7 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         coef_df = pd.DataFrame({
             "变量": ["(截距)"] + cols,
             "Huber系数": [huber.intercept_] + list(huber.coef_),
-            "OLS系数": list(ols_model.params.values),
+            "OLS系数": list(ols_model.params),
             "差异": [huber.intercept_ - ols_model.params[0]] + [
                 h - o for h, o in zip(huber.coef_, ols_model.params[1:])
             ],

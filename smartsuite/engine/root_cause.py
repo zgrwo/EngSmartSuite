@@ -3,6 +3,8 @@ import pandas as pd
 import statsmodels.api as sm
 from matplotlib.figure import Figure
 from scipy import stats
+sp_stats = stats  # 别名，供函数内统一使用
+
 from sklearn.tree import DecisionTreeRegressor, plot_tree
 from statsmodels.formula.api import ols
 from statsmodels.stats.outliers_influence import variance_inflation_factor
@@ -135,6 +137,9 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         ti = cols.index(req.target_col)
         target_p_adj[c] = float(pmat_corrected.iloc[ci, ti])
 
+    # ── 初始化图表列表 ──
+    figures = [fig]
+
     # ── 散点矩阵：目标 vs Top-N 相关性变量 ──
     top_n_scatter = min(6, len(target_corr))
     if top_n_scatter >= 2:
@@ -192,7 +197,6 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     control_vars = req.params.get("control_vars", [])
     control_vars = [c for c in control_vars if c in req.data.columns and c != req.target_col
                     and pd.api.types.is_numeric_dtype(req.data[c])]
-    figures = [fig]
     summary_parts = [
         f"与「{req.target_col}」相关性最强的因子是「{top_factor}」"
         f"({corr_label.split()[0]}={top_value:.3f})",
@@ -312,6 +316,13 @@ def _eta_squared(aov_table, model):
     ss_residual = aov_table["sum_sq"].get("Residual", 0)
     ss_total = sum(aov_table["sum_sq"])
     effect_sizes = {}
+    # 安全获取 Resudual 自由度，防止除零
+    if "Residual" in aov_table.index:
+        df_residual = max(aov_table.loc["Residual", "df"], 1)
+    else:
+        df_residual = 1
+    ms_residual = ss_residual / df_residual
+
     for idx in aov_table.index:
         if idx == "Residual":
             continue
@@ -319,9 +330,9 @@ def _eta_squared(aov_table, model):
         # 偏 η² = SS_effect / (SS_effect + SS_residual)
         eta2 = ss_effect / (ss_effect + ss_residual) if (ss_effect + ss_residual) > 0 else 0
         # ω² 近似
-        df_effect = aov_table.loc[idx, "df"]
-        ms_residual = ss_residual / aov_table.loc["Residual", "df"] if "Residual" in aov_table.index else 1
-        omega2 = (ss_effect - df_effect * ms_residual) / (ss_total + ms_residual) if (ss_total + ms_residual) > 0 else 0
+        df_effect = max(aov_table.loc[idx, "df"], 1)
+        denom = ss_total + ms_residual
+        omega2 = (ss_effect - df_effect * ms_residual) / denom if denom > 0 else 0
         omega2 = max(0, omega2)
         effect_sizes[idx] = {"η²": float(eta2), "ω²": float(omega2)}
     return effect_sizes
@@ -367,7 +378,6 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["ANOVA 模型拟合失败，请检查数据是否包含缺失值或非数值列"])
 
     # ── 假设检验前提验证 ──
-    from scipy import stats as sp_stats
 
     # Levene 方差齐性检验（按第一个因子分组）
     first_col = cols[0]
@@ -412,6 +422,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 事后检验 (Tukey HSD) 仅当显著因子数≥1 时执行 ──
     posthoc_results: list[dict] = []
     if sig_factors:
+        from itertools import combinations
         from statsmodels.stats.multicomp import pairwise_tukeyhsd
         for col in cols:
             try:
@@ -422,15 +433,19 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                         req.data.loc[req.data[req.target_col].notna(), col],
                         alpha=alpha
                     )
-                    for row_idx in range(len(tukey._results_table.data[1:])):
-                        row = tukey._results_table.data[1 + row_idx]
-                        posthoc_results.append({
-                            "因子": col,
-                            "对比": f"{row[0]} vs {row[1]}",
-                            "均值差": float(row[2]),
-                            "p值": float(row[3]),
-                            "显著": "是" if float(row[3]) < alpha else "否",
-                        })
+                    # 使用公开 API 遍历所有成对比较
+                    groups = list(tukey.groupsunique)
+                    pair_idx = 0
+                    for g1, g2 in combinations(groups, 2):
+                        if pair_idx < len(tukey.pvalues):
+                            posthoc_results.append({
+                                "因子": col,
+                                "对比": f"{g1} vs {g2}",
+                                "均值差": float(tukey.meandiffs[pair_idx]),
+                                "p值": float(tukey.pvalues[pair_idx]),
+                                "显著": "是" if tukey.reject[pair_idx] else "否",
+                            })
+                        pair_idx += 1
             except (KeyError, Exception):
                 pass
 
@@ -535,6 +550,8 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
 def _cohens_d(x, y):
     """Cohen's d 效应量 (Hedges' g 校正小样本偏差)。"""
     n1, n2 = len(x), len(y)
+    if n1 < 2 or n2 < 2:
+        return 0.0
     s1, s2 = np.std(x, ddof=1), np.std(y, ddof=1)
     # 合并标准差
     sp = np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / (n1 + n2 - 2))
@@ -547,16 +564,26 @@ def _cohens_d(x, y):
 
 
 def _cliffs_delta(x, y):
-    """Cliff's delta — 非参数效应量，适用于 Mann-Whitney。值域 [-1, 1]。"""
-    n1, n2 = len(x), len(y)
-    # 对所有 (xi, yj) 对进行比较
-    dominance = 0
-    for xi in x:
-        for yj in y:
-            if xi > yj:
-                dominance += 1
-            elif xi < yj:
-                dominance -= 1
+    """Cliff's delta — 非参数效应量，适用于 Mann-Whitney。值域 [-1, 1]。
+
+    使用基于排序的 O(n log n) 向量化实现，避免 O(n²) Python 循环。
+    """
+    x_arr = np.asarray(x, dtype=float)
+    y_arr = np.asarray(y, dtype=float)
+    n1, n2 = len(x_arr), len(y_arr)
+    if n1 == 0 or n2 == 0:
+        return 0.0
+
+    # 对 y 排序后，用 searchsorted 批量统计
+    y_sorted = np.sort(y_arr)
+    # lt_count: y 中严格小于各 xi 的元素总数
+    lt_count = int(np.sum(np.searchsorted(y_sorted, x_arr, side="left")))
+    # le_count: y 中小于等于各 xi 的元素总数
+    le_count = int(np.sum(np.searchsorted(y_sorted, x_arr, side="right")))
+    # gt_count: y 中严格大于各 xi 的元素总数
+    gt_count = n1 * n2 - le_count
+    # dominance = #(xi > yj) - #(xi < yj) = lt_count - gt_count
+    dominance = lt_count - gt_count
     return float(dominance / (n1 * n2))
 
 
@@ -596,15 +623,14 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少3个点)"])
 
-        from scipy import stats as sp_stats
         stat, p = sp_stats.ttest_1samp(data, popmean)
-        test_name = f"单样本 t 检验 (H₀: μ={popmean})"
+        test_name = f"单样本 t 检验 (H0: mu={popmean})"
         d = (float(data.mean()) - popmean) / (float(data.std(ddof=1)) + 1e-10)
         effect_size = float(d)
         effect_name = "Cohen's d (单样本)"
         effect_label = _effect_size_label(abs(d), "cohens_d")
         desc_df = pd.DataFrame({
-            "统计量": ["样本量", "均值", "标准差", "标准误", "H₀均值"],
+            "统计量": ["样本量", "均值", "标准差", "标准误", "H0均值"],
             "值": [str(len(data)), f"{data.mean():.4f}", f"{data.std(ddof=1):.4f}",
                    f"{data.sem():.4f}", str(popmean)],
         })
@@ -617,7 +643,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         ax.hist(data, bins=min(20, len(data)//2), color="#6baed6", edgecolor="white", alpha=0.8)
         mean_val = float(data.mean())
         ax.axvline(mean_val, color="#2171b5", linewidth=2, label=f"μ={mean_val:.3f}")
-        ax.axvline(popmean, color="#d94801", linestyle="--", linewidth=2, label=f"H₀={popmean}")
+        ax.axvline(popmean, color="#d94801", linestyle="--", linewidth=2, label=f"H0={popmean}")
         # 95% CI
         ci = sp_stats.t.interval(0.95, len(data)-1, loc=mean_val, scale=data.sem())
         ax.axvspan(ci[0], ci[1], alpha=0.1, color="#2171b5", label=f"95%CI")
@@ -657,7 +683,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效配对数据不足(至少3对)"])
 
-        from scipy import stats as sp_stats
         stat, p = sp_stats.ttest_rel(sub[col1], sub[col2])
         test_name = f"配对 t 检验 ({col1} vs {col2})"
         diff = sub[col1].values - sub[col2].values
@@ -719,10 +744,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少5个点)"])
 
-        from scipy import stats as sp_stats
         # Wilcoxon 符号秩检验 (双边): 检验中位数是否等于 popmedian
         stat, p = sp_stats.wilcoxon(data.values - popmedian)
-        test_name = f"单样本 Wilcoxon 检验 (H₀: 中位数={popmedian})"
+        test_name = f"单样本 Wilcoxon 检验 (H0: 中位数={popmedian})"
         # 效应量: 匹配对秩相关 r = Z / sqrt(N)
         n = len(data)
         z_stat_abs = abs(sp_stats.norm.ppf(max(p, 1e-15) / 2))
@@ -740,7 +764,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         ax.axvline(np.median(data), color="#2171b5", linewidth=2,
                    label=f"中位数={np.median(data):.3f}")
         ax.axvline(popmedian, color="#d94801", linestyle="--", linewidth=2,
-                   label=f"H₀={popmedian}")
+                   label=f"H0={popmedian}")
         ax.set_xlabel(req.target_col, fontsize=10)
         ax.set_ylabel("频数", fontsize=10)
         ax.set_title(f"{test_name} (p={p:.4f})", fontsize=11)
@@ -757,8 +781,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                     "效应量解读": [effect_label], "结论": [conclusion],
                 }),
                 "descriptive_stats": pd.DataFrame({
-                    "统计量": ["样本量", "中位数", "IQR", "H₀中位数",
-                              "高于H₀数", "低于H₀数"],
+                    "统计量": ["样本量", "中位数", "IQR", "H0中位数",
+                              "高于H0数", "低于H0数"],
                     "值": [str(n), f"{data.median():.4f}",
                            f"{data.quantile(0.75)-data.quantile(0.25):.4f}",
                            str(popmedian), str(int((data > popmedian).sum())),
@@ -782,7 +806,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["至少需要 2 个分组"])
 
-        from scipy import stats as sp_stats
         group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
         stat, p = sp_stats.kruskal(*group_data)
         test_name = "Kruskal-Wallis H 检验 (非参数 ANOVA)"
@@ -886,7 +909,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         c = int(((vals1 == neg) & (vals2 == pos)).sum())  # 前负后正
         d = int(((vals1 == neg) & (vals2 == neg)).sum())  # 都为负
 
-        from scipy import stats as sp_stats
         # McNemar 连续性校正
         stat = (abs(b - c) - 1)**2 / (b + c + 1e-10) if (b + c) > 0 else 0
         p = float(1 - sp_stats.chi2.cdf(stat, 1))
@@ -949,10 +971,13 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             if len(vals) > 2:
                 return AnalysisResult(task="hypothesis_test", status="error",
                     messages=[f"列「{c}」不是二分类数据"])
-        from scipy import stats as sp_stats
         # Cochran Q: Q = (k-1)[k*sum(Cj²) - (sum Cj)²] / [k*sum(Ri) - sum(Ri²)]
         k = len(measure_cols)
-        binary = (sub == sub.iloc[0, :].values).astype(int)  # 简化二值化
+        # 逐列独立二值化：每列取两个唯一值，排序后映射为 0/1
+        binary = pd.DataFrame(index=sub.index)
+        for c in measure_cols:
+            uv = sorted(sub[c].unique())
+            binary[c] = (sub[c] == uv[1]).astype(int)
         col_sums = binary.sum(axis=0).values
         row_sums = binary.sum(axis=1).values
         Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
@@ -984,7 +1009,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if len(groups) != 2:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["KS 检验需要恰好 2 个分组"])
-        from scipy import stats as sp_stats
         g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
         g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
         stat, p = sp_stats.ks_2samp(g1, g2)
@@ -1023,7 +1047,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if n < 4:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少4个点)"])
-        from scipy import stats as sp_stats
 
         # MK 统计量: sum of sign(x_j - x_i) for all i < j
         vals = data.values
@@ -1088,7 +1111,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if len(groups) < 3:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["Jonckheere-Terpstra 需要至少 3 个有序分组"])
-        from scipy import stats as sp_stats
         # 转换分组为有序秩次
         group_order = {g: i for i, g in enumerate(groups)}
         sub_ordered = sub.copy()
@@ -1150,7 +1172,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["Friedman 检验需要至少 2 个重复测量条件和 3 个完整观测"])
 
-        from scipy import stats as sp_stats
         stat, p = sp_stats.friedmanchisquare(*[sub[c].values for c in measure_cols])
         test_name = f"Friedman 检验 (非参数重复测量, {len(measure_cols)} 条件)"
         n = len(sub)
@@ -1211,7 +1232,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效配对数据不足(至少5对)"])
 
-        from scipy import stats as sp_stats
         # Wilcoxon 符号秩检验
         stat, p = sp_stats.wilcoxon(sub[col1], sub[col2])
         test_name = f"Wilcoxon 符号秩检验 ({col1} vs {col2})"
@@ -1274,7 +1294,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
 
-    from scipy import stats as sp_stats
 
     # ── 自动选择参数/非参数检验 ──
     norm_warn: list[str] = []
@@ -1584,7 +1603,6 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
         test_type: "ttest" (默认) | "anova" | "correlation"
         n_groups: ANOVA 分组数 (test_type="anova" 时使用)
     """
-    from scipy import stats as sp_stats
     from math import ceil
 
     effect_size = req.params.get("effect_size", 0.5)
@@ -1747,14 +1765,13 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # 列联表
     ctab = pd.crosstab(sub[col1], sub[col2])
-    from scipy import stats as sp_stats
 
     # Chi-square
     chi2, chi_p, dof, expected = sp_stats.chi2_contingency(ctab)
     min_expected = expected.min()
 
-    # 自动选择
-    if min_expected < 5 or ctab.shape == (2, 2) and len(sub) < 100:
+    # 自动选择：期望频数<5 或 (2×2 且样本少) → Fisher，否则 Chi-square
+    if (min_expected < 5) or (ctab.shape == (2, 2) and len(sub) < 100):
         # Fisher's exact test
         if ctab.shape == (2, 2):
             odds_ratio, fish_p = sp_stats.fisher_exact(ctab)
@@ -1871,7 +1888,6 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     n = len(data)
     p_hat = successes / n
 
-    from scipy import stats as sp_stats
     from math import sqrt
 
     # Wilson Score CI
@@ -1895,7 +1911,7 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     uppers = [wilson_upper - p_hat, cp_upper - p_hat]
     ax.barh(methods, uppers, left=[wilson_lower, cp_lower], height=0.3,
             color=["#6baed6", "#2171b5"], edgecolor="white")
-    ax.axvline(p_hat, color="#d94801", linewidth=2, label=f"p̂={p_hat:.4f}")
+    ax.axvline(p_hat, color="#d94801", linewidth=2, label=f"p_hat={p_hat:.4f}")
     ax.set_xlabel("比例", fontsize=10)
     ax.set_title(f"二项比例 95% CI — {req.target_col} (n={n})", fontsize=11)
     ax.legend(fontsize=8)
@@ -1942,7 +1958,6 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="variance_test", status="error",
             messages=["至少需要 2 个分组"])
 
-    from scipy import stats as sp_stats
     group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
     valid_groups = [(str(g), d) for g, d in zip(groups, group_data) if len(d) >= 2]
 
@@ -2158,7 +2173,6 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="distribution_summary", status="error",
             messages=["有效数据不足(至少3个点)"])
 
-    from scipy import stats as sp_stats
 
     # 描述性统计
     desc = {
@@ -2252,7 +2266,6 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="normality_check", status="error",
             messages=["没有可分析的列"])
 
-    from scipy import stats as sp_stats
     results = []
     for col in cols:
         d = req.data[col].dropna()
