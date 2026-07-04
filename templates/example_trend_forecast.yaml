@@ -1,0 +1,6 @@
+# 趋势预测 — 线性趋势外推 + 残差诊断 (DW/Ljung-Box/ACF)
+task: trend_forecast
+target_col: "不良率"
+feature_cols: []
+params:
+  forecast_steps: 5

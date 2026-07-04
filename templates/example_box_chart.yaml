@@ -1,0 +1,8 @@
+# 分组箱线图 — 按类别因子分组展示数值分布，支持次分类分面
+task: box_chart
+target_col: "不良率"
+feature_cols:
+  - "原料类型"
+  - "车间"
+params:
+  mode: "facet"

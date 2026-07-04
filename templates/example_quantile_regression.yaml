@@ -1,0 +1,8 @@
+# 分位数回归 — 对任意分位数建模，不依赖正态假设（默认中位数回归）
+task: quantile_regression
+target_col: "不良率"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+params:
+  quantile: 0.5
