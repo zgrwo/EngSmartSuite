@@ -5,18 +5,10 @@ import os
 import sys
 import tempfile
 
-# ── matplotlib 中文字体必须在所有图表创建之前配置 ──
-import matplotlib
-
-matplotlib.use("Agg")
-try:
-    matplotlib.font_manager.fontManager.addfont("C:/Windows/Fonts/msyh.ttc")
-    matplotlib.rcParams["font.family"] = "Microsoft YaHei"
-except Exception:
-    matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
-matplotlib.rcParams["axes.unicode_minus"] = False
-
 import pandas as pd
+
+# ── matplotlib 配置由引擎层统一管理（含中文字体 + 配色方案）──
+import smartsuite.engine  # noqa: F401 — 触发引擎层全局 matplotlib 配置
 
 try:
     from flask import Flask, jsonify, render_template, request

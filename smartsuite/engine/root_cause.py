@@ -334,7 +334,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     )
 
 
-def _eta_squared(aov_table, model):
+def _eta_squared(aov_table):
     """计算偏 η² 效应量。"""
     ss_residual = aov_table["sum_sq"].get("Residual", 0)
     ss_total = sum(aov_table["sum_sq"])
@@ -361,16 +361,23 @@ def _eta_squared(aov_table, model):
     return effect_sizes
 
 
+def _threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")):
+    """通用效应量阈值标签函数。
+
+    Args:
+        value: 待判定的效应量值
+        thresholds: 升序阈值列表，如 [0.01, 0.06, 0.14]
+        labels: 对应标签元组，比 thresholds 多一个元素
+    """
+    for t, label in zip(thresholds, labels):
+        if value < t:
+            return label
+    return labels[-1]
+
+
 def _effect_interpretation(eta2):
     """η² 效应量解读 (Cohen 准则)。"""
-    if eta2 < 0.01:
-        return "可忽略"
-    elif eta2 < 0.06:
-        return "小"
-    elif eta2 < 0.14:
-        return "中"
-    else:
-        return "大"
+    return _threshold_label(eta2, [0.01, 0.06, 0.14])
 
 
 def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -428,7 +435,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             )
 
     # ── 效应量计算 ──
-    effect_sizes = _eta_squared(anova_table, model)
+    effect_sizes = _eta_squared(anova_table)
 
     alpha = req.params.get("alpha", 0.05)
     sig_factors: list[str] = []
@@ -627,31 +634,178 @@ def _cliffs_delta(x, y):
 
 def _effect_size_label(d, test_type="cohens_d"):
     """效应量大小解读标签。"""
+    ad = abs(d)
     if test_type == "cohens_d":
-        ad = abs(d)
-        if ad < 0.2:
-            return "可忽略"
-        elif ad < 0.5:
-            return "小"
-        elif ad < 0.8:
-            return "中"
-        else:
-            return "大"
-    else:  # cliffs_delta
-        ad = abs(d)
-        if ad < 0.147:
-            return "可忽略"
-        elif ad < 0.33:
-            return "小"
-        elif ad < 0.474:
-            return "中"
-        else:
-            return "大"
+        return _threshold_label(ad, [0.2, 0.5, 0.8])
+    # cliffs_delta
+    return _threshold_label(ad, [0.147, 0.33, 0.474])
+
+
+def _make_ht_result_row(test_name, stat_label, stat_value, p_val, alpha,
+                         effect_str, conclusion, **extra_cols):
+    """构造假设检验结果表的统一 DataFrame 行。
+
+    Args:
+        test_name: 检验方法名
+        stat_label: 统计量标签 (如 "t值", "H统计量")
+        stat_value: 统计量值 (已格式化的字符串或数值)
+        p_val: p 值
+        alpha: 显著性水平
+        effect_str: 效应量描述字符串
+        conclusion: 中文结论
+        **extra_cols: 额外列 (如 "条件数", "样本量")
+    """
+    row = {
+        "检验方法": [test_name],
+        stat_label: [str(stat_value)],
+        "p值": [f"{p_val:.4f}"],
+        "显著性水平": [str(alpha)],
+        "效应量": [effect_str],
+        "结论": [conclusion],
+    }
+    for k, v in extra_cols.items():
+        row[k] = [str(v)]
+    return pd.DataFrame(row)
+
+
+# ── 假设检验分支调度 ── 新增检验类型只需在此注册 + 实现私有函数
+def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
+    """Cochran Q 检验 (3+ 配对二分类条件)。"""
+    measure_cols = [c for c in req.feature_cols if c in req.data.columns]
+    if len(measure_cols) < 2:
+        return AnalysisResult(task="hypothesis_test", status="error",
+            messages=["Cochran Q 需要至少 2 个二分类条件列"])
+    sub = req.data[measure_cols].dropna()
+    if len(sub) < 3:
+        return AnalysisResult(task="hypothesis_test", status="error",
+            messages=["有效数据不足(至少3行)"])
+    k = len(measure_cols)
+    binary = pd.DataFrame(index=sub.index)
+    for c in measure_cols:
+        encoded, err = _binary_encode(sub[c], c)
+        if err:
+            return AnalysisResult(task="hypothesis_test", status="error", messages=[err])
+        binary[c] = encoded
+    col_sums = binary.sum(axis=0).values
+    row_sums = binary.sum(axis=1).values
+    Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
+    denom = k * np.sum(row_sums) - np.sum(row_sums**2)
+    Q = Q / (denom + 1e-10)
+    p = float(1 - sp_stats.chi2.cdf(Q, k - 1))
+    test_name = f"Cochran Q 检验 ({k} 条件)"
+    alpha = req.params.get("alpha", 0.05)
+    conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
+    return AnalysisResult(
+        task="hypothesis_test",
+        tables={"test_results": pd.DataFrame({
+            "检验方法": [test_name], "统计量(Q)": [f"{Q:.3f}"],
+            "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+            "条件数": [str(k)], "样本量": [str(len(sub))],
+            "结论": [conclusion],
+        })},
+        summary=f"Cochran Q: {conclusion} (Q={Q:.2f}, p={p:.4f}, k={k})",
+        metadata={"test": test_name, "statistic": float(Q), "p_value": float(p),
+                 "alpha": alpha, "k": k, "n": len(sub)},
+    )
+
+
+def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
+    """Kolmogorov-Smirnov 双样本检验。"""
+    group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
+    groups = req.data[group_col].unique()
+    if len(groups) != 2:
+        return AnalysisResult(task="hypothesis_test", status="error",
+            messages=["KS 检验需要恰好 2 个分组"])
+    g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
+    g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
+    stat, p = sp_stats.ks_2samp(g1, g2)
+    test_name = f"Kolmogorov-Smirnov 检验 ({groups[0]} vs {groups[1]})"
+    alpha = req.params.get("alpha", 0.05)
+    conclusion = "两样本分布存在显著差异" if p < alpha else "未发现分布差异"
+    fig = Figure(figsize=(7, 4))
+    ax = fig.add_subplot(111)
+    ax.hist(g1, bins=20, alpha=0.6, color="#6baed6", density=True, label=str(groups[0]))
+    ax.hist(g2, bins=20, alpha=0.6, color="#fd8d3c", density=True, label=str(groups[1]))
+    ax.set_xlabel(req.target_col, fontsize=10)
+    ax.set_title(f"{test_name} (D={stat:.3f}, p={p:.4f})", fontsize=11)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    return AnalysisResult(
+        task="hypothesis_test",
+        tables={"test_results": pd.DataFrame({
+            "检验方法": [test_name], "统计量(D)": [f"{stat:.4f}"],
+            "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+            "结论": [conclusion],
+        })},
+        figures=[fig],
+        summary=f"KS 检验: {conclusion} (D={stat:.3f}, p={p:.4f})",
+        metadata={"test": test_name, "statistic": float(stat),
+                 "p_value": float(p), "alpha": alpha},
+    )
+
+
+def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
+    """Friedman 检验 (非参数重复测量)。"""
+    measure_cols = [c for c in req.feature_cols if c in req.data.columns]
+    if len(measure_cols) < 2:
+        measure_cols = [req.target_col] + [c for c in req.feature_cols[:2] if c in req.data.columns]
+    sub = req.data[measure_cols].dropna()
+    if len(sub) < 3 or len(measure_cols) < 2:
+        return AnalysisResult(task="hypothesis_test", status="error",
+            messages=["Friedman 检验需要至少 2 个重复测量条件和 3 个完整观测"])
+    stat, p = sp_stats.friedmanchisquare(*[sub[c].values for c in measure_cols])
+    test_name = f"Friedman 检验 (非参数重复测量, {len(measure_cols)} 条件)"
+    n = len(sub)
+    k = len(measure_cols)
+    kendall_w = float(stat / (n * (k - 1))) if n > 0 and k > 1 else 0.0
+    if kendall_w > 0.5:
+        effect_label = "强一致"
+    elif kendall_w > 0.3:
+        effect_label = "中等一致"
+    elif kendall_w > 0.1:
+        effect_label = "弱一致"
+    else:
+        effect_label = "可忽略"
+    alpha = req.params.get("alpha", 0.05)
+    conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
+    fig = Figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)
+    means = [sub[c].median() for c in measure_cols]
+    ax.bar(range(len(measure_cols)), means, color="#6baed6", edgecolor="white")
+    ax.set_xticks(range(len(measure_cols)))
+    ax.set_xticklabels(measure_cols, rotation=45, ha="right", fontsize=9)
+    ax.set_ylabel("中位数", fontsize=10)
+    ax.set_title(f"{test_name} (χ²={stat:.2f}, p={p:.4f})", fontsize=11)
+    fig.tight_layout()
+    return AnalysisResult(
+        task="hypothesis_test",
+        tables={"test_results": pd.DataFrame({
+            "检验方法": [test_name], "统计量(χ²)": [f"{stat:.3f}"],
+            "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
+            "效应量": [f"Kendall's W={kendall_w:.3f} ({effect_label})"],
+            "结论": [conclusion],
+        })},
+        figures=[fig],
+        summary=f"Friedman: {conclusion} (χ²={stat:.2f}, p={p:.4f}, W={kendall_w:.3f})",
+        metadata={"test": test_name, "statistic": float(stat), "p_value": float(p),
+                 "alpha": alpha, "effect_size": kendall_w, "n": n, "k": k},
+    )
+
+
+_HYPOTHESIS_DISPATCH = {
+    "cochran_q": _ht_cochran_q,
+    "ks": _ht_ks,
+    "friedman": _ht_friedman,
+}
 
 
 def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     """假设检验：独立样本、配对样本、单样本 t 检验 / Mann-Whitney U，含效应量。"""
     test_type = req.params.get("test", "ttest_ind")
+
+    # 调度到独立分支函数（新增检验类型只需在 _HYPOTHESIS_DISPATCH 注册）
+    if test_type in _HYPOTHESIS_DISPATCH:
+        return _HYPOTHESIS_DISPATCH[test_type](req)
 
     # ── 单样本检验 ──
     if test_type == "ttest_1samp":
@@ -935,11 +1089,11 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         vals2 = sub[col2].values
         # 自动二值化
         unique_vals = np.unique(np.concatenate([vals1, vals2]))
-        if len(unique_vals) > 2:
+        if len(unique_vals) != 2:
             return AnalysisResult(task="hypothesis_test", status="error",
-                messages=["McNemar 检验需要二分类数据 (每列恰好 2 个不同值)"])
+                messages=[f"McNemar 检验需要二分类数据 (每列恰好 2 个不同值)，当前有 {len(unique_vals)} 个"])
 
-        pos = str(unique_vals[1]) if len(unique_vals) > 1 else str(unique_vals[0])
+        pos = str(unique_vals[1])
         neg = str(unique_vals[0])
 
         a = int(((vals1 == pos) & (vals2 == pos)).sum())  # 都为正
@@ -993,86 +1147,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             },
         )
 
-    # ── Cochran's Q 检验 (3+ 配对二分类) ──
-    if test_type == "cochran_q":
-        measure_cols = [c for c in req.feature_cols if c in req.data.columns]
-        if len(measure_cols) < 2:
-            return AnalysisResult(task="hypothesis_test", status="error",
-                messages=["Cochran Q 需要至少 2 个二分类条件列"])
-        sub = req.data[measure_cols].dropna()
-        if len(sub) < 3:
-            return AnalysisResult(task="hypothesis_test", status="error",
-                messages=["有效数据不足(至少3行)"])
-        # Cochran Q: Q = (k-1)[k*sum(Cj²) - (sum Cj)²] / [k*sum(Ri) - sum(Ri²)]
-        k = len(measure_cols)
-        binary = pd.DataFrame(index=sub.index)
-        for c in measure_cols:
-            encoded, err = _binary_encode(sub[c], c)
-            if err:
-                return AnalysisResult(task="hypothesis_test", status="error", messages=[err])
-            binary[c] = encoded
-        col_sums = binary.sum(axis=0).values
-        row_sums = binary.sum(axis=1).values
-        Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
-        denom = k * np.sum(row_sums) - np.sum(row_sums**2)
-        Q = Q / (denom + 1e-10)
-        p = float(1 - sp_stats.chi2.cdf(Q, k - 1))
-
-        test_name = f"Cochran Q 检验 ({k} 条件)"
-        alpha = req.params.get("alpha", 0.05)
-        conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
-
-        return AnalysisResult(
-            task="hypothesis_test",
-            tables={"test_results": pd.DataFrame({
-                "检验方法": [test_name], "统计量(Q)": [f"{Q:.3f}"],
-                "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
-                "条件数": [str(k)], "样本量": [str(len(sub))],
-                "结论": [conclusion],
-            })},
-            summary=f"Cochran Q: {conclusion} (Q={Q:.2f}, p={p:.4f}, k={k})",
-            metadata={"test": test_name, "statistic": float(Q), "p_value": float(p),
-                     "alpha": alpha, "k": k, "n": len(sub)},
-        )
-
-    # ── Kolmogorov-Smirnov 双样本检验 ──
-    if test_type == "ks":
-        group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
-        groups = req.data[group_col].unique()
-        if len(groups) != 2:
-            return AnalysisResult(task="hypothesis_test", status="error",
-                messages=["KS 检验需要恰好 2 个分组"])
-        g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
-        g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
-        stat, p = sp_stats.ks_2samp(g1, g2)
-        test_name = f"Kolmogorov-Smirnov 检验 ({groups[0]} vs {groups[1]})"
-        alpha = req.params.get("alpha", 0.05)
-        conclusion = "两样本分布存在显著差异" if p < alpha else "未发现分布差异"
-        # 效应量: D statistic itself
-        effect_size = float(stat)
-
-        fig = Figure(figsize=(7, 4))
-        ax = fig.add_subplot(111)
-        ax.hist(g1, bins=20, alpha=0.6, color="#6baed6", density=True, label=str(groups[0]))
-        ax.hist(g2, bins=20, alpha=0.6, color="#fd8d3c", density=True, label=str(groups[1]))
-        ax.set_xlabel(req.target_col, fontsize=10)
-        ax.set_title(f"{test_name} (D={stat:.3f}, p={p:.4f})", fontsize=11)
-        ax.legend(fontsize=8)
-        fig.tight_layout()
-
-        return AnalysisResult(
-            task="hypothesis_test",
-            tables={"test_results": pd.DataFrame({
-                "检验方法": [test_name], "统计量(D)": [f"{stat:.4f}"],
-                "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
-                "结论": [conclusion],
-            })},
-            figures=[fig],
-            summary=f"KS 检验: {conclusion} (D={stat:.3f}, p={p:.4f})",
-            metadata={"test": test_name, "statistic": float(stat),
-                     "p_value": float(p), "alpha": alpha},
-        )
-
     # ── Mann-Kendall 趋势检验 ──
     if test_type == "mann_kendall":
         data = req.data[req.target_col].dropna()
@@ -1081,17 +1155,13 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少4个点)"])
 
-        # MK 统计量: sum of sign(x_j - x_i) for all i < j
+        # MK 统计量: 使用 scipy 的 kendalltau (O(n log n) C 实现)
         vals = data.values
-        S = 0
-        for i in range(n - 1):
-            for j in range(i + 1, n):
-                if vals[j] > vals[i]:
-                    S += 1
-                elif vals[j] < vals[i]:
-                    S -= 1
+        tau_mk, p_tau = sp_stats.kendalltau(np.arange(n), vals)
+        # S = tau * n * (n-1) / 2（Kendall tau 定义）
+        S = int(round(tau_mk * n * (n - 1) / 2))
 
-        # 方差 (处理结)
+        # 方差 + 正态近似 Z（与原始 MK 公式一致）
         unique_vals, counts = np.unique(vals, return_counts=True)
         ties = np.sum(counts * (counts - 1) * (2 * counts + 5))
         var_S = (n * (n - 1) * (2 * n + 5) - ties) / 18
@@ -1099,9 +1169,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
         z_mk = (S - np.sign(S)) / np.sqrt(var_S)
         p = float(2 * sp_stats.norm.sf(abs(z_mk)))
-
-        # Kendall's tau 效应量
-        tau_mk = 2 * S / (n * (n - 1))
         effect_size = float(tau_mk)
 
         test_name = "Mann-Kendall 趋势检验"
@@ -1153,15 +1220,17 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                              for i in range(len(groups))]
 
         # JT 统计量: 所有 (i<j) 对中，组i值 < 组j值的计数 - 组i值 > 组j值的计数
+        # 使用向量化 searchsorted（O(n log n)），与 _cliffs_delta 相同算法
         JT = 0
         for i in range(len(groups)):
             for j in range(i + 1, len(groups)):
-                for vi in group_data_ordered[i]:
-                    for vj in group_data_ordered[j]:
-                        if vi < vj:
-                            JT += 1
-                        elif vi > vj:
-                            JT -= 1
+                gi, gj = group_data_ordered[i], group_data_ordered[j]
+                y_sorted = np.sort(gj)
+                # lt_count: gj 中小于各 gi 元素的数量
+                lt_count = int(np.sum(np.searchsorted(y_sorted, gi, side="left")))
+                # gt_count = n_i * n_j - le_count
+                le_count = int(np.sum(np.searchsorted(y_sorted, gi, side="right")))
+                JT += lt_count - (len(gi) * len(gj) - le_count)
 
         # 正态近似
         n_total = sum(len(g) for g in group_data_ordered)
@@ -1192,66 +1261,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             summary=f"Jonckheere-Terpstra: {conclusion} (Z={z_JT:.2f}, p={p:.4f}, τ={tau_b:.3f})",
             metadata={"test": test_name, "statistic": float(JT), "p_value": float(p),
                      "alpha": alpha, "effect_size": effect_size, "z": float(z_JT)},
-        )
-
-    # ── Friedman 检验 (非参数重复测量) ──
-    if test_type == "friedman":
-        # 需要多个 feature_cols 作为重复测量的不同条件
-        measure_cols = [c for c in req.feature_cols if c in req.data.columns]
-        if len(measure_cols) < 2:
-            measure_cols = [req.target_col] + [c for c in req.feature_cols[:2] if c in req.data.columns]
-        sub = req.data[measure_cols].dropna()
-        if len(sub) < 3 or len(measure_cols) < 2:
-            return AnalysisResult(task="hypothesis_test", status="error",
-                messages=["Friedman 检验需要至少 2 个重复测量条件和 3 个完整观测"])
-
-        stat, p = sp_stats.friedmanchisquare(*[sub[c].values for c in measure_cols])
-        test_name = f"Friedman 检验 (非参数重复测量, {len(measure_cols)} 条件)"
-        n = len(sub)
-        k = len(measure_cols)
-        # Kendall's W 效应量: W = χ² / (n*(k-1))
-        kendall_w = float(stat / (n * (k - 1))) if n > 0 and k > 1 else 0.0
-        effect_size = kendall_w
-        effect_name = "Kendall's W"
-        if kendall_w > 0.5:
-            effect_label = "强一致"
-        elif kendall_w > 0.3:
-            effect_label = "中等一致"
-        elif kendall_w > 0.1:
-            effect_label = "弱一致"
-        else:
-            effect_label = "可忽略"
-
-        alpha = req.params.get("alpha", 0.05)
-        conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
-
-        fig = Figure(figsize=(6, 4))
-        ax = fig.add_subplot(111)
-        means = [sub[c].median() for c in measure_cols]
-        ax.bar(range(len(measure_cols)), means, color="#6baed6", edgecolor="white")
-        ax.set_xticks(range(len(measure_cols)))
-        ax.set_xticklabels(measure_cols, rotation=45, ha="right", fontsize=9)
-        ax.set_ylabel("中位数", fontsize=10)
-        ax.set_title(f"{test_name} (χ²={stat:.2f}, p={p:.4f})", fontsize=11)
-        fig.tight_layout()
-
-        return AnalysisResult(
-            task="hypothesis_test",
-            tables={
-                "test_results": pd.DataFrame({
-                    "检验方法": [test_name], "统计量(χ²)": [f"{stat:.3f}"],
-                    "p值": [f"{p:.4f}"], "显著性水平": [str(alpha)],
-                    "效应量": [f"{effect_name}={effect_size:.3f} ({effect_label})"],
-                    "结论": [conclusion],
-                }),
-            },
-            figures=[fig],
-            summary=f"Friedman: {conclusion} (χ²={stat:.2f}, p={p:.4f}, W={kendall_w:.3f})",
-            metadata={
-                "test": test_name, "statistic": float(stat), "p_value": float(p),
-                "alpha": alpha, "effect_size": effect_size,
-                "n": n, "k": k,
-            },
         )
 
     # ── 配对 Wilcoxon 符号秩检验 ──
@@ -1722,8 +1731,8 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
             },
         )
 
-    elif mode == "achieved":
-        # 计算已达功效
+    elif mode in ("achieved", "achieved_power"):
+        # 计算已达功效（"achieved_power" 为 Web UI 兼容别名）
         if current_n is None:
             return AnalysisResult(
                 task="power_analysis", status="error",

@@ -172,7 +172,11 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
             html_parts.append(f"<h2>📊 {name}</h2>")
             html_parts.append(df.head(50).to_html(
                 index=False, classes="table", border=0, escape=False,
-                float_format=lambda x: f"{x:.4f}" if abs(x) < 1e6 else f"{x:.2e}"
+                float_format=lambda x: (
+                    f"{x:.4f}" if isinstance(x, (int, float)) and abs(x) < 1e6
+                    else f"{x:.2e}" if isinstance(x, (int, float))
+                    else str(x)
+                )
             ))
             if len(df) > 50:
                 html_parts.append(f"<p style='color:#777;font-size:11px'>(仅显示前50行，共{len(df)}行)</p>")

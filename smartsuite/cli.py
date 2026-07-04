@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.data_io import preprocess_data
+from smartsuite.services.data_io import preprocess_data, validate_data
 from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
 
@@ -54,7 +54,17 @@ def main():
 
         raw = pd.read_excel(args.input, sheet_name=args.sheet)
         features = config.get("feature_cols", [])
-        df, feature_cols, _, _ = preprocess_data(raw, features)
+        # 数据校验：提前发现列存在性、类型、缺失值问题
+        try:
+            validate_warnings = validate_data(raw, config["target_col"], features)
+            for w in validate_warnings:
+                print(f"  ⚠ {w}")
+        except Exception:
+            pass  # 校验失败不阻塞分析
+        df, feature_cols, _, imputation_log = preprocess_data(raw, features)
+        # 输出数据预处理警告
+        for col, n_coerced in imputation_log.items():
+            print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
         req = AnalysisRequest(
             task=config["task"], data=df,
             target_col=config["target_col"],

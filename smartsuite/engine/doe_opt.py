@@ -8,6 +8,7 @@ sp_stats = stats  # 别名，供函数内统一使用
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.engine.spc_monitor import _durbin_watson
 
 
 def _std_beta(model, X):
@@ -86,7 +87,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         # ── 模型诊断 ──
         # Durbin-Watson
-        dw = float(np.sum(np.diff(residuals)**2) / (np.sum(residuals**2) + 1e-10))
+        dw = _durbin_watson(residuals)
 
         # Breusch-Pagan 异方差检验
         bp_lm, bp_p = _breusch_pagan(model, X)
@@ -298,9 +299,9 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     coef_df = pd.DataFrame({
         "项": term_names,
         "系数": beta,
-        "标准误": model_rsm.bse.values,
-        "t值": model_rsm.tvalues.values,
-        "p值": model_rsm.pvalues.values,
+        "标准误": np.asarray(model_rsm.bse),
+        "t值": np.asarray(model_rsm.tvalues),
+        "p值": np.asarray(model_rsm.pvalues),
     })
 
     # ── 双图：3D 曲面 (左) + 2D 等高线 (右) ──
@@ -496,6 +497,15 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
                               messages=["网格搜索失败，请检查参数范围和样本量是否合理"])
 
 
+def _desirability(vals, direction):
+    """计算期望值（0-1 归一化）。"""
+    vmin, vmax = vals.min(), vals.max()
+    rng = vmax - vmin + 1e-10
+    if direction == "maximize":
+        return (vals - vmin) / rng
+    return (vmax - vals) / rng
+
+
 def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     """多目标优化 — 加权期望函数法。"""
     objectives = req.params.get("objectives", [])
@@ -536,10 +546,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
                 messages=[f"列「{col}」有效数据不足"],
             )
         direction = obj.get("direction", "maximize")
-        if direction == "maximize":
-            desirability = (vals - vals.min()) / (vals.max() - vals.min() + 1e-10)
-        else:
-            desirability = (vals.max() - vals) / (vals.max() - vals.min() + 1e-10)
+        desirability = _desirability(vals, direction)
         scores[valid_rows] += w * desirability
 
     valid_idx = req.data.index[valid_rows]
@@ -562,10 +569,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         col = obj["col"]
         direction = obj.get("direction", "maximize")
         vals = req.data.loc[valid_rows, col].values
-        if direction == "maximize":
-            d_i = (vals - vals.min()) / (vals.max() - vals.min() + 1e-10)
-        else:
-            d_i = (vals.max() - vals) / (vals.max() - vals.min() + 1e-10)
+        d_i = _desirability(vals, direction)
         best_d = float(d_i[best_pos])
         desirability_rows.append({
             "目标列": col,
@@ -603,17 +607,18 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         ax_pareto.scatter(vals0_plot, vals1_plot, c=score_valid, cmap="RdYlGn",
                          alpha=0.6, s=30, edgecolors="gray", linewidths=0.3)
 
-        # 标记 Pareto 前沿点（非支配排序简化版）
+        # Pareto 前沿：O(n log n) 排序法（按 x 降序，跟踪 y 最大值）
         points = np.column_stack([vals0_plot, vals1_plot])
-        is_pareto = np.ones(len(points), dtype=bool)
-        for i in range(len(points)):
-            for j in range(len(points)):
-                if i != j:
-                    if (points[j, 0] >= points[i, 0] and points[j, 1] >= points[i, 1]
-                            and (points[j, 0] > points[i, 0] or points[j, 1] > points[i, 1])):
-                        is_pareto[i] = False
-                        break
-        pareto_idx = np.where(is_pareto)[0]
+        order = np.lexsort((-points[:, 0],))  # 按第0列降序
+        sorted_pts = points[order]
+        pareto_mask = np.ones(len(sorted_pts), dtype=bool)
+        max_y = -np.inf
+        for i in range(len(sorted_pts)):
+            if sorted_pts[i, 1] <= max_y:
+                pareto_mask[i] = False
+            else:
+                max_y = sorted_pts[i, 1]
+        pareto_idx = order[pareto_mask]
         pareto_sorted = pareto_idx[np.argsort(points[pareto_idx, 0])]
         ax_pareto.plot(points[pareto_sorted, 0], points[pareto_sorted, 1],
                       "r-", linewidth=2, alpha=0.7, label=f"Pareto 前沿 ({len(pareto_sorted)}点)")
@@ -641,10 +646,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         direction = obj.get("direction", "maximize")
         w = weights[oi]
         vals = req.data.loc[valid_rows, col].values
-        if direction == "maximize":
-            d_i = (vals - vals.min()) / (vals.max() - vals.min() + 1e-10)
-        else:
-            d_i = (vals.max() - vals) / (vals.max() - vals.min() + 1e-10)
+        d_i = _desirability(vals, direction)
         contrib = w * d_i[top_idx]
         ax_score.barh(range(top_n), contrib, left=bottom_vals,
                      color=bar_colors[oi % len(bar_colors)],
@@ -694,14 +696,11 @@ def _lenth_pse(effects):
 
 def _effect_label_doe(effect_ratio):
     """DOE 效应量解读。"""
-    if effect_ratio < 0.05:
-        return "可忽略"
-    elif effect_ratio < 0.15:
-        return "小"
-    elif effect_ratio < 0.30:
-        return "中"
-    else:
-        return "大"
+    thresholds = [0.05, 0.15, 0.30]
+    for t, label in zip(thresholds, ["可忽略", "小", "中"]):
+        if effect_ratio < t:
+            return label
+    return "大"
 
 
 def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -976,9 +975,9 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     coef_df = pd.DataFrame({
         "变量": X.columns,
         "系数": params.round(4),
-        "标准误": model.bse.values.round(4),
-        "z值": model.tvalues.values.round(3),
-        "p值": model.pvalues.values.round(4),
+        "标准误": np.asarray(model.bse).round(4),
+        "z值": np.asarray(model.tvalues).round(3),
+        "p值": np.asarray(model.pvalues).round(4),
         "OR (Odds Ratio)": or_vals.round(3),
         "OR 95%CI下限": or_ci_lower.round(3),
         "OR 95%CI上限": or_ci_upper.round(3),

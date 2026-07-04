@@ -4,10 +4,11 @@ import io
 import logging
 import random
 
+import matplotlib.pyplot as plt
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.data_io import preprocess_data
+from smartsuite.services.data_io import preprocess_data, validate_data
 from smartsuite.services.orchestrator import orchestrate
 
 logger = logging.getLogger(__name__)
@@ -71,14 +72,26 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
             merged_corr.index.name = "目标"
 
     # 预处理只执行一次，避免每个目标列重复编码
+    # 数据校验：检测列存在性、类型问题、缺失值
+    data_warnings: list[str] = []
+    all_validate_cols = list(targets) + list(features)
+    if all_validate_cols:
+        try:
+            data_warnings = validate_data(df, targets[0] if targets else "", features)
+        except Exception:
+            pass  # 校验失败不阻塞分析
+
     # 以下任务需要原始类别列（不做one-hot编码，让引擎自行处理因子水平）
-    _raw_cat_tasks = {"box_chart", "anova", "variance_test"}
+    _raw_cat_tasks = {"box_chart", "anova", "variance_test", "contingency", "cohens_kappa"}
     if task in _raw_cat_tasks:
         df_enc = df.copy()
         feat_enc = list(features)
     else:
         cat_set = set(categoricals) if categoricals else set()
-        df_enc, feat_enc, _, _ = preprocess_data(df, features, cat_set)
+        df_enc, feat_enc, _, imputation_log = preprocess_data(df, features, cat_set)
+        # 将数据预处理日志转换为用户可见的警告
+        for col, n_coerced in imputation_log.items():
+            data_warnings.append(f"列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
 
     for target in targets:
         try:
@@ -135,7 +148,6 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
                 buf.seek(0)
                 charts.append(base64.b64encode(buf.read()).decode())
-                import matplotlib.pyplot as plt
                 plt.close(fig)
 
             # 序列化 metadata：递归处理嵌套结构，标量转为可序列化类型
@@ -155,7 +167,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 "target": target,
                 "status": result.status,
                 "summary": result.summary,
-                "messages": result.messages or [],
+                "messages": data_warnings + (result.messages or []),
                 "metadata": meta,
                 "tables": tables,
                 "charts": charts,

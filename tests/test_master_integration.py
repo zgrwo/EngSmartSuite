@@ -105,8 +105,20 @@ def test_all_registered_tasks(df, task, target, features):
     req = AnalysisRequest(task=task, data=df, target_col=target,
                           feature_cols=features, params=params)
     result = orchestrate(req)
-    assert result.status in ("ok", "error"), f"{task} returned unexpected status: {result.status}"
-    # Not asserting "ok" because some tasks legitimately fail with synthetic data
+    assert result.status in ("ok", "error"), f"{task}: unexpected status {result.status}"
+    assert result.task == task, f"{task}: task mismatch {result.task}"
+
+    if result.status == "ok":
+        # 成功结果必须包含有意义的输出
+        assert isinstance(result.summary, str) and len(result.summary) > 0, (
+            f"{task}: summary 为空")
+        assert isinstance(result.tables, dict), f"{task}: tables 不是 dict"
+        assert isinstance(result.figures, list), f"{task}: figures 不是 list"
+        assert isinstance(result.metadata, dict), f"{task}: metadata 不是 dict"
+    else:
+        # 错误结果必须包含错误消息
+        assert len(result.messages) > 0, f"{task}: error 但没有 messages"
+        assert any(len(m) > 0 for m in result.messages), f"{task}: messages 全为空字符串"
 
 
 def test_all_tasks_registered_count():
@@ -116,3 +128,48 @@ def test_all_tasks_registered_count():
                "decision_tree", "vif", "normality_check", "distribution_summary"]
     for t in required:
         assert t in TASK_REGISTRY, f"Missing: {t}"
+
+
+def test_registry_label_group_consistency():
+    """验证 TASK_REGISTRY ↔ TASK_LABELS ↔ TASK_GROUPS 三者一致。
+
+    新增任务时如果忘记同步更新 web/app.py 的标签或分组，此测试会立即发现。
+    """
+    try:
+        from smartsuite.web.app import TASK_GROUPS, TASK_LABELS
+    except ImportError:
+        pytest.skip("Flask 未安装，跳过 Web 注册表一致性检查")
+
+    registry_keys = set(TASK_REGISTRY.keys())
+    label_keys = set(TASK_LABELS.keys())
+    # 展开 TASK_GROUPS 的所有任务
+    group_keys: set[str] = set()
+    for group_tasks in TASK_GROUPS.values():
+        group_keys.update(group_tasks)
+
+    # 1. TASK_REGISTRY ↔ TASK_LABELS 一致
+    missing_labels = registry_keys - label_keys
+    extra_labels = label_keys - registry_keys
+    assert not missing_labels, (
+        f"TASK_REGISTRY 中有 {len(missing_labels)} 个任务缺少 TASK_LABELS: {sorted(missing_labels)}"
+    )
+    assert not extra_labels, (
+        f"TASK_LABELS 中有 {len(extra_labels)} 个任务未在 TASK_REGISTRY 注册: {sorted(extra_labels)}"
+    )
+
+    # 2. TASK_REGISTRY ↔ TASK_GROUPS 一致
+    missing_groups = registry_keys - group_keys
+    extra_groups = group_keys - registry_keys
+    assert not missing_groups, (
+        f"TASK_REGISTRY 中有 {len(missing_groups)} 个任务未分配到任何 TASK_GROUPS: {sorted(missing_groups)}"
+    )
+    assert not extra_groups, (
+        f"TASK_GROUPS 中有 {len(extra_groups)} 个任务未在 TASK_REGISTRY 注册: {sorted(extra_groups)}"
+    )
+
+    # 3. 无任务同时属于多个分组
+    all_grouped = []
+    for group_tasks in TASK_GROUPS.values():
+        all_grouped.extend(group_tasks)
+    duplicates = [t for t in set(all_grouped) if all_grouped.count(t) > 1]
+    assert not duplicates, f"以下任务同时属于多个 TASK_GROUPS: {duplicates}"

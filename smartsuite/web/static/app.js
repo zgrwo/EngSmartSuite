@@ -103,7 +103,7 @@ const TASK_PARAMS = {
   spc_ewma:          { lam: 0.2, L: 2.7 },
   spc_attribute:     { chart_type: 'c' },
   power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5 },
-  bootstrap_ci:      { statistic: 'mean', n_bootstrap: 500 },
+  bootstrap_ci:      { statistic: 'mean', n_bootstrap: 2000 },
   median_ci:         { ci_level: 0.95 },
   quantile_regression:{ quantile: 0.5 },
   tolerance_interval:{ coverage: 0.99, confidence: 0.95, side: 'two-sided' },
@@ -128,7 +128,7 @@ const PARAM_META = {
     options: [
       ['ttest_ind', '独立样本 t 检验'], ['mannwhitney', 'Mann-Whitney U 检验'],
       ['wilcoxon_paired', 'Wilcoxon 配对检验'], ['kruskal', 'Kruskal-Wallis 检验'],
-      ['anova', '单因素 ANOVA'], ['ttest_1samp', '单样本 t 检验'],
+      ['ttest_1samp', '单样本 t 检验'],
     ]
   },
   method: {
@@ -161,8 +161,7 @@ const PARAM_META = {
   model_type: {
     type: 'select', label: '模型类型',
     options: [
-      ['linear', '线性回归'], ['quadratic', '二次回归'],
-      ['interaction', '交互效应'], ['stepwise', '逐步回归']
+      ['linear', '线性回归 (OLS)']
     ]
   },
   statistic: {
@@ -181,7 +180,7 @@ const PARAM_META = {
   'mode@power_analysis': {
     type: 'select', label: '功效分析模式',
     options: [
-      ['required_n', '计算所需样本量'], ['achieved_power', '计算实际功效']
+      ['required_n', '计算所需样本量'], ['achieved', '计算实际功效']
     ]
   },
   quantile: {

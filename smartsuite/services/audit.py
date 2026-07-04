@@ -31,10 +31,6 @@ def process_audit(
         c for c in feature_cols
         if str(df[c].dtype) in ("float64", "float32", "int64", "int32")
     ]
-    categorical_cols or [
-        c for c in feature_cols
-        if str(df[c].dtype) in ("object", "string", "category")
-    ]
 
     # ── 1. 数据质量 ──
     missing_pct = df[feature_cols + [target_col]].isna().mean().max() * 100

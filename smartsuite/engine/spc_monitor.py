@@ -602,13 +602,13 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # 置信区间
     cp_ci = _cp_confidence_interval(cp, n) if cp else (None, None)
-    cpk_ci = _cpk_confidence_interval(cpk_val, n) if cpk_val else (None, None)
+    cpk_ci = _cpk_confidence_interval(cpk_val, n) if cpk_val is not None else (None, None)
 
     # Sigma Level + DPMO
-    sigma_lvl, dpmo = _sigma_level(cpk_val) if cpk_val else (None, None)
+    sigma_lvl, dpmo = _sigma_level(cpk_val) if cpk_val is not None else (None, None)
 
     # ── 判定 ──
-    if cpk_val:
+    if cpk_val is not None:
         if cpk_val >= 1.67:
             judge = "优秀 (≥1.67)"
         elif cpk_val >= 1.33:
@@ -1452,28 +1452,21 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
                 np.concatenate([g1[time_col][g1[event_col]==1],
                                g2[time_col][g2[event_col]==1]])
             ))
-            O1_sum, E1_sum = 0.0, 0.0
+            # Log-rank: 单次遍历计算 O/E 和方差
+            O1_sum, E1_sum, v1 = 0.0, 0.0, 0.0
             for t in all_event_times:
                 o1 = int(((g1[time_col] == t) & (g1[event_col] == 1)).sum())
                 o2 = int(((g2[time_col] == t) & (g2[event_col] == 1)).sum())
-                r1 = int((g1[time_col] >= t).sum())
-                r2 = int((g2[time_col] >= t).sum())
-                total_o = o1 + o2
-                total_r = r1 + r2
-                if total_r > 0:
-                    e1 = total_o * r1 / total_r
-                    O1_sum += o1
-                    E1_sum += e1
-            v1 = 0.0
-            for t in all_event_times:
                 r1_t = int((g1[time_col] >= t).sum())
                 r2_t = int((g2[time_col] >= t).sum())
-                o1_t = int(((g1[time_col] == t) & (g1[event_col] == 1)).sum())
-                o2_t = int(((g2[time_col] == t) & (g2[event_col] == 1)).sum())
-                r_t = r1_t + r2_t
-                o_t = o1_t + o2_t
-                if r_t > 1:
-                    v1 += o_t * (r_t - o_t) * r1_t * r2_t / (r_t**2 * (r_t - 1) + 1e-10)
+                total_o = o1 + o2
+                total_r = r1_t + r2_t
+                if total_r > 0:
+                    e1 = total_o * r1_t / total_r
+                    O1_sum += o1
+                    E1_sum += e1
+                if total_r > 1:
+                    v1 += total_o * (total_r - total_o) * r1_t * r2_t / (total_r**2 * (total_r - 1) + 1e-10)
             z_lr = (O1_sum - E1_sum) / np.sqrt(v1 + 1e-10)
             lr_p = float(2 * sp_stats.norm.sf(abs(z_lr)))
             logrank_result = {
@@ -2466,28 +2459,24 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         f"CL(P50)={cl:.4f}, UCL={ucl_str}, LCL={lcl_str}。{asym_note}。"
     )
 
+    # ── 控制限表（去重列表确保统计量与值始终同步）──
+    limit_pairs = [
+        ("CL (中位数/P50)", cl),
+        ("UCL (P99.865)", ucl),
+        ("LCL (P0.135)", lcl),
+        ("UCL (P97.725, ~2σ)", ucl_2s),
+        ("LCL (P2.275, ~2σ)", lcl_2s),
+        ("UCL (P84.13, ~1σ)", ucl_1s),
+        ("LCL (P15.87, ~1σ)", lcl_1s),
+    ]
+    present_pairs = [(k, v) for k, v in limit_pairs if v is not None]
+
     return AnalysisResult(
         task="spc_nonparametric",
         tables={
             "control_limits": pd.DataFrame({
-                "统计量": [k for k, v in [
-                    ("CL (中位数/P50)", cl),
-                    ("UCL (P99.865)", ucl),
-                    ("LCL (P0.135)", lcl),
-                    ("UCL (P97.725, ~2σ)", ucl_2s),
-                    ("LCL (P2.275, ~2σ)", lcl_2s),
-                    ("UCL (P84.13, ~1σ)", ucl_1s),
-                    ("LCL (P15.87, ~1σ)", lcl_1s),
-                ] if v is not None],
-                "值": [f"{v:.4f}" for _, v in [
-                    ("CL (中位数/P50)", cl),
-                    ("UCL (P99.865)", ucl),
-                    ("LCL (P0.135)", lcl),
-                    ("UCL (P97.725, ~2σ)", ucl_2s),
-                    ("LCL (P2.275, ~2σ)", lcl_2s),
-                    ("UCL (P84.13, ~1σ)", ucl_1s),
-                    ("LCL (P15.87, ~1σ)", lcl_1s),
-                ] if v is not None],
+                "统计量": [k for k, _ in present_pairs],
+                "值": [f"{v:.4f}" for _, v in present_pairs],
             }),
             "violations": pd.DataFrame({
                 "序号": violations,
