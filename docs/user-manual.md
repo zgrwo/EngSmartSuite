@@ -358,42 +358,29 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 **功能**: 单变量的完整统计描述 + Normal/Lognormal/Weibull 三分布拟合。
 
-**操作**: Y=`不良率` → 点击 **分布特征摘要**
+**操作**: Y=`不良率`(Y) → 点击 **分布特征摘要**（无需 X 列）
 
-**预期结果**: 均值、中位数、标准差、偏度、峰度、分位数 + 最佳拟合分布。不良率通常最接近 Lognormal 分布。
+**预期结果**: 最佳拟合=Normal。包含均值/中位数/标准差/偏度/峰度/P1~P99 分位数/CV%。三分布 KS 检验 p 值比较。
 
-**Python 等价代码**:
-```python
-from smartsuite.engine.root_cause import distribution_summary
-req = AnalysisRequest(task="distribution_summary", data=df, target_col="不良率")
-result = distribution_summary(req)
-print(f"最佳拟合: {result.metadata['best_fit']}")
-```
+**Python**: `best_fit=Normal`
 
 ### 5.4 正态性评估 (`normality_check`)
 
-**功能**: 检验数据是否服从正态分布，并推荐变换方法（Box-Cox / 对数 / 平方根）。
+**功能**: 检验数据是否服从正态分布，并推荐变换方法。
 
-**操作**: Y=`不良率`, X=`熔体温度` → 点击 **正态性评估**
+**操作**: Y=`不良率`(Y), X=`熔体温度`(X) → 点击 **正态性评估**
 
-**预期结果**: Shapiro-Wilk p < 0.05 → 非正态（不良率通常右偏），建议 Box-Cox 变换。Q-Q 图展示偏离程度。
+**预期结果**: 2/2 列满足正态性（不良率分布接近正态）。含 Shapiro-Wilk + Anderson-Darling 双检验、偏度/峰度、Q-Q 子图矩阵。
 
-**Python 等价代码**:
-```python
-from smartsuite.engine.root_cause import normality_check
-req = AnalysisRequest(task="normality_check", data=df, target_col="不良率",
-    feature_cols=["熔体温度"])
-result = normality_check(req)
-print(f"正态列数: {result.metadata['normal_count']}/{result.metadata['n_columns']}")
-```
+**Python**: `normal_count=2, n_columns=2`
 
 ### 5.5 统计功效分析 (`power_analysis`)
 
 **功能**: 估计需要多少样本量才能检测到指定效应，或评估当前样本量能达到的统计功效。
 
-**操作**: 点击 **统计功效分析**，参数面板设置 `effect_size=0.5, test_type=ttest`
+**操作**: 点击 **统计功效分析**, 参数 `effect_size: 0.5, test_type: ttest, mode: required_n`
 
-**预期结果**: 每组需要约 64 个样本才能以 80% 功效检测到 d=0.5 的效应。
+**预期结果**: 每组需要 64 个样本（总 128）才能以 80% 功效检测到 d=0.5 的效应（α=0.05, 双侧）。功效曲线图展示样本量与功效的关系。
 
 ---
 
@@ -430,9 +417,9 @@ print(f"R²={result.metadata['r_squared']:.4f}, DW={result.metadata['durbin_wats
 
 **功能**: 生成 3D 曲面 + 2D 等高线，可视化两个关键因子的最优组合。
 
-**操作**: Y=`不良率`, X=`熔体温度, 模具温度` → 点击 **响应面分析**，参数 `direction: minimize`
+**操作**: Y=`不良率`(Y), X=`熔体温度, 模具温度`(X), 参数 `direction: minimize` → 点击 **响应面分析**
 
-**预期结果**: R² 约 0.01~0.05，最优区域标记为红色五角星。3D 图和 2D 等高线各一张。
+**预期结果**: R²=0.017, 调整R²=0.012。最优区域标记为红色五角星。3D 曲面图 + 2D 等高线图各一张。响应面较平坦（数据无强关系）。
 
 ### 6.3 网格搜索寻优 (`grid_search`)
 
@@ -460,27 +447,27 @@ print(f"R²={result.metadata['r_squared']:.4f}, DW={result.metadata['durbin_wats
 
 ### 6.6 ROC/AUC 分析 (`roc_analysis`)
 
-**功能**: 评估连续变量对二分类结果的区分能力（如熔体温度能否区分合格/不合格）。
+**功能**: 评估连续变量对二分类结果的区分能力。
 
-**操作**: Y=`首件合格`, X=`熔体温度` → 点击 **ROC/AUC分析**
+**操作**: Y=`首件合格`(Y), X=`熔体温度`(X) → 点击 **ROC/AUC分析**
 
-**预期结果**: AUC 约 0.5（随机数据无区分力），最佳阈值和 Youden's J。
+**预期结果**: AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0.03。ROC 曲线接近对角线。
 
 ### 6.7 Logistic 回归 (`logistic_regression`)
 
 **功能**: 二分类结果建模（如预测是否会出现不良品）。
 
-**操作**: Y=`保养日`, X=`熔体温度, 模具温度`, 类别=`保养日` → 点击 **Logistic回归**
+**操作**: Y=`保养日`(Y,类别), X=`熔体温度, 模具温度`(X) → 点击 **Logistic回归**
 
-**预期结果**: Odds Ratio 森林图 + 分类准确率/灵敏度/特异度。
+**预期结果**: 准确率=89.8%, 灵敏度=12.9%, 特异度=99.6%, McFadden R²=0.010。OR 森林图——所有因子的 95%CI 跨越 1（无显著效应）。
 
 ### 6.8 Lasso 回归 (`lasso_regression`)
 
 **功能**: 带正则化的回归——自动将不重要的变量系数压缩到零，实现特征选择。
 
-**操作**: Y=`不良率`, X=`熔体温度, 模具温度, 注射压力` → 点击 **Lasso回归**
+**操作**: Y=`不良率`(Y), X=`熔体温度, 模具温度, 注射压力`(X) → 点击 **Lasso回归**
 
-**预期结果**: 选中 N/3 个变量，R² 与 OLS 相近但系数更稳定。非零系数柱状图。
+**预期结果**: 选中 3/3 个变量（α=0.0025, R²=0.003）。随机数据下所有系数都很小，Lasso 未将任何变量压缩到零。非零系数柱状图。
 
 ### 6.9 稳健回归 Huber (`robust_regression`)
 
@@ -533,9 +520,9 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 **功能**: 累积和控制图——对小偏移比 X-bar 更敏感。
 
-**操作**: Y=`不良率` → 点击 **CUSUM控制图**
+**操作**: Y=`不良率`(Y) → 点击 **CUSUM控制图**
 
-**预期结果**: 上偏移/下偏移报警次数（随机数据通常 0~2 次）。
+**预期结果**: 总报警 9 次（k=0.5, h=5.0）。不良率波动较大（随机数据），CUSUM 比 X-bar 更敏感。
 
 ### 7.4 EWMA 控制图 (`spc_ewma`)
 
@@ -566,9 +553,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 **功能**: 线性趋势外推 + 残差诊断 (DW/Ljung-Box/ACF)。
 
-**操作**: Y=`不良率` → 点击 **趋势预测**
+**操作**: Y=`不良率`(Y) → 点击 **趋势预测**（无需 X 列）
 
-**预期结果**: R² ~0，DW~2.0，2×2 诊断图。预测区间较宽（数据无趋势）。
+**预期结果**: R²=0.0002, DW=1.979, MAPE=N/A, RMSE=2.495。数据无趋势（随机数据），预测区间较宽。2×2 诊断图（趋势+预测/残差/ACF/Actual vs Predicted）。
+
+**Python**: `r_squared=0.0002, durbin_watson=1.979`
 
 ### 7.7 异常检测 (`anomaly_detect`)
 
@@ -592,7 +581,7 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 **操作**: Y=`不良率`(Y), X=`熔体温度`(X) → 点击 **异常共识(3方法投票)**
 
-**预期结果**: 高置信异常约 22 个（2.2%），总标记约 58 个（5.8%）。
+**预期结果**: 高置信异常 22 个（2.2%），总标记 58 个（5.8%）。IQR 标记最多、IsoForest 较少——多方法投票可有效减少误报。
 
 ### 7.10 分组箱线图 (`box_chart`)  🆕
 
@@ -636,20 +625,13 @@ print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get
 
 ### 8.1 Bootstrap 置信区间 (`bootstrap_ci`)
 
-**功能**: 不依赖分布假设的置信区间估计（通过 2000 次重抽样）。
+**功能**: 不依赖分布假设的置信区间估计（通过重抽样）。
 
-**操作**: Y=`不良率` → 点击 **Bootstrap置信区间**
+**操作**: Y=`不良率`(Y), 参数 `n_bootstrap: 200` → 点击 **Bootstrap置信区间**
 
-**预期结果**: 均值/中位数/标准差的 Bootstrap 分布 + 95% CI。
+**预期结果**: 均值=4.249, 95%CI=[4.174, 4.330]。Bootstrap 分布直方图 + CI 区间标记。
 
-**Python 等价代码**:
-```python
-from smartsuite.engine.spc_monitor import bootstrap_ci
-req = AnalysisRequest(task="bootstrap_ci", data=df, target_col="不良率",
-    params={"statistic": "mean", "n_bootstrap": 2000})
-result = bootstrap_ci(req)
-print(f"均值={result.metadata['point_estimate']:.3f}, 95%CI=[{result.metadata['ci_lower']:.3f}, {result.metadata['ci_upper']:.3f}]")
-```
+**Python**: `point_estimate=4.249, ci=[4.174, 4.330]`
 
 ### 8.2 中位数置信区间 (`median_ci`)
 
@@ -661,11 +643,11 @@ print(f"均值={result.metadata['point_estimate']:.3f}, 95%CI=[{result.metadata[
 
 ### 8.3 量具 R&R 分析 (`gage_rr`)
 
-**功能**: 评估测量系统的重复性（同一人测多次）和再现性（不同人测同一件）。
+**功能**: 评估测量系统的重复性和再现性。
 
-**操作**: Y=`不良率`, X=`模具编号, 检验员`, 类别=两者 → 参数 `part_col: 模具编号; operator_col: 检验员`
+**操作**: Y=`不良率`(Y), X=`模具编号, 检验员`(类别), 参数 `part_col: 模具编号; operator_col: 检验员` → 点击 **量具R&R分析**
 
-**预期结果**: %GRR + ndc（可区分类别数）+ 变异源柱状图。
+**预期结果**: ndc=0, %GRR=100.0%（判定：不合格）。测试数据中不良率为连续值且无重复测量设计，量具 R&R 不适用——这恰好验证了"错误数据给出警示结论"的正确行为。
 
 ### 8.4 统计容许区间 (`tolerance_interval`)
 
@@ -679,9 +661,9 @@ print(f"均值={result.metadata['point_estimate']:.3f}, 95%CI=[{result.metadata[
 
 **功能**: 估计产品的寿命分布和可靠度随时间的变化。
 
-**操作**: Y=`不良率`, X=`保养日`（作为事件指示列） → 点击 **生存分析**
+**操作**: Y=`不良率`(Y), X=`保养日`(类别——作为事件指示, 1="是"=事件发生) → 点击 **生存分析**
 
-**预期结果**: KM 阶梯曲线 + Weibull 拟合 + 中位寿命（如有）。
+**预期结果**: KM 阶梯曲线 + Weibull 拟合。中位寿命=None（数据中不良率是连续值而非时间/寿命数据，事件列也不适用——结果反映出数据不适合生存分析）。
 
 ---
 
