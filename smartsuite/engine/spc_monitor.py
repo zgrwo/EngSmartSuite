@@ -1399,7 +1399,16 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     sub = req.data[[time_col, event_col] + ([group_col] if group_col else [])].dropna()
     times = sub[time_col].values
-    events = sub[event_col].values.astype(int)
+    # 自动二值化事件列：支持 0/1 数值和 "是"/"否" 等文本
+    try:
+        events = sub[event_col].values.astype(int)
+    except (ValueError, TypeError):
+        unique_vals = sub[event_col].unique()
+        if len(unique_vals) == 2:
+            events = (sub[event_col] == sorted(unique_vals)[-1]).astype(int).values
+        else:
+            return AnalysisResult(task="survival_analysis", status="error",
+                messages=[f"事件列「{event_col}」需要恰好2个不同值(0/1 或 是/否)，当前有{len(unique_vals)}个"])
 
     # KM 估计 (全样本)
     unique_times = np.sort(np.unique(times[events == 1]))
