@@ -125,22 +125,26 @@ python smartsuite/web/app.py
 | 指标 | 实际值 |
 |------|--------|
 | 最强相关因子(\|r\|) | 注射压力（负相关） |
-| Pearson r | -0.052 |
-| \|r\| | 0.052 |
-| Bonferroni 校正 | 校正前后显著对数 |
+| Pearson r | -0.0496 |
+| \|r\| | 0.0496 |
+| 次强因子 | 模具温度 (r=-0.0494), 熔体温度 (r=-0.0487) |
+| 最弱因子 | 冷却时间 (r=+0.0378) |
 | 图表 | 1 张热力图（含显著性星号标注） |
 
-> 相关系数很弱（\|r\| ≈ 0.05），测试数据为随机生成。注意：**最强按绝对值判断**，负相关(-0.052)比正相关(+0.038)更强。
+> Web UI 会对缺失值做中位数填充（`preprocess_data`），因此结果与原始数据直接调用略有差异（~0.002）。
+> 相关系数很弱（\|r\| ≈ 0.05），测试数据为随机生成。**最强按绝对值判断**，三个负相关因子的\|r\|很接近。
 
-**Python 等价代码**:
+**Python 等价代码（Web UI 路径，含预处理）**:
 ```python
 from smartsuite.engine.root_cause import correlation_analysis
-req = AnalysisRequest(task="correlation", data=df, target_col="不良率",
-    feature_cols=["熔体温度", "模具温度", "注射压力", "冷却时间"])
+from smartsuite.services.data_io import preprocess_data
+
+df_enc, feat_enc, _, _ = preprocess_data(df_raw, [...], set())
+req = AnalysisRequest(task="correlation", data=df_enc, target_col="不良率", feature_cols=feat_enc)
 result = correlation_analysis(req)
 print(result.summary)
 # → "与「不良率」相关性最强(|r|)的因子是「注射压力」
-#    (Pearson=-0.052, 负相关, |r|=0.052)。
+#    (Pearson=-0.050, 负相关, |r|=0.050)。
 #    Bonferroni校正前 0 对显著，校正后 0 对显著（10 对比较）"
 ```
 
