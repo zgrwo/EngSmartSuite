@@ -96,12 +96,14 @@ const TASK_PARAMS = {
   change_point: { min_segment: 10, n_changepoints: 5 },
   doe_analysis: { alpha: 0.05 },
   variance_test: { group_col: '' },
+  box_chart: { mode: 'facet' },
 };
 const PARAM_HINTS = {
   ranges: '格式: 料温:180,220;模具温度:40,80',
   objectives: '格式: 强度:maximize;不良率:minimize',
   side: 'two-sided(双侧) | upper(越小越好) | lower(越大越好)',
   chart_type: 'p(不良率) | np(不良数) | c(缺陷数) | u(单位缺陷率)',
+  mode: 'facet(分面,各X2一张子图) | nested(嵌套,组合标签如ABS/否)',
 };
 
 function showParams(task) {

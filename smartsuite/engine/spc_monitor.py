@@ -2156,11 +2156,13 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
 
 
 def box_chart(req: AnalysisRequest) -> AnalysisResult:
-    """分组箱线图 — 按类别因子分组展示分布，支持次分类分面。
+    """分组箱线图 — 按类别因子分组展示分布，支持嵌套和分面两种次分类模式。
 
     target_col: 数值型 Y 列
     feature_cols[0]: 主分类列
-    feature_cols[1] (可选): 次分类列（用于分面着色）
+    feature_cols[1] (可选): 次分类列
+    params:
+        mode: "facet"(默认,分面) | "nested"(嵌套,组合标签如 ABS/否)
     """
     if len(req.feature_cols) < 1:
         return AnalysisResult(task="box_chart", status="error",
@@ -2168,11 +2170,21 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
 
     group_col = req.feature_cols[0]
     sub_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
+    mode = req.params.get("mode", "facet")  # "facet" | "nested"
 
     sub = req.data[[req.target_col, group_col] + ([sub_col] if sub_col else [])].dropna()
     if len(sub) < 5:
         return AnalysisResult(task="box_chart", status="error",
             messages=["有效数据不足(至少5个点)"])
+
+    # ── 嵌套模式: 创建组合分组列 ──
+    nested_label = None
+    if mode == "nested" and sub_col:
+        sub = sub.copy()
+        nested_label = f"{group_col} × {sub_col}"
+        sub[nested_label] = sub[group_col].astype(str) + "/" + sub[sub_col].astype(str)
+        group_col = nested_label
+        sub_col = None  # 嵌套模式不用分面
 
     groups = sorted(sub[group_col].unique(), key=str)
     if len(groups) < 2:
@@ -2215,7 +2227,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         except Exception:
             pass
 
-    # ── 箱线图 (支持次分类分面) ──
+    # ── 箱线图 ──
     has_sub = sub_col and sub[sub_col].nunique() >= 2 and sub[sub_col].nunique() <= 8
     if has_sub:
         sub_groups = sorted(sub[sub_col].unique(), key=str)
@@ -2278,6 +2290,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         metadata={
             "n_groups": len(groups), "n_total": n_total,
             "group_col": group_col, "sub_col": sub_col, "has_sub": has_sub,
+            "mode": mode, "nested_label": nested_label,
         },
     )
 
