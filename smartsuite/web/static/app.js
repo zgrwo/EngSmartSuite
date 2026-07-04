@@ -91,6 +91,11 @@ const TASK_PARAMS = {
   quantile_regression: { quantile: 0.5 },
   tolerance_interval: { coverage: 0.99, confidence: 0.95, side: 'two-sided' },
   gage_rr: { part_col: '', operator_col: '' },
+  spc_xbar: { subgroup_col: '子组' },
+  lasso_regression: { alpha_lasso: '' },
+  change_point: { min_segment: 10, n_changepoints: 5 },
+  doe_analysis: { alpha: 0.05 },
+  variance_test: { group_col: '' },
 };
 const PARAM_HINTS = {
   ranges: '格式: 料温:180,220;模具温度:40,80',
