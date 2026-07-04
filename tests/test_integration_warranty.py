@@ -1,5 +1,9 @@
 """保修数据集集成测试。"""
-import os, pytest, pandas as pd, numpy as np
+import os
+
+import pandas as pd
+import pytest
+
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import orchestrate
 

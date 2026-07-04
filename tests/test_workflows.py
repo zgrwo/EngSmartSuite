@@ -2,10 +2,11 @@
 import numpy as np
 import pandas as pd
 import pytest
+
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.orchestrator import orchestrate
-from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
 from smartsuite.services.audit import process_audit
+from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
+from smartsuite.services.orchestrator import orchestrate
 
 
 @pytest.fixture

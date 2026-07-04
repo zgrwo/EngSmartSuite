@@ -1,11 +1,14 @@
 """统计正确性回归测试 — 使用已知标准答案验证引擎计算的准确性。"""
 import numpy as np
 import pandas as pd
+
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.engine.root_cause import (
-    correlation_analysis, anova_analysis, hypothesis_test, vif_analysis,
-)
 from smartsuite.engine.doe_opt import regression_analysis
+from smartsuite.engine.root_cause import (
+    anova_analysis,
+    correlation_analysis,
+    hypothesis_test,
+)
 from smartsuite.engine.spc_monitor import process_capability_analysis
 
 

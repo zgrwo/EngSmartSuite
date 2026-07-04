@@ -1,7 +1,10 @@
 """主集成测试 — 验证所有 TASK_REGISTRY 函数可被调用并返回合理结果。"""
-import os, pytest, pandas as pd, numpy as np
+import numpy as np
+import pandas as pd
+import pytest
+
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
 
 @pytest.fixture(scope="module")

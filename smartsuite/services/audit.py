@@ -1,5 +1,8 @@
 """过程综合审计 — 一站式工艺健康检查报告。"""
-from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+import pandas as pd
+
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
 from smartsuite.services.orchestrator import orchestrate
 
 
@@ -24,7 +27,7 @@ def process_audit(
         c for c in feature_cols
         if str(df[c].dtype) in ("float64", "float32", "int64", "int32")
     ]
-    cat_features = categorical_cols or [
+    categorical_cols or [
         c for c in feature_cols
         if str(df[c].dtype) in ("object", "string", "category")
     ]
@@ -36,7 +39,7 @@ def process_audit(
                              "详情": f"最高缺失率 {missing_pct:.1f}%"})
     else:
         health_checks.append({"检查项": "数据完整性", "状态": "✓ 正常",
-                             "详情": f"缺失率 < 5%"})
+                             "详情": "缺失率 < 5%"})
 
     # ── 2. 相关性 ──
     if len(numeric_features) >= 2:
@@ -188,8 +191,9 @@ def auto_report(df, target_col, feature_cols=None, output_path=None,
         usl/lsl: 规格限 (可选)
         title: 报告标题
     """
-    from smartsuite.services.reporter import to_html
     import os
+
+    from smartsuite.services.reporter import to_html
 
     if feature_cols is None:
         feature_cols = [c for c in df.columns
@@ -245,7 +249,6 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
     每个分析任务的结果 (表格+图表) 写入独立 Sheet。
     """
     import openpyxl
-    from openpyxl.utils import get_column_letter
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)

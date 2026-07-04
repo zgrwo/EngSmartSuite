@@ -1,7 +1,9 @@
 """端到端集成测试。"""
-import tempfile, os
+import os
+import tempfile
+
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 from smartsuite.services.reporter import to_pdf, to_ppt
 
 

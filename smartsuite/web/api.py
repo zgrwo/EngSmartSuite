@@ -133,9 +133,12 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
             # 序列化 metadata：保留 dict/list 结构，标量转为 float
             meta = {}
             for k, v in result.metadata.items():
-                if isinstance(v, (int, float)): meta[k] = float(v)
-                elif isinstance(v, dict): meta[k] = {str(ik): float(iv) for ik, iv in v.items()}
-                else: meta[k] = str(v)
+                if isinstance(v, (int, float)):
+                    meta[k] = float(v)
+                elif isinstance(v, dict):
+                    meta[k] = {str(ik): float(iv) for ik, iv in v.items()}
+                else:
+                    meta[k] = str(v)
             results.append({
                 "target": target,
                 "status": result.status,

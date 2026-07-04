@@ -1,9 +1,9 @@
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.spc_monitor import (
-    xbar_r_chart,
+    anomaly_detect,
     process_capability_analysis,
     trend_forecast,
-    anomaly_detect,
+    xbar_r_chart,
 )
 
 

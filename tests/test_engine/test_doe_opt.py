@@ -1,10 +1,10 @@
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.doe_opt import (
-    regression_analysis,
-    response_surface_analysis,
+    doe_analysis,
     grid_search,
     multi_objective_opt,
-    doe_analysis,
+    regression_analysis,
+    response_surface_analysis,
 )
 
 

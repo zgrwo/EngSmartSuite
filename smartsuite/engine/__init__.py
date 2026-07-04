@@ -2,6 +2,7 @@
 
 # ── 引擎层全局 matplotlib 配置（必须在任何 Figure 创建之前执行）──
 import matplotlib
+
 matplotlib.use("Agg")
 
 try:
@@ -13,6 +14,7 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 
 # ── 统一可视化样式 ──
 from smartsuite.engine._palette import get_palette_style
+
 _palette_style = get_palette_style()
 for key, val in _palette_style.items():
     matplotlib.rcParams[key] = val

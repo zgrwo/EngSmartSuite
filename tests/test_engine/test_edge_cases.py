@@ -1,19 +1,23 @@
 """边界条件和边缘情况测试 — 确保引擎函数优雅降级。"""
 import numpy as np
 import pandas as pd
-import pytest
+
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.engine.root_cause import (
-    anova_analysis, correlation_analysis, decision_tree_analysis,
-    hypothesis_test, vif_analysis, power_analysis,
-)
 from smartsuite.engine.doe_opt import (
-    doe_analysis, grid_search, multi_objective_opt,
-    regression_analysis, response_surface_analysis,
+    doe_analysis,
+    regression_analysis,
+)
+from smartsuite.engine.root_cause import (
+    anova_analysis,
+    correlation_analysis,
+    power_analysis,
+    vif_analysis,
 )
 from smartsuite.engine.spc_monitor import (
-    anomaly_detect, cusum_chart, ewma_chart,
-    process_capability_analysis, trend_forecast, xbar_r_chart,
+    anomaly_detect,
+    cusum_chart,
+    ewma_chart,
+    process_capability_analysis,
 )
 
 
@@ -212,7 +216,6 @@ def test_bootstrap_no_data():
 
 # ── Grubbs ──
 def test_anomaly_grubbs():
-    from smartsuite.engine.spc_monitor import anomaly_detect
     np.random.seed(42)
     x = np.concatenate([np.random.normal(10, 1, 48), [25.0, 28.0]])  # 2 clear outliers
     df = pd.DataFrame({"x": x})

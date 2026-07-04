@@ -152,7 +152,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     warn_unequal = ""
     if subgroup_sizes.nunique() > 1:
         min_n = int(subgroup_sizes.min())
-        max_n = int(subgroup_sizes.max())
+        int(subgroup_sizes.max())
         # 修剪每组到 min_n
         trimmed_data = []
         for name, group in subgroups:
@@ -281,7 +281,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             "违规点数": len(idxs),
         })
 
-    total_violations = sum(len(set(v)) for v in xbar_violations.values()) + sum(len(set(v)) for v in r_violations.values())
+    sum(len(set(v)) for v in xbar_violations.values()) + sum(len(set(v)) for v in r_violations.values())
     is_stable = len(xbar_violations) == 0 and len(r_violations) == 0
 
     # ── 控制限表 ──
@@ -552,7 +552,7 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     warn_msgs: list[str] = []
     boxcox_lambda: float | None = None
-    data_original = data.copy()
+    data.copy()
 
     # ── Box-Cox 变换（非正态数据处理）──
     if transform == "boxcox":
@@ -897,7 +897,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         ax3.axhline(-acf_conf, color="#e31a1c", linestyle="--", linewidth=0.8, alpha=0.6)
         ax3.set_xlabel("滞后阶数", fontsize=9)
         ax3.set_ylabel("自相关 (ACF)", fontsize=9)
-        ax3.set_title(f"残差自相关 (ACF)", fontsize=10)
+        ax3.set_title("残差自相关 (ACF)", fontsize=10)
 
         # 右下：Actual vs Predicted
         ax4 = fig.add_subplot(2, 2, 4)
@@ -1402,7 +1402,6 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     # KM 估计 (全样本)
     unique_times = np.sort(np.unique(times[events == 1]))
     n_total = len(times)
-    km_survival = []
     km_times = [0.0]
     km_survival_val = [1.0]
     at_risk = n_total
@@ -1629,7 +1628,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
                         else "↓ 下降" if seg_i > 0 else "—"
                     ),
                 })
-        seg_df = pd.DataFrame(segment_stats)
+        pd.DataFrame(segment_stats)
         cp_positions = ", ".join(str(cp) for cp in changepoints)
         summary = (
             f"检测到 {len(changepoints)} 个变点 (位置: {cp_positions})，"
@@ -1716,18 +1715,18 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             sub = req.data[feature_cols + [req.target_col]].dropna()
             common_idx = data.index.intersection(sub.index)
             iso_preds = iso.fit_predict(sub.loc[common_idx, feature_cols + [req.target_col]].values)
-            iso_scores = iso.decision_function(sub.loc[common_idx, feature_cols + [req.target_col]].values)
+            iso.decision_function(sub.loc[common_idx, feature_cols + [req.target_col]].values)
             iso_mask = pd.Series(False, index=data.index)
             for i, idx in enumerate(common_idx):
                 iso_mask[idx] = iso_preds[i] == -1
         else:
             X = data.values.reshape(-1, 1)
             iso_preds = iso.fit_predict(X)
-            iso_scores = iso.decision_function(X)
+            iso.decision_function(X)
             iso_mask = pd.Series(iso_preds == -1, index=data.index)
     except Exception:
         iso_mask = pd.Series(False, index=data.index)
-        iso_scores = np.zeros(n)
+        np.zeros(n)
 
     # ── 投票: ≥2 票 → 高置信异常 ──
     votes = iqr_mask.astype(int) + z_mask.astype(int) + iso_mask.astype(int)
@@ -1859,7 +1858,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                            linewidths=2, label=f"异常 ({mask.sum()})")
             ax1.set_xlabel(c1, fontsize=9)
             ax1.set_ylabel(c2, fontsize=9)
-            ax1.set_title(f"多变量异常检测 (Isolation Forest)", fontsize=10)
+            ax1.set_title("多变量异常检测 (Isolation Forest)", fontsize=10)
             ax1.legend(fontsize=8)
 
             # 异常分数分布
@@ -2013,7 +2012,6 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
     ci_level = req.params.get("ci_level", 0.95)
     alpha = 1 - ci_level
 
-    from math import comb
 
     sorted_data = np.sort(data.values)
     # 二项分布法：找到最小的 k 使得 P(k ≤ B ≤ n-k) ≥ ci_level
@@ -2044,7 +2042,7 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
     return AnalysisResult(
         task="median_ci",
         tables={"median_ci": pd.DataFrame({
-            "指标": ["中位数", f"CI下限", f"CI上限", "置信水平", "样本量", "方法"],
+            "指标": ["中位数", "CI下限", "CI上限", "置信水平", "样本量", "方法"],
             "值": [f"{median:.4f}", f"{lower:.4f}", f"{upper:.4f}",
                   f"{ci_level:.0%}", str(n), "二项分布符号检验"],
         })},
@@ -2085,13 +2083,16 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     # 原始估计
     if statistic == "median":
         orig_stat = float(np.median(values))
-        stat_fn = lambda x: np.median(x)
+        def stat_fn(x):
+            return np.median(x)
     elif statistic == "std":
         orig_stat = float(np.std(values, ddof=1))
-        stat_fn = lambda x: np.std(x, ddof=1)
+        def stat_fn(x):
+            return np.std(x, ddof=1)
     else:  # mean
         orig_stat = float(np.mean(values))
-        stat_fn = lambda x: np.mean(x)
+        def stat_fn(x):
+            return np.mean(x)
 
     # Bootstrap
     boot_stats = np.zeros(n_boot)

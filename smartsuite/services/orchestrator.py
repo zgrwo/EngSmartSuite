@@ -120,7 +120,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         err_cls = type(e).__name__
         detail_map = {
             "ValueError": "数据格式不符合分析要求，请检查目标列和因子列的数据类型",
-            "KeyError": f"数据中缺少必要的列，请确认列名是否正确",
+            "KeyError": "数据中缺少必要的列，请确认列名是否正确",
             "TypeError": "数据类型不匹配，请确保所有因子列为数值型或类别型",
             "IndexError": "数据索引异常，请检查数据是否包含空行或异常索引",
             "MemoryError": "数据量过大超出内存限制，请减少数据行数或列数",

@@ -1,11 +1,15 @@
 """新引擎函数的测试覆盖。"""
 import numpy as np
 import pandas as pd
+
 from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine.root_cause import hypothesis_test
 from smartsuite.engine.spc_monitor import (
-    cusum_chart, ewma_chart, change_point_detect, attribute_chart,
+    attribute_chart,
+    change_point_detect,
+    cusum_chart,
+    ewma_chart,
 )
-from smartsuite.engine.root_cause import hypothesis_test, power_analysis
 from smartsuite.services.data_io import missing_pattern_analysis
 
 

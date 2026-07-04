@@ -6,6 +6,7 @@ import tempfile
 
 # ── matplotlib 中文字体必须在所有图表创建之前配置 ──
 import matplotlib
+
 matplotlib.use("Agg")
 try:
     matplotlib.font_manager.fontManager.addfont("C:/Windows/Fonts/msyh.ttc")

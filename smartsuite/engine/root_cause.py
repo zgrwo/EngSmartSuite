@@ -3,6 +3,7 @@ import pandas as pd
 import statsmodels.api as sm
 from matplotlib.figure import Figure
 from scipy import stats
+
 sp_stats = stats  # 别名，供函数内统一使用
 
 from sklearn.tree import DecisionTreeRegressor, plot_tree
@@ -441,6 +442,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     posthoc_results: list[dict] = []
     if sig_factors:
         from itertools import combinations
+
         from statsmodels.stats.multicomp import pairwise_tukeyhsd
         for col in cols:
             try:
@@ -668,7 +670,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         ax.axvline(popmean, color="#d94801", linestyle="--", linewidth=2, label=f"H0={popmean}")
         # 95% CI
         ci = sp_stats.t.interval(0.95, len(data)-1, loc=mean_val, scale=data.sem())
-        ax.axvspan(ci[0], ci[1], alpha=0.1, color="#2171b5", label=f"95%CI")
+        ax.axvspan(ci[0], ci[1], alpha=0.1, color="#2171b5", label="95%CI")
         ax.set_xlabel(req.target_col, fontsize=10)
         ax.set_ylabel("频数", fontsize=10)
         ax.set_title(f"{test_name} (p={p:.4f})", fontsize=11)
@@ -1091,7 +1093,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = "Mann-Kendall 趋势检验"
         alpha = req.params.get("alpha", 0.05)
         trend_dir = "上升趋势" if S > 0 else "下降趋势" if S < 0 else "无趋势"
-        conclusion = f"存在显著{trend_dir}" if p < alpha else f"未发现显著趋势"
+        conclusion = f"存在显著{trend_dir}" if p < alpha else "未发现显著趋势"
 
         fig = Figure(figsize=(8, 4))
         ax = fig.add_subplot(111)
@@ -1155,10 +1157,10 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         z_JT = (JT - E_JT) / np.sqrt(V_JT + 1e-10)
         p = float(2 * sp_stats.norm.sf(abs(z_JT)))
 
-        test_name = f"Jonckheere-Terpstra 趋势检验"
+        test_name = "Jonckheere-Terpstra 趋势检验"
         alpha = req.params.get("alpha", 0.05)
         trend_dir = "递增趋势" if z_JT > 0 else "递减趋势"
-        conclusion = f"存在显著{trend_dir}" if p < alpha else f"未发现显著趋势"
+        conclusion = f"存在显著{trend_dir}" if p < alpha else "未发现显著趋势"
 
         # Kendall's tau-b 效应量近似
         tau_b = 2 * JT / (n_total**2 - np.sum(n_i**2) + 1e-10)
@@ -1923,8 +1925,7 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(6, 3))
     ax = fig.add_subplot(111)
     methods = ["Wilson Score", "Clopper-Pearson"]
-    midpoints = [p_hat, p_hat]
-    lowers = [p_hat - wilson_lower, p_hat - cp_lower]
+    [p_hat - wilson_lower, p_hat - cp_lower]
     uppers = [wilson_upper - p_hat, cp_upper - p_hat]
     ax.barh(methods, uppers, left=[wilson_lower, cp_lower], height=0.3,
             color=["#6baed6", "#2171b5"], edgecolor="white")
@@ -1982,7 +1983,7 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="variance_test", status="error",
             messages=["有效分组不足"])
 
-    labels = [g for g, _ in valid_groups]
+    [g for g, _ in valid_groups]
     data_list = [d for _, d in valid_groups]
 
     # Levene (对非正态更鲁棒，推荐)

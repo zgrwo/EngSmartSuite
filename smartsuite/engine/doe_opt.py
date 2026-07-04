@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from scipy import stats
+
 sp_stats = stats  # 别名，供函数内统一使用
 
 from matplotlib.figure import Figure
-from sklearn.linear_model import Ridge
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 
@@ -622,9 +622,9 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
                          linewidths=1.5, zorder=5, label="加权最优")
         ax_pareto.set_xlabel(xlabel, fontsize=9)
         ax_pareto.set_ylabel(ylabel, fontsize=9)
-        ax_pareto.set_title(f"Pareto 前沿 — 双目标权衡", fontsize=10)
+        ax_pareto.set_title("Pareto 前沿 — 双目标权衡", fontsize=10)
         ax_pareto.legend(fontsize=7)
-        plt_label = f"综合得分 (加权)"
+        plt_label = "综合得分 (加权)"
         fig.colorbar(ax_pareto.collections[0], ax=ax_pareto, label=plt_label)
 
     # 右图: 得分分布 + 各目标期望值
@@ -679,7 +679,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
 def _lenth_pse(effects):
     """Lenth 伪标准误 — 用于无重复 DOE 的效应显著性判断。"""
     abs_effects = np.sort(np.abs(effects))
-    n = len(abs_effects)
+    len(abs_effects)
     # 取中位数的一半作为初始 s0
     median_abs = np.median(abs_effects)
     s0 = 1.5 * median_abs
@@ -736,7 +736,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         if len(unique_vals) == 2:
             # 二水平因子：直接编码 -1/+1
-            lo, hi = sorted(unique_vals)[0], sorted(unique_vals)[-1]
+            _lo, hi = sorted(unique_vals)[0], sorted(unique_vals)[-1]
             coded = np.where(col_vals == hi, 1, -1)
         else:
             # 多水平/连续因子：标准化后作为线性效应
@@ -858,7 +858,7 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     y_true = (sub[label_col] == pos_label).astype(int).values
     scores = sub[score_col].values
 
-    from sklearn.metrics import roc_curve, auc
+    from sklearn.metrics import auc, roc_curve
     try:
         fpr, tpr, thresholds = roc_curve(y_true, scores)
         auc_val = float(auc(fpr, tpr))
@@ -898,7 +898,8 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     ax.set_ylabel("真阳性率 (TPR/召回率)", fontsize=10)
     ax.set_title(f"ROC 曲线 — {score_col} → {label_col} ({pos_label})", fontsize=11)
     ax.legend(fontsize=8, loc="lower right")
-    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
 
@@ -1057,7 +1058,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="lasso_regression", status="error",
             messages=["有效样本不足"])
 
-    from sklearn.linear_model import LassoCV, ElasticNetCV
+    from sklearn.linear_model import ElasticNetCV, LassoCV
     from sklearn.preprocessing import StandardScaler
 
     X = sub[cols].values
@@ -1152,7 +1153,7 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         huber = HuberRegressor(epsilon=1.35, max_iter=1000)
         huber.fit(X, y)
         y_pred = huber.predict(X)
-        residuals = y - y_pred
+        y - y_pred
 
         # OLS 对比
         import statsmodels.api as sm_ols
@@ -1188,7 +1189,7 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         fig.tight_layout()
 
         summary = (
-            f"稳健回归完成。"
+            "稳健回归完成。"
             + (f"差异最大变量: {outlier_sensitive}" if outlier_sensitive else "")
         )
 
@@ -1222,7 +1223,6 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
 
     quantile = req.params.get("quantile", 0.5)
     try:
-        import statsmodels.formula.api as smf
 
         X_df = sub[cols]
         y = sub[req.target_col]

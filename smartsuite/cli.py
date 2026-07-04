@@ -3,6 +3,7 @@ import argparse
 import sys
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import pandas as pd

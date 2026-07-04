@@ -1,5 +1,6 @@
-import tempfile
 import os
+import tempfile
+
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import orchestrate
 

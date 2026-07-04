@@ -65,3 +65,14 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]  # line-length handled by formatter
+
+[tool.ruff.lint.per-file-ignores]
+"smartsuite/engine/__init__.py" = ["E402"]  # matplotlib config must precede imports
+"smartsuite/engine/doe_opt.py" = ["E402", "N803", "N806"]  # sp_stats alias + math vars X, Z, etc.
+"smartsuite/engine/root_cause.py" = ["E402", "N803", "N806"]  # sp_stats alias + math vars Q, S, JT
+"smartsuite/engine/spc_monitor.py" = ["N806"]  # math vars
+"smartsuite/cli.py" = ["E402"]  # matplotlib.use before imports
+"smartsuite/web/*" = ["E402"]  # matplotlib config before imports
+"smartsuite/services/reporter.py" = ["N806"]  # txBox variable
+"tests/*" = ["N806", "E501", "F841"]  # test fixtures + math vars
