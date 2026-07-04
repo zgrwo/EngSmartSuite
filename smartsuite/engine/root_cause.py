@@ -25,6 +25,24 @@ def _significance_stars(p):
     return ""
 
 
+def _binary_encode(series, col_name: str = ""):
+    """验证二分类列并编码为 0/1。
+
+    返回 (binary_array, error_msg)。
+    成功时 error_msg 为 None，binary_array 为 int 型 numpy 数组。
+    失败时 binary_array 为 None，error_msg 为中文错误描述。
+
+    编码规则: 排序后的较大值 (sorted[-1]) 映射为 1，较小值映射为 0。
+    """
+    vals = series.dropna()
+    unique_vals = vals.unique()
+    if len(unique_vals) != 2:
+        label = f"「{col_name}」" if col_name else "该列"
+        return None, f"{label}不是二分类数据（唯一值数={len(unique_vals)}，需要恰好2个）"
+    uv = sorted(unique_vals)
+    return (series == uv[1]).astype(int).values, None
+
+
 def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     """相关性矩阵分析（Pearson/Spearman），含多重比较校正和显著性标记。"""
     # 去重：防止 target_col 同时出现在 feature_cols 中导致重复列
@@ -964,15 +982,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 messages=["有效数据不足(至少3行)"])
         # Cochran Q: Q = (k-1)[k*sum(Cj²) - (sum Cj)²] / [k*sum(Ri) - sum(Ri²)]
         k = len(measure_cols)
-        # 逐列验证并二值化：每列需恰好 2 个不同值，排序后映射为 0/1
         binary = pd.DataFrame(index=sub.index)
         for c in measure_cols:
-            vals = sub[c].unique()
-            if len(vals) != 2:
-                return AnalysisResult(task="hypothesis_test", status="error",
-                    messages=[f"列「{c}」不是二分类数据（唯一值数={len(vals)}，需要恰好2个）"])
-            uv = sorted(vals)
-            binary[c] = (sub[c] == uv[1]).astype(int)
+            encoded, err = _binary_encode(sub[c], c)
+            if err:
+                return AnalysisResult(task="hypothesis_test", status="error", messages=[err])
+            binary[c] = encoded
         col_sums = binary.sum(axis=0).values
         row_sums = binary.sum(axis=1).values
         Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
