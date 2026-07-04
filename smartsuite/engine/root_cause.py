@@ -435,8 +435,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                     )
                     # 使用公开 API 遍历所有成对比较
                     groups = list(tukey.groupsunique)
-                    pair_idx = 0
-                    for g1, g2 in combinations(groups, 2):
+                    for pair_idx, (g1, g2) in enumerate(combinations(groups, 2)):
                         if pair_idx < len(tukey.pvalues):
                             posthoc_results.append({
                                 "因子": col,
@@ -445,7 +444,6 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                                 "p值": float(tukey.pvalues[pair_idx]),
                                 "显著": "是" if tukey.reject[pair_idx] else "否",
                             })
-                        pair_idx += 1
             except (KeyError, Exception):
                 pass
 
@@ -475,8 +473,9 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         summary = f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})"
 
     coef_df = pd.DataFrame({
-        "变量": model.params.index, "系数": model.params.values,
-        "标准误": model.bse.values, "t值": model.tvalues.values, "p值": model.pvalues.values,
+        "变量": list(model.params.index) if hasattr(model.params, 'index') else model.model.exog_names,
+        "系数": np.asarray(model.params),
+        "标准误": np.asarray(model.bse), "t值": np.asarray(model.tvalues), "p值": np.asarray(model.pvalues),
     })
 
     # ── 箱线图：按第一个显著因子分组，含显著性注释 ──
@@ -580,10 +579,8 @@ def _cliffs_delta(x, y):
     lt_count = int(np.sum(np.searchsorted(y_sorted, x_arr, side="left")))
     # le_count: y 中小于等于各 xi 的元素总数
     le_count = int(np.sum(np.searchsorted(y_sorted, x_arr, side="right")))
-    # gt_count: y 中严格大于各 xi 的元素总数
-    gt_count = n1 * n2 - le_count
-    # dominance = #(xi > yj) - #(xi < yj) = lt_count - gt_count
-    dominance = lt_count - gt_count
+    # dominance = #(xi > yj) - #(xi < yj) = 2*lt_count + eq_count - n1*n2
+    dominance = lt_count + le_count - n1 * n2
     return float(dominance / (n1 * n2))
 
 
@@ -965,18 +962,16 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if len(sub) < 3:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少3行)"])
-        # 二值化
-        for c in measure_cols:
-            vals = sub[c].unique()
-            if len(vals) > 2:
-                return AnalysisResult(task="hypothesis_test", status="error",
-                    messages=[f"列「{c}」不是二分类数据"])
         # Cochran Q: Q = (k-1)[k*sum(Cj²) - (sum Cj)²] / [k*sum(Ri) - sum(Ri²)]
         k = len(measure_cols)
-        # 逐列独立二值化：每列取两个唯一值，排序后映射为 0/1
+        # 逐列验证并二值化：每列需恰好 2 个不同值，排序后映射为 0/1
         binary = pd.DataFrame(index=sub.index)
         for c in measure_cols:
-            uv = sorted(sub[c].unique())
+            vals = sub[c].unique()
+            if len(vals) != 2:
+                return AnalysisResult(task="hypothesis_test", status="error",
+                    messages=[f"列「{c}」不是二分类数据（唯一值数={len(vals)}，需要恰好2个）"])
+            uv = sorted(vals)
             binary[c] = (sub[c] == uv[1]).astype(int)
         col_sums = binary.sum(axis=0).values
         row_sums = binary.sum(axis=1).values

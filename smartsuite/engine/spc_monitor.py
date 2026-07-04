@@ -1,8 +1,7 @@
 import numpy as np
 import pandas as pd
-from scipy import stats as sp_stats
-
 from matplotlib.figure import Figure
+from scipy import stats as sp_stats
 from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult

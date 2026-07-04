@@ -115,12 +115,23 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     try:
         return TASK_REGISTRY[req.task](req)
     except Exception as e:
-        logger.exception("分析任务 %s 执行失败", req.task)
-        error_detail = str(e)[:300]
+        logger.exception("分析任务 %s 执行失败: %s", req.task, str(e)[:200])
+        # 将异常转为中文工艺术语，不暴露原始 traceback
+        err_cls = type(e).__name__
+        detail_map = {
+            "ValueError": "数据格式不符合分析要求，请检查目标列和因子列的数据类型",
+            "KeyError": f"数据中缺少必要的列，请确认列名是否正确",
+            "TypeError": "数据类型不匹配，请确保所有因子列为数值型或类别型",
+            "IndexError": "数据索引异常，请检查数据是否包含空行或异常索引",
+            "MemoryError": "数据量过大超出内存限制，请减少数据行数或列数",
+            "LinAlgError": "矩阵运算失败，数据可能存在严重共线性或数值异常",
+            "ConvergenceError": "模型未能收敛，请检查数据质量或调整分析参数",
+        }
+        detail = detail_map.get(err_cls, "分析计算过程中出现异常，请检查数据完整性")
         return AnalysisResult(
             task=req.task, status="error",
             messages=[
-                f"分析执行失败: {error_detail}",
-                "如问题持续出现，请检查数据格式或联系开发者",
+                f"分析执行失败 ({err_cls}): {detail}",
+                "如问题持续出现，请联系开发者并提供数据样本",
             ],
         )

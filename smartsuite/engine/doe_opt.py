@@ -75,10 +75,10 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         coef_df = pd.DataFrame({
             "变量": X.columns,
-            "系数": model.params.values,
-            "标准误": model.bse.values,
-            "t值": model.tvalues.values,
-            "p值": model.pvalues.values,
+            "系数": np.asarray(model.params),
+            "标准误": np.asarray(model.bse),
+            "t值": np.asarray(model.tvalues),
+            "p值": np.asarray(model.pvalues),
             "标准化系数(β)": std_betas,
         })
 
@@ -259,7 +259,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 使用 OLS 而非 lstsq，以获取 R²/p值/标准误
         import statsmodels.api as sm_rsm
         model_rsm = sm_rsm.OLS(y, X_design_df).fit()
-        beta = model_rsm.params.values
+        beta = np.asarray(model_rsm.params)
         r2 = float(model_rsm.rsquared)
         r2_adj = float(model_rsm.rsquared_adj)
     except Exception:
@@ -965,7 +965,7 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
             messages=["Logistic 模型拟合失败"])
 
     # Odds Ratios
-    params = model.params.values
+    params = np.asarray(model.params)
     ci = model.conf_int()
     or_vals = np.exp(params)
     or_ci_lower = np.exp(ci.iloc[:, 0].values)
@@ -1231,10 +1231,10 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
 
         coef_df = pd.DataFrame({
             "变量": Xc.columns,
-            "系数": model.params.values.round(4),
-            "标准误": model.bse.values.round(4),
-            "t值": model.tvalues.values.round(3),
-            "p值": model.pvalues.values.round(4),
+            "系数": np.asarray(model.params).round(4),
+            "标准误": np.asarray(model.bse).round(4),
+            "t值": np.asarray(model.tvalues).round(3),
+            "p值": np.asarray(model.pvalues).round(4),
         })
 
         q_label = f"Q{int(quantile*100)} (中位数)" if quantile == 0.5 else f"Q{int(quantile*100)}"
