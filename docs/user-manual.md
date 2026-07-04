@@ -324,6 +324,10 @@ print(f"检验方法: {result.metadata['test']}, p={result.metadata['p_value']:.
 | Wilson Score (推荐) | 0.8917 | 0.9271 |
 | Clopper-Pearson (精确) | 0.8916 | 0.9279 |
 
+![比例置信区间](images/proportion_ci_1.png)
+
+*比例置信区间 — Wilson Score(浅蓝) vs Clopper-Pearson(深蓝) 95%CI 对比。红虚线=点估计。*
+
 > **解读**: 首件合格率 91.1%，Wilson 95%CI [89.2%, 92.7%]。Wilson Score 方法比 Clopper-Pearson 更推荐（区间更窄、覆盖率更好）。两种方法结果高度一致（差异仅 0.0008）。
 
 ### 4.8 方差齐性检验 (`variance_test`)
@@ -491,6 +495,10 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 **操作**: Y=`不良率`, X=`熔体温度, 模具温度` → 参数 `objectives: 不良率:minimize;拉伸强度:maximize`
 
 **预期结果**: Pareto 前沿图 + 综合评分排序。加权最优方案的参数组合。
+
+![多目标优化 Pareto 前沿](images/multi_objective_1.png)
+
+*多目标优化 — 左:Pareto 前沿(红点)，右:Top 方案加权期望值分解。每个目标以不同颜色堆叠展示贡献。*
 
 ### 6.5 DOE 效应估计 (`doe_analysis`)
 
@@ -721,7 +729,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 | PC | 159 | 4.165 | 3.890 | 1.191 | 1.342 | 1.386 | 8.968 |
 | PP | 235 | 4.282 | 3.997 | 1.290 | 1.467 | 1.445 | 9.532 |
 
-> **解读**: 5 组均值都在 4.17~4.35 之间，中位数在 3.89~4.08，差异极小。ANOVA p=0.615 不显著。各组的 IQR 约 1.3~1.5 说明组内离散度相近。箱线图散点叠加可直观看到分布形态。
+![分组箱线图(简单)](images/box_chart_1.png)
+
+*分组箱线图 — 按原料类型(5组)的不良率分布，散点叠加展示个体差异。各组箱体高度相近，中位数接近。*
+
+> **解读**: 5 组均值都在 4.17~4.35 之间，中位数在 3.89~4.08，差异极小。ANOVA p=0.615 不显著。各组的 IQR 约 1.3~1.5 说明组内离散度相近。
 
 **操作（带次分类分面）**:
 - Y: `不良率`(Y)
@@ -793,6 +805,10 @@ print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get
 **功能**: 评估测量系统的重复性和再现性。
 
 **操作**: Y=`不良率`(Y), X=`模具编号, 检验员`(类别), 参数 `part_col: 模具编号; operator_col: 检验员` → 点击 **量具R&R分析**
+
+![量具 R&R 变异源分析](images/gage_rr_1.png)
+
+*量具 R&R 变异源柱状图 — EV(重复性)/AV(再现性)/GRR(量具)/PV(部件间)的 5.15σ 研究变异。%GRR=100% 不合格。*
 
 **预期结果**: ndc=0, %GRR=100.0%（判定：不合格）。测试数据中不良率为连续值且无重复测量设计，量具 R&R 不适用——这恰好验证了"错误数据给出警示结论"的正确行为。
 
