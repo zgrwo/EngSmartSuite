@@ -112,6 +112,11 @@ python smartsuite/web/app.py
 
 ### 4.1 相关性分析 (`correlation`)
 
+![相关性热力图](images/correlation_1.png)
+
+*蓝色=正相关，红色=负相关，颜色越深 |r| 越大，星号(*)标记显著性水平*
+
+
 **功能**: 计算所有 Y 列与 X 列之间的 Pearson 相关系数，生成热力图和散点矩阵。
 
 **操作**:
@@ -150,6 +155,11 @@ print(result.summary)
 
 ### 4.2 ANOVA 方差分析 (`anova`)
 
+![ANOVA 箱线图](images/anova_1.png)
+
+*按原料类型分组的不良率分布，散点叠加展示。各组中位数接近，与 p=0.615 一致*
+
+
 **功能**: 判断类别因子（如原料类型、车间）是否对质量指标有显著影响。
 
 **操作**:
@@ -181,6 +191,11 @@ print(result.summary)
 
 ### 4.3 假设检验 (`hypothesis_test`)
 
+![假设检验箱线图](images/hypothesis_test_1.png)
+
+*保养日=否(蓝) vs 是(橙)的不良率对比。保养日='是'的均值(2.89)明显低于'否'(4.41)*
+
+
 **功能**: 对比两组数据是否存在显著差异（t 检验、Mann-Whitney U、配对检验等 14 种方法）。
 
 **操作（两样本 t 检验）**:
@@ -208,6 +223,11 @@ print(result.summary)
 > 测试数据生成时 `defect_rate = ... -1.0 if maintenance_days='是'`，所以这是真实的因果效应。
 
 ### 4.4 决策树重要性 (`decision_tree`)
+
+![决策树特征重要性对比](images/decision_tree_1.png)
+
+*排列重要性(深蓝) vs 内置Gini(浅蓝)。排列重要性更可靠，冷却时间居首*
+
 
 **功能**: 用决策树模型评估每个因子对目标的解释力，输出排列重要性（比内置 Gini 重要性更可靠）。
 
@@ -247,6 +267,11 @@ for _, row in fi.iterrows():
 
 ### 4.5 VIF 共线性诊断 (`vif`)
 
+![VIF 共线性诊断](images/vif_1.png)
+
+*所有因子 VIF≈1.0 远低于阈值5，无共线性风险*
+
+
 **功能**: 检测因子之间是否存在共线性（两个因子本质是同一个东西）。
 
 **操作**: X=`熔体温度, 模具温度, 注射压力, 冷却时间`(X) → 点击 **VIF共线性**（无需 Y 列）
@@ -263,6 +288,11 @@ for _, row in fi.iterrows():
 > **解读**: 所有变量 VIF ≈ 1.0 << 5，完全无共线性。各因子独立生成，彼此不相关。VIF > 5 时标记为高风险（橙色），建议考虑剔除或合并。
 
 ### 4.6 列联表分析 (`contingency`)
+
+![列联表堆叠柱状图](images/contingency_1.png)
+
+*按比例展示原料类型在各保养日状态下的分布，各列比例相近*
+
 
 **功能**: 检验两个类别变量是否独立（如原料类型和保养日是否有关联）。
 
@@ -347,6 +377,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 ### 5.3 分布特征摘要 (`distribution_summary`)
 
+![分布特征摘要](images/distribution_summary_1.png)
+
+*直方图+Normal(蓝)/Lognormal(橙)/Weibull(绿)三分布拟合，不良率最接近Normal*
+
+
 **功能**: 单变量的完整统计描述 + Normal/Lognormal/Weibull 三分布拟合。
 
 **操作**: Y=`不良率`(Y) → 点击 **分布特征摘要**（无需 X 列）
@@ -357,6 +392,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 ### 5.4 正态性评估 (`normality_check`)
 
+![正态性评估 Q-Q 图矩阵](images/normality_check_1.png)
+
+*点越接近红色对角线越正态。不良率和熔体温度均较好贴合对角线*
+
+
 **功能**: 检验数据是否服从正态分布，并推荐变换方法。
 
 **操作**: Y=`不良率`(Y), X=`熔体温度`(X) → 点击 **正态性评估**
@@ -366,6 +406,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 **Python**: `normal_count=2, n_columns=2`
 
 ### 5.5 统计功效分析 (`power_analysis`)
+
+![统计功效曲线](images/power_analysis_1.png)
+
+*蓝线=功效随样本量变化，橙虚线=目标0.80，绿虚线=所需N=64*
+
 
 **功能**: 估计需要多少样本量才能检测到指定效应，或评估当前样本量能达到的统计功效。
 
@@ -380,6 +425,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 > "建立预测模型，找到最优参数组合。"
 
 ### 6.1 回归建模 OLS (`regression`)
+
+![回归诊断 6 宫格](images/regression_1.png)
+
+*Residual vs Fitted / Q-Q / Scale-Location / Cook's D / Leverage / Actual vs Predicted*
+
 
 **功能**: 建立 Y = f(X₁, X₂, ...) 的线性公式，输出 6 宫格诊断图。
 
@@ -410,6 +460,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 ### 6.2 响应面分析 (`response_surface`)
 
+![响应面 3D+2D](images/response_surface_1.png)
+
+*左:3D曲面+蓝点(观测)+红五角星(最优)。右:2D填充等高线。曲面平坦*
+
+
 **功能**: 生成 3D 曲面 + 2D 等高线，可视化两个关键因子的最优组合。
 
 **操作**: Y=`不良率`(Y), X=`熔体温度, 模具温度`(X), 参数 `direction: minimize` → 点击 **响应面分析**
@@ -417,6 +472,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 **预期结果**: R²=0.017, 调整R²=0.012。最优区域标记为红色五角星。3D 曲面图 + 2D 等高线图各一张。响应面较平坦（数据无强关系）。
 
 ### 6.3 网格搜索寻优 (`grid_search`)
+
+![网格搜索最优参数](images/grid_search_1.png)
+
+*各候选参数组合的预测值柱状图*
+
 
 **功能**: 在参数范围内自动搜索最优值（基于 RidgeCV 线性模型）。
 
@@ -434,6 +494,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 ### 6.5 DOE 效应估计 (`doe_analysis`)
 
+![DOE 主效应 Pareto 图](images/doe_analysis_1.png)
+
+*蓝色=正效应，橙色=负效应，红色虚线=Lenth ME显著性参考线*
+
+
 **功能**: 估计各因子的主效应大小，Pareto 图展示，Lenth PSE 显著性参考线。
 
 **操作**: Y=`不良率`, X=`熔体温度, 模具温度, 注射压力` → 点击 **DOE效应估计**
@@ -441,6 +506,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 **预期结果**: 效应量排序 + Pareto 图。效应占比大多 < 5%（随机数据）。
 
 ### 6.6 ROC/AUC 分析 (`roc_analysis`)
+
+![ROC 曲线](images/roc_analysis_1.png)
+
+*AUC=0.489≈0.5模型无区分力，红色圆点=最佳阈值(Youden's J=0.03)*
+
 
 **功能**: 评估连续变量对二分类结果的区分能力。
 
@@ -450,6 +520,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 ### 6.7 Logistic 回归 (`logistic_regression`)
 
+![Logistic OR 森林图](images/logistic_regression_1.png)
+
+*横线=95%CI，竖虚线=OR=1(无效应)，所有因子CI跨越1*
+
+
 **功能**: 二分类结果建模（如预测是否会出现不良品）。
 
 **操作**: Y=`保养日`(Y,类别), X=`熔体温度, 模具温度`(X) → 点击 **Logistic回归**
@@ -458,6 +533,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 
 ### 6.8 Lasso 回归 (`lasso_regression`)
 
+![Lasso 回归系数](images/lasso_regression_1.png)
+
+*仅显示非零系数，α自动选择，3/3变量被选中但系数均接近零*
+
+
 **功能**: 带正则化的回归——自动将不重要的变量系数压缩到零，实现特征选择。
 
 **操作**: Y=`不良率`(Y), X=`熔体温度, 模具温度, 注射压力`(X) → 点击 **Lasso回归**
@@ -465,6 +545,11 @@ print(f"Cronbach α={result.metadata['alpha']:.3f}")
 **预期结果**: 选中 3/3 个变量（α=0.0025, R²=0.003）。随机数据下所有系数都很小，Lasso 未将任何变量压缩到零。非零系数柱状图。
 
 ### 6.9 稳健回归 Huber (`robust_regression`)
+
+![Huber vs OLS 系数对比](images/robust_regression_1.png)
+
+*深蓝=Huber稳健回归，浅蓝=OLS。随机数据无异常值，两种方法几乎一致*
+
 
 **功能**: 对异常值不敏感的回归——Huber 损失函数自动降低异常值权重。
 
@@ -513,6 +598,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 ### 7.3 CUSUM 控制图 (`spc_cusum`)
 
+![CUSUM 控制图](images/cusum_1.png)
+
+*上:原始数据+均值线(绿)。下:C+(橙)和C-(蓝)累积和+h=5决策区间(红虚线)*
+
+
 **功能**: 累积和控制图——对小偏移比 X-bar 更敏感。
 
 **操作**: Y=`不良率`(Y) → 点击 **CUSUM控制图**
@@ -521,6 +611,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 ### 7.4 EWMA 控制图 (`spc_ewma`)
 
+![EWMA 控制图](images/ewma_1.png)
+
+*蓝线=EWMA平滑值(λ=0.2)，浅蓝=原始数据，红虚线=时变控制限(L=2.7)*
+
+
 **功能**: 指数加权移动平均控制图——对近期数据权重更高。
 
 **操作**: Y=`不良率` → 点击 **EWMA控制图**
@@ -528,6 +623,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 **预期结果**: EWMA 平滑线 + 时变控制限 + 违规点。
 
 ### 7.5 过程能力 Cp/Cpk (`process_capability`)
+
+![过程能力分析](images/process_capability_1.png)
+
+*直方图+正态拟合+规格限(LSL=1,USL=10)。Cpk=0.923<1.0不合格，中心偏左需调准*
+
 
 **功能**: 评估工艺是否满足规格要求，输出 Cp/Cpk/Pp/Ppk + Sigma Level + DPMO。
 
@@ -550,6 +650,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 ### 7.6 趋势预测 (`trend_forecast`)
 
+![趋势预测 2×2 诊断](images/trend_forecast_1.png)
+
+*趋势+预测(橙带)/残差(DW≈2)/ACF自相关/Actual vs Predicted(R²≈0)*
+
+
 **功能**: 线性趋势外推 + 残差诊断 (DW/Ljung-Box/ACF)。
 
 **操作**: Y=`不良率`(Y) → 点击 **趋势预测**（无需 X 列）
@@ -560,6 +665,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 ### 7.7 异常检测 (`anomaly_detect`)
 
+![异常检测 (IQR法)](images/anomaly_detect_1.png)
+
+*红色X=异常点，橙色虚线=Q1-1.5IQR和Q3+1.5IQR上下界*
+
+
 **功能**: IQR / Z-score / Grubbs / Isolation Forest 四种方法检测异常点。
 
 **操作**: Y=`不良率` → 点击 **异常检测**，参数 `method: iqr`
@@ -568,6 +678,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 ### 7.8 变点检测 (`change_point`)
 
+![变点检测](images/change_point_1.png)
+
+*彩色水平线=各段均值，红色虚线=变点位置，红色箭头标注*
+
+
 **功能**: 基于 CUSUM 识别过程结构性变化的位置。
 
 **操作**: Y=`不良率` → 点击 **变点检测**
@@ -575,6 +690,11 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 **预期结果**: 分段统计（均值/标准差/方向）+ 变点位置标记。
 
 ### 7.9 异常共识 (`outlier_consensus`)
+
+![多方法异常共识](images/outlier_consensus_1.png)
+
+*红色X=高置信异常(≥2票)，橙色方块=低置信(1票)。三方法投票减少误报*
+
 
 **功能**: IQR + Z-score + Isolation Forest 三种方法投票，≥2 票才是高置信异常。
 
@@ -634,6 +754,11 @@ print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get
 
 ### 8.1 Bootstrap 置信区间 (`bootstrap_ci`)
 
+![Bootstrap 置信区间](images/bootstrap_ci_1.png)
+
+*直方图=200次重抽样的均值分布，绿线=点估计，红线=95%CI，分布呈钟形*
+
+
 **功能**: 不依赖分布假设的置信区间估计（通过重抽样）。
 
 **操作**: Y=`不良率`(Y), 参数 `n_bootstrap: 200` → 点击 **Bootstrap置信区间**
@@ -652,6 +777,11 @@ print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get
 
 ### 8.2 中位数置信区间 (`median_ci`)
 
+![中位数置信区间](images/median_ci_1.png)
+
+*绿线=中位数，红线=95%CI(基于二项分布符号检验)，粉色=CI区域*
+
+
 **功能**: 基于二项分布的符号检验法，不需要任何分布假设。
 
 **操作**: Y=`不良率` → 点击 **中位数置信区间**
@@ -668,6 +798,11 @@ print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get
 
 ### 8.4 统计容许区间 (`tolerance_interval`)
 
+![统计容许区间](images/tolerance_interval_1.png)
+
+*直方图+正态拟合，红/绿虚线=双侧容许限*
+
+
 **功能**: 以指定置信度覆盖总体指定比例的区间（如 "99% 产品以 95% 置信度落在 [L, U]"）。
 
 **操作**: Y=`不良率` → 点击 **统计容许区间**
@@ -675,6 +810,11 @@ print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get
 **预期结果**: 双侧容许限 + 直方图 + 正态拟合。
 
 ### 8.5 生存分析 Kaplan-Meier (`survival_analysis`)
+
+![Kaplan-Meier 生存曲线](images/survival_analysis_1.png)
+
+*蓝线=KM估计，浅蓝虚线=Weibull拟合，灰线=删失标记*
+
 
 **功能**: 估计产品的寿命分布和可靠度随时间的变化。
 
