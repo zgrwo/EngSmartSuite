@@ -99,20 +99,24 @@ def upload():
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
-    body = request.get_json()
-    task = body.get("task")
-    targets = body.get("targets", [])
-    features = body.get("features", [])
-    categoricals = body.get("categoricals", [])
-    params = body.get("params", {})
-    if not task or not targets:
-        return jsonify({"error": "缺少分析任务或目标列"}), 400
-    path = app.config.get("DATA_PATH")
-    if not path or not os.path.exists(path):
-        return jsonify({"error": "请先上传数据文件"}), 400
-    df = pd.read_parquet(path)
-    results = run_analysis(task, df, targets, features, categoricals, params)
-    return jsonify({"results": results})
+    try:
+        body = request.get_json()
+        task = body.get("task")
+        targets = body.get("targets", [])
+        features = body.get("features", [])
+        categoricals = body.get("categoricals", [])
+        params = body.get("params", {})
+        if not task or not targets:
+            return jsonify({"error": "缺少分析任务或目标列"}), 400
+        path = app.config.get("DATA_PATH")
+        if not path or not os.path.exists(path):
+            return jsonify({"error": "请先上传数据文件"}), 400
+        df = pd.read_parquet(path)
+        results = run_analysis(task, df, targets, features, categoricals, params)
+        return jsonify({"results": results})
+    except Exception as e:
+        logger.exception("分析请求处理失败")
+        return jsonify({"error": f"分析失败: {str(e)[:200]}"}), 500
 
 
 @app.route("/api/tasks")
