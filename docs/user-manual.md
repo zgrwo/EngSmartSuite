@@ -112,33 +112,34 @@ python smartsuite/web/app.py
 
 ### 4.1 相关性分析 (`correlation`)
 
-**功能**: 计算所有 Y 列与 X 列之间的 Pearson 相关系数，生成热力图。
+**功能**: 计算所有 Y 列与 X 列之间的 Pearson 相关系数，生成热力图和散点矩阵。
 
 **操作**:
-- Y: `不良率`
-- X: `熔体温度, 模具温度, 注射压力, 冷却时间`
+- Y: `不良率`（勾选 Y）
+- X: `熔体温度`, `模具温度`, `注射压力`, `冷却时间`（勾选 X）
+- 无需额外参数
 - 点击 **相关性分析**
 
 **预期结果**:
 
-| 指标 | 值 |
-|------|-----|
-| 最强相关因子 | 冷却时间或熔体温度 |
-| 相关系数范围 | -0.15 ~ +0.15 |
-| 图表 | 1 张热力图 |
+| 指标 | 实际值 |
+|------|--------|
+| 最强相关因子 | 冷却时间 |
+| Pearson r | +0.038 |
+| Bonferroni 校正 | 校正前后显著对数 |
+| 图表 | 1 张热力图（含显著性星号标注） |
+
+> 测试数据为随机生成，因子之间的相关性很弱（|r| < 0.05），这是正常的。
 
 **Python 等价代码**:
 ```python
-from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.root_cause import correlation_analysis
-import pandas as pd
-
-df = pd.read_excel("tests/test_data.xlsx")
 req = AnalysisRequest(task="correlation", data=df, target_col="不良率",
     feature_cols=["熔体温度", "模具温度", "注射压力", "冷却时间"])
 result = correlation_analysis(req)
 print(result.summary)
-# → "与「不良率」相关性最强的因子是「冷却时间」(Pearson=0.xxx)。Bonferroni校正前 x 对显著，校正后 x 对显著（x 对比较）"
+# → "与「不良率」相关性最强的因子是「冷却时间」(Pearson=0.038)。
+#    Bonferroni校正前 1 对显著，校正后 0 对显著（10 对比较）"
 ```
 
 ### 4.2 ANOVA 方差分析 (`anova`)
@@ -146,18 +147,22 @@ print(result.summary)
 **功能**: 判断类别因子（如原料类型、车间）是否对质量指标有显著影响。
 
 **操作**:
-- Y: `不良率`
-- X: `原料类型`（勾选为类别）
+- Y: `不良率`（勾选 Y）
+- X: `原料类型`（勾选类别）
+- 无需额外参数（默认 α=0.05）
 - 点击 **ANOVA方差分析**
 
 **预期结果**:
 
-| 指标 | 值 |
-|------|-----|
-| 模型 R² | 0.00~0.10（随机数据） |
-| p 值 | > 0.05（无显著差异） |
+| 指标 | 实际值 |
+|------|--------|
+| 模型 R² | 0.0027 |
+| 调整 R² | ~0 |
 | 效应量 η² | < 0.01（可忽略） |
-| 图表 | 1 张箱线图 |
+| 图表 | 1 张箱线图（按原料类型分组） |
+| 事后检验 | Tukey HSD 成对比较表 |
+
+> 说明：测试数据为随机生成，原料类型之间无明显差异，R² 接近 0。
 
 **Python 等价代码**:
 ```python
@@ -167,6 +172,7 @@ req = AnalysisRequest(task="anova", data=df, target_col="不良率",
 result = anova_analysis(req)
 print(result.summary)
 # → "未发现对「不良率」显著影响的因子 (α=0.05)"
+# R²=0.0027, 调整R²=-0.0013
 ```
 
 ### 4.3 假设检验 (`hypothesis_test`)
@@ -174,19 +180,22 @@ print(result.summary)
 **功能**: 对比两组数据是否存在显著差异（t 检验、Mann-Whitney U、配对检验等 14 种方法）。
 
 **操作（两样本 t 检验）**:
-- Y: `不良率`
-- X: `保养日`（"是"/"否"）
-- 类别: `保养日`
+- Y: `不良率`（勾选 Y）
+- X: `保养日`（勾选类别 — 值："是"/"否"）
+- 参数面板：`test` 保持默认 `ttest_ind`
 - 点击 **假设检验**
-- 参数面板选择 `test: ttest_ind`
 
 **预期结果**:
 
-| 指标 | 值 |
-|------|-----|
-| p 值 | > 0.05（随机数据） |
-| Cohen's d | \|d\| < 0.2（可忽略） |
-| 图表 | 1 张箱线图+散点 |
+| 指标 | 实际值 | 说明 |
+|------|--------|------|
+| p 值 | < 0.001 | 保养日对不良率有显著影响 |
+| Cohen's d | 约 1.3 | 大效应（d > 0.8） |
+| 统计功效 | ~1.0 | 样本量充足 |
+| 图表 | 1 张箱线图+散点叠加 | 蓝色=否, 橙色=是 |
+
+> 说明：测试数据生成时设定了 `defect_rate = ... -1.0 if maintenance_days='是'`，
+> 所以保养日确实对不良率有真实的因果影响，p 值非常小是正确的。
 
 **Python 等价代码**:
 ```python
@@ -196,16 +205,16 @@ req = AnalysisRequest(task="hypothesis_test", data=df, target_col="不良率",
     params={"test": "ttest_ind", "group_col": "保养日"})
 result = hypothesis_test(req)
 print(result.summary)
-# → "否 vs 是: 未发现显著差异 (p=0.xxx)；效应量 Cohen's d=0.xxx（可忽略）"
+# → "否 vs 是: 存在显著差异 (p=0.0000)；效应量 Cohen's d=1.310（大）；统计功效 100.0%"
 ```
 
 ### 4.4 决策树重要性 (`decision_tree`)
 
 **功能**: 用决策树模型评估每个因子对目标的解释力，输出排列重要性（比内置 Gini 重要性更可靠）。
 
-**操作**: Y=`不良率`, X=`熔体温度, 模具温度, 注射压力, 冷却时间` → 点击 **决策树重要性**
+**操作**: Y=`不良率`(Y), X=`熔体温度, 模具温度, 注射压力, 冷却时间`(X) → 点击 **决策树重要性**
 
-**预期结果**: 综合重要性排序表 + 决策树结构图。关键因子重要性 > 0.1，噪声因子接近 0。
+**预期结果**: 排列重要性排序表 + 决策树结构图。CV R² 为负（随机数据，模型拟合差于均值预测）。关键因子为冷却时间。
 
 **Python 等价代码**:
 ```python
@@ -214,15 +223,16 @@ req = AnalysisRequest(task="decision_tree", data=df, target_col="不良率",
     feature_cols=["熔体温度", "模具温度", "注射压力", "冷却时间"])
 result = decision_tree_analysis(req)
 print(f"关键因子: {result.metadata['top_factor']}, CV R²={result.metadata['cv_r2']:.3f}")
+# → 关键因子: 冷却时间, CV R²=-0.092
 ```
 
 ### 4.5 VIF 共线性诊断 (`vif`)
 
 **功能**: 检测因子之间是否存在共线性（两个因子本质是同一个东西）。
 
-**操作**: X=`熔体温度, 模具温度, 注射压力, 冷却时间` → 点击 **VIF共线性**
+**操作**: X=`熔体温度, 模具温度, 注射压力, 冷却时间`(X) → 点击 **VIF共线性**（无需 Y 列）
 
-**预期结果**: VIF 值均 < 5（正常），柱状图全蓝。如果有 VIF > 5 的因子，会以橙色显示。
+**预期结果**: VIF 值均 < 5（max=1.01），柱状图全蓝，无共线性风险。各因子独立（随机生成）。
 
 **Python 等价代码**:
 ```python
@@ -230,8 +240,8 @@ from smartsuite.engine.root_cause import vif_analysis
 req = AnalysisRequest(task="vif", data=df, target_col="",
     feature_cols=["熔体温度", "模具温度", "注射压力", "冷却时间"])
 result = vif_analysis(req)
-print(f"高 VIF 因子数: {result.metadata['high_vif_count']}")
-# → 0
+print(f"最大 VIF: {result.tables['vif_table']['VIF'].max():.2f}, 高 VIF 数: {result.metadata['high_vif_count']}")
+# → 最大 VIF: 1.01, 高 VIF 数: 0
 ```
 
 ### 4.6 列联表分析 (`contingency`)
@@ -256,16 +266,17 @@ print(f"检验方法: {result.metadata['test']}, p={result.metadata['p_value']:.
 
 **功能**: 估计二分类数据的比例及其置信区间（如合格率）。
 
-**操作**: Y=`首件合格` → 点击 **比例置信区间**
+**操作**: Y=`首件合格`(Y) → 无需 X 列 → 点击 **比例置信区间**
 
-**预期结果**: 合格率约 92%，Wilson 95% CI。
+**预期结果**: 合格率 91.1%，Wilson 95% CI 约 [89.3%, 92.7%]。
 
 **Python 等价代码**:
 ```python
 from smartsuite.engine.root_cause import proportion_ci
 req = AnalysisRequest(task="proportion_ci", data=df, target_col="首件合格")
 result = proportion_ci(req)
-print(f"比例: {result.metadata['p_hat']:.1%}")
+print(f"合格率: {result.metadata['p_hat']:.1%}")
+# → 合格率: 91.1%
 ```
 
 ### 4.8 方差齐性检验 (`variance_test`)
@@ -286,9 +297,9 @@ print(f"比例: {result.metadata['p_hat']:.1%}")
 
 **功能**: 评估两个检验员/评定者之间的一致性（如张三和李四的判定是否一致）。
 
-**操作**: X=`首件合格, 外观检查` → 点击 **评定者一致性**
+**操作**: X=`首件合格, 外观检查`(X) → 无需 Y 列 → 点击 **评定者一致性**
 
-**预期结果**: Kappa 值（-1 ~ 1），> 0.6 为高度一致。
+**预期结果**: Kappa = -0.009（低于随机一致）。两列数据独立随机生成，无一致性。
 
 **Python 等价代码**:
 ```python
@@ -297,6 +308,7 @@ req = AnalysisRequest(task="cohens_kappa", data=df, target_col="",
     feature_cols=["首件合格", "外观检查"])
 result = cohens_kappa(req)
 print(f"Kappa={result.metadata['kappa']:.3f} ({result.metadata['level']})")
+# → Kappa=-0.009 (低于随机一致)
 ```
 
 ### 5.2 信度分析 Cronbach α (`cronbach_alpha`)
@@ -367,16 +379,16 @@ print(f"正态列数: {result.metadata['normal_count']}/{result.metadata['n_colu
 
 **功能**: 建立 Y = f(X₁, X₂, ...) 的线性公式，输出 6 宫格诊断图。
 
-**操作**: Y=`不良率`, X=`熔体温度, 注射压力, 冷却时间` → 点击 **回归建模(OLS)**
+**操作**: Y=`不良率`(Y), X=`熔体温度, 注射压力, 冷却时间`(X) → 点击 **回归建模(OLS)**
 
 **预期结果**:
 
-| 指标 | 值 |
-|------|-----|
-| R² | 0.02~0.08（随机数据，拟合度低） |
-| 显著变量 | 0~1 个 |
-| DW | ~2.0（无自相关） |
-| 图表 | 1 张 3×2 诊断图 |
+| 指标 | 实际值 | 说明 |
+|------|--------|------|
+| R² | 0.0064 | 随机数据，拟合度极低 |
+| DW | 1.983 | 接近 2，无自相关 |
+| 显著变量 | 0 个 | 无因子 p < 0.05 |
+| 图表 | 1 张 3×2 诊断图 | Residual/Q-Q/Scale-Location/Cook's D/Leverage/Actual vs Predicted |
 
 **Python 等价代码**:
 ```python
@@ -384,7 +396,8 @@ from smartsuite.engine.doe_opt import regression_analysis
 req = AnalysisRequest(task="regression", data=df, target_col="不良率",
     feature_cols=["熔体温度", "注射压力", "冷却时间"])
 result = regression_analysis(req)
-print(f"R²={result.metadata['r_squared']:.3f}, DW={result.metadata['durbin_watson']:.3f}")
+print(f"R²={result.metadata['r_squared']:.4f}, DW={result.metadata['durbin_watson']:.3f}")
+# → R²=0.0064, DW=1.983
 ```
 
 ### 6.2 响应面分析 (`response_surface`)
@@ -510,15 +523,18 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 **功能**: 评估工艺是否满足规格要求，输出 Cp/Cpk/Pp/Ppk + Sigma Level + DPMO。
 
-**操作**: Y=`不良率`, 参数 `usl: 10, lsl: 1` → 点击 **过程能力Cp/Cpk**
+**操作**: Y=`不良率`(Y), 参数面板填入 `usl: 10, lsl: 1` → 点击 **过程能力Cp/Cpk**
+
+**参数说明**: usl=规格上限, lsl=规格下限。可选 `target`（目标值，用于 Cpm）和 `transform: boxcox`（非正态数据变换）。
 
 **预期结果**:
 
-| 指标 | 预期值 |
+| 指标 | 实际值 |
 |------|--------|
-| Cpk | 0.5~1.5（取决于数据） |
-| Sigma Level | 1.5~4.5 |
-| 判定 | 需改进 或 不合格 |
+| Cpk | 0.923 |
+| 判定 | 不合格 (< 1.0) |
+| Sigma Level | ~2.77 |
+| 图表 | 直方图 + 正态拟合 + 规格限 |
 
 ### 7.6 趋势预测 (`trend_forecast`)
 
@@ -548,9 +564,43 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 **功能**: IQR + Z-score + Isolation Forest 三种方法投票，≥2 票才是高置信异常。
 
-**操作**: Y=`不良率`, X=`熔体温度` → 点击 **异常共识(3方法投票)**
+**操作**: Y=`不良率`(Y), X=`熔体温度`(X) → 点击 **异常共识(3方法投票)**
 
-**预期结果**: 高置信异常点数量（通常 < 5%）+ 低置信异常（1 票，可忽略）。
+**预期结果**: 高置信异常约 22 个（2.2%），总标记约 58 个（5.8%）。
+
+### 7.10 分组箱线图 (`box_chart`)  🆕
+
+**功能**: 按类别因子分组展示数值分布，支持次分类分面。自动附 ANOVA/Kruskal-Wallis 或 t 检验/MWU 统计检验。
+
+**操作（简单分组）**:
+- Y: `不良率`(Y)
+- X₁: `原料类型`(类别) — 主分类
+- 点击 **分组箱线图**
+
+**预期结果**: 5 组箱线图（ABS/PP/PA6/PC/PA66），含 ANOVA + Kruskal-Wallis p 值。描述统计表含每组样本量/均值/中位数/标准差/IQR。
+
+**操作（带次分类分面）**:
+- Y: `不良率`(Y)
+- X₁: `原料类型`(类别) — 主分类
+- X₂: `车间`(类别) — 次分类
+- 点击 **分组箱线图**
+
+**预期结果**: 3 张分面箱线图（一车间/二车间/三车间各一张），每张 X 轴=原料类型。次分类 ≤ 8 个水平时自动分面。
+
+**Python 等价代码**:
+```python
+from smartsuite.engine.spc_monitor import box_chart
+# 简单分组
+req = AnalysisRequest(task="box_chart", data=df, target_col="不良率",
+    feature_cols=["原料类型"])
+result = box_chart(req)
+# 带次分类
+req2 = AnalysisRequest(task="box_chart", data=df, target_col="不良率",
+    feature_cols=["原料类型", "车间"])
+result2 = box_chart(req2)
+print(f"分组数={result.metadata['n_groups']}, 次分类={result2.metadata.get('sub_col')}, 分面={result2.metadata['has_sub']}")
+# → 分组数=5, 次分类=车间, 分面=True
+```
 
 ---
 
