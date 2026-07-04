@@ -1,9 +1,13 @@
 """过程综合审计 — 一站式工艺健康检查报告。"""
+import logging
+
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
 from smartsuite.services.orchestrator import orchestrate
+
+logger = logging.getLogger(__name__)
 
 
 def process_audit(
