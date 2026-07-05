@@ -5,10 +5,6 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-import matplotlib
-
-matplotlib.use("Agg")
-
 import pandas as pd
 import yaml
 
@@ -65,10 +61,12 @@ def main():
         except Exception as e:
             logger.warning("数据校验异常: %s", e)
             print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
-        df, feature_cols, _, imputation_log = preprocess_data(raw, features)
+        df, feature_cols, _, imputation_log, unknown_cat_warnings = preprocess_data(raw, features)
         # 输出数据预处理警告
         for col, n_coerced in imputation_log.items():
             print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
+        for col, extra_cats in unknown_cat_warnings:
+            print(f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。")
         req = AnalysisRequest(
             task=config["task"], data=df,
             target_col=config["target_col"],

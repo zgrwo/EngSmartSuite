@@ -3,6 +3,7 @@ import logging
 from dataclasses import replace
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.exceptions import SmartSuiteError
 from smartsuite.engine import (
     anomaly_detect,
     anova_analysis,
@@ -150,6 +151,12 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
 
     try:
         return TASK_REGISTRY[req.task](req)
+    except SmartSuiteError as e:
+        logger.warning("分析任务 %s SmartSuite异常: %s", req.task, str(e)[:200])
+        return AnalysisResult(
+            task=req.task, status="error",
+            messages=[f"分析执行失败: {str(e)}", "如问题持续出现，请联系开发者"],
+        )
     except Exception as e:
         logger.exception("分析任务 %s 执行失败: %s", req.task, str(e)[:200])
         # 将异常转为中文工艺术语，不暴露原始 traceback
@@ -166,12 +173,16 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
             "RuntimeError": "计算过程出现运行时错误，请检查参数设置是否合适",
             "AttributeError": "数据结构异常，请确认数据列名和格式正确",
             "FileNotFoundError": "找不到指定的文件，请检查文件路径",
+            "ValidationError": "数据校验不通过，请检查数据列类型和格式",
+            "AnalysisError": "分析计算过程出现异常，请检查数据完整性",
+            "DataSelectionError": "数据选区无效，请重新选择数据区域",
+            "OutputError": "报告输出失败，请检查输出路径是否可写",
         }
         detail = detail_map.get(err_cls, "分析计算过程中出现异常，请检查数据完整性")
         return AnalysisResult(
             task=req.task, status="error",
             messages=[
-                f"分析执行失败 ({err_cls}): {detail}",
+                f"分析执行失败: {detail}",
                 "如问题持续出现，请联系开发者并提供数据样本",
             ],
         )

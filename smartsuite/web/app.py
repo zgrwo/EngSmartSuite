@@ -3,14 +3,16 @@ import atexit
 import functools
 import logging
 import os
+import pathlib
 import secrets
 import sys
 import tempfile
+import threading
 
 import pandas as pd
 
 # ── matplotlib 配置由引擎层统一管理（含中文字体 + 配色方案）──
-import smartsuite.engine  # noqa: F401 — 触发引擎层全局 matplotlib 配置
+# orchestrator 导入会级联触发 engine/__init__.py 中的全局 matplotlib 配置
 
 try:
     from flask import Flask, jsonify, render_template, request, session
@@ -30,10 +32,13 @@ logger = logging.getLogger(__name__)
 
 # 上传文件的临时追踪，确保进程退出时清理
 _UPLOAD_FILES: list[str] = []
+_upload_lock = threading.Lock()
 
 
 def _cleanup_uploads() -> None:
-    for path in _UPLOAD_FILES:
+    with _upload_lock:
+        paths = list(_UPLOAD_FILES)
+    for path in paths:
         try:
             if os.path.exists(path):
                 os.unlink(path)
@@ -69,7 +74,23 @@ def require_csrf(f):
 
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SMARTSUITE_SECRET", os.urandom(24).hex())
+_secret_from_env = os.environ.get("SMARTSUITE_SECRET")
+if _secret_from_env:
+    app.config["SECRET_KEY"] = _secret_from_env
+else:
+    _secret_file = pathlib.Path.home() / ".smartsuite" / "secret_key"
+    try:
+        _secret_file.parent.mkdir(parents=True, exist_ok=True)
+        if _secret_file.exists():
+            app.config["SECRET_KEY"] = _secret_file.read_text().strip()
+        else:
+            _fallback_key = secrets.token_hex(32)
+            _secret_file.write_text(_fallback_key)
+            app.config["SECRET_KEY"] = _fallback_key
+    except OSError:
+        _fallback_key = secrets.token_hex(32)
+        app.config["SECRET_KEY"] = _fallback_key
+        logger.warning("无法持久化密钥到 %s，使用临时密钥", _secret_file)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 TASK_LABELS = {
@@ -177,21 +198,21 @@ def upload():
     if df.empty:
         return jsonify({"error": "文件为空或无法读取数据"}), 400
 
-    # 清理旧的上传文件并同步追踪列表
-    old_path = app.config.get("DATA_PATH")
-    if old_path and os.path.exists(old_path):
-        try:
-            os.unlink(old_path)
-            if old_path in _UPLOAD_FILES:
-                _UPLOAD_FILES.remove(old_path)
-        except OSError:
-            pass
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-    tmp.close()
-    df.to_parquet(tmp.name)
-    _UPLOAD_FILES.append(tmp.name)
-    app.config["DATA_PATH"] = tmp.name
+    # 清理旧上传文件并写入新文件（线程安全）
+    with _upload_lock:
+        old_path = session.get("_data_path")
+        if old_path and os.path.exists(old_path):
+            try:
+                os.unlink(old_path)
+                if old_path in _UPLOAD_FILES:
+                    _UPLOAD_FILES.remove(old_path)
+            except OSError:
+                pass
+        tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+        tmp.close()
+        df.to_parquet(tmp.name)
+        session["_data_path"] = tmp.name
+        _UPLOAD_FILES.append(tmp.name)
     return jsonify({"columns": column_info(df), "shape": list(df.shape)})
 
 
@@ -207,7 +228,11 @@ def analyze():
         params = body.get("params", {})
         if not task or not targets:
             return jsonify({"error": "缺少分析任务或目标列"}), 400
-        path = app.config.get("DATA_PATH")
+        if not isinstance(targets, list):
+            return jsonify({"error": "targets 参数必须是列表"}), 400
+        if not isinstance(features, list):
+            return jsonify({"error": "features 参数必须是列表"}), 400
+        path = session.get("_data_path")
         if not path or not os.path.exists(path):
             return jsonify({"error": "请先上传数据文件"}), 400
         df = pd.read_parquet(path)

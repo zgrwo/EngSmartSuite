@@ -42,8 +42,8 @@ if _env_font and os.path.exists(_env_font):
         matplotlib.font_manager.fontManager.addfont(_env_font)
         matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[0]
         _font_loaded = True
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.debug("环境变量字体 %s 加载失败: %s", _env_font, e)
 
 # 平台字体
 if not _font_loaded:
@@ -55,7 +55,8 @@ if not _font_loaded:
                 matplotlib.rcParams["font.family"] = family
                 _font_loaded = True
                 break
-            except Exception:
+            except Exception as e:
+                _logger.debug("平台字体 %s (%s) 加载失败: %s", font_path, family, e)
                 continue
 
 if not _font_loaded:

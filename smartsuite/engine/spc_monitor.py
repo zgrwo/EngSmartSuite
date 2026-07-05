@@ -101,10 +101,16 @@ def _we_rules_r(values, cl, ucl, lcl=0):
     vals = np.asarray(values)
     n = len(vals)
 
-    # Rule R1: 超出 UCL
+    # Rule R1a: 超出 UCL
     r1 = np.where(vals > ucl)[0]
     if len(r1):
-        violations["R1: 超出UCL"] = [int(i) for i in r1]
+        violations["R1a: 超出UCL"] = [int(i) for i in r1]
+
+    # Rule R1b: 低于 LCL (仅当 LCL>0 时)
+    if lcl > 0:
+        r1b = np.where(vals < lcl)[0]
+        if len(r1b):
+            violations["R1b: 低于LCL"] = [int(i) for i in r1b]
 
     # Rule R2: 连续 7 点在中心线同侧
     for i in range(n - 6):
@@ -360,6 +366,9 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
             n_vals = req.data.groupby(subgroup_col)[n_col].first() if subgroup_col else req.data[n_col]
         else:
             n_vals = sizes
+        if (n_vals == 0).any():
+            return AnalysisResult(task="spc_attribute", status="error",
+                messages=["子组样本量包含0值，无法计算比率控制图"])
         stat = counts / n_vals
         stat_name = "不良率(p)"
         p_bar = float(counts.sum() / n_vals.sum())
@@ -398,6 +407,9 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
             n_vals = req.data.groupby(subgroup_col)[n_col].first() if subgroup_col else req.data[n_col]
         else:
             n_vals = sizes
+        if (n_vals == 0).any():
+            return AnalysisResult(task="spc_attribute", status="error",
+                messages=["子组样本量包含0值，无法计算比率控制图"])
         stat = counts / n_vals
         stat_name = "单位缺陷率(u)"
         u_bar = float(counts.sum() / n_vals.sum())
@@ -505,9 +517,14 @@ def _cpk_confidence_interval(cpk, n, alpha=0.05):
 
 
 def _sigma_level(cpk_val):
-    """Cpk → Sigma Level (短期) 和 DPMO 估算。"""
+    """Cpk → Sigma Level (短期) 和 DPMO 估算。
+
+    注意: DPMO 公式使用短期 (unshifted) sigma，假设过程均值不发生偏移。
+    实际生产中常考虑 1.5σ 偏移，此时 DPMO 会更高。该公式提供的是
+    理论最优条件下的缺陷率估算，用于能力对比而非绝对预测。
+    """
     # Sigma Level ≈ 3 * Cpk（长期 Z 值）
-    # DPMO = 2 * Φ(-3*Cpk) * 1e6（双边正态）
+    # DPMO = 2 * Φ(-3*Cpk) * 1e6（双边正态，无偏移假设）
     sigma = 3 * cpk_val
     dpmo = int(2 * sp_stats.norm.cdf(-3 * cpk_val) * 1_000_000)
     return float(sigma), dpmo
@@ -521,6 +538,7 @@ def _box_cox_transform(data):
         transformed, lam = sp_stats.boxcox(data)
         return transformed, float(lam)
     except Exception:
+        logger.debug("Box-Cox transform failed", exc_info=True)
         return None, None
 
 
@@ -606,7 +624,7 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         cpm = float((usl - lsl) / (6 * tau)) if tau > 0 else None
 
     # 置信区间
-    cp_ci = _cp_confidence_interval(cp, n) if cp else (None, None)
+    cp_ci = _cp_confidence_interval(cp, n) if cp is not None else (None, None)
     cpk_ci = _cpk_confidence_interval(cpk_val, n) if cpk_val is not None else (None, None)
 
     # Sigma Level + DPMO
@@ -747,11 +765,18 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     )
 
 
-def _durbin_watson(residuals):
-    """Durbin-Watson 统计量 — 检测残差一阶自相关。"""
+def durbin_watson(residuals):
+    """Durbin-Watson 统计量 — 检测残差一阶自相关。
+
+    跨模块共享工具：被 regression_analysis (doe_opt.py) 和 trend_forecast 调用。
+    """
     diff = np.diff(residuals)
     dw = np.sum(diff**2) / (np.sum(residuals**2) + 1e-10)
     return float(dw)
+
+
+# 向后兼容别名
+_durbin_watson = durbin_watson
 
 
 def _ljung_box(residuals, lags=None):
@@ -771,7 +796,12 @@ def _ljung_box(residuals, lags=None):
 
 
 def _dw_interpretation(dw, n, k=1):
-    """Durbin-Watson 判读（近似阈值）。"""
+    """Durbin-Watson 判读（近似阈值）。
+
+    注意: 阈值 1.0/1.5/2.5/3.0 为近似经验值，精确的 DW 临界值
+    取决于样本量 n 和自变量数 k。对于小样本 (n<30) 或多变量回归，
+    建议查阅 DW 临界值表进行精确判读。本函数提供快速近似判读。
+    """
     if dw < 1.0:
         return f"正自相关 (DW={dw:.3f}<1.0)"
     elif dw > 3.0:
@@ -825,14 +855,21 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         dof = max(1, n - 2)
         t_crit = sp_stats.t.ppf(0.975, dof)
         resid_std_se = float(np.std(residuals, ddof=2))
-        # 预测区间（比置信区间更宽，包含单点不确定性）
-        conf = t_crit * resid_std_se * np.sqrt(1 + 1/n)
+        # 预测区间随预测步数增大而加宽（外推不确定性）
+        x_mean = float(np.mean(np.arange(n)))
+        ssx = float(np.sum((np.arange(n) - x_mean) ** 2))
+        future_conf = []
+        for step in range(1, steps + 1):
+            x_future = n + step - 1  # 0-indexed future position
+            se_future = resid_std_se * np.sqrt(1 + 1/n + (x_future - x_mean)**2 / ssx)
+            future_conf.append(float(t_crit * se_future))
+        conf_array = np.array(future_conf)
 
         forecast_df = pd.DataFrame({
             "步数": range(1, steps + 1),
             "预测值": predictions.round(4),
-            "下限": (predictions - conf).round(4),
-            "上限": (predictions + conf).round(4),
+            "下限": (predictions - conf_array).round(4),
+            "上限": (predictions + conf_array).round(4),
         })
 
         # ── 精度指标表 ──
@@ -875,7 +912,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
                 label=f"趋势线 (R²={r2:.3f})")
         fut_idx = np.arange(n, n + steps)
         ax1.plot(fut_idx, predictions, "o-", markersize=4, label="预测", color=PALETTE["target"]["primary"])
-        ax1.fill_between(fut_idx, predictions - conf, predictions + conf,
+        ax1.fill_between(fut_idx, predictions - conf_array, predictions + conf_array,
                         alpha=0.2, color=PALETTE["target"]["primary"], label="95% 预测区间")
         ax1.set_xlabel("时间点", fontsize=9)
         ax1.set_ylabel(req.target_col, fontsize=9)
@@ -1073,7 +1110,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
 
     n = len(data)
     ewma = np.zeros(n)
-    ewma[0] = data.values[0]
+    ewma[0] = mu  # 统计标准：EWMA 初始值为过程均值，非首个观测值
 
     for i in range(1, n):
         ewma[i] = lam * data.values[i] + (1 - lam) * ewma[i-1]
@@ -1198,7 +1235,10 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
 
     # d2 constants for subgroup size r
     d2_table = {2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326, 6: 2.534,
-                7: 2.704, 8: 2.847, 9: 2.970, 10: 3.078}
+                7: 2.704, 8: 2.847, 9: 2.970, 10: 3.078,
+                11: 3.173, 12: 3.258, 13: 3.336, 14: 3.407, 15: 3.472,
+                16: 3.532, 17: 3.588, 18: 3.640, 19: 3.689, 20: 3.735,
+                21: 3.778, 22: 3.819, 23: 3.858, 24: 3.895, 25: 3.931}
     d2_r = d2_table.get(r, 1.128)
 
     sigma_mult = req.params.get("sigma_multiplier", 5.15)
@@ -1220,7 +1260,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     # Part Variation (PV)
     part_means = sub.groupby(part_col)[req.target_col].mean()
     rp = float(part_means.max() - part_means.min())
-    d2_p = d2_table.get(n_parts, 2.326) if n_parts <= 10 else 2.326
+    d2_p = d2_table.get(n_parts, 3.735)
     pv = rp / d2_p
     pv_pct = pv * sigma_mult
 
@@ -1255,7 +1295,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     ax = fig.add_subplot(111)
     components = ["重复性(EV)", "再现性(AV)", "GRR", "部件间(PV)"]
     values_pct = [ev_pct, av_pct, grr_pct, pv_pct]
-    ax.barh(components, values_pct, color=[PALETTE["data"]["secondary"], PALETTE["data"]["tertiary"], PALETTE["data"]["primary"], "#fd8d3c"])
+    ax.barh(components, values_pct, color=[PALETTE["data"]["secondary"], PALETTE["data"]["tertiary"], PALETTE["data"]["primary"], PALETTE["contrast"]["b"]])
     ax.axvline(tv_pct, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, label=f"TV={tv_pct:.3f}")
     ax.set_xlabel(f"{sigma_mult:.1f}σ 研究变异", fontsize=10)
     ax.set_title(
@@ -1441,7 +1481,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             weibull_shape = float(shape)
             weibull_scale = float(scale)
         except Exception:
-            pass
+            logger.debug("Weibull fit failed in survival_analysis", exc_info=True)
 
     # Log-rank 检验 (分组比较)
     logrank_result = None
@@ -1562,6 +1602,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
 
     min_segment = req.params.get("min_segment", max(10, n // 20))
     max_cp = req.params.get("n_changepoints", 5)
+    min_peak_ratio = req.params.get("min_peak_ratio", 0.1)
 
     values = data.values
     changepoints: list[int] = []
@@ -1596,6 +1637,12 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
                 best_seg_idx = seg_i
 
         if best_cp is not None and best_cp not in changepoints:
+            # 检查峰值是否超过数据变化范围的最小比例
+            seg_start, seg_end = segments_for_split[best_seg_idx]
+            segment_vals = values[seg_start:seg_end]
+            data_range = float(np.max(segment_vals) - np.min(segment_vals))
+            if data_range > 0 and best_stat < min_peak_ratio * data_range:
+                break
             changepoints.append(best_cp)
             old_start, old_end = segments_for_split[best_seg_idx]
             segments_for_split.pop(best_seg_idx)
@@ -1729,6 +1776,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             iso_preds = iso.fit_predict(X)
             iso_mask = pd.Series(iso_preds == -1, index=data.index)
     except Exception:
+        logger.debug("IsolationForest failed in outlier_consensus", exc_info=True)
         iso_mask = pd.Series(False, index=data.index)
 
     # ── 投票: ≥2 票 → 高置信异常 ──
@@ -1923,6 +1971,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         max_outliers = req.params.get("max_outliers", 5)
         vals = data.values.copy()
         mask = np.zeros(len(data), dtype=bool)
+        keep_idx = np.arange(len(data))
         for _ in range(max_outliers):
             mu = np.mean(vals)
             sigma = np.std(vals, ddof=1)
@@ -1939,9 +1988,9 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                 t_crit**2 / (n_remain - 2 + t_crit**2)
             )
             if G > G_crit:
-                original_idx = np.where(~np.isnan(data.values))[0]
-                mask[original_idx[max_idx]] = True
+                mask[keep_idx[max_idx]] = True
                 vals = np.delete(vals, max_idx)
+                keep_idx = np.delete(keep_idx, max_idx)
             else:
                 break
     elif method == "iqr":
@@ -2223,14 +2272,14 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             _, kw_p = sp_stats.kruskal(*group_data)
             test_note = f"ANOVA p={anova_p:.4f}, Kruskal-Wallis p={kw_p:.4f}"
         except Exception:
-            pass
+            logger.debug("ANOVA/Kruskal-Wallis test failed in box_chart", exc_info=True)
     else:
         try:
             _, t_p = sp_stats.ttest_ind(*group_data)
             _, mw_p = sp_stats.mannwhitneyu(*group_data)
             test_note = f"t检验 p={t_p:.4f}, MWU p={mw_p:.4f}"
         except Exception:
-            pass
+            logger.debug("t-test/Mann-Whitney test failed in box_chart", exc_info=True)
 
     # ── 箱线图 ──
     has_sub = sub_col and sub[sub_col].nunique() >= 2 and sub[sub_col].nunique() <= 8
@@ -2348,7 +2397,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             fits["Weibull"] = {"dist": sp_stats.weibull_min, "args": (shape_w, 0, scale_w),
                               "ks_p": ks_w.pvalue}
         except Exception:
-            pass
+            logger.debug("Weibull fit failed in spc_nonparametric", exc_info=True)
 
     # 选 KS p 值最大的（拟合最优）
     best_name = max(fits, key=lambda k: fits[k]["ks_p"])

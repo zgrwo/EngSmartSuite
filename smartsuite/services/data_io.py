@@ -49,7 +49,7 @@ def validate_data(df: pd.DataFrame, target_col: str,
 def preprocess_data(df: pd.DataFrame, features: list[str],
                     categorical_cols: set[str] | None = None,
                     known_cat_map: dict[str, list[str]] | None = None
-                    ) -> tuple[pd.DataFrame, list[str], dict[str, list[str]]]:
+                    ) -> tuple[pd.DataFrame, list[str], dict[str, list[str]], dict[str, int], list[tuple[str, set[str], int]]]:
     """预处理数据：One-Hot 编码类别列、数值强制转换、中位数填充缺失值。
 
     Args:
@@ -59,17 +59,21 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
         known_cat_map: 已知类别映射（用于对齐历史编码），为 None 则从数据推断
 
     Returns:
-        (encoded_df, encoded_cols, cat_map, imputation_log)
+        (encoded_df, encoded_cols, cat_map, imputation_log, unknown_cat_warnings)
         imputation_log: 每列被插补的行数统计
+        unknown_cat_warnings: 未知类别警告列表，每个元素为 (col, unknown_categories, n_affected)，
+                             调用方可据此决定是否中断分析或向用户展示警告
     """
     if categorical_cols is None:
         categorical_cols = {c for c in features
-                           if str(df[c].dtype) in ('object', 'string', 'category')}
+                           if str(df[c].dtype) in ('object', 'string', 'category')
+                           and not pd.api.types.is_numeric_dtype(df[c])}
 
     df = df.copy()
     encoded_cols: list[str] = []
     cat_map: dict[str, list[str]] = {}
     imputation_log: dict[str, int] = {}
+    unknown_cat_warnings: list[tuple[str, set[str], int]] = []
 
     for col in features:
         if col in categorical_cols:
@@ -82,12 +86,15 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                 # 缺失的已知类别 → 补 0 列
                 for missing_col in expected - actual:
                     dummies[missing_col] = 0
-                # 未知的新类别 → 丢弃（记录警告）
+                # 未知的新类别 → 记录警告并跟踪，不再静默丢弃
                 extra = actual - expected
                 if extra:
+                    n_affected = int((col_str.isin(extra)).sum())
+                    unknown_cat_warnings.append((col, extra, n_affected))
                     logger.warning(
-                        "列「%s」出现 %d 个未知类别，已丢弃: %s",
-                        col, len(extra), extra
+                        "列「%s」出现 %d 个未知类别，影响 %d 行，已丢弃: %s。"
+                        "建议检查数据或重新训练模型以确保分析准确性。",
+                        col, len(extra), n_affected, extra
                     )
                 dummies = dummies[known_cat_map[col]]
             for dc in dummies.columns:
@@ -105,12 +112,17 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                 if pd.isna(median_val):
                     logger.warning("列「%s」全部为非数值，填充为 0", col)
                     df[col] = df[col].fillna(0)
+                    imputation_log[col] = n_coerced
+                    # 整列无法转为数值 → 追加严重警告
+                    unknown_cat_warnings.append(
+                        (col, {"<全列非数值，已强制填充为0>"}, n_coerced)
+                    )
                 else:
                     df[col].loc[new_na] = median_val
                 imputation_log[col] = n_coerced
             encoded_cols.append(col)
 
-    return df, encoded_cols, cat_map, imputation_log
+    return df, encoded_cols, cat_map, imputation_log, unknown_cat_warnings
 
 
 def missing_pattern_analysis(df: pd.DataFrame) -> dict:

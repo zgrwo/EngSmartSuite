@@ -33,16 +33,17 @@ tests/demo_output/
 
 # 开发者工具（本地保留，不推送）
 docs/contributing/
-scripts/demo_all_analyses.py
+# 一次性数据生成脚本
 scripts/generate_assembly_data.py
 scripts/generate_chemical_data.py
 scripts/generate_manual_images.py
 scripts/generate_pharma_data.py
 scripts/generate_reliability_data.py
 scripts/generate_warranty_data.py
+# 实验性 GUI
 scripts/smartsuite_gui.py
-scripts/verify_consistency.py
-scripts/verify_cross_consistency.py
+# 演示脚本
+scripts/demo_all_analyses.py
 
 # 历史残留
 .superpowers/

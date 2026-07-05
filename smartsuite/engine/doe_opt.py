@@ -8,7 +8,7 @@ from scipy import stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine.spc_monitor import _durbin_watson
+from smartsuite.engine.spc_monitor import durbin_watson
 
 logger = logging.getLogger(__name__)
 sp_stats = stats  # 别名，供函数内统一使用
@@ -24,11 +24,12 @@ def _std_beta(model, X):
         if col == "const":
             beta.append(0.0)
         else:
+            param_val = model.params[col]
             x_std = np.std(X[col])
-            if x_std > 1e-10:
-                beta.append(float(model.params[col] * x_std / y_std))
-            else:
+            if np.isnan(param_val) or x_std < 1e-10 or y_std < 1e-10:
                 beta.append(0.0)
+            else:
+                beta.append(float(param_val * x_std / y_std))
     return beta
 
 
@@ -48,6 +49,7 @@ def _breusch_pagan(model, X):
         p_val = float(1 - sp_stats.chi2.cdf(lm, max(k, 1)))
         return float(lm), p_val
     except Exception:
+        logger.debug("Breusch-Pagan 异方差检验失败", exc_info=True)
         return None, None
 
 
@@ -90,7 +92,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         # ── 模型诊断 ──
         # Durbin-Watson
-        dw = _durbin_watson(residuals)
+        dw = durbin_watson(residuals)
 
         # Breusch-Pagan 异方差检验
         bp_lm, bp_p = _breusch_pagan(model, X)
@@ -109,7 +111,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
              "说明": f"p={model.f_pvalue:.4f}"},
             {"指标": "Durbin-Watson", "值": f"{dw:.4f}",
              "说明": "接近2=无自相关, <1=正自相关, >3=负自相关"},
-            {"指标": "Breusch-Pagan", "值": f"LM={bp_lm:.4f}, p={bp_p:.4f}" if bp_lm else "N/A",
+            {"指标": "Breusch-Pagan", "值": f"LM={bp_lm:.4f}, p={bp_p:.4f}" if bp_lm is not None else "N/A",
              "说明": "p<0.05=存在异方差"},
             {"指标": "AIC", "值": f"{model.aic:.1f}", "说明": "越小越好(模型比较用)"},
             {"指标": "BIC", "值": f"{model.bic:.1f}", "说明": "越小越好(惩罚更重)"},
@@ -198,7 +200,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             top_var = sig_vars.iloc[top_beta_idx]["变量"]
             summary_parts.append(f"最重要的变量: {top_var}")
         summary_parts.append(f"DW={dw:.3f}")
-        if bp_p and bp_p < 0.05:
+        if bp_p is not None and bp_p < 0.05:
             summary_parts.append("⚠ 存在异方差")
         summary = "；".join(summary_parts)
 
@@ -226,6 +228,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=warn_msgs,
         )
     except Exception:
+        logger.debug("回归模型拟合失败", exc_info=True)
         return AnalysisResult(task="regression", status="error",
                               messages=["回归模型拟合失败，请检查数据是否存在缺失值或共线性"])
 
@@ -263,12 +266,12 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         term_names = list(X_design_df.columns)
 
         # 使用 OLS 而非 lstsq，以获取 R²/p值/标准误
-        import statsmodels.api as sm_rsm
-        model_rsm = sm_rsm.OLS(y, X_design_df).fit()
+        model_rsm = sm.OLS(y, X_design_df).fit()
         beta = np.asarray(model_rsm.params)
         r2 = float(model_rsm.rsquared)
         r2_adj = float(model_rsm.rsquared_adj)
     except Exception:
+        logger.debug("响应面模型未能求解", exc_info=True)
         return AnalysisResult(
             task="response_surface", status="error",
             messages=["响应面模型未能求解"],
@@ -290,9 +293,9 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 最优点查找 ──
     direction = req.params.get("direction", "maximize")
-    if "min" in direction:
+    if direction == "minimize":
         opt_idx = np.unravel_index(np.argmin(ZI), ZI.shape)
-    else:
+    else:  # default "maximize"
         opt_idx = np.unravel_index(np.argmax(ZI), ZI.shape)
     opt_x1 = float(XI[opt_idx])
     opt_x2 = float(YI[opt_idx])
@@ -496,6 +499,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             },
         )
     except Exception:
+        logger.debug("网格搜索失败", exc_info=True)
         return AnalysisResult(task="grid_search", status="error",
                               messages=["网格搜索失败，请检查参数范围和样本量是否合理"])
 
@@ -526,6 +530,12 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             )
 
     weights = req.params.get("weights", [1.0] * len(objectives))
+    if len(weights) != len(objectives):
+        return AnalysisResult(task="multi_objective", status="error",
+            messages=[f"权重数量({len(weights)})与目标数量({len(objectives)})不匹配"])
+    if len(weights) == 0:
+        return AnalysisResult(task="multi_objective", status="error",
+            messages=["权重列表不能为空"])
     weights = np.array(weights) / np.sum(weights)
 
 
@@ -642,7 +652,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     top_n = min(20, len(score_valid))
     top_idx = np.argsort(score_valid)[-top_n:]
     # 显示各目标分解
-    bar_colors = [PALETTE["data"]["primary"], PALETTE["data"]["secondary"], PALETTE["data"]["tertiary"], "#c6dbef"]
+    bar_colors = [PALETTE["data"]["primary"], PALETTE["data"]["secondary"], PALETTE["data"]["tertiary"], PALETTE["contrast"]["d"]]
     bottom_vals = np.zeros(top_n)
     for oi, obj in enumerate(objectives):
         col = obj["col"]
@@ -749,7 +759,8 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         X = np.column_stack([np.ones(len(coded)), coded])
         try:
             beta, residuals, rank, sv = np.linalg.lstsq(X, y, rcond=None)
-            effect = float(2 * beta[1]) if len(unique_vals) == 2 else float(beta[1] * col_vals.std(ddof=1))
+            # 连续因子: 效应 = 2*标准化系数 (对应 ±1σ 范围, 与二水平因子的 -1/+1 编码一致)
+            effect = float(2 * beta[1])
             # t 检验
             resid_std = float(np.std(y - X @ beta, ddof=2)) if len(y) > 2 else 1.0
             se = resid_std / np.sqrt(np.sum(coded**2)) if np.sum(coded**2) > 0 else 1.0
@@ -757,6 +768,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             dof = len(y) - 2
             p_val = float(2 * sp_stats.t.sf(abs(t_val), dof)) if dof > 0 else 1.0
         except Exception:
+            logger.debug("DOE 效应估计失败 (因子: %s)", col, exc_info=True)
             effect, t_val, p_val = 0.0, 0.0, 1.0
 
         effect_ratio = abs(effect) / (abs(grand_mean) + 1e-10) if abs(grand_mean) > 1e-10 else 0.0
@@ -866,6 +878,7 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
         fpr, tpr, thresholds = roc_curve(y_true, scores)
         auc_val = float(auc(fpr, tpr))
     except Exception:
+        logger.debug("ROC 曲线计算失败", exc_info=True)
         return AnalysisResult(task="roc_analysis", status="error",
             messages=["ROC 曲线计算失败"])
 
@@ -965,6 +978,7 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
         X = sm.add_constant(sub[cols])
         model = sm.Logit(y, X).fit(disp=0)
     except Exception:
+        logger.debug("Logistic 模型拟合失败", exc_info=True)
         return AnalysisResult(task="logistic_regression", status="error",
             messages=["Logistic 模型拟合失败"])
 
@@ -1072,7 +1086,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     alpha = req.params.get("alpha_lasso", None)
     l1_ratio = req.params.get("l1_ratio", 1.0)  # 1.0 = pure Lasso, <1 = ElasticNet
 
-    if alpha:
+    if alpha is not None:
         from sklearn.linear_model import Lasso
         model = Lasso(alpha=alpha, max_iter=5000).fit(X_scaled, y)
         best_alpha = alpha
@@ -1157,9 +1171,8 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         huber.fit(X, y)
 
         # OLS 对比
-        import statsmodels.api as sm_ols
         Xc = sm.add_constant(X)
-        ols_model = sm_ols.OLS(y, Xc).fit()
+        ols_model = sm.OLS(y, Xc).fit()
 
         # 对比表
         coef_df = pd.DataFrame({
@@ -1202,6 +1215,7 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
             metadata={"n_samples": len(sub), "n_features": len(cols)},
         )
     except Exception:
+        logger.debug("稳健回归拟合失败", exc_info=True)
         return AnalysisResult(task="robust_regression", status="error",
             messages=["稳健回归拟合失败"])
 
@@ -1248,5 +1262,6 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
             metadata={"quantile": quantile, "n_samples": len(sub), "n_features": len(cols)},
         )
     except Exception:
+        logger.debug("分位数回归拟合失败", exc_info=True)
         return AnalysisResult(task="quantile_regression", status="error",
             messages=["分位数回归拟合失败"])

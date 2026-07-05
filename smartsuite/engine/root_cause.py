@@ -87,18 +87,17 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             else:
                 pmat.loc[c1, c2] = np.nan
 
-    # ── 多重比较校正 (Bonferroni) ──
-    # 只对非对角线的上三角唯一 p 值做校正
+    # ── 多重比较校正 (Bonferroni) — 向量化 ──
     n_comparisons = len(cols) * (len(cols) - 1) // 2
     pmat_corrected = pmat.copy()
     if n_comparisons > 0:
-        for i in range(len(cols)):
-            for j in range(i + 1, len(cols)):
-                raw_p = pmat.iloc[i, j]
-                if not np.isnan(raw_p):
-                    corrected = min(raw_p * n_comparisons, 1.0)
-                    pmat_corrected.iloc[i, j] = corrected
-                    pmat_corrected.iloc[j, i] = corrected
+        arr = np.array(pmat_corrected, dtype=float)  # 强制拷贝为可写数组
+        triu_idx = np.triu_indices_from(arr, k=1)
+        corrected = np.minimum(arr * n_comparisons, 1.0)
+        arr[triu_idx] = corrected[triu_idx]
+        # 对称镜像到下三角
+        arr[(triu_idx[1], triu_idx[0])] = corrected[triu_idx]
+        pmat_corrected = pd.DataFrame(arr, index=pmat.index, columns=pmat.columns)
 
     # ── 相关性 + 显著性标记矩阵 ──
     annotated = pd.DataFrame(index=cols, columns=cols, dtype=str)
@@ -199,6 +198,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                                     ax.plot(smoothed[:, 0], smoothed[:, 1], "-",
                                            color=PALETTE["target"]["primary"], linewidth=1.5, alpha=0.7)
                                 except Exception:
+                                    logger.debug("LOWESS 平滑失败", exc_info=True)
                                     pass
                             r_val = corr.loc[cv1, cv2] if cv1 in corr.index and cv2 in corr.columns else 0
                             ax.annotate(f"r={r_val:.2f}", xy=(0.95, 0.05),
@@ -217,6 +217,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                 fig_scatter.tight_layout()
                 figures.append(fig_scatter)
             except Exception:
+                logger.debug("散点矩阵生成失败", exc_info=True)
                 pass  # 散点矩阵失败不影响主分析
 
     # ── 偏相关分析（控制混淆变量）──
@@ -505,7 +506,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         es = effect_sizes.get(idx, {})
         row["η²"] = es.get("η²", None)
         row["ω²"] = es.get("ω²", None)
-        row["效应量解读"] = _effect_interpretation(es.get("η²", 0)) if es.get("η²") else ""
+        row["效应量解读"] = _effect_interpretation(es.get("η²", 0)) if es.get("η²") is not None else ""
         anova_enhanced_rows.append(row)
     anova_enhanced = pd.DataFrame(anova_enhanced_rows)
 
@@ -567,6 +568,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                 fig_int.tight_layout()
                 figures.append(fig_int)
             except Exception:
+                logger.debug("交互效应图生成失败", exc_info=True)
                 pass  # 交互图生成失败不影响主分析
 
     # ── 返回 ──
@@ -729,7 +731,7 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(7, 4))
     ax = fig.add_subplot(111)
     ax.hist(g1, bins=20, alpha=0.6, color=PALETTE["data"]["secondary"], density=True, label=str(groups[0]))
-    ax.hist(g2, bins=20, alpha=0.6, color="#fd8d3c", density=True, label=str(groups[1]))
+    ax.hist(g2, bins=20, alpha=0.6, color=PALETTE["contrast"]["b"], density=True, label=str(groups[1]))
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_title(f"{test_name} (D={stat:.3f}, p={p:.4f})", fontsize=11)
     ax.legend(fontsize=8)
@@ -904,7 +906,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         ax = fig.add_subplot(111)
         x_pos = np.arange(len(sub))
         ax.plot(x_pos, sub[col1].values, "o-", markersize=4, color=PALETTE["data"]["secondary"], label=col1)
-        ax.plot(x_pos, sub[col2].values, "s-", markersize=4, color="#fd8d3c", label=col2)
+        ax.plot(x_pos, sub[col2].values, "s-", markersize=4, color=PALETTE["contrast"]["b"], label=col2)
         for i in range(len(sub)):
             ax.plot([i, i], [sub[col1].iloc[i], sub[col2].iloc[i]],
                    "-", color=PALETTE["spec"]["tertiary"], alpha=0.4, linewidth=0.8)
@@ -1109,6 +1111,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         d = int(((vals1 == neg) & (vals2 == neg)).sum())  # 都为负
 
         # McNemar 连续性校正
+        # Yates 连续性校正 (适用于小样本, b+c<25 时推荐)
         stat = (abs(b - c) - 1)**2 / (b + c + 1e-10) if (b + c) > 0 else 0
         p = float(1 - sp_stats.chi2.cdf(stat, 1))
 
@@ -1172,7 +1175,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         S = int(round(tau_mk * np.sqrt(max(n0 * (n0 - n2), 1.0))))
         effect_size = float(tau_mk)
         # 从 p 值反推近似 Z（用于展示）
-        z_mk = float(sp_stats.norm.ppf(1 - p / 2)) * np.sign(S) if p < 1.0 else 0.0
+        p_safe = max(p, 1e-300)  # protect against p=0 causing ppf(1.0)=inf
+        z_mk = float(sp_stats.norm.ppf(1 - p_safe / 2)) * np.sign(S) if p < 1.0 else 0.0
 
         test_name = "Mann-Kendall 趋势检验"
         alpha = req.params.get("alpha", 0.05)
@@ -1392,6 +1396,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             t_crit = sp_stats.t.ppf(1 - alpha / 2, dof)
             power = float(1 - nct.cdf(t_crit, dof, ncp) + nct.cdf(-t_crit, dof, ncp))
         except Exception:
+            logger.debug("统计功效计算失败", exc_info=True)
             power = None
     else:
         power = None
@@ -1502,6 +1507,7 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
             "排列重要性_std": perm_result.importances_std,
         })
     except Exception:
+        logger.debug("排列重要性计算失败", exc_info=True)
         # 样本量太小时回退
         fi_perm = pd.DataFrame({
             "因子": cols,
@@ -1532,6 +1538,7 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
                     f"交叉验证R²={cv_r2:.3f} (差距={train_r2-cv_r2:.2f})"
                 )
         except Exception:
+            logger.debug("交叉验证失败", exc_info=True)
             cv_r2 = None
     else:
         cv_r2 = None
@@ -1836,6 +1843,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
             try:
                 _, fish_p = sp_stats.fisher_exact(ctab, simulate_p_value=True)
             except Exception:
+                logger.debug("Fisher 精确检验模拟失败", exc_info=True)
                 fish_p = chi_p
             stat = chi2
             stat_label = "Chi²"
@@ -2014,12 +2022,14 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
     try:
         lev_stat, lev_p = sp_stats.levene(*data_list, center="median")
     except Exception:
+        logger.debug("Levene 检验失败", exc_info=True)
         lev_stat, lev_p = None, None
 
     # Bartlett (要求正态，更敏感)
     try:
         bart_stat, bart_p = sp_stats.bartlett(*data_list)
     except Exception:
+        logger.debug("Bartlett 检验失败", exc_info=True)
         bart_stat, bart_p = None, None
 
     alpha = req.params.get("alpha", 0.05)
@@ -2092,7 +2102,7 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
     # 期望一致率
     row_sums = ctab.sum(axis=1).values
     col_sums = ctab.sum(axis=0).values
-    p_e = np.sum(row_sums * col_sums) / n**2
+    p_e = np.sum(np.outer(row_sums, col_sums)) / n**2
     # Kappa
     kappa = (p_o - p_e) / (1 - p_e + 1e-10)
     # 标准误
@@ -2176,7 +2186,7 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
                 else f"{a_drop-alpha:.4f}" if a_drop else "—"
             ),
             "方差": f"{item_vars[i]:.4f}",
-            "项总相关": f"{float(sub[col].corr(sub.sum(axis=1))):.3f}",
+            "项总相关": f"{float(sub[col].corr(sub.drop(columns=[col]).sum(axis=1))):.3f}",
         })
 
     if alpha >= 0.9:
@@ -2255,6 +2265,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             ks_w = float(sp_stats.kstest(data, "weibull_min", args=(shape_w, 0, scale_w))[1])
             fits["Weibull"] = {"params": f"β={shape_w:.3f}, η={scale_w:.3f}", "KS p": round(ks_w, 4)}
         except Exception:
+            logger.debug("Weibull 拟合失败", exc_info=True)
             pass
 
     # 直方图 + 拟合曲线
@@ -2329,6 +2340,7 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             ad_crit = float(ad_result.critical_values[2]) if len(ad_result.critical_values) > 2 else 0
             ad_normal = ad_stat < ad_crit
         except Exception:
+            logger.debug("Anderson-Darling 检验失败", exc_info=True)
             ad_stat, ad_crit, ad_normal = None, None, None
 
         skew = float(d.skew())

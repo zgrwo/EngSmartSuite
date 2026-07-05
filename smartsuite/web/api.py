@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.core.exceptions import ValidationError
 from smartsuite.services.data_io import preprocess_data, validate_data
 from smartsuite.services.orchestrator import orchestrate
 
@@ -55,7 +56,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     merged_corr = None
     if task == "correlation" and len(targets) > 1:
         cat_set = set(categoricals) if categoricals else set()
-        df_enc, feat_enc, _, _ = preprocess_data(df, features, cat_set)
+        df_enc, feat_enc, _, _, _ = preprocess_data(df, features, cat_set)
         merged_rows = {}
         for target in targets:
             try:
@@ -65,8 +66,8 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 m = r.tables.get("correlation_matrix")
                 if m is not None and target in m.index:
                     merged_rows[target] = m.loc[target, feat_enc]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("目标列 %s 相关性合并失败: %s", target, e, exc_info=True)
         if merged_rows:
             merged_corr = pd.DataFrame(merged_rows).T
             merged_corr.index.name = "目标"
@@ -78,7 +79,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     if all_validate_cols:
         try:
             data_warnings = validate_data(df, targets[0] if targets else "", features)
-        except Exception:
+        except ValidationError:
             pass  # 校验失败不阻塞分析
 
     # 以下任务需要原始类别列（不做one-hot编码，让引擎自行处理因子水平）
@@ -88,10 +89,17 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         feat_enc = list(features)
     else:
         cat_set = set(categoricals) if categoricals else set()
-        df_enc, feat_enc, _, imputation_log = preprocess_data(df, features, cat_set)
+        df_enc, feat_enc, _, imputation_log, unknown_cat_warnings = preprocess_data(df, features, cat_set)
         # 将数据预处理日志转换为用户可见的警告
         for col, n_coerced in imputation_log.items():
             data_warnings.append(f"列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
+        # 未知类别警告：提升为用户可见的 P0 级警告（可能影响分析准确性）
+        for col, extra_cats, n_affected in unknown_cat_warnings:
+            data_warnings.append(
+                f"⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别，"
+                f"影响 {n_affected} 行，已丢弃: {extra_cats}。"
+                f"建议检查数据或重新训练模型。"
+            )
 
     for target in targets:
         try:
@@ -173,13 +181,12 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 "charts": charts,
             })
         except Exception as e:
-            logger.exception("分析目标列 %s 时失败", target)
-            err_name = type(e).__name__
+            logger.exception("分析目标列 %s 时失败 (%s)", target, type(e).__name__)
             results.append({
                 "target": target,
                 "status": "error",
-                "summary": f"分析失败 ({err_name})",
-                "messages": [f"目标列「{target}」分析异常 ({err_name})，请检查数据格式"],
+                "summary": "分析失败",
+                "messages": [f"目标列「{target}」分析异常，请检查数据格式"],
                 "tables": {},
                 "charts": [],
             })
