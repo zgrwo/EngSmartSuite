@@ -1,7 +1,21 @@
 // SmartSuite Web UI
 let columnData = [];
 let selectedY = new Set(), selectedX = new Set(), selectedCat = new Set();
-const escHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+let csrfToken = '';
+const escHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+// CSRF token 获取
+async function getCsrfToken() {
+  if (csrfToken) return csrfToken;
+  try {
+    const r = await fetch('/api/csrf-token');
+    const d = await r.json();
+    csrfToken = d.token || '';
+  } catch(e) { /* 网络错误时留空 */ }
+  return csrfToken;
+}
+// 页面加载时预取
+getCsrfToken();
 const catKw = ['日期','班次','车间','机台','模具','编号','操作','检验',
   '原料','类型','批号','冷却','循环','模式','分区','保养','环境',
   '产品代码','色母','嵌件','首件','外观','尺寸','需返工','报警','换料'];
@@ -14,7 +28,8 @@ document.getElementById('file-input').addEventListener('change', async e => {
   document.getElementById('shape').textContent = '上传中...';
   const fd = new FormData(); fd.append('file', f);
   try {
-    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const r = await fetch('/api/upload', { method: 'POST', body: fd,
+      headers: { 'X-CSRF-Token': await getCsrfToken() } });
     const d = await r.json();
     if (!r.ok) {
       alert('上传失败: ' + (d.error || '未知错误'));
@@ -36,7 +51,7 @@ document.getElementById('file-input').addEventListener('change', async e => {
 function renderCols() {
   document.getElementById('col-list').innerHTML = columnData.map((c, i) => {
     const safeName = escHtml(c.name);
-    const jsName = c.name.replace(/'/g, "\\'");
+    const jsName = c.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     return `
     <div class="col-row">
       <span class="col-name" title="${safeName} (${c.dtype}, ${c.nunique} unique, ${c.missing} NA)">${safeName}</span>
@@ -328,7 +343,7 @@ async function executeRequest(task) {
     '<div class="empty-hint"><div class="spinner"></div> 分析中...</div>';
   try {
     const r = await fetch('/api/analyze', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await getCsrfToken() },
       body: JSON.stringify({ task, targets: [...selectedY], features: [...selectedX],
         categoricals: [...selectedCat], params: getParams(task) })
     });

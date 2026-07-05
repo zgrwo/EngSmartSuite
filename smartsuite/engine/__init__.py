@@ -9,11 +9,64 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-try:
-    matplotlib.font_manager.fontManager.addfont("C:/Windows/Fonts/msyh.ttc")
-    matplotlib.rcParams["font.family"] = "Microsoft YaHei"
-except Exception:
-    matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "DejaVu Sans"]
+import logging
+import os
+import platform
+
+_logger = logging.getLogger(__name__)
+
+# ── 跨平台中文字体加载 ──
+_FONT_CANDIDATES = {
+    "Windows": [
+        ("C:/Windows/Fonts/msyh.ttc", "Microsoft YaHei"),
+        ("C:/Windows/Fonts/simhei.ttf", "SimHei"),
+    ],
+    "Darwin": [
+        ("/System/Library/Fonts/PingFang.ttc", "PingFang SC"),
+        ("/System/Library/Fonts/STHeiti Light.ttc", "Heiti SC"),
+        ("/Library/Fonts/Arial Unicode.ttf", "Arial Unicode MS"),
+    ],
+    "Linux": [
+        ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+        ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+    ],
+}
+
+_font_loaded = False
+_env_font = os.environ.get("MATPLOTLIB_FONT_PATH")
+
+# 环境变量字体（跨平台通用）
+if _env_font and os.path.exists(_env_font):
+    try:
+        matplotlib.font_manager.fontManager.addfont(_env_font)
+        matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[0]
+        _font_loaded = True
+    except Exception:
+        pass
+
+# 平台字体
+if not _font_loaded:
+    system = platform.system()
+    for font_path, family in _FONT_CANDIDATES.get(system, []):
+        if os.path.exists(font_path):
+            try:
+                matplotlib.font_manager.fontManager.addfont(font_path)
+                matplotlib.rcParams["font.family"] = family
+                _font_loaded = True
+                break
+            except Exception:
+                continue
+
+if not _font_loaded:
+    matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "PingFang SC",
+                                               "Noto Sans CJK SC", "DejaVu Sans"]
+    _logger.warning(
+        "未检测到中文字体，图表中文可能无法正常显示。"
+        "Windows: 安装微软雅黑; Mac: 使用 PingFang SC; "
+        "Linux: apt install fonts-noto-cjk 或设置 MATPLOTLIB_FONT_PATH 环境变量"
+    )
+
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 # ── 统一可视化样式 ──

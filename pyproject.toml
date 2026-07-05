@@ -19,6 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 dependencies = [
@@ -46,7 +47,7 @@ dev = [
     "ruff>=0.1",
 ]
 all = [
-    "smartsuite[web,report,viz]",
+    "smartsuite[web,report]",
 ]
 
 [project.scripts]
@@ -64,16 +65,16 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
+select = ["E", "F", "I", "N", "W", "UP", "B"]
 ignore = ["E501"]  # line-length handled by formatter
 
 [tool.ruff.lint.per-file-ignores]
 "smartsuite/engine/__init__.py" = ["E402", "I001"]  # matplotlib config + core deps check must precede imports
-"smartsuite/engine/doe_opt.py" = ["E402", "N803", "N806"]  # sp_stats alias + math vars X, Z, etc.
-"smartsuite/engine/root_cause.py" = ["E402", "N803", "N806"]  # sp_stats alias + math vars Q, S, JT
-"smartsuite/engine/spc_monitor.py" = ["N806"]  # math vars
+"smartsuite/engine/doe_opt.py" = ["E402", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict
+"smartsuite/engine/root_cause.py" = ["E402", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict
+"smartsuite/engine/spc_monitor.py" = ["N806", "B007", "B905"]  # math vars + zip strict
 "smartsuite/cli.py" = ["E402"]  # matplotlib.use before imports
 "smartsuite/web/*" = ["E402"]  # matplotlib config before imports
 "smartsuite/services/orchestrator.py" = ["I001"]  # sorted engine imports for readability
-"smartsuite/services/reporter.py" = ["N806"]  # txBox variable
+"smartsuite/services/reporter.py" = ["N806", "B904"]  # txBox variable + raise from err (Python 3.10)
 "tests/*" = ["N806", "E501", "F841"]  # test fixtures + math vars

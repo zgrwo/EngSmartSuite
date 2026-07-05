@@ -1,7 +1,9 @@
 """Flask application — SmartSuite Web UI 入口。"""
 import atexit
+import functools
 import logging
 import os
+import secrets
 import sys
 import tempfile
 
@@ -11,7 +13,7 @@ import pandas as pd
 import smartsuite.engine  # noqa: F401 — 触发引擎层全局 matplotlib 配置
 
 try:
-    from flask import Flask, jsonify, render_template, request
+    from flask import Flask, jsonify, render_template, request, session
 except ImportError:
     print("=" * 60)
     print("  ❌ SmartSuite Web UI 需要 Flask，但未安装。")
@@ -41,7 +43,33 @@ def _cleanup_uploads() -> None:
 
 atexit.register(_cleanup_uploads)
 
+# ── CSRF 防护 ──
+_CSRF_TOKEN_KEY = "_csrf_token"
+
+
+def _generate_csrf_token() -> str:
+    token = secrets.token_hex(32)
+    session[_CSRF_TOKEN_KEY] = token
+    return token
+
+
+def require_csrf(f):
+    """CSRF 校验装饰器：POST 端点需携带 X-CSRF-Token 头匹配 session token。"""
+
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            client_token = request.headers.get("X-CSRF-Token", "")
+            server_token = session.get(_CSRF_TOKEN_KEY, "")
+            if not client_token or not secrets.compare_digest(client_token, server_token):
+                return jsonify({"error": "CSRF 校验失败，请刷新页面后重试"}), 403
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
 app = Flask(__name__)
+app.config["SECRET_KEY"] = os.environ.get("SMARTSUITE_SECRET", os.urandom(24).hex())
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 TASK_LABELS = {
@@ -95,13 +123,26 @@ GROUP_COLORS = {"要因筛选": "#e8f5e9", "信度诊断": "#fff8e1",
 
 @app.route("/")
 def index():
+    # 为每个页面访问生成 CSRF token
+    if _CSRF_TOKEN_KEY not in session:
+        _generate_csrf_token()
     return render_template("index.html",
         task_labels=TASK_LABELS,
         task_groups=TASK_GROUPS,
         group_colors=GROUP_COLORS)
 
 
+@app.route("/api/csrf-token")
+def csrf_token():
+    """前端获取 CSRF token。"""
+    token = session.get(_CSRF_TOKEN_KEY)
+    if not token:
+        token = _generate_csrf_token()
+    return jsonify({"token": token})
+
+
 @app.route("/api/upload", methods=["POST"])
+@require_csrf
 def upload():
     f = request.files.get("file")
     if not f:
@@ -113,8 +154,22 @@ def upload():
     if ext not in (".xlsx", ".xls", ".xlsm"):
         return jsonify({"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xls 文件"}), 400
 
+    # Zip bomb 防护：检查解压后大小
+    import io
+    import zipfile
+    f_bytes = f.read()
     try:
-        df = pd.read_excel(f)
+        with zipfile.ZipFile(io.BytesIO(f_bytes)) as zf:
+            total_size = sum(info.file_size for info in zf.infolist())
+            if total_size > 200 * 1024 * 1024:
+                return jsonify({"error": "文件解压后过大（限制200MB），请减少数据量"}), 400
+            if len(zf.infolist()) > 1000:
+                return jsonify({"error": "文件包含过多条目，可能不是有效的 Excel 文件"}), 400
+    except zipfile.BadZipFile:
+        return jsonify({"error": "不是有效的 Excel 文件，请确认文件格式正确"}), 400
+
+    try:
+        df = pd.read_excel(io.BytesIO(f_bytes))
     except Exception:
         logger.exception("Excel 文件解析失败")
         return jsonify({"error": "无法解析 Excel 文件，请确认文件格式正确"}), 400
@@ -141,6 +196,7 @@ def upload():
 
 
 @app.route("/api/analyze", methods=["POST"])
+@require_csrf
 def analyze():
     try:
         body = request.get_json()
@@ -158,8 +214,8 @@ def analyze():
         results = run_analysis(task, df, targets, features, categoricals, params)
         return jsonify({"results": results})
     except Exception as e:
-        logger.exception("分析请求处理失败")
-        return jsonify({"error": f"分析失败: {str(e)[:500]}"}), 500
+        logger.exception("分析请求处理失败: %s", str(e)[:200])
+        return jsonify({"error": "分析处理失败，请检查数据格式后重试"}), 500
 
 
 @app.route("/api/tasks")

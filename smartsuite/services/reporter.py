@@ -8,6 +8,10 @@ import matplotlib.pyplot as plt
 from smartsuite.core.contracts import AnalysisResult
 from smartsuite.core.exceptions import OutputError
 
+# 图表输出 DPI 常量
+_CHART_DPI = 150
+_PDF_DPI = 200
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +134,10 @@ def to_ppt(result: AnalysisResult, output_path: str,
 def to_html(result: AnalysisResult, output_path: str) -> str:
     """生成自包含 HTML 分析报告 (Base64 内嵌图表)。"""
     import base64
+    import html as _html
+
+    def _esc(s):
+        return _html.escape(str(s))
 
     try:
         html_parts = [
@@ -149,29 +157,29 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
             ".meta{color:#777;font-size:11px;margin-top:30px;border-top:1px solid #deebf7;padding-top:10px}",
             ".status-ok{color:#238b45}.status-error{color:#e31a1c}.status-warn{color:#d94801}",
             "</style></head><body>",
-            f"<h1>SmartSuite 分析报告: {result.task}</h1>",
+            f"<h1>SmartSuite 分析报告: {_esc(result.task)}</h1>",
         ]
 
         # 状态 + 结论
         status_class = f"status-{result.status}" if result.status in ("ok","error") else "status-warn"
         html_parts.append(
             f"<div class='summary'><strong>状态:</strong> "
-            f"<span class='{status_class}'>{result.status}</span><br>"
-            f"<strong>结论:</strong> {result.summary}</div>"
+            f"<span class='{status_class}'>{_esc(result.status)}</span><br>"
+            f"<strong>结论:</strong> {_esc(result.summary)}</div>"
         )
 
         # 警告消息
         if result.messages:
             html_parts.append("<h2>诊断信息</h2><ul>")
             for m in result.messages:
-                html_parts.append(f"<li>{m}</li>")
+                html_parts.append(f"<li>{_esc(m)}</li>")
             html_parts.append("</ul>")
 
         # 数据表
         for name, df in result.tables.items():
-            html_parts.append(f"<h2>📊 {name}</h2>")
+            html_parts.append(f"<h2>📊 {_esc(name)}</h2>")
             html_parts.append(df.head(50).to_html(
-                index=False, classes="table", border=0, escape=False,
+                index=False, classes="table", border=0, escape=True,
                 float_format=lambda x: (
                     f"{x:.4f}" if isinstance(x, (int, float)) and abs(x) < 1e6
                     else f"{x:.2e}" if isinstance(x, (int, float))
@@ -181,12 +189,21 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
             if len(df) > 50:
                 html_parts.append(f"<p style='color:#777;font-size:11px'>(仅显示前50行，共{len(df)}行)</p>")
 
-        # 图表 (Base64 内嵌)
+        # 图表 (Base64 内嵌，压缩 PNG)
         for i, fig in enumerate(result.figures):
             buf = io.BytesIO()
-            fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+            fig.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
             buf.seek(0)
-            img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+            # PIL 压缩优化
+            try:
+                from PIL import Image
+                img = Image.open(buf)
+                out_buf = io.BytesIO()
+                img.save(out_buf, format="PNG", optimize=True)
+                out_buf.seek(0)
+                img_b64 = base64.b64encode(out_buf.read()).decode("utf-8")
+            except ImportError:
+                img_b64 = base64.b64encode(buf.read()).decode("utf-8")
             html_parts.append(
                 f"<h2>📈 图表 {i+1}</h2>"
                 f"<img src='data:image/png;base64,{img_b64}' alt='图表{i+1}'>"
@@ -197,8 +214,8 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
         if result.metadata:
             html_parts.append("<h2>📋 元数据</h2><ul>")
             for k, v in list(result.metadata.items())[:15]:
-                val_str = str(v)[:200]
-                html_parts.append(f"<li><strong>{k}:</strong> {val_str}</li>")
+                val_str = _esc(str(v)[:200])
+                html_parts.append(f"<li><strong>{_esc(str(k))}:</strong> {val_str}</li>")
             html_parts.append("</ul>")
 
         html_parts.append(

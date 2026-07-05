@@ -1,14 +1,17 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from matplotlib.figure import Figure
 from scipy import stats
 
-sp_stats = stats  # 别名，供函数内统一使用
-
-from matplotlib.figure import Figure
-
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.engine._palette import PALETTE
 from smartsuite.engine.spc_monitor import _durbin_watson
+
+logger = logging.getLogger(__name__)
+sp_stats = stats  # 别名，供函数内统一使用
 
 
 def _std_beta(model, X):
@@ -132,8 +135,8 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         # 1. Residual vs Fitted + loess 平滑
         ax1 = fig_res.add_subplot(2, 3, 1)
-        ax1.scatter(fitted, residuals, alpha=0.6, s=20, color="#2171b5")
-        ax1.axhline(0, color="red", linestyle="--", linewidth=1)
+        ax1.scatter(fitted, residuals, alpha=0.6, s=20, color=PALETTE["data"]["primary"])
+        ax1.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
         ax1.set_xlabel("拟合值", fontsize=9)
         ax1.set_ylabel("残差", fontsize=9)
         ax1.set_title("Residual vs Fitted", fontsize=10)
@@ -146,16 +149,16 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 3. Scale-Location (sqrt|resid| vs fitted)
         ax3 = fig_res.add_subplot(2, 3, 3)
         sqrt_abs_resid = np.sqrt(np.abs(residuals))
-        ax3.scatter(fitted, sqrt_abs_resid, alpha=0.6, s=20, color="#2171b5")
+        ax3.scatter(fitted, sqrt_abs_resid, alpha=0.6, s=20, color=PALETTE["data"]["primary"])
         ax3.set_xlabel("拟合值", fontsize=9)
         ax3.set_ylabel("√|残差|", fontsize=9)
         ax3.set_title("Scale-Location", fontsize=10)
 
         # 4. Cook's Distance
         ax4 = fig_res.add_subplot(2, 3, 4)
-        ax4.stem(range(n), cooks_d, linefmt="#6baed6", markerfmt="o", basefmt=" ")
+        ax4.stem(range(n), cooks_d, linefmt=PALETTE["data"]["secondary"], markerfmt="o", basefmt=" ")
         threshold = 4 / n
-        ax4.axhline(threshold, color="red", linestyle="--", linewidth=1,
+        ax4.axhline(threshold, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1,
                     label=f"4/n={threshold:.4f}")
         ax4.set_xlabel("观测序号", fontsize=9)
         ax4.set_ylabel("Cook's D", fontsize=9)
@@ -165,15 +168,15 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 5. Residual vs Leverage
         ax5 = fig_res.add_subplot(2, 3, 5)
         leverage = influence.hat_matrix_diag
-        ax5.scatter(leverage, residuals, alpha=0.6, s=20, color="#2171b5")
-        ax5.axhline(0, color="red", linestyle="--", linewidth=1)
+        ax5.scatter(leverage, residuals, alpha=0.6, s=20, color=PALETTE["data"]["primary"])
+        ax5.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
         ax5.set_xlabel("杠杆值", fontsize=9)
         ax5.set_ylabel("残差", fontsize=9)
         ax5.set_title("Residuals vs Leverage", fontsize=10)
 
         # 6. Actual vs Predicted
         ax6 = fig_res.add_subplot(2, 3, 6)
-        ax6.scatter(fitted, y, alpha=0.5, s=15, color="#2171b5")
+        ax6.scatter(fitted, y, alpha=0.5, s=15, color=PALETTE["data"]["primary"])
         ax6.plot([y.min(), y.max()], [y.min(), y.max()], "r--", linewidth=1,
                  label="完美预测")
         ax6.set_xlabel("预测值", fontsize=9)
@@ -310,9 +313,9 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 左: 3D 曲面
     ax_3d = fig.add_subplot(1, 2, 1, projection="3d")
     surf = ax_3d.plot_surface(XI, YI, ZI, cmap="RdYlGn", alpha=0.85, linewidth=0, antialiased=True)
-    ax_3d.scatter(X1, X2, y, color="#2171b5", s=25, alpha=0.7, label="观测数据")
+    ax_3d.scatter(X1, X2, y, color=PALETTE["data"]["primary"], s=25, alpha=0.7, label="观测数据")
     # 标注最优点
-    ax_3d.scatter([opt_x1], [opt_x2], [opt_z], color="red", s=120,
+    ax_3d.scatter([opt_x1], [opt_x2], [opt_z], color=PALETTE["anomaly"]["primary"], s=120,
                   marker="*", edgecolors="white", linewidths=1.5,
                   label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f})")
     ax_3d.set_xlabel(c1, fontsize=9)
@@ -328,8 +331,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     cf = ax_contour.contourf(XI, YI, ZI, levels=levels, cmap="RdYlGn", alpha=0.9)
     cs = ax_contour.contour(XI, YI, ZI, levels=8, colors="black", linewidths=0.5, alpha=0.3)
     ax_contour.clabel(cs, inline=True, fontsize=7, fmt="%.2f")
-    ax_contour.scatter(X1, X2, color="#2171b5", s=20, alpha=0.6, label="观测数据")
-    ax_contour.scatter([opt_x1], [opt_x2], color="red", s=150,
+    ax_contour.scatter(X1, X2, color=PALETTE["data"]["primary"], s=20, alpha=0.6, label="观测数据")
+    ax_contour.scatter([opt_x1], [opt_x2], color=PALETTE["anomaly"]["primary"], s=150,
                        marker="*", edgecolors="white", linewidths=2,
                        label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f}, z={opt_z:.3f})")
     ax_contour.set_xlabel(c1, fontsize=10)
@@ -454,9 +457,9 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             X, Y = mesh
             cs = ax.contourf(X, Y, Z, levels=15, cmap="RdYlGn")
             ax.scatter(X_train[:, 0], X_train[:, 1], alpha=0.4, s=12,
-                      color="#2171b5", label="训练数据")
+                      color=PALETTE["data"]["primary"], label="训练数据")
             ax.scatter(points[best_idx, 0], points[best_idx, 1], marker="*",
-                       color="#d94801", s=180, edgecolors="white", linewidths=1.5, zorder=5,
+                       color=PALETTE["target"]["primary"], s=180, edgecolors="white", linewidths=1.5, zorder=5,
                        label=f"最优 ({best[col_names[0]]}, {best[col_names[1]]})")
             ax.set_xlabel(col_names[0], fontsize=10)
             ax.set_ylabel(col_names[1], fontsize=10)
@@ -468,7 +471,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             fig.colorbar(cs, ax=ax, label="预测值", shrink=0.8)
         else:
             ax = fig.add_subplot(111)
-            ax.bar(range(len(predictions)), predictions, color="#6baed6")
+            ax.bar(range(len(predictions)), predictions, color=PALETTE["data"]["secondary"])
             ax.set_xlabel("参数组合索引", fontsize=10)
             ax.set_ylabel("预测值", fontsize=10)
             ax.set_title(f"网格搜索 — {req.target_col}", fontsize=11)
@@ -605,7 +608,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             ylabel = objectives[1]["col"]
 
         ax_pareto.scatter(vals0_plot, vals1_plot, c=score_valid, cmap="RdYlGn",
-                         alpha=0.6, s=30, edgecolors="gray", linewidths=0.3)
+                         alpha=0.6, s=30, edgecolors=PALETTE["spec"]["tertiary"], linewidths=0.3)
 
         # Pareto 前沿：O(n log n) 排序法（按 x 降序，跟踪 y 最大值）
         points = np.column_stack([vals0_plot, vals1_plot])
@@ -625,7 +628,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         # 标记最优
         best_pos_in_valid = best_pos
         ax_pareto.scatter([vals0_plot[best_pos_in_valid]], [vals1_plot[best_pos_in_valid]],
-                         s=150, marker="*", color="red", edgecolors="white",
+                         s=150, marker="*", color=PALETTE["anomaly"]["primary"], edgecolors="white",
                          linewidths=1.5, zorder=5, label="加权最优")
         ax_pareto.set_xlabel(xlabel, fontsize=9)
         ax_pareto.set_ylabel(ylabel, fontsize=9)
@@ -639,7 +642,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     top_n = min(20, len(score_valid))
     top_idx = np.argsort(score_valid)[-top_n:]
     # 显示各目标分解
-    bar_colors = ["#2171b5", "#6baed6", "#9ecae1", "#c6dbef"]
+    bar_colors = [PALETTE["data"]["primary"], PALETTE["data"]["secondary"], PALETTE["data"]["tertiary"], "#c6dbef"]
     bottom_vals = np.zeros(top_n)
     for oi, obj in enumerate(objectives):
         col = obj["col"]
@@ -782,13 +785,13 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(max(len(effects_df)*0.9, 6), 4))
     ax = fig.add_subplot(111)
     ef = effects_df.sort_values("主效应", key=abs)
-    colors = ["#d94801" if v < 0 else "#2171b5" for v in ef["主效应"]]
+    colors = [PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in ef["主效应"]]
     ax.barh(ef["因子"], ef["主效应"], color=colors, height=0.6)
     ax.axvline(0, color="black", linewidth=0.8)
     if me > 0:
-        ax.axvline(me, color="red", linestyle="--", linewidth=1, alpha=0.6,
+        ax.axvline(me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6,
                    label=f"Lenth ME={me:.3f} (≈α=0.05)")
-        ax.axvline(-me, color="red", linestyle="--", linewidth=1, alpha=0.6)
+        ax.axvline(-me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6)
     # 标注效应值
     for i, (_, row) in enumerate(ef.iterrows()):
         v = row["主效应"]
@@ -886,12 +889,12 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ROC 曲线图
     fig = Figure(figsize=(6, 5.5))
     ax = fig.add_subplot(111)
-    ax.plot(fpr, tpr, "-", color="#2171b5", linewidth=2.5,
+    ax.plot(fpr, tpr, "-", color=PALETTE["data"]["primary"], linewidth=2.5,
             label=f"ROC (AUC={auc_val:.3f}, {auc_label})")
-    ax.plot([0, 1], [0, 1], "--", color="gray", linewidth=1, alpha=0.6,
+    ax.plot([0, 1], [0, 1], "--", color=PALETTE["spec"]["tertiary"], linewidth=1, alpha=0.6,
             label="随机猜测 (AUC=0.5)")
-    ax.fill_between(fpr, tpr, alpha=0.1, color="#2171b5")
-    ax.scatter([fpr[best_idx]], [tpr[best_idx]], s=100, color="#d94801",
+    ax.fill_between(fpr, tpr, alpha=0.1, color=PALETTE["data"]["primary"])
+    ax.scatter([fpr[best_idx]], [tpr[best_idx]], s=100, color=PALETTE["target"]["primary"],
               marker="o", zorder=5,
               label=f"最佳阈值={best_threshold:.3f} (J={j_scores[best_idx]:.3f})")
     ax.set_xlabel("假阳性率 (FPR)", fontsize=10)
@@ -1002,11 +1005,11 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     sig_vars_plot = sig_vars.sort_values("OR (Odds Ratio)")
     y_pos = range(len(sig_vars_plot))
     ax.scatter(sig_vars_plot["OR (Odds Ratio)"].values, y_pos, s=60,
-              color="#2171b5", zorder=3)
+              color=PALETTE["data"]["primary"], zorder=3)
     for i, (_, row) in enumerate(sig_vars_plot.iterrows()):
         ax.plot([row["OR 95%CI下限"], row["OR 95%CI上限"]], [i, i],
-               "-", color="#6baed6", linewidth=2)
-    ax.axvline(1, color="#e31a1c", linestyle="--", linewidth=1, alpha=0.6, label="OR=1")
+               "-", color=PALETTE["data"]["secondary"], linewidth=2)
+    ax.axvline(1, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6, label="OR=1")
     ax.set_yticks(y_pos)
     ax.set_yticklabels(sig_vars_plot["变量"], fontsize=9)
     ax.set_xlabel("Odds Ratio (95% CI)", fontsize=10)
@@ -1102,7 +1105,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     ax = fig.add_subplot(111)
     nonzero_coefs = coef_df[coef_df["选中"] == "是"]
     if len(nonzero_coefs) > 0:
-        colors = ["#d94801" if v < 0 else "#2171b5" for v in nonzero_coefs["标准化系数"]]
+        colors = [PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in nonzero_coefs["标准化系数"]]
         ax.barh(nonzero_coefs["变量"], nonzero_coefs["标准化系数"], color=colors)
     ax.axvline(0, color="black", linewidth=0.5)
     ax.set_xlabel("标准化系数", fontsize=10)
@@ -1176,8 +1179,8 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         ax = fig.add_subplot(111)
         x_pos = np.arange(len(coef_df))
         width = 0.35
-        ax.bar(x_pos - width/2, coef_df["Huber系数"], width, label="Huber 稳健", color="#2171b5")
-        ax.bar(x_pos + width/2, coef_df["OLS系数"], width, label="OLS", color="#6baed6", alpha=0.7)
+        ax.bar(x_pos - width/2, coef_df["Huber系数"], width, label="Huber 稳健", color=PALETTE["data"]["primary"])
+        ax.bar(x_pos + width/2, coef_df["OLS系数"], width, label="OLS", color=PALETTE["data"]["secondary"], alpha=0.7)
         ax.set_xticks(x_pos)
         ax.set_xticklabels(coef_df["变量"], rotation=45, ha="right", fontsize=8)
         ax.set_ylabel("系数", fontsize=10)

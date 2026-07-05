@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 from matplotlib import cm
@@ -6,6 +8,9 @@ from scipy import stats as sp_stats
 from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.engine._palette import PALETTE
+
+logger = logging.getLogger(__name__)
 
 # ── X-bar/R 控制图常数表 (子组大小 n → A2, D3, D4) ──
 _XBR_CONSTANTS: dict[int, tuple[float, float, float]] = {
@@ -197,23 +202,23 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     # X-bar 控制图
     ax1 = fig.add_subplot(211)
     # 区域着色
-    ax1.fill_between(indices, lcl_x, ucl_x, alpha=0.04, color="green", label="±3σ 区域")
+    ax1.fill_between(indices, lcl_x, ucl_x, alpha=0.04, color=PALETTE["center"]["primary"], label="±3σ 区域")
     ax1.fill_between(indices, xbar_bar - 2*sigma_xbar, xbar_bar + 2*sigma_xbar,
-                     alpha=0.04, color="yellow")
+                     alpha=0.04, color=PALETTE["judge"]["warn"])
     ax1.fill_between(indices, xbar_bar - 1*sigma_xbar, xbar_bar + 1*sigma_xbar,
-                     alpha=0.04, color="green")
-    ax1.axhline(xbar_bar, color="green", linestyle="-", linewidth=1.5,
+                     alpha=0.04, color=PALETTE["center"]["primary"])
+    ax1.axhline(xbar_bar, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1.5,
                 label=f"CL={xbar_bar:.4f}")
-    ax1.axhline(ucl_x, color="red", linestyle="--", linewidth=1.2,
+    ax1.axhline(ucl_x, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"UCL={ucl_x:.4f}")
-    ax1.axhline(lcl_x, color="red", linestyle="--", linewidth=1.2,
+    ax1.axhline(lcl_x, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"LCL={lcl_x:.4f}")
-    ax1.axhline(xbar_bar + 2*sigma_xbar, color="orange", linestyle=":", linewidth=0.7, alpha=0.6)
-    ax1.axhline(xbar_bar - 2*sigma_xbar, color="orange", linestyle=":", linewidth=0.7, alpha=0.6)
-    ax1.axhline(xbar_bar + 1*sigma_xbar, color="gray", linestyle=":", linewidth=0.5, alpha=0.4)
-    ax1.axhline(xbar_bar - 1*sigma_xbar, color="gray", linestyle=":", linewidth=0.5, alpha=0.4)
+    ax1.axhline(xbar_bar + 2*sigma_xbar, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.7, alpha=0.6)
+    ax1.axhline(xbar_bar - 2*sigma_xbar, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.7, alpha=0.6)
+    ax1.axhline(xbar_bar + 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
+    ax1.axhline(xbar_bar - 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
 
-    ax1.plot(indices, xbar.values, "o-", markersize=5, color="#2171b5", linewidth=1.2)
+    ax1.plot(indices, xbar.values, "o-", markersize=5, color=PALETTE["data"]["primary"], linewidth=1.2)
 
     # 标记所有违规点
     all_xbar_violated = set()
@@ -223,7 +228,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 all_xbar_violated.add(idx)
     if all_xbar_violated:
         vio_idx = sorted(all_xbar_violated)
-        ax1.scatter(vio_idx, xbar.values[list(vio_idx)], s=80, color="red",
+        ax1.scatter(vio_idx, xbar.values[list(vio_idx)], s=80, color=PALETTE["anomaly"]["primary"],
                    marker="o", facecolors="none", linewidths=2, zorder=5,
                    label=f"违规点 ({len(vio_idx)}个)")
 
@@ -236,13 +241,13 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # R 控制图
     ax2 = fig.add_subplot(212)
-    ax2.axhline(r_bar, color="green", linestyle="-", linewidth=1.5,
+    ax2.axhline(r_bar, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1.5,
                 label=f"CL={r_bar:.4f}")
-    ax2.axhline(ucl_r, color="red", linestyle="--", linewidth=1.2,
+    ax2.axhline(ucl_r, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"UCL={ucl_r:.4f}")
-    ax2.axhline(lcl_r, color="red", linestyle="--", linewidth=1.2,
+    ax2.axhline(lcl_r, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"LCL={lcl_r:.4f}")
-    ax2.plot(indices, r.values, "o-", markersize=5, color="#d94801", linewidth=1.2)
+    ax2.plot(indices, r.values, "o-", markersize=5, color=PALETTE["target"]["primary"], linewidth=1.2)
 
     # 标记 R 图违规（所有规则）
     all_r_violated: set[int] = set()
@@ -252,7 +257,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 all_r_violated.add(idx)
     if all_r_violated:
         r_vio_idx = sorted(all_r_violated)
-        ax2.scatter(r_vio_idx, r.values[list(r_vio_idx)], s=80, color="red",
+        ax2.scatter(r_vio_idx, r.values[list(r_vio_idx)], s=80, color=PALETTE["anomaly"]["primary"],
                    marker="o", facecolors="none", linewidths=2, zorder=5,
                    label=f"违规点 ({len(r_vio_idx)}个)")
 
@@ -420,22 +425,22 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(10, 5))
     ax = fig.add_subplot(111)
     pos = np.arange(m)
-    ax.plot(pos, stat.values, "o-", markersize=5, color="#2171b5", linewidth=1.2)
-    ax.axhline(cl, color="#238b45", linestyle="-", linewidth=1.5,
+    ax.plot(pos, stat.values, "o-", markersize=5, color=PALETTE["data"]["primary"], linewidth=1.2)
+    ax.axhline(cl, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1.5,
                label=f"CL={cl:.4f}")
 
     if ucl_const is not None:
-        ax.axhline(ucl_const, color="#e31a1c", linestyle="--", linewidth=1.2,
+        ax.axhline(ucl_const, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"UCL={ucl_const:.4f}")
         lcl_val = float(lcl.iloc[0]) if hasattr(lcl, 'iloc') else float(lcl)
-        ax.axhline(lcl_val, color="#e31a1c", linestyle="--", linewidth=1.2,
+        ax.axhline(lcl_val, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"LCL={lcl_val:.4f}")
     else:
-        ax.plot(pos, ucl, "--", color="#e31a1c", linewidth=1, alpha=0.6, label="UCL")
-        ax.plot(pos, lcl, "--", color="#e31a1c", linewidth=1, alpha=0.6, label="LCL")
+        ax.plot(pos, ucl, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.6, label="UCL")
+        ax.plot(pos, lcl, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.6, label="LCL")
 
     if len(violations) > 0:
-        ax.scatter(violations, stat.values[violations], s=80, color="red",
+        ax.scatter(violations, stat.values[violations], s=80, color=PALETTE["anomaly"]["primary"],
                    marker="x", linewidths=2.5, zorder=5,
                    label=f"超出控制限 ({len(violations)}个)")
 
@@ -660,32 +665,32 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 直方图
     n_bins = min(30, max(10, int(np.sqrt(n))))
     counts, bins, patches = ax.hist(
-        data, bins=n_bins, color="#6baed6", edgecolor="white",
+        data, bins=n_bins, color=PALETTE["data"]["secondary"], edgecolor="white",
         alpha=0.7, density=True, label="数据分布"
     )
 
     # 正态拟合曲线
     x_fit = np.linspace(data.min(), data.max(), 200)
     pdf_fit = sp_stats.norm.pdf(x_fit, mu, sigma_overall)
-    ax.plot(x_fit, pdf_fit, color="#2171b5", linewidth=2,
+    ax.plot(x_fit, pdf_fit, color=PALETTE["data"]["primary"], linewidth=2,
             label=f"正态拟合 (μ={mu:.3f}, σ={sigma_overall:.3f})")
 
     # 规格限
-    ax.axvline(mu, color="green", linestyle="-", linewidth=2,
+    ax.axvline(mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=2,
                label=f"均值={mu:.4f}")
     if lsl is not None:
-        ax.axvline(lsl, color="red", linestyle="--", linewidth=2,
+        ax.axvline(lsl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=2,
                    label=f"LSL={lsl}")
     if usl is not None:
-        ax.axvline(usl, color="red", linestyle="--", linewidth=2,
+        ax.axvline(usl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=2,
                    label=f"USL={usl}")
     if target is not None:
-        ax.axvline(target, color="orange", linestyle=":", linewidth=1.5,
+        ax.axvline(target, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=1.5,
                    label=f"目标={target}")
 
     # 规格限区域着色
     if lsl is not None and usl is not None:
-        ax.axvspan(lsl, usl, alpha=0.08, color="green", label="规格范围")
+        ax.axvspan(lsl, usl, alpha=0.08, color=PALETTE["center"]["primary"], label="规格范围")
 
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_ylabel("密度", fontsize=10)
@@ -865,13 +870,13 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # 左上：趋势 + 预测 + 置信带
         ax1 = fig.add_subplot(2, 2, 1)
         hist_idx = np.arange(n)
-        ax1.plot(hist_idx, y, "o-", markersize=3, label="历史数据", color="#2171b5", linewidth=1.2)
-        ax1.plot(hist_idx, y_pred_in, "-", color="#6baed6", linewidth=2, alpha=0.6,
+        ax1.plot(hist_idx, y, "o-", markersize=3, label="历史数据", color=PALETTE["data"]["primary"], linewidth=1.2)
+        ax1.plot(hist_idx, y_pred_in, "-", color=PALETTE["data"]["secondary"], linewidth=2, alpha=0.6,
                 label=f"趋势线 (R²={r2:.3f})")
         fut_idx = np.arange(n, n + steps)
-        ax1.plot(fut_idx, predictions, "o-", markersize=4, label="预测", color="#d94801")
+        ax1.plot(fut_idx, predictions, "o-", markersize=4, label="预测", color=PALETTE["target"]["primary"])
         ax1.fill_between(fut_idx, predictions - conf, predictions + conf,
-                        alpha=0.2, color="#d94801", label="95% 预测区间")
+                        alpha=0.2, color=PALETTE["target"]["primary"], label="95% 预测区间")
         ax1.set_xlabel("时间点", fontsize=9)
         ax1.set_ylabel(req.target_col, fontsize=9)
         ax1.set_title(f"趋势预测 — {req.target_col} ({trend_dir})", fontsize=10)
@@ -879,9 +884,9 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
         # 右上：残差图
         ax2 = fig.add_subplot(2, 2, 2)
-        ax2.scatter(hist_idx, residuals, s=12, color="#6baed6", alpha=0.7)
-        ax2.axhline(0, color="red", linestyle="--", linewidth=1)
-        ax2.plot(hist_idx, residuals, "-", color="#6baed6", alpha=0.3, linewidth=0.5)
+        ax2.scatter(hist_idx, residuals, s=12, color=PALETTE["data"]["secondary"], alpha=0.7)
+        ax2.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
+        ax2.plot(hist_idx, residuals, "-", color=PALETTE["data"]["secondary"], alpha=0.3, linewidth=0.5)
         ax2.set_xlabel("时间点", fontsize=9)
         ax2.set_ylabel("残差", fontsize=9)
         ax2.set_title(f"残差 — {dw_label}", fontsize=10)
@@ -889,17 +894,17 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # 左下：ACF 自相关图
         ax3 = fig.add_subplot(2, 2, 3)
         lags = range(max_lag + 1)
-        ax3.bar(lags, acf_vals, color="#6baed6", width=0.4, edgecolor="white")
+        ax3.bar(lags, acf_vals, color=PALETTE["data"]["secondary"], width=0.4, edgecolor="white")
         ax3.axhline(0, color="black", linewidth=0.5)
-        ax3.axhline(acf_conf, color="#e31a1c", linestyle="--", linewidth=0.8, alpha=0.6)
-        ax3.axhline(-acf_conf, color="#e31a1c", linestyle="--", linewidth=0.8, alpha=0.6)
+        ax3.axhline(acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6)
+        ax3.axhline(-acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6)
         ax3.set_xlabel("滞后阶数", fontsize=9)
         ax3.set_ylabel("自相关 (ACF)", fontsize=9)
         ax3.set_title("残差自相关 (ACF)", fontsize=10)
 
         # 右下：Actual vs Predicted
         ax4 = fig.add_subplot(2, 2, 4)
-        ax4.scatter(y_pred_in, y, s=12, alpha=0.6, color="#2171b5")
+        ax4.scatter(y_pred_in, y, s=12, alpha=0.6, color=PALETTE["data"]["primary"])
         ax4.plot([y.min(), y.max()], [y.min(), y.max()], "r--", linewidth=1)
         ax4.set_xlabel("预测值", fontsize=9)
         ax4.set_ylabel("实际值", fontsize=9)
@@ -988,22 +993,22 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     pos = np.arange(len(data))
 
     ax1 = fig.add_subplot(211)
-    ax1.plot(pos, data.values, "o-", markersize=3, color="#6baed6", linewidth=1, label="数据")
-    ax1.axhline(mu, color="#238b45", linestyle="-", linewidth=1, label=f"均值={mu:.3f}")
+    ax1.plot(pos, data.values, "o-", markersize=3, color=PALETTE["data"]["secondary"], linewidth=1, label="数据")
+    ax1.axhline(mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1, label=f"均值={mu:.3f}")
     ax1.set_ylabel(req.target_col, fontsize=10)
     ax1.set_title(f"CUSUM 控制图 — {req.target_col} (k={k}, h={h})", fontsize=11)
     ax1.legend(fontsize=8)
 
     ax2 = fig.add_subplot(212)
-    ax2.plot(pos, c_plus, "-", color="#d94801", linewidth=1.5, label="C+ (上偏移)")
-    ax2.plot(pos, c_minus, "-", color="#2171b5", linewidth=1.5, label="C- (下偏移)")
-    ax2.axhline(h, color="#e31a1c", linestyle="--", linewidth=1.2, label=f"决策区间 h={h}")
-    ax2.fill_between(pos, 0, h, alpha=0.05, color="#238b45")
+    ax2.plot(pos, c_plus, "-", color=PALETTE["target"]["primary"], linewidth=1.5, label="C+ (上偏移)")
+    ax2.plot(pos, c_minus, "-", color=PALETTE["data"]["primary"], linewidth=1.5, label="C- (下偏移)")
+    ax2.axhline(h, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2, label=f"决策区间 h={h}")
+    ax2.fill_between(pos, 0, h, alpha=0.05, color=PALETTE["center"]["primary"])
     if alarm_plus:
-        ax2.scatter(alarm_plus, c_plus[alarm_plus], s=60, color="red",
+        ax2.scatter(alarm_plus, c_plus[alarm_plus], s=60, color=PALETTE["anomaly"]["primary"],
                    marker="x", linewidths=2, zorder=5, label=f"上偏移报警({len(alarm_plus)})")
     if alarm_minus:
-        ax2.scatter(alarm_minus, c_minus[alarm_minus], s=60, color="red",
+        ax2.scatter(alarm_minus, c_minus[alarm_minus], s=60, color=PALETTE["anomaly"]["primary"],
                    marker="x", linewidths=2, zorder=5, label=f"下偏移报警({len(alarm_minus)})")
     ax2.set_xlabel("序号", fontsize=10)
     ax2.set_ylabel("CUSUM", fontsize=10)
@@ -1097,17 +1102,17 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     pos = np.arange(n)
 
     ax.plot(pos, data.values, "o-", markersize=3, alpha=0.35,
-            color="#9ecae1", linewidth=0.8, label="原始数据")
-    ax.plot(pos, ewma, "-", color="#2171b5", linewidth=2, label=f"EWMA (λ={lam})")
-    ax.axhline(mu, color="#238b45", linestyle="-", linewidth=1, label=f"CL={mu:.3f}")
-    ax.plot(pos, ucl_t, "--", color="#e31a1c", linewidth=1, alpha=0.7, label="UCL(t)")
-    ax.plot(pos, lcl_t, "--", color="#e31a1c", linewidth=1, alpha=0.7, label="LCL(t)")
-    ax.axhline(ucl_asym, color="#e31a1c", linestyle=":", linewidth=1, alpha=0.4)
-    ax.axhline(lcl_asym, color="#e31a1c", linestyle=":", linewidth=1, alpha=0.4)
+            color=PALETTE["data"]["tertiary"], linewidth=0.8, label="原始数据")
+    ax.plot(pos, ewma, "-", color=PALETTE["data"]["primary"], linewidth=2, label=f"EWMA (λ={lam})")
+    ax.axhline(mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1, label=f"CL={mu:.3f}")
+    ax.plot(pos, ucl_t, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.7, label="UCL(t)")
+    ax.plot(pos, lcl_t, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.7, label="LCL(t)")
+    ax.axhline(ucl_asym, color=PALETTE["anomaly"]["primary"], linestyle=":", linewidth=1, alpha=0.4)
+    ax.axhline(lcl_asym, color=PALETTE["anomaly"]["primary"], linestyle=":", linewidth=1, alpha=0.4)
 
     if violations.sum() > 0:
         vpos = np.where(violations)[0]
-        ax.scatter(vpos, ewma[vpos], s=80, color="red", marker="x",
+        ax.scatter(vpos, ewma[vpos], s=80, color=PALETTE["anomaly"]["primary"], marker="x",
                   linewidths=2, zorder=5, label=f"违规({violations.sum()}个)")
 
     ax.set_xlabel("序号", fontsize=10)
@@ -1250,8 +1255,8 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     ax = fig.add_subplot(111)
     components = ["重复性(EV)", "再现性(AV)", "GRR", "部件间(PV)"]
     values_pct = [ev_pct, av_pct, grr_pct, pv_pct]
-    ax.barh(components, values_pct, color=["#6baed6", "#9ecae1", "#2171b5", "#fd8d3c"])
-    ax.axvline(tv_pct, color="#e31a1c", linestyle="--", linewidth=1, label=f"TV={tv_pct:.3f}")
+    ax.barh(components, values_pct, color=[PALETTE["data"]["secondary"], PALETTE["data"]["tertiary"], PALETTE["data"]["primary"], "#fd8d3c"])
+    ax.axvline(tv_pct, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, label=f"TV={tv_pct:.3f}")
     ax.set_xlabel(f"{sigma_mult:.1f}σ 研究变异", fontsize=10)
     ax.set_title(
         f"Gage R&R — {req.target_col} | %GRR={grr_sv:.1f}%, ndc={ndc} | {judge}",
@@ -1348,13 +1353,13 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(8, 4))
     ax = fig.add_subplot(111)
     ax.hist(data, bins=min(30, int(sqrt(n))*2), density=True,
-            color="#6baed6", edgecolor="white", alpha=0.7)
+            color=PALETTE["data"]["secondary"], edgecolor="white", alpha=0.7)
     x_fit = np.linspace(data.min() - 2*sigma, data.max() + 2*sigma, 200)
-    ax.plot(x_fit, sp_stats.norm.pdf(x_fit, mu, sigma), "-", color="#2171b5", linewidth=2)
+    ax.plot(x_fit, sp_stats.norm.pdf(x_fit, mu, sigma), "-", color=PALETTE["data"]["primary"], linewidth=2)
     if side != "upper":
-        ax.axvline(lower, color="#e31a1c", linestyle="--", linewidth=2)
+        ax.axvline(lower, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=2)
     if side != "lower":
-        ax.axvline(upper, color="#238b45", linestyle="--", linewidth=2)
+        ax.axvline(upper, color=PALETTE["center"]["primary"], linestyle="--", linewidth=2)
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_title(f"容许区间 — {label}", fontsize=10)
     fig.tight_layout()
@@ -1415,15 +1420,13 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     n_total = len(times)
     km_times = [0.0]
     km_survival_val = [1.0]
-    at_risk = n_total
 
     for t in unique_times:
         n_events = int(np.sum((times == t) & (events == 1)))
+        at_risk = int(np.sum(times >= t))  # 直接计算风险集，正确计入事件间删失
         if at_risk > 0 and n_events > 0:
             km_survival_val.append(km_survival_val[-1] * (1 - n_events / at_risk))
             km_times.append(float(t))
-        n_censored = int(np.sum((times == t) & (events == 0)))
-        at_risk -= n_events + n_censored
 
     # 中位生存时间
     median_idx = np.where(np.array(km_survival_val) <= 0.5)[0]
@@ -1479,22 +1482,22 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 可视化
     fig = Figure(figsize=(8, 5))
     ax = fig.add_subplot(111)
-    ax.step(km_times, km_survival_val, where="post", color="#2171b5", linewidth=2.5,
+    ax.step(km_times, km_survival_val, where="post", color=PALETTE["data"]["primary"], linewidth=2.5,
             label=f"KM (n={n_total})")
-    ax.axhline(0.5, color="gray", linestyle=":", linewidth=0.8, alpha=0.5)
+    ax.axhline(0.5, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.8, alpha=0.5)
     if median_survival:
-        ax.axvline(median_survival, color="#d94801", linestyle="--", linewidth=1,
+        ax.axvline(median_survival, color=PALETTE["target"]["primary"], linestyle="--", linewidth=1,
                    label=f"中位寿命={median_survival:.0f}")
     # Weibull 拟合曲线
     if weibull_shape and weibull_scale:
         x_w = np.linspace(0, max(times) * 1.2, 200)
         s_w = 1 - sp_stats.weibull_min.cdf(x_w, weibull_shape, 0, weibull_scale)
-        ax.plot(x_w, s_w, "--", color="#6baed6", linewidth=1.5, alpha=0.7,
+        ax.plot(x_w, s_w, "--", color=PALETTE["data"]["secondary"], linewidth=1.5, alpha=0.7,
                 label=f"Weibull (β={weibull_shape:.2f}, η={weibull_scale:.0f})")
 
     # 删失标记
     cens_times = times[events == 0]
-    ax.scatter(cens_times, np.ones(len(cens_times)), marker="|", s=30, color="gray",
+    ax.scatter(cens_times, np.ones(len(cens_times)), marker="|", s=30, color=PALETTE["spec"]["tertiary"],
               alpha=0.5, label=f"删失 ({len(cens_times)})")
 
     ax.set_xlabel("时间", fontsize=10)
@@ -1642,12 +1645,12 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(12, 5))
     ax = fig.add_subplot(111)
     pos = np.arange(n)
-    ax.plot(pos, values, "-", color="#6baed6", linewidth=1, alpha=0.7, label="数据")
+    ax.plot(pos, values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.7, label="数据")
 
     # 分段均值线
     if changepoints:
         boundaries = [0] + changepoints + [n]
-        colors = ["#2171b5", "#d94801", "#238b45", "#9e9ac8", "#fd8d3c"]
+        colors = [PALETTE["data"]["primary"], PALETTE["target"]["primary"], PALETTE["center"]["primary"], "#9e9ac8", "#fd8d3c"]
         for seg_i in range(len(boundaries) - 1):
             start, end = boundaries[seg_i], boundaries[seg_i + 1]
             seg_mean = float(np.mean(values[start:end]))
@@ -1657,11 +1660,11 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
 
     # 标记变点
     for cp in changepoints:
-        ax.axvline(cp, color="#e31a1c", linestyle="--", linewidth=1.5, alpha=0.8)
+        ax.axvline(cp, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5, alpha=0.8)
         ax.annotate(f"变点{cp}", xy=(cp, values[cp]),
                    xytext=(cp + 5, values[cp] + 0.5 * np.std(values)),
-                   fontsize=8, color="#e31a1c",
-                   arrowprops=dict(arrowstyle="->", color="#e31a1c", lw=0.8))
+                   fontsize=8, color=PALETTE["anomaly"]["primary"],
+                   arrowprops=dict(arrowstyle="->", color=PALETTE["anomaly"]["primary"], lw=0.8))
 
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
@@ -1751,21 +1754,21 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(10, 5))
     ax = fig.add_subplot(111)
     pos = np.arange(n)
-    ax.plot(pos, data.values, "-", color="#6baed6", linewidth=1, alpha=0.6)
-    ax.scatter(pos, data.values, s=12, color="#2171b5", alpha=0.6)
+    ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.6)
+    ax.scatter(pos, data.values, s=12, color=PALETTE["data"]["primary"], alpha=0.6)
 
     # 低置信 (1票)
     low_conf_pos = np.where(any_flag & ~high_conf)[0]
     if len(low_conf_pos) > 0:
         ax.scatter(low_conf_pos, data.values[low_conf_pos], s=60,
-                  color="orange", marker="s", facecolors="none", linewidths=1.5,
+                  color=PALETTE["spec"]["secondary"], marker="s", facecolors="none", linewidths=1.5,
                   zorder=4, label=f"低置信 (1票, {len(low_conf_pos)}个)")
 
     # 高置信 (≥2票)
     high_conf_pos = np.where(high_conf)[0]
     if len(high_conf_pos) > 0:
         ax.scatter(high_conf_pos, data.values[high_conf_pos], s=100,
-                  color="red", marker="x", linewidths=3, zorder=5,
+                  color=PALETTE["anomaly"]["primary"], marker="x", linewidths=3, zorder=5,
                   label=f"高置信 (≥2票, {len(high_conf_pos)}个)")
 
     ax.set_xlabel("序号", fontsize=10)
@@ -1851,10 +1854,10 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             c1, c2 = feature_cols[0], feature_cols[1]
             normal_mask = ~mask
             ax1.scatter(sub.loc[normal_mask, c1], sub.loc[normal_mask, c2],
-                       s=20, alpha=0.5, color="#6baed6", label=f"正常 ({normal_mask.sum()})")
+                       s=20, alpha=0.5, color=PALETTE["data"]["secondary"], label=f"正常 ({normal_mask.sum()})")
             if mask.sum() > 0:
                 ax1.scatter(sub.loc[mask, c1], sub.loc[mask, c2],
-                           s=60, alpha=0.9, color="red", marker="x",
+                           s=60, alpha=0.9, color=PALETTE["anomaly"]["primary"], marker="x",
                            linewidths=2, label=f"异常 ({mask.sum()})")
             ax1.set_xlabel(c1, fontsize=9)
             ax1.set_ylabel(c2, fontsize=9)
@@ -1865,12 +1868,12 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             ax2 = fig.add_subplot(1, 2, 2)
         else:
             ax2 = fig.add_subplot(111)
-        ax2.hist(scores[~mask], bins=20, alpha=0.7, color="#6baed6",
+        ax2.hist(scores[~mask], bins=20, alpha=0.7, color=PALETTE["data"]["secondary"],
                 label=f"正常 (n={(~mask).sum()})")
         if mask.sum() > 0:
-            ax2.hist(scores[mask], bins=10, alpha=0.8, color="#d94801",
+            ax2.hist(scores[mask], bins=10, alpha=0.8, color=PALETTE["target"]["primary"],
                     label=f"异常 (n={mask.sum()})")
-        ax2.axvline(0, color="red", linestyle="--", linewidth=1, label="决策边界")
+        ax2.axvline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, label="决策边界")
         ax2.set_xlabel("异常分数 (越低越异常)", fontsize=9)
         ax2.set_ylabel("频数", fontsize=9)
         ax2.set_title("异常分数分布", fontsize=10)
@@ -1969,21 +1972,21 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(9, 4))
     ax = fig.add_subplot(111)
     pos = np.arange(len(data))
-    ax.plot(pos, data.values, "-", color="#6baed6", linewidth=1, label="数据")
-    ax.scatter(pos, data.values, s=10, color="#2171b5")
+    ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, label="数据")
+    ax.scatter(pos, data.values, s=10, color=PALETTE["data"]["primary"])
     if mask.sum() > 0:
         anomaly_pos = np.where(mask)[0]
-        ax.scatter(anomaly_pos, data.values[mask], s=80, color="red",
+        ax.scatter(anomaly_pos, data.values[mask], s=80, color=PALETTE["anomaly"]["primary"],
                    marker="x", linewidths=2.5, zorder=5, label=f"异常({mask.sum()}个)")
         if method == "iqr":
-            ax.axhline(Q1 - 1.5 * IQR, color="orange", linestyle="--",
+            ax.axhline(Q1 - 1.5 * IQR, color=PALETTE["spec"]["secondary"], linestyle="--",
                       linewidth=1, alpha=0.6, label=f"下界={Q1-1.5*IQR:.3f}")
-            ax.axhline(Q3 + 1.5 * IQR, color="orange", linestyle="--",
+            ax.axhline(Q3 + 1.5 * IQR, color=PALETTE["spec"]["secondary"], linestyle="--",
                       linewidth=1, alpha=0.6, label=f"上界={Q3+1.5*IQR:.3f}")
         else:
-            ax.axhline(data.mean() + 3*data.std(), color="orange", linestyle="--",
+            ax.axhline(data.mean() + 3*data.std(), color=PALETTE["spec"]["secondary"], linestyle="--",
                       linewidth=1, alpha=0.6, label=f"上界={data.mean()+3*data.std():.3f}")
-            ax.axhline(data.mean() - 3*data.std(), color="orange", linestyle="--",
+            ax.axhline(data.mean() - 3*data.std(), color=PALETTE["spec"]["secondary"], linestyle="--",
                       linewidth=1, alpha=0.6, label=f"下界={data.mean()-3*data.std():.3f}")
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
@@ -2028,13 +2031,13 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
 
     fig = Figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
-    ax.hist(data, bins=min(30, int(np.sqrt(n))*2), color="#6baed6",
+    ax.hist(data, bins=min(30, int(np.sqrt(n))*2), color=PALETTE["data"]["secondary"],
             edgecolor="white", alpha=0.7)
-    ax.axvline(median, color="#238b45", linewidth=2, label=f"中位数={median:.4f}")
-    ax.axvline(lower, color="#e31a1c", linestyle="--", linewidth=1.5)
-    ax.axvline(upper, color="#e31a1c", linestyle="--", linewidth=1.5,
+    ax.axvline(median, color=PALETTE["center"]["primary"], linewidth=2, label=f"中位数={median:.4f}")
+    ax.axvline(lower, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5)
+    ax.axvline(upper, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
                label=f"{ci_level*100:.0f}% CI: [{lower:.4f}, {upper:.4f}]")
-    ax.axvspan(lower, upper, alpha=0.1, color="#e31a1c")
+    ax.axvspan(lower, upper, alpha=0.1, color=PALETTE["anomaly"]["primary"])
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_ylabel("频数", fontsize=10)
     ax.set_title(f"中位数 {ci_level*100:.0f}% CI — {req.target_col} (n={n})", fontsize=11)
@@ -2110,13 +2113,13 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     # 可视化：Bootstrap 分布 + CI
     fig = Figure(figsize=(8, 4))
     ax = fig.add_subplot(111)
-    ax.hist(boot_stats, bins=40, color="#6baed6", edgecolor="white", alpha=0.8, density=True)
-    ax.axvline(orig_stat, color="#238b45", linewidth=2, label=f"点估计={orig_stat:.4f}")
-    ax.axvline(ci_lower_pct, color="#e31a1c", linestyle="--", linewidth=1.5,
+    ax.hist(boot_stats, bins=40, color=PALETTE["data"]["secondary"], edgecolor="white", alpha=0.8, density=True)
+    ax.axvline(orig_stat, color=PALETTE["center"]["primary"], linewidth=2, label=f"点估计={orig_stat:.4f}")
+    ax.axvline(ci_lower_pct, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
                label=f"{ci_level*100:.0f}% CI下限={ci_lower_pct:.4f}")
-    ax.axvline(ci_upper_pct, color="#e31a1c", linestyle="--", linewidth=1.5,
+    ax.axvline(ci_upper_pct, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
                label=f"{ci_level*100:.0f}% CI上限={ci_upper_pct:.4f}")
-    ax.axvspan(ci_lower_pct, ci_upper_pct, alpha=0.1, color="#e31a1c")
+    ax.axvspan(ci_lower_pct, ci_upper_pct, alpha=0.1, color=PALETTE["anomaly"]["primary"])
     ax.set_xlabel(f"{statistic} ({req.target_col})", fontsize=10)
     ax.set_ylabel("Bootstrap 密度", fontsize=10)
     ax.set_title(
@@ -2413,29 +2416,29 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     pos = np.arange(n)
     ax = fig.add_subplot(111)
 
-    ax.plot(pos, values, "o-", markersize=3, color="#2171b5", linewidth=1, alpha=0.6, label="数据")
-    ax.axhline(cl, color="#238b45", linestyle="-", linewidth=2, label=f"CL (中位数)={cl:.4f}")
+    ax.plot(pos, values, "o-", markersize=3, color=PALETTE["data"]["primary"], linewidth=1, alpha=0.6, label="数据")
+    ax.axhline(cl, color=PALETTE["center"]["primary"], linestyle="-", linewidth=2, label=f"CL (中位数)={cl:.4f}")
 
     if ucl is not None:
-        ax.axhline(ucl, color="#e31a1c", linestyle="--", linewidth=1.5,
+        ax.axhline(ucl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
                    label=f"UCL (P99.865)={ucl:.4f}")
         if ucl_2s:
-            ax.axhline(ucl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
+            ax.axhline(ucl_2s, color=PALETTE["target"]["primary"], linestyle=":", linewidth=0.8, alpha=0.6)
         if ucl_1s:
-            ax.axhline(ucl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
-        ax.fill_between(pos, cl, ucl, alpha=0.04, color="green")
+            ax.axhline(ucl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
+        ax.fill_between(pos, cl, ucl, alpha=0.04, color=PALETTE["center"]["primary"])
 
     if lcl is not None:
-        ax.axhline(lcl, color="#e31a1c", linestyle="--", linewidth=1.5,
+        ax.axhline(lcl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
                    label=f"LCL (P0.135)={lcl:.4f}")
         if lcl_2s:
-            ax.axhline(lcl_2s, color="#d94801", linestyle=":", linewidth=0.8, alpha=0.6)
+            ax.axhline(lcl_2s, color=PALETTE["target"]["primary"], linestyle=":", linewidth=0.8, alpha=0.6)
         if lcl_1s:
-            ax.axhline(lcl_1s, color="#969696", linestyle=":", linewidth=0.5, alpha=0.4)
-        ax.fill_between(pos, lcl, cl, alpha=0.04, color="green")
+            ax.axhline(lcl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
+        ax.fill_between(pos, lcl, cl, alpha=0.04, color=PALETTE["center"]["primary"])
 
     if violations:
-        ax.scatter(violations, values[violations], s=80, color="red",
+        ax.scatter(violations, values[violations], s=80, color=PALETTE["anomaly"]["primary"],
                   marker="x", linewidths=2.5, zorder=5,
                   label=f"违规 ({len(violations)}个)")
 

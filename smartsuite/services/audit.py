@@ -57,9 +57,10 @@ def process_audit(
             else:
                 health_checks.append({"检查项": "关键因子识别", "状态": "⚠ 注意",
                                      "详情": "无强相关因子 (|r|≤0.5)"})
-        except Exception:
+        except Exception as e:
             logger.warning("关键因子识别失败", exc_info=True)
-            health_checks.append({"检查项": "关键因子识别", "状态": "✗ 失败", "详情": "—"})
+            health_checks.append({"检查项": "关键因子识别", "状态": "✗ 失败",
+                                 "详情": f"计算异常 ({type(e).__name__})"})
 
     # ── 3. 回归/VIF ──
     if len(numeric_features) >= 3:
@@ -75,9 +76,10 @@ def process_audit(
             else:
                 health_checks.append({"检查项": "共线性诊断", "状态": "⚠ 警告",
                                      "详情": f"{high_vif} 个因子 VIF>5"})
-        except Exception:
+        except Exception as e:
             logger.warning("共线性诊断失败", exc_info=True)
-            health_checks.append({"检查项": "共线性诊断", "状态": "✗ 失败", "详情": "—"})
+            health_checks.append({"检查项": "共线性诊断", "状态": "✗ 失败",
+                                 "详情": f"计算异常 ({type(e).__name__})"})
 
     # ── 4. 过程能力 ──
     if usl is not None and lsl is not None:
@@ -99,9 +101,10 @@ def process_audit(
             else:
                 health_checks.append({"检查项": "过程能力", "状态": "—",
                                      "详情": "未计算"})
-        except Exception:
+        except Exception as e:
             logger.warning("过程能力分析失败", exc_info=True)
-            health_checks.append({"检查项": "过程能力", "状态": "✗ 失败", "详情": "—"})
+            health_checks.append({"检查项": "过程能力", "状态": "✗ 失败",
+                                 "详情": f"计算异常 ({type(e).__name__})"})
 
     # ── 5. 趋势 (时序数据) ──
     if time_order and len(df) >= 10:
@@ -117,9 +120,10 @@ def process_audit(
             else:
                 health_checks.append({"检查项": "过程稳定性", "状态": "⚠ 注意",
                                      "详情": f"DW={dw:.3f} (存在自相关或趋势)"})
-        except Exception:
+        except Exception as e:
             logger.warning("过程稳定性分析失败", exc_info=True)
-            health_checks.append({"检查项": "过程稳定性", "状态": "✗ 失败", "详情": "—"})
+            health_checks.append({"检查项": "过程稳定性", "状态": "✗ 失败",
+                                 "详情": f"计算异常 ({type(e).__name__})"})
 
     # ── 6. 异常检测 ──
     try:
@@ -134,9 +138,10 @@ def process_audit(
         else:
             health_checks.append({"检查项": "异常值检测", "状态": "⚠ 注意",
                                  "详情": f"{high_conf} 个高置信异常点"})
-    except Exception:
+    except Exception as e:
         logger.warning("异常值检测失败", exc_info=True)
-        health_checks.append({"检查项": "异常值检测", "状态": "✗ 失败", "详情": "—"})
+        health_checks.append({"检查项": "异常值检测", "状态": "✗ 失败",
+                             "详情": f"计算异常 ({type(e).__name__})"})
 
     # ── 汇总评分 ──
     ok_count = sum(1 for h in health_checks if "✓" in str(h["状态"]))

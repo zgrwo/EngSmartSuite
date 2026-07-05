@@ -9,7 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 def read_excel_range(sheet, range_addr: str | None = None) -> pd.DataFrame:
-    """从 Excel 选区读取 DataFrame。"""
+    """从 Excel 选区读取 DataFrame。
+
+    依赖 xlwings Sheet 对象（需 Excel add-in 运行环境，xlwings 不作为 pip 依赖声明）。
+    Web UI 和 CLI 入口不调用此函数。
+    """
     if range_addr:
         data_range = sheet.range(range_addr)
     else:
@@ -29,7 +33,7 @@ def validate_data(df: pd.DataFrame, target_col: str,
         raise ValidationError(f"以下列不存在于数据中: {missing}")
 
     for col in feature_cols + [target_col]:
-        if df[col].dtype == 'object':
+        if not pd.api.types.is_numeric_dtype(df[col]):
             try:
                 pd.to_numeric(df[col])
             except (ValueError, TypeError):
@@ -43,7 +47,8 @@ def validate_data(df: pd.DataFrame, target_col: str,
 
 
 def preprocess_data(df: pd.DataFrame, features: list[str],
-                    categorical_cols: set[str] | None = None
+                    categorical_cols: set[str] | None = None,
+                    known_cat_map: dict[str, list[str]] | None = None
                     ) -> tuple[pd.DataFrame, list[str], dict[str, list[str]]]:
     """预处理数据：One-Hot 编码类别列、数值强制转换、中位数填充缺失值。
 
@@ -51,6 +56,7 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
         df: 原始 DataFrame
         features: 要使用的原始列名列表
         categorical_cols: 需做 One-Hot 编码的类别列名集合，为 None 则自动检测
+        known_cat_map: 已知类别映射（用于对齐历史编码），为 None 则从数据推断
 
     Returns:
         (encoded_df, encoded_cols, cat_map, imputation_log)
@@ -67,7 +73,23 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
 
     for col in features:
         if col in categorical_cols:
-            dummies = pd.get_dummies(df[col].astype(str), prefix=col, drop_first=True)
+            col_str = df[col].astype(str)
+            dummies = pd.get_dummies(col_str, prefix=col, drop_first=True)
+            # 对齐已知类别映射
+            if known_cat_map and col in known_cat_map:
+                expected = set(known_cat_map[col])
+                actual = set(dummies.columns)
+                # 缺失的已知类别 → 补 0 列
+                for missing_col in expected - actual:
+                    dummies[missing_col] = 0
+                # 未知的新类别 → 丢弃（记录警告）
+                extra = actual - expected
+                if extra:
+                    logger.warning(
+                        "列「%s」出现 %d 个未知类别，已丢弃: %s",
+                        col, len(extra), extra
+                    )
+                dummies = dummies[known_cat_map[col]]
             for dc in dummies.columns:
                 df[dc] = dummies[dc].astype(float)
                 encoded_cols.append(dc)

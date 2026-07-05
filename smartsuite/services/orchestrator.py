@@ -162,6 +162,10 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
             "MemoryError": "数据量过大超出内存限制，请减少数据行数或列数",
             "LinAlgError": "矩阵运算失败，数据可能存在严重共线性或数值异常",
             "ConvergenceError": "模型未能收敛，请检查数据质量或调整分析参数",
+            "OverflowError": "数值溢出，数据中可能存在极端值，请检查数据范围",
+            "RuntimeError": "计算过程出现运行时错误，请检查参数设置是否合适",
+            "AttributeError": "数据结构异常，请确认数据列名和格式正确",
+            "FileNotFoundError": "找不到指定的文件，请检查文件路径",
         }
         detail = detail_map.get(err_cls, "分析计算过程中出现异常，请检查数据完整性")
         return AnalysisResult(

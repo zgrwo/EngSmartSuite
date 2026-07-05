@@ -1,9 +1,12 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from matplotlib.figure import Figure
 from scipy import stats
 
+logger = logging.getLogger(__name__)
 sp_stats = stats  # 别名，供函数内统一使用
 
 from sklearn.tree import DecisionTreeRegressor, plot_tree
@@ -11,6 +14,7 @@ from statsmodels.formula.api import ols
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.engine._palette import PALETTE
 
 
 def _significance_stars(p):
@@ -180,12 +184,12 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                             continue
                         if ri == ci:
                             vals = sub[cv1].values
-                            ax.hist(vals, bins=min(15, len(vals)//2), color="#6baed6",
+                            ax.hist(vals, bins=min(15, len(vals)//2), color=PALETTE["data"]["secondary"],
                                    edgecolor="white", alpha=0.8)
                             ax.set_title(cv1, fontsize=8)
                         else:
                             ax.scatter(sub[cv1].values, sub[cv2].values, s=8,
-                                      alpha=0.5, color="#2171b5")
+                                      alpha=0.5, color=PALETTE["data"]["primary"])
                             # LOWESS 平滑趋势线
                             if len(sub) >= 20:
                                 try:
@@ -193,13 +197,13 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                                     smoothed = lowess(sub[cv2].values, sub[cv1].values,
                                                      frac=0.3, return_sorted=True)
                                     ax.plot(smoothed[:, 0], smoothed[:, 1], "-",
-                                           color="#d94801", linewidth=1.5, alpha=0.7)
+                                           color=PALETTE["target"]["primary"], linewidth=1.5, alpha=0.7)
                                 except Exception:
                                     pass
                             r_val = corr.loc[cv1, cv2] if cv1 in corr.index and cv2 in corr.columns else 0
                             ax.annotate(f"r={r_val:.2f}", xy=(0.95, 0.05),
                                        xycoords="axes fraction",
-                                       ha="right", fontsize=7, color="#d94801",
+                                       ha="right", fontsize=7, color=PALETTE["target"]["primary"],
                                        bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.7))
                         if ri == n_s - 1:
                             ax.set_xlabel(cv2, fontsize=7)
@@ -281,9 +285,9 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             zero_vals = [v if v is not None else 0 for v in partial_df["零阶相关(r)"]]
             partial_vals = partial_df["偏相关(r_partial)"].values
             ax_p.bar(x - width/2, zero_vals, width, label="零阶相关",
-                    color="#6baed6", alpha=0.8)
+                    color=PALETTE["data"]["secondary"], alpha=0.8)
             ax_p.bar(x + width/2, partial_vals, width, label="偏相关(控制混淆)",
-                    color="#2171b5", alpha=0.9)
+                    color=PALETTE["data"]["primary"], alpha=0.9)
             ax_p.axhline(0, color="black", linewidth=0.5)
             ax_p.set_xticks(x)
             ax_p.set_xticklabels(partial_df["因子"], rotation=45, ha="right", fontsize=9)
@@ -530,7 +534,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         f"{g}\n(n={len(d)})" for g, d in zip(group_names, group_data)
     ], patch_artist=True, widths=0.5)
     for patch in bp['boxes']:
-        patch.set_facecolor("#6baed6")
+        patch.set_facecolor(PALETTE["data"]["secondary"])
     # 叠加散点
     for i, gdata in enumerate(group_data, 1):
         jitter = np.random.uniform(-0.12, 0.12, len(gdata))
@@ -724,7 +728,7 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
     conclusion = "两样本分布存在显著差异" if p < alpha else "未发现分布差异"
     fig = Figure(figsize=(7, 4))
     ax = fig.add_subplot(111)
-    ax.hist(g1, bins=20, alpha=0.6, color="#6baed6", density=True, label=str(groups[0]))
+    ax.hist(g1, bins=20, alpha=0.6, color=PALETTE["data"]["secondary"], density=True, label=str(groups[0]))
     ax.hist(g2, bins=20, alpha=0.6, color="#fd8d3c", density=True, label=str(groups[1]))
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_title(f"{test_name} (D={stat:.3f}, p={p:.4f})", fontsize=11)
@@ -771,7 +775,7 @@ def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
     means = [sub[c].median() for c in measure_cols]
-    ax.bar(range(len(measure_cols)), means, color="#6baed6", edgecolor="white")
+    ax.bar(range(len(measure_cols)), means, color=PALETTE["data"]["secondary"], edgecolor="white")
     ax.set_xticks(range(len(measure_cols)))
     ax.set_xticklabels(measure_cols, rotation=45, ha="right", fontsize=9)
     ax.set_ylabel("中位数", fontsize=10)
@@ -832,13 +836,13 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
         fig = Figure(figsize=(6, 4))
         ax = fig.add_subplot(111)
-        ax.hist(data, bins=min(20, len(data)//2), color="#6baed6", edgecolor="white", alpha=0.8)
+        ax.hist(data, bins=min(20, len(data)//2), color=PALETTE["data"]["secondary"], edgecolor="white", alpha=0.8)
         mean_val = float(data.mean())
-        ax.axvline(mean_val, color="#2171b5", linewidth=2, label=f"μ={mean_val:.3f}")
-        ax.axvline(popmean, color="#d94801", linestyle="--", linewidth=2, label=f"H0={popmean}")
+        ax.axvline(mean_val, color=PALETTE["data"]["primary"], linewidth=2, label=f"μ={mean_val:.3f}")
+        ax.axvline(popmean, color=PALETTE["target"]["primary"], linestyle="--", linewidth=2, label=f"H0={popmean}")
         # 95% CI
         ci = sp_stats.t.interval(0.95, len(data)-1, loc=mean_val, scale=data.sem())
-        ax.axvspan(ci[0], ci[1], alpha=0.1, color="#2171b5", label="95%CI")
+        ax.axvspan(ci[0], ci[1], alpha=0.1, color=PALETTE["data"]["primary"], label="95%CI")
         ax.set_xlabel(req.target_col, fontsize=10)
         ax.set_ylabel("频数", fontsize=10)
         ax.set_title(f"{test_name} (p={p:.4f})", fontsize=11)
@@ -899,11 +903,11 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         fig = Figure(figsize=(6, 4.5))
         ax = fig.add_subplot(111)
         x_pos = np.arange(len(sub))
-        ax.plot(x_pos, sub[col1].values, "o-", markersize=4, color="#6baed6", label=col1)
+        ax.plot(x_pos, sub[col1].values, "o-", markersize=4, color=PALETTE["data"]["secondary"], label=col1)
         ax.plot(x_pos, sub[col2].values, "s-", markersize=4, color="#fd8d3c", label=col2)
         for i in range(len(sub)):
             ax.plot([i, i], [sub[col1].iloc[i], sub[col2].iloc[i]],
-                   "-", color="gray", alpha=0.4, linewidth=0.8)
+                   "-", color=PALETTE["spec"]["tertiary"], alpha=0.4, linewidth=0.8)
         ax.set_xlabel("配对序号", fontsize=10)
         ax.set_ylabel("值", fontsize=10)
         ax.set_title(f"{test_name} (p={p:.4f}, d={d_val:.3f})", fontsize=11)
@@ -952,10 +956,10 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
         fig = Figure(figsize=(6, 4))
         ax = fig.add_subplot(111)
-        ax.hist(data, bins=min(20, n//2), color="#6baed6", edgecolor="white", alpha=0.8)
-        ax.axvline(np.median(data), color="#2171b5", linewidth=2,
+        ax.hist(data, bins=min(20, n//2), color=PALETTE["data"]["secondary"], edgecolor="white", alpha=0.8)
+        ax.axvline(np.median(data), color=PALETTE["data"]["primary"], linewidth=2,
                    label=f"中位数={np.median(data):.3f}")
-        ax.axvline(popmedian, color="#d94801", linestyle="--", linewidth=2,
+        ax.axvline(popmedian, color=PALETTE["target"]["primary"], linestyle="--", linewidth=2,
                    label=f"H0={popmedian}")
         ax.set_xlabel(req.target_col, fontsize=10)
         ax.set_ylabel("频数", fontsize=10)
@@ -1016,7 +1020,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         bp = ax.boxplot(group_data, tick_labels=[str(g) for g in groups],
                        patch_artist=True, widths=0.5)
         for patch in bp["boxes"]:
-            patch.set_facecolor("#6baed6")
+            patch.set_facecolor(PALETTE["data"]["secondary"])
         ax.set_xlabel(group_col, fontsize=10)
         ax.set_ylabel(req.target_col, fontsize=10)
         ax.set_title(f"{test_name} (H={stat:.2f}, p={p:.4f})", fontsize=11)
@@ -1036,6 +1040,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             from itertools import combinations
             all_vals = np.concatenate(group_data)
             ranks = sp_stats.rankdata(all_vals)
+            _, tie_counts = np.unique(ranks, return_counts=True)
             rank_sums = {}
             start = 0
             for g, gd in zip(groups, group_data):
@@ -1047,7 +1052,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             for g1, g2 in combinations(groups, 2):
                 n1, n2 = len(group_data[list(groups).index(g1)]), len(group_data[list(groups).index(g2)])
                 z_num = abs(rank_sums[g1] / n1 - rank_sums[g2] / n2)
-                z_denom = np.sqrt((len(all_vals) * (len(all_vals) + 1) / 12) * (1/n1 + 1/n2))
+                N = len(all_vals)
+                tie_corr = np.sum(tie_counts**3 - tie_counts) / (12 * (N - 1)) if N > 1 else 0
+                z_denom = np.sqrt(((N * (N + 1) / 12) - tie_corr) * (1/n1 + 1/n2))
                 z_stat_dunn = z_num / (z_denom + 1e-10)
                 p_dunn = float(2 * sp_stats.norm.sf(abs(z_stat_dunn)))
                 # Bonferroni 校正
@@ -1117,7 +1124,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         ax = fig.add_subplot(111)
         categories = [f"{neg}→{neg}", f"{neg}→{pos}", f"{pos}→{neg}", f"{pos}→{pos}"]
         counts = [d, c, b, a]
-        ax.bar(categories, counts, color=["#9ecae1", "#2171b5", "#d94801", "#6baed6"],
+        ax.bar(categories, counts, color=[PALETTE["data"]["tertiary"], PALETTE["data"]["primary"], PALETTE["target"]["primary"], PALETTE["data"]["secondary"]],
                edgecolor="white")
         for i, (cat, cnt) in enumerate(zip(categories, counts)):
             ax.text(i, cnt + max(counts)*0.02, str(cnt), ha="center", fontsize=9)
@@ -1155,21 +1162,17 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少4个点)"])
 
-        # MK 统计量: 使用 scipy 的 kendalltau (O(n log n) C 实现)
+        # MK 统计量: 使用 scipy kendalltau (τ-B) 计算 p 值（已正确处理结）
         vals = data.values
-        tau_mk, p_tau = sp_stats.kendalltau(np.arange(n), vals)
-        # S = tau * n * (n-1) / 2（Kendall tau 定义）
-        S = int(round(tau_mk * n * (n - 1) / 2))
-
-        # 方差 + 正态近似 Z（与原始 MK 公式一致）
+        tau_mk, p = sp_stats.kendalltau(np.arange(n), vals)
+        # 从 τ-B 反推 S：τ-B = S / sqrt(n0*(n0-n2)) → 考虑 y 方向结校正
+        n0 = n * (n - 1) / 2
         unique_vals, counts = np.unique(vals, return_counts=True)
-        ties = np.sum(counts * (counts - 1) * (2 * counts + 5))
-        var_S = (n * (n - 1) * (2 * n + 5) - ties) / 18
-        var_S = max(var_S, 1e-10)
-
-        z_mk = (S - np.sign(S)) / np.sqrt(var_S)
-        p = float(2 * sp_stats.norm.sf(abs(z_mk)))
+        n2 = np.sum(counts * (counts - 1) / 2)  # y 方向结校正
+        S = int(round(tau_mk * np.sqrt(max(n0 * (n0 - n2), 1.0))))
         effect_size = float(tau_mk)
+        # 从 p 值反推近似 Z（用于展示）
+        z_mk = float(sp_stats.norm.ppf(1 - p / 2)) * np.sign(S) if p < 1.0 else 0.0
 
         test_name = "Mann-Kendall 趋势检验"
         alpha = req.params.get("alpha", 0.05)
@@ -1178,10 +1181,10 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
         fig = Figure(figsize=(8, 4))
         ax = fig.add_subplot(111)
-        ax.plot(range(n), vals, "o-", markersize=3, color="#2171b5", linewidth=1)
+        ax.plot(range(n), vals, "o-", markersize=3, color=PALETTE["data"]["primary"], linewidth=1)
         # 简单趋势线
         z_poly = np.polyfit(range(n), vals, 1)
-        ax.plot(range(n), np.polyval(z_poly, range(n)), "-", color="#d94801",
+        ax.plot(range(n), np.polyval(z_poly, range(n)), "-", color=PALETTE["target"]["primary"],
                linewidth=2, alpha=0.7, label=f"线性趋势 (τ={tau_mk:.3f})")
         ax.set_xlabel("时间序号", fontsize=10)
         ax.set_ylabel(req.target_col, fontsize=10)
@@ -1292,9 +1295,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         # 配对差值分布图
         fig = Figure(figsize=(7, 4.5))
         ax = fig.add_subplot(111)
-        ax.hist(diff, bins=min(15, n_pairs//2), color="#6baed6", edgecolor="white", alpha=0.8)
-        ax.axvline(0, color="#e31a1c", linestyle="--", linewidth=1.5, label="零差异线")
-        ax.axvline(np.median(diff), color="#2171b5", linewidth=2,
+        ax.hist(diff, bins=min(15, n_pairs//2), color=PALETTE["data"]["secondary"], edgecolor="white", alpha=0.8)
+        ax.axvline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5, label="零差异线")
+        ax.axvline(np.median(diff), color=PALETTE["data"]["primary"], linewidth=2,
                    label=f"中位数差={np.median(diff):.3f}")
         ax.set_xlabel(f"{col1} - {col2}", fontsize=10)
         ax.set_ylabel("频数", fontsize=10)
@@ -1399,7 +1402,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     bp = ax.boxplot([g1, g2], tick_labels=[
         f"{groups[0]}\n(n={n1})", f"{groups[1]}\n(n={n2})"
     ], patch_artist=True, widths=0.5)
-    for patch, color in zip(bp['boxes'], ["#6baed6", "#fd8d3c"]):
+    for patch, color in zip(bp['boxes'], [PALETTE["data"]["secondary"], "#fd8d3c"]):
         patch.set_facecolor(color)
     # 叠加散点
     for i, gdata in enumerate([g1, g2], 1):
@@ -1542,9 +1545,9 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     width = 0.35
     ax = fig_imp.add_subplot(111)
     ax.barh(x + width/2, fi_plot["内置重要性"], width,
-            label="内置重要性 (Gini)", color="#6baed6", alpha=0.8)
+            label="内置重要性 (Gini)", color=PALETTE["data"]["secondary"], alpha=0.8)
     ax.barh(x - width/2, fi_plot["排列重要性"], width,
-            label="排列重要性 (±1σ)", color="#2171b5", alpha=0.9,
+            label="排列重要性 (±1σ)", color=PALETTE["data"]["primary"], alpha=0.9,
             xerr=fi_plot["排列重要性_std"] if "排列重要性_std" in fi_plot.columns else None,
             capsize=2)
     ax.set_yticks(x)
@@ -1616,9 +1619,9 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         vif_plot = vif_data
         fig = Figure(figsize=(max(len(vif_plot)*0.7, 5), 3.5))
         ax = fig.add_subplot(111)
-        colors = ["#d94801" if v > 5 else "#2171b5" for v in vif_plot["VIF"]]
+        colors = [PALETTE["target"]["primary"] if v > 5 else PALETTE["data"]["primary"] for v in vif_plot["VIF"]]
         ax.barh(vif_plot["变量"], vif_plot["VIF"], color=colors)
-        ax.axvline(5, color="red", linestyle="--", linewidth=1, label="VIF=5 阈值")
+        ax.axvline(5, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, label="VIF=5 阈值")
         ax.set_xlabel("VIF", fontsize=9)
         ax.set_title("共线性诊断 — VIF", fontsize=11)
         ax.legend(fontsize=8)
@@ -1707,10 +1710,10 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         fig = Figure(figsize=(7, 4))
         ax = fig.add_subplot(111)
-        ax.plot(n_range, powers, "-", color="#2171b5", linewidth=2)
-        ax.axhline(target_power, color="#d94801", linestyle="--", linewidth=1.2,
+        ax.plot(n_range, powers, "-", color=PALETTE["data"]["primary"], linewidth=2)
+        ax.axhline(target_power, color=PALETTE["target"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"目标功效={target_power}")
-        ax.axvline(required, color="#238b45", linestyle="--", linewidth=1.2,
+        ax.axvline(required, color=PALETTE["center"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"所需N={required}")
         ax.set_xlabel("每组样本量", fontsize=10)
         ax.set_ylabel("统计功效", fontsize=10)
@@ -1950,8 +1953,8 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     methods = ["Wilson Score", "Clopper-Pearson"]
     uppers = [wilson_upper - p_hat, cp_upper - p_hat]
     ax.barh(methods, uppers, left=[wilson_lower, cp_lower], height=0.3,
-            color=["#6baed6", "#2171b5"], edgecolor="white")
-    ax.axvline(p_hat, color="#d94801", linewidth=2, label=f"p_hat={p_hat:.4f}")
+            color=[PALETTE["data"]["secondary"], PALETTE["data"]["primary"]], edgecolor="white")
+    ax.axvline(p_hat, color=PALETTE["target"]["primary"], linewidth=2, label=f"p_hat={p_hat:.4f}")
     ax.set_xlabel("比例", fontsize=10)
     ax.set_title(f"二项比例 95% CI — {req.target_col} (n={n})", fontsize=11)
     ax.legend(fontsize=8)
@@ -2258,18 +2261,18 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(8, 5))
     ax = fig.add_subplot(111)
     ax.hist(data, bins=min(30, int(np.sqrt(n))*2), density=True,
-            color="#6baed6", edgecolor="white", alpha=0.7, label="数据")
+            color=PALETTE["data"]["secondary"], edgecolor="white", alpha=0.7, label="数据")
     x_fit = np.linspace(data.min(), data.max(), 200)
-    ax.plot(x_fit, sp_stats.norm.pdf(x_fit, mu, sigma), "-", color="#2171b5",
+    ax.plot(x_fit, sp_stats.norm.pdf(x_fit, mu, sigma), "-", color=PALETTE["data"]["primary"],
             linewidth=2, label=f"Normal (KS p={ks_norm:.3f})")
     if "Lognormal" in fits:
         ax.plot(x_fit, sp_stats.lognorm.pdf(x_fit, shape, 0, scale), "--",
-                color="#d94801", linewidth=1.5, label=f"Lognormal (KS p={ks_ln:.3f})")
+                color=PALETTE["target"]["primary"], linewidth=1.5, label=f"Lognormal (KS p={ks_ln:.3f})")
     if "Weibull" in fits:
         ax.plot(x_fit, sp_stats.weibull_min.pdf(x_fit, shape_w, 0, scale_w), ":",
-                color="#238b45", linewidth=1.5, label=f"Weibull (KS p={ks_w:.3f})")
-    ax.axvline(data.mean(), color="#2171b5", linestyle="--", linewidth=1, alpha=0.5)
-    ax.axvline(data.median(), color="#d94801", linestyle="--", linewidth=1, alpha=0.5)
+                color=PALETTE["center"]["primary"], linewidth=1.5, label=f"Weibull (KS p={ks_w:.3f})")
+    ax.axvline(data.mean(), color=PALETTE["data"]["primary"], linestyle="--", linewidth=1, alpha=0.5)
+    ax.axvline(data.median(), color=PALETTE["target"]["primary"], linestyle="--", linewidth=1, alpha=0.5)
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_ylabel("密度", fontsize=10)
     ax.set_title(f"分布特征 — {req.target_col} (n={n})", fontsize=11)

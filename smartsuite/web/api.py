@@ -172,13 +172,14 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 "tables": tables,
                 "charts": charts,
             })
-        except Exception:
+        except Exception as e:
             logger.exception("分析目标列 %s 时失败", target)
+            err_name = type(e).__name__
             results.append({
                 "target": target,
                 "status": "error",
-                "summary": "分析失败",
-                "messages": [f"目标列「{target}」分析过程中出现内部错误"],
+                "summary": f"分析失败 ({err_name})",
+                "messages": [f"目标列「{target}」分析异常 ({err_name})，请检查数据格式"],
                 "tables": {},
                 "charts": [],
             })

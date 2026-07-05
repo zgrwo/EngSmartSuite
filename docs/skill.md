@@ -53,6 +53,7 @@
 └── "数据有什么特征？"
     ├── 单变量全貌 → distribution_summary
     ├── 正态性 + 变换建议 → normality_check
+    ├── 异常点(单方法快速) → anomaly_detect (iqr/zscore/grubbs/isoforest)
     ├── 异常点(多方法投票) → outlier_consensus
     ├── 结构性变化 → change_point
     ├── 趋势预测 → trend_forecast

@@ -1,6 +1,9 @@
 """CLI 入口 — 命令行直接运行分析。"""
 import argparse
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 import matplotlib
 
@@ -59,8 +62,9 @@ def main():
             validate_warnings = validate_data(raw, config["target_col"], features)
             for w in validate_warnings:
                 print(f"  ⚠ {w}")
-        except Exception:
-            pass  # 校验失败不阻塞分析
+        except Exception as e:
+            logger.warning("数据校验异常: %s", e)
+            print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
         df, feature_cols, _, imputation_log = preprocess_data(raw, features)
         # 输出数据预处理警告
         for col, n_coerced in imputation_log.items():

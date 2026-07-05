@@ -24,3 +24,18 @@ docs/superpowers/
 
 # 个人配置（不在团队间共享）
 .claude/settings.local.json
+
+# 虚拟环境
+.venv/
+venv/
+
+# 覆盖率报告
+.coverage
+htmlcov/
+
+# 编辑器临时文件
+*.swp
+*.swo
+
+# 构建产物
+*.egg
