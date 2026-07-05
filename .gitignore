@@ -1,41 +1,49 @@
-# Python 编译产物
+# Python
 *.egg-info/
 __pycache__/
 *.pyc
 
-# 缓存 & 工具
+# 缓存
 .pytest_cache/
 .ruff_cache/
-.superpowers/
 
-# 构建输出
+# 构建
 dist/
-
-# 生成的分析输出（运行时产物）
-smartsuite_report.html
-tests/results.pptx
-tests/demo_output/
-
-# 文档中自动生成的截图
-docs/images/
-
-# 历史开发规划文档
-docs/superpowers/
-
-# 个人配置（不在团队间共享）
-.claude/settings.local.json
+*.egg
 
 # 虚拟环境
 .venv/
 venv/
 
-# 覆盖率报告
+# 覆盖率
 .coverage
 htmlcov/
 
-# 编辑器临时文件
+# 编辑器
 *.swp
 *.swo
 
-# 构建产物
-*.egg
+# 个人配置
+.claude/settings.local.json
+
+# 运行时产物
+smartsuite_report.html
+tests/results.pptx
+tests/demo_output/
+
+# 开发者工具（本地保留，不推送）
+docs/contributing/
+scripts/demo_all_analyses.py
+scripts/generate_assembly_data.py
+scripts/generate_chemical_data.py
+scripts/generate_manual_images.py
+scripts/generate_pharma_data.py
+scripts/generate_reliability_data.py
+scripts/generate_warranty_data.py
+scripts/smartsuite_gui.py
+scripts/verify_consistency.py
+scripts/verify_cross_consistency.py
+
+# 历史残留
+.superpowers/
+docs/superpowers/

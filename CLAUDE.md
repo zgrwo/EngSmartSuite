@@ -7,28 +7,110 @@
 
 ## 模块结构
 
+> **本文档是项目结构的唯一信源。** 新增/删除/移动文件时必须同步更新此节。
+> 其他文档（docs/api-reference.md、docs/skill.md、README.md）应引用此处定义，不得重复维护模块清单。
+
+### 源码树
+
 ```
-smartsuite/
-├── core/
-│   ├── contracts.py       # AnalysisRequest / AnalysisResult 数据契约
-│   └── exceptions.py      # 分层异常体系
-├── engine/                # ③ 分析引擎层：纯 Python，零 Excel 依赖
-│   ├── root_cause.py      # 要因分析（13 个函数）
-│   ├── doe_opt.py         # DOE/优化（10 个函数）
-│   ├── spc_monitor.py     # 过程监控（16 个函数）
-│   ├── _palette.py        # 统一可视化配色方案
-│   └── __init__.py        # 全局 matplotlib 配置 + 公开 API 导出
-├── services/              # ② 应用服务层：唯一桥接层
-│   ├── orchestrator.py    # 任务路由 (TASK_REGISTRY, 39 项) + 默认参数注入
-│   ├── reporter.py        # 多格式输出: to_excel / to_pdf / to_ppt / to_html
-│   ├── data_io.py         # Excel 数据读写 + 校验 + 预处理 + 智能推荐
-│   └── audit.py           # 过程综合审计 + 批量分析 + 自动报告
-├── web/                   # Web UI 层 (Flask)
-│   ├── app.py             # Flask 入口 + 任务分组 (TASK_GROUPS) + 标签 (TASK_LABELS)
-│   ├── api.py             # REST API: run_analysis / column_info
-│   ├── templates/         # Jinja2 模板
-│   └── static/            # JS + CSS
-└── cli.py                 # CLI 入口: smartsuite run / list
+smartsuite/                     # 主包
+├── __init__.py                 # 包初始化 + check_optional_dep() 工具
+├── cli.py                      # CLI 入口: smartsuite run / list
+│
+├── core/                       # ① 数据契约层：零依赖，仅 dataclass
+│   ├── __init__.py
+│   ├── contracts.py            # AnalysisRequest / AnalysisResult
+│   └── exceptions.py           # 分层异常体系（3 层）
+│
+├── engine/                     # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
+│   ├── __init__.py             # matplotlib 全局配置 + 字体加载 + 公开 API 导出
+│   ├── _palette.py             # 统一可视化配色方案（PALETTE 字典，~60 色值）
+│   ├── root_cause.py           # 要因分析 13 函数 (correlation, anova, hypothesis_test, ...)
+│   ├── doe_opt.py              # DOE/优化 10 函数 (regression, rsm, grid_search, ...)
+│   └── spc_monitor.py          # 过程监控 16 函数 (xbar_r, cpk, cusum, survival, ...)
+│
+├── services/                   # ② 应用服务层：唯一桥接层，engine 和 web 通过它通信
+│   ├── __init__.py
+│   ├── orchestrator.py         # 任务路由: TASK_REGISTRY (39 项) + DEFAULT_PARAMS + 异常翻译
+│   ├── data_io.py              # Excel 读写 + 校验 + 预处理 (中位数填充/One-Hot) + 智能推荐
+│   ├── reporter.py             # 多格式输出: to_excel / to_pdf / to_ppt / to_html
+│   └── audit.py                # 综合审计: process_audit / batch_analyze / auto_report
+│
+└── web/                        # Web UI 层 (Flask)，依赖 services/，不直接依赖 engine/
+    ├── __init__.py
+    ├── app.py                  # Flask 入口 + TASK_GROUPS (5 组) + TASK_LABELS (39 项)
+    ├── api.py                  # REST API: run_analysis / column_info
+    ├── templates/              # Jinja2 模板
+    │   └── index.html          # 主页面（列定义面板 + 分析按钮区 + 结果展示区）
+    └── static/                 # 静态资源
+        ├── app.js              # 前端逻辑：列标记、参数面板、API 调用、结果渲染
+        └── style.css           # 前端样式
+```
+
+### 测试树
+
+```
+tests/
+├── conftest.py                 # 共享 fixtures (sample_data, sample_multigroup_data, ...)
+├── test_integration.py         # 通用集成测试
+├── test_integration_chemical.py    # 化工场景集成测试
+├── test_integration_reliability.py # 可靠性场景集成测试
+├── test_integration_warranty.py    # 保修场景集成测试
+├── test_master_integration.py      # 39 方法全量集成测试
+├── test_web_e2e.py             # Web UI 端到端测试
+├── test_workflows.py           # 工作流串联测试
+├── verify_all_modules.py       # 模块导入 + 基本调用验证
+│
+├── test_engine/                # 引擎层单元测试
+│   ├── test_root_cause.py      # 要因分析测试
+│   ├── test_doe_opt.py         # DOE/优化测试
+│   ├── test_spc_monitor.py     # SPC 监控测试
+│   ├── test_correctness.py     # 数值正确性断言（10/39 方法覆盖）
+│   ├── test_edge_cases.py      # 边界情况测试
+│   └── test_new_functions.py   # 新函数验证
+│
+└── test_services/              # 服务层单元测试
+    ├── test_orchestrator.py    # 编排路由测试
+    └── test_reporter.py        # 报告生成测试
+```
+
+### 模板与脚本
+
+```
+templates/                      # YAML 分析模板 (42 个，39 方法 + 3 变体)
+│                               # CLI 调用: smartsuite run --template <name>
+├── example_correlation.yaml    # 每个 task key 对应一个模板
+├── example_anova.yaml
+├── ...                         # (共 42 个 .yaml)
+└── example_full_suite.yaml     # 多步骤链式分析教程模板
+
+scripts/                        # 开发辅助脚本（非 pip 安装）
+├── README.md                   # 脚本目录说明
+├── generate_test_data.py       # 通用测试数据生成 (1000行×44列)
+├── generate_chemical_data.py   # 化工场景数据
+├── generate_assembly_data.py   # 装配场景数据
+├── generate_pharma_data.py     # 制药场景数据
+├── generate_reliability_data.py    # 可靠性场景数据
+├── generate_warranty_data.py       # 保修场景数据
+├── generate_manual_images.py       # 用户手册配图生成
+├── demo_all_analyses.py            # 39 方法集成演示
+├── verify_consistency.py           # 文档与代码一致性校验
+├── verify_cross_consistency.py     # Web/CLI 交叉验证
+└── smartsuite_gui.py               # 桌面 GUI 启动器（实验性）
+```
+
+### 文档与 CI
+
+```
+docs/                           # 项目文档
+├── user-manual.md              # 用户操作手册 (964 行)
+├── api-reference.md            # API 参考 (39 函数完整签名)
+├── skill.md                    # AI Agent 决策知识库
+├── adr/                        # 架构决策记录 (2 项)
+├── contributing/               # 贡献指南 (含代码审查模板)
+└── images/                     # 用户手册配图 (38 PNG)
+
+.github/workflows/ci.yml        # GitHub Actions: ruff + pytest (3.10/3.11/3.12)
 ```
 
 ## 架构约束（硬性规则）
@@ -83,6 +165,8 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 7. 创建 YAML 模板到 `templates/`
 8. 添加测试：至少 1 个集成测试 + 1 个正确性测试
 9. 更新 `docs/api-reference.md`
+10. 更新 `docs/skill.md` 决策树（如引入新的分析场景）
+11. 更新 `docs/user-manual.md`（如为面向用户的新方法）
 
 ## 常见陷阱
 
@@ -95,7 +179,9 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 ## 架构决策
 
-见 `docs/adr/`。当前决策：ADR-001：三层分离架构。
+见 `docs/adr/`。当前决策：
+- ADR-001：三层分离架构（2026-07-05 修订：Excel 层已移除）
+- ADR-002：Web UI 替换 Excel 交互层（2026-07-04）
 
 ## 常用命令
 
