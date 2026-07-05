@@ -748,7 +748,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             continue
 
         if len(unique_vals) == 2:
-            # 二水平因子：直接编码 -1/+1
+            # 二水平因子：直接编码 -1/+1（效应 = 全范围差异）
             _lo, hi = sorted(unique_vals)[0], sorted(unique_vals)[-1]
             coded = np.where(col_vals == hi, 1, -1)
         else:
@@ -759,7 +759,9 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         X = np.column_stack([np.ones(len(coded)), coded])
         try:
             beta, residuals, rank, sv = np.linalg.lstsq(X, y, rcond=None)
-            # 连续因子: 效应 = 2*标准化系数 (对应 ±1σ 范围, 与二水平因子的 -1/+1 编码一致)
+            # 二水平因子: 效应 = 2*β (对应 -1→+1 的全部范围变化)
+            # 连续因子: 效应 = 2*β (对应 ±1σ 的变化，约覆盖 68% 数据)
+            # 注: 两种效应量的物理含义不同（全范围 vs 2σ），Pareto 图中并排展示时需注意解读差异
             effect = float(2 * beta[1])
             # t 检验
             resid_std = float(np.std(y - X @ beta, ddof=2)) if len(y) > 2 else 1.0

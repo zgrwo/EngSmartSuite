@@ -47,24 +47,35 @@ document.getElementById('file-input').addEventListener('change', async e => {
   }
 });
 
-// Column rendering
+// Column rendering — uses data-* attributes + addEventListener (no inline handlers)
 function renderCols() {
   document.getElementById('col-list').innerHTML = columnData.map((c, i) => {
     const safeName = escHtml(c.name);
-    const jsName = c.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     return `
     <div class="col-row">
       <span class="col-name" title="${safeName} (${c.dtype}, ${c.nunique} unique, ${c.missing} NA)">${safeName}</span>
-      <input type="checkbox" id="cat${i}" ${selectedCat.has(c.name)?'checked':''}
-        onchange="toggle('${jsName}','cat',this.checked)">
+      <input type="checkbox" id="cat${i}" data-col="${safeName}" data-role="cat"
+        ${selectedCat.has(c.name)?'checked':''}>
       <span class="tag cat">类</span>
-      <input type="checkbox" id="x${i}" ${selectedX.has(c.name)?'checked':''}
-        onchange="toggle('${jsName}','x',this.checked)">
+      <input type="checkbox" id="x${i}" data-col="${safeName}" data-role="x"
+        ${selectedX.has(c.name)?'checked':''}>
       <span class="tag x">X</span>
-      <input type="checkbox" id="y${i}" ${selectedY.has(c.name)?'checked':''}
-        onchange="toggle('${jsName}','y',this.checked)">
+      <input type="checkbox" id="y${i}" data-col="${safeName}" data-role="y"
+        ${selectedY.has(c.name)?'checked':''}>
       <span class="tag y">Y</span>
     </div>`}).join('');
+
+  // Bind event listeners — avoids XSS via inline handlers
+  columnData.forEach((c, i) => {
+    ['cat', 'x', 'y'].forEach(role => {
+      const cb = document.getElementById(role + i);
+      if (cb) {
+        cb.addEventListener('change', function() {
+          toggle(c.name, role, this.checked);
+        });
+      }
+    });
+  });
   updateStatus();
 }
 
@@ -348,6 +359,11 @@ async function executeRequest(task) {
         categoricals: [...selectedCat], params: getParams(task) })
     });
     const d = await r.json();
+    if (!r.ok) {
+      document.getElementById('results').innerHTML =
+        `<div class="empty-hint" style="color:#c62828">${escHtml(d.error || '分析请求失败')}</div>`;
+      return;
+    }
     renderResults(d.results || []);
   } catch(e) {
     document.getElementById('results').innerHTML =
@@ -415,11 +431,11 @@ function renderResults(results) {
         <table><thead><tr><th></th>${hdr}</tr></thead><tbody>${rows}</tbody></table></div>`;
     }
     let cHtml = (r.charts||[]).map(b => `<div class="chart-wrap"><img src="data:image/png;base64,${b}"></div>`).join('');
-    let mHtml = r.messages?.length ? r.messages.map(m => `<div class="messages">${m}</div>`).join('') : '';
+    let mHtml = r.messages?.length ? r.messages.map(m => `<div class="messages">${escHtml(String(m))}</div>`).join('') : '';
 
     html += `<div class="result-card"><div class="card-header">
-      <span>${r.target}</span><span class="status-badge ${sc}">${r.status==='ok'?'OK':'ERR'}</span></div>
-      <div class="card-body"><div class="summary">${r.summary}</div>${mHtml}${cHtml}${tHtml}</div></div>`;
+      <span>${escHtml(String(r.target))}</span><span class="status-badge ${sc}">${r.status==='ok'?'OK':'ERR'}</span></div>
+      <div class="card-body"><div class="summary">${escHtml(String(r.summary))}</div>${mHtml}${cHtml}${tHtml}</div></div>`;
   });
 
   document.getElementById('results').innerHTML = html;

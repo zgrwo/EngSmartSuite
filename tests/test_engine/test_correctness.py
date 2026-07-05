@@ -279,3 +279,103 @@ def test_attribute_chart_types():
     r = attribute_chart(req)
     assert r.status == "ok"
     assert r.metadata["chart_type"] == "u"
+
+    # np-chart: 不良数（固定样本量）
+    df_np = pd.DataFrame({
+        "batch": np.repeat(range(1, 21), 50),
+        "defect": np.random.binomial(1, 0.05, 1000),
+    })
+    req = AnalysisRequest(task="spc_attribute", data=df_np, target_col="defect",
+                          params={"chart_type": "np", "subgroup_col": "batch"})
+    r = attribute_chart(req)
+    assert r.status == "ok"
+    assert r.metadata["chart_type"] == "np"
+    # np-chart 应在合理范围内
+    assert 1 <= r.metadata["n_subgroups"] <= 30
+
+
+# ── SPC X-bar/R 控制图正确性 ──
+
+def test_xbar_r_known_limits():
+    """X-bar/R: 已知 μ=10, σ=1 的子组应产生接近的控制限。"""
+    from smartsuite.engine.spc_monitor import xbar_r_chart
+    np.random.seed(42)
+    # 10 个子组，每个 5 个样本，μ=10, σ=1
+    data = []
+    for sg in range(1, 11):
+        for _ in range(5):
+            data.append({"子组": sg, "val": np.random.normal(10, 1)})
+    df = pd.DataFrame(data)
+    req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
+                          params={"subgroup_col": "子组"})
+    r = xbar_r_chart(req)
+    assert r.status == "ok"
+    # 控制限应在合理范围 (CL≈10, UCL>10, LCL<10)
+    cl = r.metadata["xbar_mean"]
+    ucl = r.metadata["ucl_x"]
+    lcl = r.metadata["lcl_x"]
+    assert 9.0 < cl < 11.0, f"X-bar CL={cl:.2f}, expected ~10"
+    assert ucl > cl, f"UCL={ucl:.3f} should be > CL={cl:.3f}"
+    assert lcl < cl, f"LCL={lcl:.3f} should be < CL={cl:.3f}"
+    # 子组大小 n=5 应匹配
+    assert r.metadata["subgroup_size"] == 5
+
+
+# ── 生存分析正确性 ──
+
+def test_survival_km_known_median():
+    """Kaplan-Meier: 已知指数分布 (λ=0.1) 的寿命数据，中位生存 ≈ ln(2)/λ ≈ 6.93。"""
+    from smartsuite.engine.spc_monitor import survival_analysis
+    np.random.seed(42)
+    n = 200
+    times = np.random.exponential(10, n)  # 均值=10, 中位≈6.93
+    events = np.ones(n)  # 全部失效，无删失
+    df = pd.DataFrame({"time": times, "event": events})
+    req = AnalysisRequest(task="survival_analysis", data=df, target_col="time",
+                          feature_cols=["event"])
+    r = survival_analysis(req)
+    assert r.status == "ok"
+    median = r.metadata["median_survival"]
+    assert median is not None, "应能计算中位生存时间"
+    # 指数分布 μ=10, 中位 ≈ 6.93, 允许 ±3
+    assert 4 < median < 10, f"中位生存={median:.1f}, expected ~7"
+
+
+# ── CUSUM 正确性 ──
+
+def test_cusum_no_shift():
+    """CUSUM: 稳定过程不应产生违规。"""
+    from smartsuite.engine.spc_monitor import cusum_chart
+    np.random.seed(42)
+    df = pd.DataFrame({"val": np.random.normal(10, 1, 100)})
+    req = AnalysisRequest(task="spc_cusum", data=df, target_col="val",
+                          params={"k": 0.5, "h": 5.0})
+    r = cusum_chart(req)
+    assert r.status == "ok"
+    # 稳定过程的 CUSUM 不应触发违规（h=5 是宽松阈值）
+    violations = r.metadata.get("violations", [])
+    n_v = len(violations) if isinstance(violations, (list, dict)) else 0
+    assert n_v <= 5, f"稳定过程 CUSUM 违规过多: {n_v}"
+
+
+# ── 列联表 / 卡方正确性 ──
+
+def test_contingency_known_chi2():
+    """列联表: 已知关联的数据应产生显著的卡方 p 值。"""
+    from smartsuite.engine.root_cause import contingency_analysis
+    np.random.seed(42)
+    # 构造强关联的 2x2 表: A→X, B→Y
+    df = pd.DataFrame({
+        "factor": ["A"] * 80 + ["A"] * 20 + ["B"] * 30 + ["B"] * 70,
+        "outcome": ["X"] * 80 + ["Y"] * 20 + ["X"] * 30 + ["Y"] * 70,
+    })
+    req = AnalysisRequest(task="contingency", data=df, target_col="factor",
+                          feature_cols=["outcome"])
+    r = contingency_analysis(req)
+    assert r.status == "ok"
+    p_val = r.metadata["p_value"]
+    # 强关联应显著
+    assert p_val < 0.001, f"Expected p<0.001 for strong association, got p={p_val:.4f}"
+    # Cramér's V 应在 0.2-0.6
+    if "effect" in r.metadata and r.metadata["effect"] is not None:
+        assert 0.2 < r.metadata["effect"] < 0.6, f"Cramér's V={r.metadata['effect']:.3f}"

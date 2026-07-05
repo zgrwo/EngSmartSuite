@@ -89,19 +89,11 @@ TASKS_TO_TEST = [
 ]
 
 
-@pytest.mark.parametrize("task,target,features", [
-    (t, tg, f) for t, tg, f, *_ in TASKS_TO_TEST
+@pytest.mark.parametrize("task,target,features,params", [
+    (t[0], t[1], t[2], t[3] if len(t) > 3 else {}) for t in TASKS_TO_TEST
 ])
-def test_all_registered_tasks(df, task, target, features):
-    """参数化测试: 每个注册任务至少运行一次。"""
-    # Find the matching params for this task+target+features combo
-    params = {}
-    for t_entry in TASKS_TO_TEST:
-        if t_entry[0] == task and t_entry[1] == target and t_entry[2] == features:
-            if len(t_entry) > 3:
-                params = t_entry[3]
-            break
-
+def test_all_registered_tasks(df, task, target, features, params):
+    """参数化测试: 每个注册任务 + 参数变体至少运行一次。"""
     req = AnalysisRequest(task=task, data=df, target_col=target,
                           feature_cols=features, params=params)
     result = orchestrate(req)
@@ -123,7 +115,7 @@ def test_all_registered_tasks(df, task, target, features):
 
 def test_all_tasks_registered_count():
     """验证任务注册表完整性。"""
-    assert len(TASK_REGISTRY) >= 39
+    assert len(TASK_REGISTRY) == 39, f"Expected 39 tasks, got {len(TASK_REGISTRY)}"
     required = ["correlation", "anova", "regression", "hypothesis_test",
                "decision_tree", "vif", "normality_check", "distribution_summary"]
     for t in required:
@@ -135,10 +127,7 @@ def test_registry_label_group_consistency():
 
     新增任务时如果忘记同步更新 web/app.py 的标签或分组，此测试会立即发现。
     """
-    try:
-        from smartsuite.web.app import TASK_GROUPS, TASK_LABELS
-    except ImportError:
-        pytest.skip("Flask 未安装，跳过 Web 注册表一致性检查")
+    from smartsuite.services.orchestrator import TASK_GROUPS, TASK_LABELS
 
     registry_keys = set(TASK_REGISTRY.keys())
     label_keys = set(TASK_LABELS.keys())

@@ -10,7 +10,7 @@ import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import preprocess_data, validate_data
-from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
+from smartsuite.services.orchestrator import TASK_LABELS, TASK_REGISTRY, orchestrate
 
 
 def main():
@@ -22,7 +22,7 @@ def main():
     run_parser.add_argument("template", help="YAML 分析模板路径")
     run_parser.add_argument("--input", "-i", required=True,
                              help="输入 Excel 文件路径")
-    run_parser.add_argument("--sheet", "-s", default=0,
+    run_parser.add_argument("--sheet", "-s", default="0",
                              help="Sheet 名或索引 (默认: 第一个)")
 
     subparsers.add_parser("list", help="列出支持的分析方法")
@@ -32,12 +32,20 @@ def main():
     if args.command == "list":
         print("支持的分析方法:")
         for name in sorted(TASK_REGISTRY.keys()):
-            print(f"  - {name}")
+            label = TASK_LABELS.get(name, "")
+            print(f"  - {name}: {label}")
         return
 
     if args.command == "run":
-        with open(args.template, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        try:
+            with open(args.template, encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+        except FileNotFoundError:
+            print(f"错误: 找不到模板文件「{args.template}」", file=sys.stderr)
+            sys.exit(1)
+        except yaml.YAMLError as e:
+            print(f"错误: YAML 模板解析失败: {e}", file=sys.stderr)
+            sys.exit(1)
 
         # 验证必需字段
         required = ["task", "target_col"]
@@ -65,7 +73,7 @@ def main():
         # 输出数据预处理警告
         for col, n_coerced in imputation_log.items():
             print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
-        for col, extra_cats in unknown_cat_warnings:
+        for col, extra_cats, _n_affected in unknown_cat_warnings:
             print(f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。")
         req = AnalysisRequest(
             task=config["task"], data=df,

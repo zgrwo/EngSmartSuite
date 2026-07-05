@@ -1,4 +1,6 @@
 import logging
+from math import lgamma
+from math import sqrt as _math_sqrt
 
 import numpy as np
 import pandas as pd
@@ -121,15 +123,15 @@ def _we_rules_r(values, cl, ucl, lcl=0):
             violations.setdefault("R2: 连续7点<CL", []).extend(range(i, i+7))
             break
 
-    # Rule R3: 连续 7 点上升 (变异性恶化)
+    # Rule R3: 连续 7 点上升 (变异性恶化) — 严格单调，与 X-bar Rule 5 一致
     for i in range(n - 6):
-        if all(vals[i+k+1] >= vals[i+k] for k in range(6)):
+        if all(vals[i+k+1] > vals[i+k] for k in range(6)):
             violations.setdefault("R3: 连续7点上升 (变异增大)", []).extend(range(i, i+7))
             break
 
     # Rule R4: 连续 7 点下降 (变异性改善)
     for i in range(n - 6):
-        if all(vals[i+k+1] <= vals[i+k] for k in range(6)):
+        if all(vals[i+k+1] < vals[i+k] for k in range(6)):
             violations.setdefault("R4: 连续7点下降 (变异减小)", []).extend(range(i, i+7))
             break
 
@@ -379,9 +381,14 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         ucl_const = None  # 非恒定
 
     elif chart_type == "np":
-        # np-chart: 不良数 (固定样本量)
+        # np-chart: 不良数（要求等样本量）
         stat = counts
         stat_name = "不良数(np)"
+        if sizes.nunique() > 1:
+            logger.warning(
+                "np-chart 要求等样本量，当前子组大小范围为 %.0f-%.0f，将使用均值 %.1f 近似计算控制限",
+                sizes.min(), sizes.max(), sizes.mean()
+            )
         n_bar = float(sizes.mean())
         np_bar = float(counts.mean())
         p_bar = np_bar / n_bar
@@ -1233,13 +1240,21 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     x_bar_diff = float(np.max([s["X-bar"] for s in op_stats]) -
                        np.min([s["X-bar"] for s in op_stats]))
 
-    # d2 constants for subgroup size r
+    # d2 constants for subgroup size r (ASTM E2282 / AIAG MSA standard table)
     d2_table = {2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326, 6: 2.534,
                 7: 2.704, 8: 2.847, 9: 2.970, 10: 3.078,
                 11: 3.173, 12: 3.258, 13: 3.336, 14: 3.407, 15: 3.472,
                 16: 3.532, 17: 3.588, 18: 3.640, 19: 3.689, 20: 3.735,
-                21: 3.778, 22: 3.819, 23: 3.858, 24: 3.895, 25: 3.931}
-    d2_r = d2_table.get(r, 1.128)
+                21: 3.778, 22: 3.819, 23: 3.858, 24: 3.895, 25: 3.931,
+                26: 3.964, 27: 3.997, 28: 4.027, 29: 4.056, 30: 4.084}
+    d2_r = d2_table.get(r)
+    if d2_r is None:
+        # r > 30: 使用理论近似公式 d2 ≈ √2 · Γ((n+1)/2) / Γ(n/2)
+        d2_r = float(_math_sqrt(2) * np.exp(lgamma((r + 1) / 2) - lgamma(r / 2)))
+        logger.warning(
+            "Gage R&R 重复次数 r=%d 超出标准表范围 (2-30)，"
+            "d2 使用理论近似 %.3f", r, d2_r
+        )
 
     sigma_mult = req.params.get("sigma_multiplier", 5.15)
 
@@ -1958,6 +1973,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 单变量异常检测 (IQR / Z-score) ──
     data = req.data[req.target_col].dropna()
+    data_std = data.std(ddof=1)  # 统一计算，供所有方法和可视化使用
     if len(data) < 5:
         return AnalysisResult(
             task="anomaly_detect",
@@ -2004,7 +2020,6 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             )
         mask = (data < Q1 - 1.5 * IQR) | (data > Q3 + 1.5 * IQR)
     else:
-        data_std = data.std()
         if data_std < 1e-10:
             return AnalysisResult(
                 task="anomaly_detect",
@@ -2033,10 +2048,10 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             ax.axhline(Q3 + 1.5 * IQR, color=PALETTE["spec"]["secondary"], linestyle="--",
                       linewidth=1, alpha=0.6, label=f"上界={Q3+1.5*IQR:.3f}")
         else:
-            ax.axhline(data.mean() + 3*data.std(), color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"上界={data.mean()+3*data.std():.3f}")
-            ax.axhline(data.mean() - 3*data.std(), color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"下界={data.mean()-3*data.std():.3f}")
+            ax.axhline(data.mean() + 3*data_std, color=PALETTE["spec"]["secondary"], linestyle="--",
+                      linewidth=1, alpha=0.6, label=f"上界={data.mean()+3*data_std:.3f}")
+            ax.axhline(data.mean() - 3*data_std, color=PALETTE["spec"]["secondary"], linestyle="--",
+                      linewidth=1, alpha=0.6, label=f"下界={data.mean()-3*data_std:.3f}")
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
     ax.set_title(f"异常检测 — {req.target_col} (方法: {method})", fontsize=11)

@@ -25,7 +25,7 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
-from smartsuite.services.orchestrator import TASK_REGISTRY
+from smartsuite.services.orchestrator import TASK_GROUPS, TASK_LABELS, TASK_REGISTRY
 from smartsuite.web.api import column_info, run_analysis
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,32 @@ def _cleanup_uploads() -> None:
 
 
 atexit.register(_cleanup_uploads)
+
+# ── 定期清理过期临时文件（每 N 次请求触发一次）──
+_request_counter = 0
+_CLEANUP_INTERVAL = 50  # 每 50 次上传/分析请求尝试清理
+
+
+def _periodic_cleanup() -> None:
+    """清理不存在对应 session 的过期临时文件。"""
+    global _request_counter
+    _request_counter += 1
+    if _request_counter % _CLEANUP_INTERVAL != 0:
+        return
+    with _upload_lock:
+        for path in list(_UPLOAD_FILES):
+            try:
+                # 检查文件最后修改时间，超过 24h 的清理
+                if os.path.exists(path):
+                    mtime = os.path.getmtime(path)
+                    import time as _time
+                    if _time.time() - mtime > 86400:  # 24 hours
+                        os.unlink(path)
+                        _UPLOAD_FILES.remove(path)
+                else:
+                    _UPLOAD_FILES.remove(path)
+            except OSError:
+                pass
 
 # ── CSRF 防护 ──
 _CSRF_TOKEN_KEY = "_csrf_token"
@@ -82,60 +108,28 @@ else:
     try:
         _secret_file.parent.mkdir(parents=True, exist_ok=True)
         if _secret_file.exists():
-            app.config["SECRET_KEY"] = _secret_file.read_text().strip()
+            _key = _secret_file.read_text().strip()
+            if not _key:
+                _key = secrets.token_hex(32)
+                _secret_file.write_text(_key)
+            app.config["SECRET_KEY"] = _key
         else:
             _fallback_key = secrets.token_hex(32)
             _secret_file.write_text(_fallback_key)
             app.config["SECRET_KEY"] = _fallback_key
+        # 限制密钥文件权限（仅 owner 可读写）
+        try:
+            os.chmod(_secret_file, 0o600)
+        except OSError:
+            pass
     except OSError:
         _fallback_key = secrets.token_hex(32)
         app.config["SECRET_KEY"] = _fallback_key
         logger.warning("无法持久化密钥到 %s，使用临时密钥", _secret_file)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
-
-TASK_LABELS = {
-    # 要因分析
-    "correlation": "相关性分析", "anova": "ANOVA方差分析",
-    "hypothesis_test": "假设检验", "decision_tree": "决策树重要性",
-    "vif": "VIF共线性", "contingency": "列联表分析",
-    "proportion_ci": "比例置信区间", "variance_test": "方差齐性检验",
-    "cohens_kappa": "评定者一致性", "cronbach_alpha": "信度分析(Cronbach α)",
-    "distribution_summary": "分布特征摘要", "normality_check": "正态性评估",
-    "power_analysis": "统计功效分析",
-    # DOE/优化
-    "regression": "回归建模(OLS)", "response_surface": "响应面分析",
-    "grid_search": "网格搜索寻优", "multi_objective": "多目标优化",
-    "doe_analysis": "DOE效应估计", "roc_analysis": "ROC/AUC分析",
-    "logistic_regression": "Logistic回归", "lasso_regression": "Lasso回归",
-    "robust_regression": "稳健回归(Huber)", "quantile_regression": "分位数回归",
-    # 过程监控
-    "spc_xbar": "X-bar/R控制图", "spc_attribute": "计数型控制图(p/np/c/u)",
-    "spc_cusum": "CUSUM控制图", "spc_ewma": "EWMA控制图",
-    "process_capability": "过程能力Cp/Cpk", "trend_forecast": "趋势预测",
-    "anomaly_detect": "异常检测", "change_point": "变点检测",
-    "outlier_consensus": "异常共识(3方法投票)",
-    "bootstrap_ci": "Bootstrap置信区间", "median_ci": "中位数置信区间",
-    "gage_rr": "量具R&R分析", "tolerance_interval": "统计容许区间",
-    "survival_analysis": "生存分析(Kaplan-Meier)",
-    "box_chart": "分组箱线图",
-    "spc_nonparametric": "非参数控制图(分布拟合法)",
-}
-
-TASK_GROUPS = {
-    "要因筛选": ["correlation", "anova", "hypothesis_test", "decision_tree",
-                 "vif", "contingency", "proportion_ci", "variance_test"],
-    "信度诊断": ["cohens_kappa", "cronbach_alpha", "distribution_summary",
-                 "normality_check", "power_analysis"],
-    "建模优化": ["regression", "response_surface", "grid_search", "multi_objective",
-                 "doe_analysis", "roc_analysis", "logistic_regression",
-                 "lasso_regression", "robust_regression", "quantile_regression"],
-    "过程监控": ["spc_xbar", "spc_attribute", "spc_cusum", "spc_ewma",
-                 "process_capability", "trend_forecast", "anomaly_detect",
-                 "change_point", "outlier_consensus", "box_chart",
-                 "spc_nonparametric"],
-    "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval",
-                 "survival_analysis"],
-}
+# Session cookie 安全标志
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 GROUP_COLORS = {"要因筛选": "#e8f5e9", "信度诊断": "#fff8e1",
                 "建模优化": "#e3f2fd", "过程监控": "#fce4ec",
@@ -165,6 +159,7 @@ def csrf_token():
 @app.route("/api/upload", methods=["POST"])
 @require_csrf
 def upload():
+    _periodic_cleanup()
     f = request.files.get("file")
     if not f:
         return jsonify({"error": "请选择文件"}), 400
@@ -198,9 +193,27 @@ def upload():
     if df.empty:
         return jsonify({"error": "文件为空或无法读取数据"}), 400
 
-    # 清理旧上传文件并写入新文件（线程安全）
+    # 大文件内存警告（当前实现将整个文件读入内存）
+    _mem_mb = f_bytes.__sizeof__() / (1024 * 1024)
+    if _mem_mb > 20:
+        logger.warning("上传文件较大 (%.0f MB)，内存占用可能较高", _mem_mb)
+
+    # 先写新文件再清理旧文件（避免写失败时丢失已有数据）
     with _upload_lock:
+        tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+        tmp.close()
+        try:
+            df.to_parquet(tmp.name)
+        except Exception:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return jsonify({"error": "数据保存失败，请重试"}), 500
+        # 新文件写入成功，更新 session 并清理旧文件
         old_path = session.get("_data_path")
+        session["_data_path"] = tmp.name
+        _UPLOAD_FILES.append(tmp.name)
         if old_path and os.path.exists(old_path):
             try:
                 os.unlink(old_path)
@@ -208,17 +221,13 @@ def upload():
                     _UPLOAD_FILES.remove(old_path)
             except OSError:
                 pass
-        tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-        tmp.close()
-        df.to_parquet(tmp.name)
-        session["_data_path"] = tmp.name
-        _UPLOAD_FILES.append(tmp.name)
     return jsonify({"columns": column_info(df), "shape": list(df.shape)})
 
 
 @app.route("/api/analyze", methods=["POST"])
 @require_csrf
 def analyze():
+    _periodic_cleanup()
     try:
         body = request.get_json()
         task = body.get("task")
@@ -228,10 +237,14 @@ def analyze():
         params = body.get("params", {})
         if not task or not targets:
             return jsonify({"error": "缺少分析任务或目标列"}), 400
-        if not isinstance(targets, list):
-            return jsonify({"error": "targets 参数必须是列表"}), 400
-        if not isinstance(features, list):
-            return jsonify({"error": "features 参数必须是列表"}), 400
+        if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+            return jsonify({"error": "targets 必须是字符串列表"}), 400
+        if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
+            return jsonify({"error": "features 必须是字符串列表"}), 400
+        if not isinstance(params, dict):
+            return jsonify({"error": "params 必须是字典"}), 400
+        if task not in TASK_REGISTRY:
+            return jsonify({"error": f"未知的分析任务「{task}」，支持: {list(TASK_REGISTRY.keys())}"}), 400
         path = session.get("_data_path")
         if not path or not os.path.exists(path):
             return jsonify({"error": "请先上传数据文件"}), 400
@@ -250,6 +263,11 @@ def list_tasks():
 
 
 def main(host="127.0.0.1", port=5050, debug=False):
+    if debug and host != "127.0.0.1":
+        print("⚠️  警告: debug 模式仅在 localhost 下安全，已强制绑定 127.0.0.1")
+        host = "127.0.0.1"
+    if debug:
+        print("⚠️  警告: debug 模式启用了 Werkzeug 交互调试器，请勿在公网环境使用！")
     logger.info("SmartSuite Web UI 启动: http://%s:%s", host, port)
     print(f"\n  SmartSuite Web UI\n  地址: http://{host}:{port}\n  按 Ctrl+C 停止\n")
     app.run(host=host, port=port, debug=debug)

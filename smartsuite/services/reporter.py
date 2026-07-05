@@ -34,16 +34,16 @@ def to_excel(result: AnalysisResult, workbook,
             r += len(df) + 2
         for i, fig in enumerate(result.figures):
             buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            fig.savefig(buf, format='png', dpi=_CHART_DPI, bbox_inches='tight')
             buf.seek(0)
             pic = workbook.sheets.add(f"图表_{i + 1}", after=workbook.sheets[-1])
             pic.pictures.add(buf, left=pic.range("A1").left,
                              top=pic.range("A1").top, width=600, height=450)
             plt.close(fig)
         return sheet_name
-    except Exception:
+    except Exception as e:
         logger.exception("Excel 输出失败")
-        raise OutputError("Excel 输出失败，请检查工作簿是否可写")
+        raise OutputError("Excel 输出失败，请检查工作簿是否可写") from e
 
 
 def to_pdf(result: AnalysisResult, output_path: str) -> str:
@@ -91,9 +91,9 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
 
         c.save()
         return output_path
-    except Exception:
+    except Exception as e:
         logger.exception("PDF 输出失败")
-        raise OutputError("PDF 输出失败，请检查输出路径是否可写")
+        raise OutputError("PDF 输出失败，请检查输出路径是否可写") from e
 
 
 def to_ppt(result: AnalysisResult, output_path: str,
@@ -117,7 +117,7 @@ def to_ppt(result: AnalysisResult, output_path: str,
 
         for fig in result.figures:
             buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            fig.savefig(buf, format='png', dpi=_CHART_DPI, bbox_inches='tight')
             buf.seek(0)
             slide = prs.slides.add_slide(prs.slide_layouts[6])
             slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5),
@@ -126,9 +126,9 @@ def to_ppt(result: AnalysisResult, output_path: str,
 
         prs.save(output_path)
         return output_path
-    except Exception:
+    except Exception as e:
         logger.exception("PPT 输出失败")
-        raise OutputError("PPT 输出失败，请检查输出路径是否可写")
+        raise OutputError("PPT 输出失败，请检查输出路径是否可写") from e
 
 
 def to_html(result: AnalysisResult, output_path: str) -> str:

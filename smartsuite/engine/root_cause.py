@@ -947,7 +947,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = f"单样本 Wilcoxon 检验 (H0: 中位数={popmedian})"
         # 效应量: 匹配对秩相关 r = Z / sqrt(N)
         n = len(data)
-        z_stat_abs = abs(sp_stats.norm.ppf(max(p, 1e-15) / 2))
+        z_stat_abs = abs(sp_stats.norm.ppf(max(p, 1e-300) / 2))
         r_effect = float(z_stat_abs / np.sqrt(n))
         effect_size = r_effect
         effect_name = "秩相关 r"
@@ -1226,18 +1226,18 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         group_data_ordered = [sub_sorted[sub_sorted["_order"] == i][req.target_col].values
                              for i in range(len(groups))]
 
-        # JT 统计量: 所有 (i<j) 对中，组i值 < 组j值的计数 - 组i值 > 组j值的计数
+        # JT 统计量: 标准 Jonckheere-Terpstra = Σ_{i<j} U_{ij}
+        # U_{ij} = #{(x∈gi, y∈gj) | x < y}（Mann-Whitney 统计量）
         # 使用向量化 searchsorted（O(n log n)），与 _cliffs_delta 相同算法
         JT = 0
         for i in range(len(groups)):
             for j in range(i + 1, len(groups)):
                 gi, gj = group_data_ordered[i], group_data_ordered[j]
                 y_sorted = np.sort(gj)
-                # lt_count: gj 中小于各 gi 元素的数量
-                lt_count = int(np.sum(np.searchsorted(y_sorted, gi, side="left")))
-                # gt_count = n_i * n_j - le_count
+                # le_count: gj 中小于等于各 gi 元素的数量
                 le_count = int(np.sum(np.searchsorted(y_sorted, gi, side="right")))
-                JT += lt_count - (len(gi) * len(gj) - le_count)
+                # U_{ij} = n_i * n_j - le_count = #(x < y)
+                JT += len(gi) * len(gj) - le_count
 
         # 正态近似
         n_total = sum(len(g) for g in group_data_ordered)
@@ -1287,7 +1287,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         diff = sub[col1].values - sub[col2].values
         # 匹配对效应量: r = Z / sqrt(N)
         n_pairs = len(sub)
-        z_stat = float(sp_stats.norm.ppf(p / 2)) if p > 1e-15 else float(sp_stats.norm.ppf(1e-15))
+        z_stat = float(sp_stats.norm.ppf(max(p, 1e-300) / 2))
         r_effect = abs(z_stat) / np.sqrt(n_pairs)
         effect_size = float(r_effect)
         effect_name = "匹配对秩相关 r"
@@ -1859,7 +1859,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         # Cramér's V
         n_total = ctab.sum().sum()
         min_dim = min(*ctab.shape) - 1
-        effect = float(np.sqrt(chi2 / (n_total * min_dim + 1e-10)))
+        effect = float(np.sqrt(chi2 / (n_total * min_dim + 1e-10))) if min_dim > 0 else 0.0
         effect_name = "Cramér's V"
         if effect > 0.3:
             effect_label = "强关联"
@@ -1875,7 +1875,10 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(8, 4.5))
     ax = fig.add_subplot(111)
     ctab_pct = ctab.div(ctab.sum(axis=0), axis=1) * 100
-    ctab_pct.plot(kind="bar", stacked=True, ax=ax, colormap="Set2",
+    bar_colors = [PALETTE["data"]["primary"], PALETTE["data"]["secondary"],
+                  PALETTE["target"]["primary"], PALETTE["anomaly"]["primary"],
+                  PALETTE["contrast"]["b"], PALETTE["contrast"]["c"]]
+    ctab_pct.plot(kind="bar", stacked=True, ax=ax, color=bar_colors[:len(ctab_pct)],
                   edgecolor="white", linewidth=0.5)
     ax.set_xlabel(col1, fontsize=10)
     ax.set_ylabel("比例 (%)", fontsize=10)
@@ -2102,7 +2105,7 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
     # 期望一致率
     row_sums = ctab.sum(axis=1).values
     col_sums = ctab.sum(axis=0).values
-    p_e = np.sum(np.outer(row_sums, col_sums)) / n**2
+    p_e = np.sum(row_sums * col_sums) / n**2
     # Kappa
     kappa = (p_o - p_e) / (1 - p_e + 1e-10)
     # 标准误

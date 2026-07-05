@@ -5,8 +5,10 @@
 使用方式:
     from smartsuite.engine._palette import PALETTE
     ax.bar(..., color=PALETTE["data"]["primary"])
+Note: PALETTE 应在导入后视为只读常量，运行时不应对其进行修改。
 """
 
+# 只读配色常量 — 运行时不应修改
 PALETTE = {
     # ── 数据层级 ──
     "data": {

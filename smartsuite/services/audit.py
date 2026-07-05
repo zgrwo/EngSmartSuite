@@ -158,7 +158,6 @@ def process_audit(
     else:
         overall = "优秀 (全部正常)"
 
-    import pandas as pd
     return {
         "health_checks": pd.DataFrame(health_checks),
         "results_summary": {k: v.get("summary", "") for k, v in results.items()},
@@ -230,10 +229,21 @@ def auto_report(df, target_col, feature_cols=None, output_path=None,
         output_path = os.path.join(os.getcwd(), "smartsuite_report.html")
 
     # 使用回归分析作为代表性结果生成 HTML
+    feat_for_html = feature_cols[:min(len(feature_cols), 10)]
     req = AnalysisRequest(task="regression", data=df, target_col=target_col,
-                          feature_cols=feature_cols[:8])
+                          feature_cols=feat_for_html)
     r = orchestrate(req)
-    r.summary = (
+    if r.status != "ok":
+        r.summary = (
+            f"自动分析报告: {title}\n"
+            f"数据质量: {quality['summary']}\n"
+            f"分析推荐: {rec['summary']}\n"
+            f"批量分析: {batch['summary']}\n"
+            f"综合审计: {audit['summary']}\n"
+            f"---\n回归建模失败，无法生成详细报告"
+        )
+    else:
+        r.summary = (
         f"自动分析报告: {title}\n"
         f"数据质量: {quality['summary']}\n"
         f"分析推荐: {rec['summary']}\n"
@@ -302,5 +312,10 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
             logger.warning("导出工作表失败: %s", task, exc_info=True)
             continue
 
+    if len(wb.sheetnames) == 0:
+        # 所有任务均失败，创建一个错误信息 Sheet
+        ws = wb.create_sheet(title="导出状态")
+        ws["A1"] = "所有分析任务均失败，无法生成报告"
+        ws["A2"] = f"已尝试任务: {', '.join(tasks)}"
     wb.save(output_path)
     return output_path

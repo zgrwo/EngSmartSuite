@@ -146,7 +146,7 @@ class AnalysisResult:
 ### regression_analysis
 - **Task Key**: `regression`
 - **描述**: 线性回归 OLS，含标准化系数 (β)、Durbin-Watson、Breusch-Pagan 异方差检验、Cook's D 影响点诊断
-- **params**: `model_type` (默认 "linear")
+- **params**: `model_type` (保留参数，当前仅支持 OLS)
 - **返回**: `coefficients`, `diagnostics`
 - **图**: 6 宫格诊断图 (Residual vs Fitted / Q-Q / Scale-Location / Cook's D / Leverage / Actual vs Predicted)
 
@@ -261,7 +261,7 @@ class AnalysisResult:
 ### anomaly_detect
 - **Task Key**: `anomaly_detect`
 - **描述**: 异常检测 — IQR / Z-score (单变量) 或 Isolation Forest (多变量) 或 Grubbs 检验
-- **params**: `method` ("iqr"|"zscore"|"grubbs"|"isolation_forest"|"mad"), `contamination` (IsoForest, 默认 0.05)
+- **params**: `method` ("iqr"|"zscore"|"grubbs"|"isolation_forest"), `contamination` (IsoForest, 默认 0.05)
 - **返回**: `anomalies`
 - **图**: 异常点标记散点图 + 阈值线
 
@@ -284,7 +284,7 @@ class AnalysisResult:
 - **描述**: 分组箱线图 — 按类别因子展示数值分布，支持主分类 + 次分类分面，自动附 ANOVA/Kruskal-Wallis 或 t 检验/MWU 统计检验
 - **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签)
 - **feature_cols**: `[主分类列]` 或 `[主分类列, 次分类列]`
-- **返回**: `group_statistics` (含各分组均值/中位数/标准差/IQR), `test_result`
+- **返回**: `group_statistics` (含各分组均值/中位数/标准差/IQR)；统计检验结果嵌入 summary
 - **图**: 分组箱线图 + 散点叠加；次分类 ≤ 8 水平时分面展示
 
 ### spc_nonparametric

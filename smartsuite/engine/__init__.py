@@ -1,13 +1,13 @@
 """分析引擎层 — 纯 Python 统计分析函数，零 Excel 依赖。"""
 
+# ── matplotlib.use() 必须在第一次 import matplotlib 之前调用 ──
+import matplotlib as _mpl
+_mpl.use("Agg")
+matplotlib = _mpl  # 向后兼容别名
+
 # ── 启动时自动检查核心依赖 ──
 from smartsuite import check_core_deps
 check_core_deps()
-
-# ── 引擎层全局 matplotlib 配置（必须在任何 Figure 创建之前执行）──
-import matplotlib
-
-matplotlib.use("Agg")
 
 import logging
 import os
@@ -16,10 +16,12 @@ import platform
 _logger = logging.getLogger(__name__)
 
 # ── 跨平台中文字体加载 ──
+_WINDOWS_SYSROOT = os.environ.get("SystemRoot", os.environ.get("WINDIR", "C:/Windows"))
 _FONT_CANDIDATES = {
     "Windows": [
-        ("C:/Windows/Fonts/msyh.ttc", "Microsoft YaHei"),
-        ("C:/Windows/Fonts/simhei.ttf", "SimHei"),
+        (f"{_WINDOWS_SYSROOT}/Fonts/msyh.ttc", "Microsoft YaHei"),
+        (f"{_WINDOWS_SYSROOT}/Fonts/simhei.ttf", "SimHei"),
+        (f"{_WINDOWS_SYSROOT}/Fonts/msyhbd.ttf", "Microsoft YaHei"),
     ],
     "Darwin": [
         ("/System/Library/Fonts/PingFang.ttc", "PingFang SC"),
@@ -30,6 +32,7 @@ _FONT_CANDIDATES = {
         ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
         ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
         ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+        ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", "Droid Sans Fallback"),
     ],
 }
 
@@ -60,8 +63,18 @@ if not _font_loaded:
                 continue
 
 if not _font_loaded:
-    matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "PingFang SC",
-                                               "Noto Sans CJK SC", "DejaVu Sans"]
+    # 回退: 尝试使用 matplotlib 字体查找机制
+    _fallback_fonts = ["SimHei", "Microsoft YaHei", "PingFang SC",
+                       "Noto Sans CJK SC", "DejaVu Sans"]
+    matplotlib.rcParams["font.sans-serif"] = _fallback_fonts
+    # 尝试为每个 fallback 字体查找并注册字体文件
+    for _fb in _fallback_fonts:
+        try:
+            _fb_path = matplotlib.font_manager.findfont(_fb, fallback_to_default=False)
+            if _fb_path and os.path.exists(_fb_path):
+                matplotlib.font_manager.fontManager.addfont(_fb_path)
+        except Exception:
+            pass
     _logger.warning(
         "未检测到中文字体，图表中文可能无法正常显示。"
         "Windows: 安装微软雅黑; Mac: 使用 PingFang SC; "

@@ -43,12 +43,16 @@ def test_full_pipeline_rsm_to_ppt(sample_doe_data):
 
 
 def test_all_tasks_registered():
-    """确保所有引擎函数都在 TASK_REGISTRY 中注册。"""
+    """确保所有引擎函数都在 TASK_REGISTRY 中注册（双向检查）。"""
     import smartsuite.engine as eng
     assert len(eng.__all__) > 0, "engine.__all__ 为空，注册表验证无效"
     registered_func_names = {f.__name__ for f in TASK_REGISTRY.values()}
-    missing = set(eng.__all__) - registered_func_names
-    assert not missing, f"未注册的引擎函数: {missing}"
+    # __all__ → TASK_REGISTRY: engine 导出的都在 registry 中
+    missing_in_registry = set(eng.__all__) - registered_func_names
+    assert not missing_in_registry, f"engine.__all__ 中有未注册的函数: {missing_in_registry}"
+    # TASK_REGISTRY → __all__: registry 中的都在 engine 导出中
+    missing_in_all = registered_func_names - set(eng.__all__)
+    assert not missing_in_all, f"TASK_REGISTRY 中有未在 engine.__all__ 中导出的函数: {missing_in_all}"
 
 
 def test_invalid_task_returns_error():
@@ -64,6 +68,6 @@ def test_missing_column_validation(sample_doe_data):
     from smartsuite.services.data_io import validate_data
     try:
         validate_data(sample_doe_data, "不存在的列", ["料温"])
-        assert False, "should have raised ValidationError"
+        raise AssertionError("should have raised ValidationError")
     except ValidationError:
         pass

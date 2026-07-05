@@ -118,7 +118,7 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                         (col, {"<全列非数值，已强制填充为0>"}, n_coerced)
                     )
                 else:
-                    df[col].loc[new_na] = median_val
+                    df.loc[new_na, col] = median_val
                 imputation_log[col] = n_coerced
             encoded_cols.append(col)
 
@@ -146,7 +146,12 @@ def missing_pattern_analysis(df: pd.DataFrame) -> dict:
     col_missing_df = pd.DataFrame(col_stats).sort_values("缺失率(%)", ascending=False)
 
     # ── 缺失模式 ──
-    miss_pattern = df.isna().astype(int)
+    # 限制列数以防范指数级分组 (groupby over >20 boolean columns)
+    max_pattern_cols = 20
+    pattern_cols = df.columns[:min(len(df.columns), max_pattern_cols)]
+    miss_pattern = df[pattern_cols].isna().astype(int)
+    if len(df.columns) > max_pattern_cols:
+        miss_pattern["_others"] = df[df.columns[max_pattern_cols:]].isna().any(axis=1).astype(int)
     pattern_counts = miss_pattern.groupby(
         list(miss_pattern.columns)
     ).size().reset_index(name="行数")

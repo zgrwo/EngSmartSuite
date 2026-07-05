@@ -159,15 +159,26 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 plt.close(fig)
 
             # 序列化 metadata：递归处理嵌套结构，标量转为可序列化类型
-            def _serialize_meta(val):
-                if isinstance(val, (int, float, bool)):
-                    return float(val) if not isinstance(val, bool) else val
+            def _serialize_meta(val, _depth=0):
+                import numpy as _np
+                if _depth > 10:  # 循环引用保护
+                    return str(val)
+                if isinstance(val, bool):
+                    return val
+                if isinstance(val, (_np.integer,)):
+                    return int(val)
+                if isinstance(val, (_np.floating,)):
+                    return float(val)
+                if isinstance(val, int):
+                    return val  # Python int 保持原样，不丢失精度
+                if isinstance(val, float):
+                    return val
                 if isinstance(val, str):
                     return val
                 if isinstance(val, dict):
-                    return {str(k): _serialize_meta(v) for k, v in val.items()}
+                    return {str(k): _serialize_meta(v, _depth + 1) for k, v in val.items()}
                 if isinstance(val, (list, tuple)):
-                    return [_serialize_meta(v) for v in val]
+                    return [_serialize_meta(v, _depth + 1) for v in val]
                 return str(val)
 
             meta = {str(k): _serialize_meta(v) for k, v in result.metadata.items()}

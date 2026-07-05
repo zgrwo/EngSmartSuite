@@ -53,7 +53,7 @@ def test_zero_variance_column():
 
 
 def test_anova_with_one_factor():
-    """单因子 ANOVA 应正常工作。"""
+    """单因子 ANOVA 应正常工作并返回有效统计量。"""
     np.random.seed(42)
     df = _make_df({
         "group": ["A"] * 10 + ["B"] * 10 + ["C"] * 10,
@@ -62,6 +62,8 @@ def test_anova_with_one_factor():
     req = AnalysisRequest(task="anova", data=df, target_col="val", feature_cols=["group"])
     result = anova_analysis(req)
     assert result.status == "ok"
+    assert 0 <= result.metadata["r_squared"] <= 1, f"R² out of range: {result.metadata['r_squared']}"
+    assert "anova_enhanced" in result.tables
 
 
 # ── 确定性 ──
@@ -161,7 +163,7 @@ def test_cusum_detects_shift():
 
 
 def test_ewma_basic():
-    """EWMA 应返回有效结果。"""
+    """EWMA 应返回有效结果，稳定过程违规点应在合理范围内。"""
     np.random.seed(42)
     df = _make_df({"val": np.random.normal(10, 1, 50)})
     req = AnalysisRequest(task="spc_ewma", data=df, target_col="val",
@@ -169,6 +171,10 @@ def test_ewma_basic():
     result = ewma_chart(req)
     assert result.status == "ok"
     assert "violations" in result.metadata
+    # 随机稳定数据不应产生大量违规（允许少量假阳性）
+    v = result.metadata["violations"]
+    n_alarms = len(v) if isinstance(v, dict) else (len(v) if isinstance(v, list) else 0)
+    assert n_alarms <= 10, f"稳定过程产生过多违规: {n_alarms}"
 
 # ── 比例 CI ──
 def test_proportion_ci_binary():
@@ -190,6 +196,9 @@ def test_contingency_2x2():
     r = contingency_analysis(req)
     assert r.status == "ok"
     assert "p_value" in r.metadata
+    # 2x2 卡方检验应有 Cramér's V 效应量
+    if "effect" in r.metadata:
+        assert 0 <= r.metadata["effect"] <= 1, f"Cramér's V out of range: {r.metadata['effect']}"
 
 # ── Kendall ──
 def test_correlation_kendall():
@@ -204,6 +213,10 @@ def test_correlation_kendall():
         feature_cols=["x"], params={"method": "kendall"})
     r = correlation_analysis(req)
     assert r.status == "ok"
+    # 已知 y ≈ 0.7x + noise，Kendall τ 应为正且与 Pearson r 量级相当
+    tau = r.tables["correlation_matrix"].loc["y", "x"]
+    assert 0.3 < tau < 0.8, f"Expected Kendall τ in 0.3-0.8, got {tau:.3f}"
+    assert r.metadata["method"] == "kendall"
 
 # ── Bootstrap edge ──
 def test_bootstrap_no_data():
@@ -272,6 +285,10 @@ def test_distribution_summary_positive():
     r = distribution_summary(req)
     assert r.status == "ok"
     assert "best_fit" in r.metadata
+    # 对数正态数据的最佳拟合应为 lognorm 或 gamma 之类的正偏态分布
+    best = r.metadata["best_fit"]
+    assert best != "None", "未找到最佳拟合分布"
+    assert isinstance(best, str) and len(best) > 0
 
 def test_cohens_kappa_agreement():
     from smartsuite.engine.root_cause import cohens_kappa
