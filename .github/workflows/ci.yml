@@ -16,3 +16,4 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check smartsuite/
       - run: pytest
+      - run: python scripts/verify_consistency.py

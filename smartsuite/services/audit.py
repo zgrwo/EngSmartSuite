@@ -48,9 +48,9 @@ def process_audit(
                 target_col=target_col, feature_cols=numeric_features)
             r = orchestrate(req)
             results["correlation"] = {"status": r.status, "summary": r.summary}
-            top_r = abs(r.metadata.get("target_correlations", {}).get(
-                list(r.metadata.get("target_correlations", {}).keys())[0] if r.metadata.get("target_correlations") else "", 0
-            ))
+            target_corr = r.metadata.get("target_correlations", {})
+            corr_values = list(target_corr.values())
+            top_r = abs(corr_values[0]) if corr_values else 0
             if top_r > 0.5:
                 health_checks.append({"检查项": "关键因子识别", "状态": "✓ 良好",
                                      "详情": f"存在 |r|>{top_r:.2f} 的相关因子"})

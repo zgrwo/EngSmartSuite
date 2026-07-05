@@ -96,6 +96,16 @@ PALETTE = {
 }
 
 
+# ── Web UI 分组配色（与 PALETTE 主色系统一）──
+GROUP_COLORS = {
+    "要因筛选": "#e8f5e9",   # 浅绿 — data.primary 淡色
+    "信度诊断": "#fff8e1",   # 浅黄 — judge.warn 淡色
+    "建模优化": "#e3f2fd",   # 浅蓝 — data.primary 淡色
+    "过程监控": "#fce4ec",   # 浅红 — anomaly 淡色
+    "高级分析": "#f3e5f5",   # 浅紫 — contrast.d 淡色
+}
+
+
 def get_palette_style():
     """返回 matplotlib rcParams 样式字典，用于全局图表美化。"""
     return {

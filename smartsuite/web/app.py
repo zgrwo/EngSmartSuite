@@ -25,6 +25,7 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
+from smartsuite.engine._palette import GROUP_COLORS
 from smartsuite.services.orchestrator import TASK_GROUPS, TASK_LABELS, TASK_REGISTRY
 from smartsuite.web.api import column_info, run_analysis
 
@@ -130,10 +131,6 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 # Session cookie 安全标志
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-
-GROUP_COLORS = {"要因筛选": "#e8f5e9", "信度诊断": "#fff8e1",
-                "建模优化": "#e3f2fd", "过程监控": "#fce4ec",
-                "高级分析": "#f3e5f5"}
 
 
 @app.route("/")

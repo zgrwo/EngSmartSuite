@@ -1,7 +1,11 @@
+import numpy as np
+import pandas as pd
+
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.root_cause import (
     anova_analysis,
     correlation_analysis,
+    cronbach_alpha,
     decision_tree_analysis,
     hypothesis_test,
     vif_analysis,
@@ -80,3 +84,43 @@ def test_vif_analysis(sample_doe_data):
     result = vif_analysis(req)
     assert result.status == "ok"
     assert "vif_table" in result.tables
+
+
+def test_mcnemar_numeric_binary_data():
+    """验证 McNemar 检验对数值型二值数据 (0/1) 正确计数（修复 P0 Bug F2.1）。"""
+    import numpy as np
+    from smartsuite.core.contracts import AnalysisRequest
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    # 构造明显不对称的数据: 大量 0→1 翻转，极少 1→0 翻转
+    # 修复前 str() Bug 会导致此数据产生全零计数和 p=1.0
+    before = np.array([0] * 25 + [1] * 25)
+    after = np.array([1] * 22 + [0] * 3 + [0] * 3 + [1] * 22)
+    df = pd.DataFrame({"before": before, "after": after})
+
+    req = AnalysisRequest(task="hypothesis_test", data=df, target_col="before",
+                          feature_cols=["before", "after"],
+                          params={"test": "mcnemar"})
+    result = hypothesis_test(req)
+    assert result.status == "ok"
+    # b≈3, c≈22 → McNemar 应高度显著（p << 0.001）
+    p_val = result.metadata["p_value"]
+    assert p_val < 0.001, f"McNemar should detect significant change, got p={p_val:.4f} (bug: all counts may be zero)"
+
+
+def test_cronbach_zero_variance_item():
+    """验证 Cronbach's α 对零方差题项不崩溃（修复 P2 Bug F2.10）。"""
+    from smartsuite.core.contracts import AnalysisRequest
+    from smartsuite.engine.root_cause import cronbach_alpha
+
+    # 一个题项零方差（所有值相同）
+    df = pd.DataFrame({
+        "item1": [5.0, 5.0, 5.0, 5.0, 5.0],  # 零方差
+        "item2": [1.0, 3.0, 2.0, 4.0, 3.0],
+        "item3": [2.0, 4.0, 3.0, 5.0, 4.0],
+    })
+    req = AnalysisRequest(task="cronbach_alpha", data=df, target_col="item1",
+                          feature_cols=["item1", "item2", "item3"])
+    result = cronbach_alpha(req)
+    # 不应崩溃，status 为 ok（α 可计算或返回错误均可，但不能崩溃）
+    assert result.status in ("ok", "error")

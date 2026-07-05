@@ -311,25 +311,33 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     })
 
     # ── 双图：3D 曲面 (左) + 2D 等高线 (右) ──
-    fig = Figure(figsize=(14, 5.5))
+    # 检查 mplot3d 可用性（极简 matplotlib 安装可能不包含）
+    try:
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+        _has_3d = True
+    except ImportError:
+        _has_3d = False
+
+    fig = Figure(figsize=(14 if _has_3d else 7, 5.5))
 
     # 左: 3D 曲面
-    ax_3d = fig.add_subplot(1, 2, 1, projection="3d")
-    surf = ax_3d.plot_surface(XI, YI, ZI, cmap="RdYlGn", alpha=0.85, linewidth=0, antialiased=True)
-    ax_3d.scatter(X1, X2, y, color=PALETTE["data"]["primary"], s=25, alpha=0.7, label="观测数据")
-    # 标注最优点
-    ax_3d.scatter([opt_x1], [opt_x2], [opt_z], color=PALETTE["anomaly"]["primary"], s=120,
-                  marker="*", edgecolors="white", linewidths=1.5,
-                  label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f})")
-    ax_3d.set_xlabel(c1, fontsize=9)
-    ax_3d.set_ylabel(c2, fontsize=9)
-    ax_3d.set_zlabel(req.target_col, fontsize=9)
-    ax_3d.set_title(f"3D 响应面 — {req.target_col}\n(R²={r2:.3f})", fontsize=10)
-    ax_3d.legend(fontsize=7, loc="upper left")
-    fig.colorbar(surf, ax=ax_3d, shrink=0.5, label=req.target_col)
+    if _has_3d:
+        ax_3d = fig.add_subplot(1, 2, 1, projection="3d")
+        surf = ax_3d.plot_surface(XI, YI, ZI, cmap="RdYlGn", alpha=0.85, linewidth=0, antialiased=True)
+        ax_3d.scatter(X1, X2, y, color=PALETTE["data"]["primary"], s=25, alpha=0.7, label="观测数据")
+        # 标注最优点
+        ax_3d.scatter([opt_x1], [opt_x2], [opt_z], color=PALETTE["anomaly"]["primary"], s=120,
+                      marker="*", edgecolors="white", linewidths=1.5,
+                      label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f})")
+        ax_3d.set_xlabel(c1, fontsize=9)
+        ax_3d.set_ylabel(c2, fontsize=9)
+        ax_3d.set_zlabel(req.target_col, fontsize=9)
+        ax_3d.set_title(f"3D 响应面 — {req.target_col}\n(R²={r2:.3f})", fontsize=10)
+        ax_3d.legend(fontsize=7, loc="upper left")
+        fig.colorbar(surf, ax=ax_3d, shrink=0.5, label=req.target_col)
 
-    # 右: 2D 填充等高线
-    ax_contour = fig.add_subplot(1, 2, 2)
+    # 右 (或全幅): 2D 填充等高线
+    ax_contour = fig.add_subplot(1, 2 if _has_3d else 1, 2 if _has_3d else 1)
     levels = 20
     cf = ax_contour.contourf(XI, YI, ZI, levels=levels, cmap="RdYlGn", alpha=0.9)
     cs = ax_contour.contour(XI, YI, ZI, levels=8, colors="black", linewidths=0.5, alpha=0.3)
@@ -536,7 +544,11 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     if len(weights) == 0:
         return AnalysisResult(task="multi_objective", status="error",
             messages=["权重列表不能为空"])
-    weights = np.array(weights) / np.sum(weights)
+    weight_sum = np.sum(weights)
+    if weight_sum <= 0:
+        return AnalysisResult(task="multi_objective", status="error",
+            messages=["权重之和必须大于零"])
+    weights = np.array(weights) / weight_sum
 
 
     # 构建所有优化目标列的共同有效数据掩码
@@ -749,7 +761,8 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         if len(unique_vals) == 2:
             # 二水平因子：直接编码 -1/+1（效应 = 全范围差异）
-            _lo, hi = sorted(unique_vals)[0], sorted(unique_vals)[-1]
+            s = sorted(unique_vals)
+            _lo, hi = s[0], s[-1]
             coded = np.where(col_vals == hi, 1, -1)
         else:
             # 多水平/连续因子：标准化后作为线性效应
@@ -769,9 +782,19 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             t_val = float(beta[1] / se) if se > 1e-10 else 0.0
             dof = len(y) - 2
             p_val = float(2 * sp_stats.t.sf(abs(t_val), dof)) if dof > 0 else 1.0
-        except Exception:
-            logger.debug("DOE 效应估计失败 (因子: %s)", col, exc_info=True)
-            effect, t_val, p_val = 0.0, 0.0, 1.0
+        except (ValueError, np.linalg.LinAlgError, TypeError) as e:
+            logger.warning("DOE 效应估计失败 (因子: %s): %s", col, e)
+            # 标记为计算失败而非静默赋零，避免伪造正常结果
+            effects.append({
+                "因子": col,
+                "主效应": None,
+                "效应占比": None,
+                "t值": None,
+                "p值": None,
+                "显著": "计算失败",
+                "效应量": f"计算异常: {str(e)[:60]}",
+            })
+            continue
 
         effect_ratio = abs(effect) / (abs(grand_mean) + 1e-10) if abs(grand_mean) > 1e-10 else 0.0
         alpha = req.params.get("alpha", 0.05)
@@ -785,20 +808,24 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             "效应量": _effect_label_doe(effect_ratio),
         })
 
-    effects_df = pd.DataFrame(effects).sort_values("主效应", key=abs, ascending=False)
-    top_name = str(effects_df["因子"].iloc[0]) if len(effects_df) > 0 else "N/A"
-    top_val = float(effects_df["主效应"].iloc[0]) if len(effects_df) > 0 else 0
+    effects_df = pd.DataFrame(effects)
+    # 分离计算失败的因子（避免 None 值影响排序和统计）
+    failed_effects = effects_df[effects_df["主效应"].isna()] if "主效应" in effects_df else pd.DataFrame()
+    valid_effects = effects_df[effects_df["主效应"].notna()].sort_values("主效应", key=abs, ascending=False)
+    top_name = str(valid_effects["因子"].iloc[0]) if len(valid_effects) > 0 else "N/A"
+    top_val = float(valid_effects["主效应"].iloc[0]) if len(valid_effects) > 0 else 0
 
     # ── Lenth PSE 参考线（无重复时替代 p 值作为显著性参考）──
-    effect_array = effects_df["主效应"].values
+    effect_array = valid_effects["主效应"].values
     pse = _lenth_pse(effect_array) if len(effect_array) >= 3 else 0
     # t 临界值近似 (α=0.05, 双侧)
     me = 2.0 * pse  # margin of error ≈ t(0.975) * PSE, t 近似取 2
 
     # ── Pareto 图含显著性阈值 ──
-    fig = Figure(figsize=(max(len(effects_df)*0.9, 6), 4))
+    n_plot = max(len(valid_effects), 1)
+    fig = Figure(figsize=(max(n_plot*0.9, 6), 4))
     ax = fig.add_subplot(111)
-    ef = effects_df.sort_values("主效应", key=abs)
+    ef = valid_effects.sort_values("主效应", key=abs)
     colors = [PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in ef["主效应"]]
     ax.barh(ef["因子"], ef["主效应"], color=colors, height=0.6)
     ax.axvline(0, color="black", linewidth=0.8)
@@ -822,20 +849,28 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     fig.tight_layout()
 
     # ── 汇总 ──
-    sig_count = int((effects_df["显著"] == "是").sum())
-    top_effect_label = str(effects_df["效应量"].iloc[0]) if len(effects_df) > 0 else "N/A"
-    summary = (
-        f"最强主效应: {top_name} (效应={top_val:.4f}, {top_effect_label})。"
-        f"显著因子: {sig_count}/{len(effects_df)}"
-    )
+    sig_count = int((valid_effects["显著"] == "是").sum())
+    fail_count = len(failed_effects)
+    top_effect_label = str(valid_effects["效应量"].iloc[0]) if len(valid_effects) > 0 else "N/A"
+    summary_parts = [
+        f"最强主效应: {top_name} (效应={top_val:.4f}, {top_effect_label})",
+        f"显著因子: {sig_count}/{len(valid_effects)}",
+    ]
+    if fail_count > 0:
+        summary_parts.append(f"⚠ {fail_count} 个因子计算失败")
+    summary = "。".join(summary_parts)
+
+    # 合并有效结果和失败标记到输出表
+    output_table = pd.concat([valid_effects, failed_effects], ignore_index=True) if fail_count > 0 else valid_effects
 
     return AnalysisResult(
         task="doe_analysis",
-        tables={"effect_estimates": effects_df},
+        tables={"effect_estimates": output_table},
         figures=[fig],
         summary=summary,
         metadata={
             "grand_mean": grand_mean,
+            "failed_factors": fail_count,
             "grand_std": grand_std,
             "top_effect_factor": top_name,
             "lenth_pse": pse,
@@ -1092,23 +1127,30 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         from sklearn.linear_model import Lasso
         model = Lasso(alpha=alpha, max_iter=5000).fit(X_scaled, y)
         best_alpha = alpha
-        cv_r2 = None
+        train_r2 = None
     elif l1_ratio < 1.0:
         model = ElasticNetCV(l1_ratio=[l1_ratio], cv=min(5, len(sub)//3),
                             max_iter=5000, random_state=42).fit(X_scaled, y)
         best_alpha = float(model.alpha_)
-        cv_r2 = float(model.score(X_scaled, y))
+        train_r2 = float(model.score(X_scaled, y))
     else:
         model = LassoCV(cv=min(5, len(sub)//3), max_iter=5000,
                         random_state=42).fit(X_scaled, y)
         best_alpha = float(model.alpha_)
-        cv_r2 = float(model.score(X_scaled, y))
+        train_r2 = float(model.score(X_scaled, y))
 
     # 系数
     coefs = model.coef_
     nonzero = np.abs(coefs) > 1e-6
     n_selected = int(np.sum(nonzero))
     r2 = float(model.score(X_scaled, y))
+
+    # 收敛性检查：max_iter 用尽且未收敛时警告用户
+    convergence_warning = ""
+    if hasattr(model, "n_iter_"):
+        n_iter_actual = int(model.n_iter_) if np.isscalar(model.n_iter_) else int(np.max(model.n_iter_))
+        if n_iter_actual >= 4999:
+            convergence_warning = "⚠ Lasso 模型在最大迭代次数内未收敛，系数可能不准确，建议增大 max_iter 或调整 alpha"
 
     coef_df = pd.DataFrame({
         "变量": cols + ["(截距)"],
@@ -1134,18 +1176,24 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
 
     summary = (
         f"Lasso: 选中 {n_selected}/{len(cols)} 变量, R²={r2:.3f}, α={best_alpha:.4f}"
-        + (f", CV R²={cv_r2:.3f}" if cv_r2 else "")
+        + (f", 训练 R²={train_r2:.3f}" if train_r2 else "")
     )
+
+    messages = []
+    if convergence_warning:
+        messages.append(convergence_warning)
 
     return AnalysisResult(
         task="lasso_regression",
         tables={"coefficients": coef_df},
         figures=[fig],
         summary=summary,
+        messages=messages,
         metadata={
-            "r_squared": r2, "cv_r2": cv_r2,
+            "r_squared": r2, "train_r2": train_r2,
             "best_alpha": best_alpha, "n_selected": n_selected,
             "n_features": len(cols),
+            "converged": not bool(convergence_warning),
         },
     )
 

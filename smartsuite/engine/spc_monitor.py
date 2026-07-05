@@ -210,11 +210,11 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     # X-bar 控制图
     ax1 = fig.add_subplot(211)
     # 区域着色
-    ax1.fill_between(indices, lcl_x, ucl_x, alpha=0.04, color=PALETTE["center"]["primary"], label="±3σ 区域")
+    ax1.fill_between(indices, lcl_x, ucl_x, alpha=0.06, color=PALETTE["center"]["primary"], label="±3σ 区域")
     ax1.fill_between(indices, xbar_bar - 2*sigma_xbar, xbar_bar + 2*sigma_xbar,
-                     alpha=0.04, color=PALETTE["judge"]["warn"])
+                     alpha=0.06, color=PALETTE["judge"]["warn"])
     ax1.fill_between(indices, xbar_bar - 1*sigma_xbar, xbar_bar + 1*sigma_xbar,
-                     alpha=0.04, color=PALETTE["center"]["primary"])
+                     alpha=0.06, color=PALETTE["center"]["primary"])
     ax1.axhline(xbar_bar, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1.5,
                 label=f"CL={xbar_bar:.4f}")
     ax1.axhline(ucl_x, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
@@ -588,13 +588,18 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         if transformed is not None:
             data = pd.Series(transformed, name=data.name)
             boxcox_lambda = lam
-            # 对规格限和目标值同样做 Box-Cox 变换
-            if usl is not None and usl > 0:
+            # 对规格限和目标值同样做 Box-Cox 变换（全量或全不：避免混合尺度）
+            spec_positive = (usl is not None and usl > 0) and (lsl is not None and lsl > 0)
+            if spec_positive:
                 usl = sp_stats.boxcox(np.array([usl]), lmbda=lam)[0]
-            if lsl is not None and lsl > 0:
                 lsl = sp_stats.boxcox(np.array([lsl]), lmbda=lam)[0]
-            if target is not None and target > 0:
-                target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
+                if target is not None and target > 0:
+                    target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
+            elif usl is not None or lsl is not None:
+                warn_msgs.append(
+                    "⚠ Box-Cox 变换要求规格限均为正值，规格限保持在原始尺度，"
+                    "Cp/Cpk 可能不准确，建议使用原始数据分析"
+                )
         else:
             warn_msgs.append("⚠ Box-Cox 变换失败（数据必须全部为正值），使用原始数据分析")
 
@@ -981,10 +986,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
                 "forecast_steps": steps, "n": n,
             },
         )
-    except Exception:
+    except (ValueError, np.linalg.LinAlgError) as e:
+        logger.warning("趋势预测模型拟合失败: %s", e)
         return AnalysisResult(
             task="trend_forecast", status="error",
-            messages=["趋势预测模型拟合失败，请检查数据是否包含缺失值"])
+            messages=[f"趋势预测模型拟合失败: {e}"])
 
 
 def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -1117,7 +1123,8 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
 
     n = len(data)
     ewma = np.zeros(n)
-    ewma[0] = mu  # 统计标准：EWMA 初始值为过程均值，非首个观测值
+    # Montgomery 标准: z₁ = λ·x₁ + (1-λ)·μ, z₀ = μ 为初始值
+    ewma[0] = lam * data.values[0] + (1 - lam) * mu
 
     for i in range(1, n):
         ewma[i] = lam * data.values[i] + (1 - lam) * ewma[i-1]

@@ -42,8 +42,13 @@ _env_font = os.environ.get("MATPLOTLIB_FONT_PATH")
 # 环境变量字体（跨平台通用）
 if _env_font and os.path.exists(_env_font):
     try:
-        matplotlib.font_manager.fontManager.addfont(_env_font)
-        matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[0]
+        _font_prop = matplotlib.font_manager.fontManager.addfont(_env_font)
+        # 优先使用字体文件内部的 family 名，回退到文件名
+        if hasattr(_font_prop, "family_name") and _font_prop.family_name:
+            matplotlib.rcParams["font.family"] = _font_prop.family_name
+        else:
+            matplotlib.rcParams["font.family"] = os.path.splitext(
+                os.path.basename(_env_font))[0]
         _font_loaded = True
     except Exception as e:
         _logger.debug("环境变量字体 %s 加载失败: %s", _env_font, e)

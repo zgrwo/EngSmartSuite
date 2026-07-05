@@ -38,6 +38,8 @@ def _binary_encode(series, col_name: str = ""):
     失败时 binary_array 为 None，error_msg 为中文错误描述。
 
     编码规则: 排序后的较大值 (sorted[-1]) 映射为 1，较小值映射为 0。
+    注意: NaN 值会被编码为 0（因为 NaN != uv[1] 返回 False），调用方
+    如需区分 NaN 和真实值，应先自行处理缺失值。
     """
     vals = series.dropna()
     unique_vals = vals.unique()
@@ -50,6 +52,9 @@ def _binary_encode(series, col_name: str = ""):
 
 def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     """相关性矩阵分析（Pearson/Spearman），含多重比较校正和显著性标记。"""
+    if req.target_col not in req.data.columns:
+        return AnalysisResult(task="correlation", status="error",
+            messages=[f"目标列「{req.target_col}」不存在于数据中"])
     # 去重：防止 target_col 同时出现在 feature_cols 中导致重复列
     cols = list(dict.fromkeys(req.feature_cols + [req.target_col]))
     cols = [c for c in cols if c in req.data.columns]
@@ -146,7 +151,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                 ax.text(j, i, f"{v:+.2f}{stars}", ha="center", va="center",
                         fontsize=8 if n <= 15 else 6,
                         fontweight="bold" if is_sig else "normal",
-                        color="white" if abs(v) > 0.5 else "black")
+                        color="white" if abs(v) > 0.65 else "black")
     fig.colorbar(im, ax=ax, shrink=0.8, label=corr_label)
     ax.set_title(
         f"相关性热力图 — {req.target_col}\n"
@@ -409,6 +414,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         model = ols(formula, data=req.data).fit()
         anova_table = sm.stats.anova_lm(model, typ=2)
     except Exception:
+        logger.debug("ANOVA 模型拟合失败", exc_info=True)
         return AnalysisResult(task="anova", status="error",
             messages=["ANOVA 模型拟合失败，请检查数据是否包含缺失值或非数值列"])
 
@@ -489,8 +495,8 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                                 "p值": float(tukey.pvalues[pair_idx]),
                                 "显著": "是" if tukey.reject[pair_idx] else "否",
                             })
-            except (KeyError, Exception):
-                pass
+            except (KeyError, IndexError, ValueError) as e:
+                logger.debug("Tukey HSD 事后检验提取失败 (因子: %s): %s", col, e, exc_info=True)
 
     # ── 构建 ANOVA 增强表 (含效应量) ──
     anova_enhanced_rows = []
@@ -948,7 +954,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         # 效应量: 匹配对秩相关 r = Z / sqrt(N)
         n = len(data)
         z_stat_abs = abs(sp_stats.norm.ppf(max(p, 1e-300) / 2))
-        r_effect = float(z_stat_abs / np.sqrt(n))
+        r_effect = min(float(z_stat_abs / np.sqrt(n)), 1.0)  # capped at 1.0 (theoretical max)
         effect_size = r_effect
         effect_name = "秩相关 r"
         effect_label = _effect_size_label(r_effect, "cliffs_delta")
@@ -1102,8 +1108,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=[f"McNemar 检验需要二分类数据 (每列恰好 2 个不同值)，当前有 {len(unique_vals)} 个"])
 
-        pos = str(unique_vals[1])
-        neg = str(unique_vals[0])
+        # 保留原始类型进行比较，避免 str() 导致数值型二值数据 (0/1) 比较失败
+        pos = unique_vals[1]
+        neg = unique_vals[0]
 
         a = int(((vals1 == pos) & (vals2 == pos)).sum())  # 都为正
         b = int(((vals1 == pos) & (vals2 == neg)).sum())  # 前正后负
@@ -1481,6 +1488,11 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="decision_tree", status="error",
             messages=[f"有效样本({len(df)})不足"])
 
+    # 检查是否存在非数值列（DecisionTreeRegressor 不接受字符串/类别特征）
+    non_num = [c for c in cols if not pd.api.types.is_numeric_dtype(df[c])]
+    if non_num:
+        return AnalysisResult(task="decision_tree", status="error",
+            messages=[f"以下列包含非数值数据，请先进行 One-Hot 编码: {non_num}"])
     X = df[cols]
     y = df[req.target_col]
     max_depth = req.params.get("max_depth", 5)
@@ -1639,6 +1651,7 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
             metadata={"high_vif_count": len(high_vif)},
         )
     except Exception:
+        logger.debug("VIF 计算失败", exc_info=True)
         return AnalysisResult(task="vif", status="error",
                               messages=["VIF 计算失败，请检查数据是否存在共线性或数值异常"])
 
@@ -1921,6 +1934,10 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     适用于合格率、不良率、通过率等二项数据的区间估计。
     """
     data = req.data[req.target_col].dropna()
+    n = len(data)
+    if n == 0:
+        return AnalysisResult(task="proportion_ci", status="error",
+            messages=[f"列「{req.target_col}」有效数据为空"])
     # 将数据转为 0/1
     unique_vals = data.unique()
     if len(unique_vals) > 2:
@@ -1941,7 +1958,6 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
             # 默认取出现最多的值
             successes = int(data.value_counts().iloc[0])
 
-    n = len(data)
     p_hat = successes / n
 
     from math import sqrt
@@ -2108,7 +2124,9 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
     p_e = np.sum(row_sums * col_sums) / n**2
     # Kappa
     kappa = (p_o - p_e) / (1 - p_e + 1e-10)
-    # 标准误
+    # 标准误 (Fleiss-Cohen-Everitt 公式，适用于大样本)
+    # SE₀(κ) = √[p_o(1-p_o) / (n(1-p_e)²)]  是 H₀:κ=0 下的近似
+    # 生产环境使用简化公式；如需精确 SE 可用 bootstrap 方法
     se_kappa = np.sqrt((p_o * (1 - p_o)) / (n * (1 - p_e)**2 + 1e-10))
     z_kappa = kappa / (se_kappa + 1e-10)
     p_val = float(2 * (1 - stats.norm.cdf(abs(z_kappa))))
@@ -2181,15 +2199,21 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
             a_drop = (kd / (kd - 1)) * (1 - np.sum(item_vars_drop) / total_var_drop)
         else:
             a_drop = None
+        # 项总相关：零方差列会导致 .corr() 返回 NaN，格式化时需防护
+        item_total_corr = sub[col].corr(sub.drop(columns=[col]).sum(axis=1))
+        if pd.isna(item_total_corr) or item_vars[i] < 1e-10:
+            corr_str = "N/A (零方差)"
+        else:
+            corr_str = f"{float(item_total_corr):.3f}"
         alpha_if_deleted.append({
             "题项": col,
-            "删除后α": f"{a_drop:.4f}" if a_drop else "N/A",
+            "删除后α": f"{a_drop:.4f}" if a_drop is not None else "N/A",
             "变化": (
-                f"+{a_drop-alpha:.4f}" if a_drop and a_drop > alpha + 0.01
-                else f"{a_drop-alpha:.4f}" if a_drop else "—"
+                f"+{a_drop-alpha:.4f}" if a_drop is not None and a_drop > alpha + 0.01
+                else f"{a_drop-alpha:.4f}" if a_drop is not None else "—"
             ),
             "方差": f"{item_vars[i]:.4f}",
-            "项总相关": f"{float(sub[col].corr(sub.drop(columns=[col]).sum(axis=1))):.3f}",
+            "项总相关": corr_str,
         })
 
     if alpha >= 0.9:

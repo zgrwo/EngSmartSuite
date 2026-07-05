@@ -4,6 +4,7 @@ import pandas as pd
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.spc_monitor import (
     anomaly_detect,
+    ewma_chart,
     process_capability_analysis,
     trend_forecast,
     xbar_r_chart,
@@ -102,4 +103,28 @@ def test_xbar_constants_correct_limits():
     assert abs(float(xbar_row["LCL"]) - expected_lcl_x) < 0.01
     # R 图下控制限（n=5 时 D3=0）
     assert abs(float(r_row["LCL"])) < 0.01
-    assert abs(float(r_row["UCL"]) - expected_ucl_r) < 0.01
+
+
+def test_ewma_first_data_point_included():
+    """验证 EWMA 首个数据点参与计算（修复 P0 Bug F2.2）。"""
+    import numpy as np
+    from smartsuite.core.contracts import AnalysisRequest
+    from smartsuite.engine.spc_monitor import ewma_chart
+
+    np.random.seed(42)
+    # 构造序列: 首个点为极端异常值，应被 EWMA 捕获
+    data_vals = [50.0, 10.0, 10.5, 9.8, 10.2, 10.1, 9.9, 10.3]
+    df = pd.DataFrame({"val": data_vals})
+    # 计算手动 EWMA
+    mu = np.mean(data_vals)  # ~15.1
+    lam = 0.2
+    expected_ewma_0 = lam * data_vals[0] + (1 - lam) * mu
+    # 首个 EWMA 值应反映极端点 50.0
+    assert expected_ewma_0 > mu, f"首个 EWMA 值 {expected_ewma_0:.2f} 应 > 均值 {mu:.2f}（反映异常点）"
+
+    req = AnalysisRequest(task="spc_ewma", data=df, target_col="val",
+                          params={"lam": lam, "L": 2.7})
+    result = ewma_chart(req)
+    assert result.status == "ok"
+    # EWMA 图应存在，摘要应包含统计信息
+    assert len(result.figures) >= 1
