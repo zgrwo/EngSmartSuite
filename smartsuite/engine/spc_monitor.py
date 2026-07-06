@@ -123,25 +123,30 @@ def _we_rules_r(values, cl, ucl, lcl=0):
             violations["R1b: 低于LCL"] = [int(i) for i in r1b]
 
     # Rule R2: 连续 7 点在中心线同侧
+    r2_seen: set[int] = set()
     for i in range(n - 6):
         if all(vals[i:i+7] > cl):
-            violations.setdefault("R2: 连续7点>CL", []).extend(range(i, i+7))
-            break
+            r2_seen.update(range(i, i+7))
         if all(vals[i:i+7] < cl):
-            violations.setdefault("R2: 连续7点<CL", []).extend(range(i, i+7))
-            break
+            r2_seen.update(range(i, i+7))
+    if r2_seen:
+        violations["R2: 连续7点同侧"] = sorted(r2_seen)
 
     # Rule R3: 连续 7 点上升 (变异性恶化) — 严格单调，与 X-bar Rule 5 一致
+    r3_seen: set[int] = set()
     for i in range(n - 6):
         if all(vals[i+k+1] > vals[i+k] for k in range(6)):
-            violations.setdefault("R3: 连续7点上升 (变异增大)", []).extend(range(i, i+7))
-            break
+            r3_seen.update(range(i, i+7))
+    if r3_seen:
+        violations["R3: 连续7点上升 (变异增大)"] = sorted(r3_seen)
 
     # Rule R4: 连续 7 点下降 (变异性改善)
+    r4_seen: set[int] = set()
     for i in range(n - 6):
         if all(vals[i+k+1] < vals[i+k] for k in range(6)):
-            violations.setdefault("R4: 连续7点下降 (变异减小)", []).extend(range(i, i+7))
-            break
+            r4_seen.update(range(i, i+7))
+    if r4_seen:
+        violations["R4: 连续7点下降 (变异减小)"] = sorted(r4_seen)
 
     # 去重每个规则内的索引
     return {k: sorted(set(v)) for k, v in violations.items()}
@@ -412,7 +417,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         cl = np_bar
         ucl = np_bar + 3 * np.sqrt(np_bar * (1 - p_bar))
         lcl = np.maximum(0, np_bar - 3 * np.sqrt(np_bar * (1 - p_bar)))
-        ucl_const = float(ucl.iloc[0]) if hasattr(ucl, 'iloc') else float(ucl)
+        ucl_const = float(ucl)
 
     elif chart_type == "c":
         # c-chart: 缺陷数 (Poisson, 固定检验单位)
@@ -451,7 +456,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     # ── 违规检测 ──
     if ucl_const is not None:
         above = stat > ucl_const
-        below = stat < (float(lcl.iloc[0]) if hasattr(lcl, 'iloc') else float(lcl))
+        below = stat < float(lcl)
     else:
         above = stat.values > ucl
         below = stat.values < lcl
@@ -468,7 +473,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     if ucl_const is not None:
         ax.axhline(ucl_const, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"UCL={ucl_const:.4f}")
-        lcl_val = float(lcl.iloc[0]) if hasattr(lcl, 'iloc') else float(lcl)
+        lcl_val = float(lcl)
         ax.axhline(lcl_val, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"LCL={lcl_val:.4f}")
     else:
@@ -562,7 +567,7 @@ def _box_cox_transform(data):
         transformed, lam = sp_stats.boxcox(data)
         return transformed, float(lam)
     except Exception:
-        logger.debug("Box-Cox transform failed", exc_info=True)
+        logger.warning("Box-Cox 变换失败 (数据可能非正值或数值异常)", exc_info=True)
         return None, None
 
 
@@ -698,9 +703,9 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
         {"指标": "Cpm (田口能力)", "值": f"{cpm:.3f}" if cpm else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Sigma Level (短期)", "值": f"{sigma_lvl:.2f}" if sigma_lvl else "N/A",
+        {"指标": "Sigma Level (长期, Z_LT)", "值": f"{sigma_lvl:.2f}" if sigma_lvl else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "DPMO (每百万缺陷数)", "值": f"{dpmo:,}" if dpmo else "N/A",
+        {"指标": "DPMO (无偏移假设)", "值": f"{dpmo:,}" if dpmo else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
     ]
     capability_df = pd.DataFrame(capability_rows)
@@ -1028,6 +1033,8 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     参数:
         k: 参考值/松弛因子 (通常取 δ/2，其中 δ 是要检测的偏移量，以 σ 为单位)
         h: 决策区间 (通常取 4~5)
+        mu: 过程均值 (如未提供，从数据估计；建议使用已知受控状态的 μ)
+        sigma: 过程标准差 (如未提供，从数据估计；建议使用已知受控状态的 σ)
     """
     data = req.data[req.target_col].dropna()
     if len(data) < 5:
@@ -1036,8 +1043,18 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效数据不足(至少5个点)"],
         )
 
-    mu = float(data.mean())
-    sigma = float(data.std(ddof=1))
+    mu = req.params.get("mu")
+    sigma = req.params.get("sigma")
+    warn_msgs: list[str] = []
+    if mu is not None and sigma is not None:
+        mu, sigma = float(mu), float(sigma)
+    else:
+        mu = float(data.mean())
+        sigma = float(data.std(ddof=1))
+        warn_msgs.append(
+            "⚠ μ/σ 从全部数据估计，若数据包含过程偏移会导致 CUSUM 灵敏度下降。"
+            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
+        )
     if sigma < 1e-10:
         return AnalysisResult(
             task="spc_cusum", status="error",
@@ -1113,6 +1130,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=summary,
+        messages=warn_msgs,
         metadata={
             "mu": mu, "sigma": sigma, "k": k, "h": h,
             "alarm_plus": alarm_plus, "alarm_minus": alarm_minus,
@@ -1127,6 +1145,8 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     参数:
         lam: 平滑参数 (0<λ≤1)。λ越小越平滑，λ=1 等同于原始数据。常用 λ=0.2
         L: 控制限宽度 (常用 2.7~3.0)
+        mu: 过程均值 (如未提供，从数据估计)
+        sigma: 过程标准差 (如未提供，从数据估计)
     """
     data = req.data[req.target_col].dropna()
     if len(data) < 3:
@@ -1135,8 +1155,18 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效数据不足(至少3个点)"],
         )
 
-    mu = float(data.mean())
-    sigma = float(data.std(ddof=1))
+    warn_msgs: list[str] = []
+    mu = req.params.get("mu")
+    sigma = req.params.get("sigma")
+    if mu is not None and sigma is not None:
+        mu, sigma = float(mu), float(sigma)
+    else:
+        mu = float(data.mean())
+        sigma = float(data.std(ddof=1))
+        warn_msgs.append(
+            "⚠ μ/σ 从全部数据估计，若数据包含过程偏移会导致 EWMA 控制限偏大。"
+            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
+        )
     if sigma < 1e-10:
         return AnalysisResult(
             task="spc_ewma", status="error",
@@ -1222,6 +1252,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=summary,
+        messages=warn_msgs,
         metadata={
             "mu": mu, "sigma": sigma, "lam": lam, "L": L,
             "ucl_asym": float(ucl_asym), "lcl_asym": float(lcl_asym),
@@ -1285,13 +1316,23 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                 26: 3.964, 27: 3.997, 28: 4.027, 29: 4.056, 30: 4.084}
     d2_r = d2_table.get(r)
     if d2_r is None:
-        # r > 30: 使用理论近似公式 d2 ≈ √2 · Γ((n+1)/2) / Γ(n/2)
-        # (标准 d2 表仅覆盖 2-30，超出范围时理论近似已足够精确)
-        d2_r = float(_math_sqrt(2) * np.exp(lgamma((r + 1) / 2) - lgamma(r / 2)))
-        logger.info(
-            "Gage R&R 重复次数 r=%d > 30，d2 使用理论近似 %.3f（标准表仅覆盖 2-30）",
-            r, d2_r
-        )
+        # r=1 时无法估计重复性（极差未定义），回退到 r=2 的 d2=1.128
+        # 并给出明确警告
+        if r < 2:
+            d2_r = 1.128
+            logger.warning(
+                "Gage R&R 重复次数 r=%d < 2，d2 使用回退值 %.3f (按 r=2 处理)。"
+                "建议至少重复测量 2 次以获得可靠的重复性估计。",
+                r, d2_r
+            )
+        else:
+            # r > 30: 使用理论近似公式 d2 ≈ √2 · Γ((n+1)/2) / Γ(n/2)
+            # (标准 d2 表仅覆盖 2-30，超出范围时理论近似已足够精确)
+            d2_r = float(_math_sqrt(2) * np.exp(lgamma((r + 1) / 2) - lgamma(r / 2)))
+            logger.info(
+                "Gage R&R 重复次数 r=%d > 30，d2 使用理论近似 %.3f（标准表仅覆盖 2-30）",
+                r, d2_r
+            )
 
     sigma_mult = req.params.get("sigma_multiplier", 5.15)
 

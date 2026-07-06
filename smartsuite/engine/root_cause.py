@@ -47,6 +47,13 @@ def _binary_encode(series, col_name: str = ""):
         label = f"「{col_name}」" if col_name else "该列"
         return None, f"{label}不是二分类数据（唯一值数={len(unique_vals)}，需要恰好2个）"
     uv = sorted(unique_vals)
+    n_nan = int(series.isna().sum())
+    if n_nan > 0:
+        logger.warning(
+            "列「%s」存在 %d 个缺失值，将被编码为 0（与「%s」归为一类）。"
+            "如需区分缺失值，请先填充后再分析。",
+            col_name or "未知", n_nan, str(uv[0]),
+        )
     return (series == uv[1]).astype(int).values, None
 
 
@@ -1134,12 +1141,22 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         c = int(((vals1 == neg) & (vals2 == pos)).sum())  # 前负后正
         d = int(((vals1 == neg) & (vals2 == neg)).sum())  # 都为负
 
-        # McNemar 连续性校正
-        # Yates 连续性校正 (适用于小样本, b+c<25 时推荐)
-        stat = (abs(b - c) - 1)**2 / (b + c + 1e-10) if (b + c) > 0 else 0
+        # McNemar 检验
+        # 小样本 (b+c < 25) 使用 Yates 连续性校正，大样本不做校正
+        bc_sum = b + c
+        if bc_sum > 0:
+            if bc_sum < 25:
+                stat = (abs(b - c) - 1)**2 / bc_sum
+                test_name_suffix = " (Yates校正)"
+            else:
+                stat = (b - c)**2 / bc_sum
+                test_name_suffix = ""
+        else:
+            stat = 0
+            test_name_suffix = ""
         p = float(1 - sp_stats.chi2.cdf(stat, 1))
 
-        test_name = f"McNemar 检验 ({col1} → {col2})"
+        test_name = f"McNemar 检验 ({col1} → {col2}){test_name_suffix}"
         alpha = req.params.get("alpha", 0.05)
         conclusion = "前后存在显著变化" if p < alpha else "前后未发现显著变化"
         # Odds Ratio = b/c
@@ -1268,11 +1285,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         n_i = np.array([len(g) for g in group_data_ordered])
         E_JT = (n_total**2 - np.sum(n_i**2)) / 4
         V_JT = (n_total**2 * (2*n_total + 3) - np.sum(n_i**2 * (2*n_i + 3))) / 72
-        # 结校正：当数据中存在重复值（结）时，需减去每个结的校正项
-        for g in group_data_ordered:
-            _, counts = np.unique(g, return_counts=True)
-            ties = counts[counts >= 2]
-            V_JT -= np.sum(ties * (ties - 1) * (2 * ties + 5)) / 72
+        # 结校正：对所有组的值合并后统一计算，每个结值的校正项按其总出现次数计算
+        #（正确做法是按跨组总频数计算，而非按每个组内分别计算）
+        all_vals_flat = np.concatenate(group_data_ordered)
+        _, counts_all = np.unique(all_vals_flat, return_counts=True)
+        ties_all = counts_all[counts_all >= 2]
+        V_JT -= np.sum(ties_all * (ties_all - 1) * (2 * ties_all + 5)) / 72
         z_JT = (JT - E_JT) / np.sqrt(max(V_JT, 1e-10))
         p = float(2 * sp_stats.norm.sf(abs(z_JT)))
 
@@ -1437,7 +1455,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     bp = ax.boxplot([g1, g2], tick_labels=[
         f"{groups[0]}\n(n={n1})", f"{groups[1]}\n(n={n2})"
     ], patch_artist=True, widths=0.5)
-    for patch, color in zip(bp['boxes'], [PALETTE["data"]["secondary"], "#fd8d3c"]):
+    for patch, color in zip(bp['boxes'], [PALETTE["data"]["secondary"], PALETTE["target"]["fill"]]):
         patch.set_facecolor(color)
     # 叠加散点
     for i, gdata in enumerate([g1, g2], 1):
@@ -1542,8 +1560,11 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
             "排列重要性_std": perm_result.importances_std,
         })
     except Exception:
-        logger.debug("排列重要性计算失败", exc_info=True)
-        # 样本量太小时回退
+        logger.warning(
+            "排列重要性计算失败（样本量可能不足），回退为内置重要性。"
+            "排列重要性标准差已置零，解读时请注意。",
+            exc_info=True,
+        )
         fi_perm = pd.DataFrame({
             "因子": cols,
             "排列重要性": tree.feature_importances_,

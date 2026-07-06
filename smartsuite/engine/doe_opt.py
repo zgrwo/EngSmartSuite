@@ -90,6 +90,9 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             "标准化系数(β)": std_betas,
         })
 
+        # 警告消息列表（在整个诊断段之前初始化，供后续各节追加）
+        warn_msgs: list[str] = []
+
         # ── 模型诊断 ──
         # Durbin-Watson
         dw = durbin_watson(residuals)
@@ -97,9 +100,18 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # Breusch-Pagan 异方差检验
         bp_lm, bp_p = _breusch_pagan(model, X)
 
-        # Cook's Distance
-        influence = model.get_influence()
-        cooks_d = influence.cooks_distance[0]
+        # Cook's Distance — 隔离 try/except: 即使 Cook's D 失败也不丢弃已算出的系数和诊断
+        cooks_d = None
+        influence = None
+        try:
+            influence = model.get_influence()
+            cooks_d = influence.cooks_distance[0]
+        except (ValueError, np.linalg.LinAlgError, Exception) as e:
+            logger.warning("Cook's D 计算失败 (矩阵可能接近奇异): %s", e)
+            warn_msgs.append(
+                "⚠ Cook's Distance 无法计算（数据可能存在严重共线性），"
+                "回归系数仍然有效但影响点诊断已跳过"
+            )
 
         # ── 诊断表 ──
         diagnostics_rows = [
@@ -119,7 +131,6 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         diagnostics_df = pd.DataFrame(diagnostics_rows)
 
         sig_vars = coef_df[(coef_df["p值"] < 0.05) & (coef_df["变量"] != "const")]
-        warn_msgs: list[str] = []
 
         # 异方差警告（p<0.05 表示拒绝同方差，即存在异方差 == 有问题）
         if bp_p is not None and bp_p < 0.05:
@@ -156,25 +167,35 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax3.set_ylabel("√|残差|", fontsize=9)
         ax3.set_title("Scale-Location", fontsize=10)
 
-        # 4. Cook's Distance
+        # 4. Cook's Distance (若计算失败则显示提示文本)
         ax4 = fig_res.add_subplot(2, 3, 4)
-        ax4.stem(range(n), cooks_d, linefmt=PALETTE["data"]["secondary"], markerfmt="o", basefmt=" ")
-        threshold = 4 / n
-        ax4.axhline(threshold, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1,
-                    label=f"4/n={threshold:.4f}")
-        ax4.set_xlabel("观测序号", fontsize=9)
-        ax4.set_ylabel("Cook's D", fontsize=9)
-        ax4.set_title("Cook's Distance (影响点诊断)", fontsize=10)
-        ax4.legend(fontsize=7)
+        if cooks_d is not None and len(cooks_d) > 0:
+            ax4.stem(range(n), cooks_d, linefmt=PALETTE["data"]["secondary"], markerfmt="o", basefmt=" ")
+            threshold = 4 / n
+            ax4.axhline(threshold, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1,
+                        label=f"4/n={threshold:.4f}")
+            ax4.set_xlabel("观测序号", fontsize=9)
+            ax4.set_ylabel("Cook's D", fontsize=9)
+            ax4.set_title("Cook's Distance (影响点诊断)", fontsize=10)
+            ax4.legend(fontsize=7)
+        else:
+            ax4.text(0.5, 0.5, "Cook's D 计算失败\n(数据可能共线性)", ha="center", va="center",
+                    transform=ax4.transAxes, fontsize=9, color=PALETTE["judge"]["warn"])
+            ax4.set_title("Cook's Distance (不可用)", fontsize=10)
 
         # 5. Residual vs Leverage
         ax5 = fig_res.add_subplot(2, 3, 5)
-        leverage = influence.hat_matrix_diag
-        ax5.scatter(leverage, residuals, alpha=0.6, s=20, color=PALETTE["data"]["primary"])
-        ax5.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
-        ax5.set_xlabel("杠杆值", fontsize=9)
-        ax5.set_ylabel("残差", fontsize=9)
-        ax5.set_title("Residuals vs Leverage", fontsize=10)
+        if influence is not None:
+            leverage = influence.hat_matrix_diag
+            ax5.scatter(leverage, residuals, alpha=0.6, s=20, color=PALETTE["data"]["primary"])
+            ax5.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
+            ax5.set_xlabel("杠杆值", fontsize=9)
+            ax5.set_ylabel("残差", fontsize=9)
+            ax5.set_title("Residuals vs Leverage", fontsize=10)
+        else:
+            ax5.text(0.5, 0.5, "杠杆值计算失败\n(数据可能共线性)", ha="center", va="center",
+                    transform=ax5.transAxes, fontsize=9, color=PALETTE["judge"]["warn"])
+            ax5.set_title("Residuals vs Leverage (不可用)", fontsize=10)
 
         # 6. Actual vs Predicted
         ax6 = fig_res.add_subplot(2, 3, 6)
@@ -244,6 +265,13 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     c1, c2 = cols[0], cols[1]
+    rsm_warn_msgs: list[str] = []
+    if len(cols) > 2:
+        rsm_warn_msgs.append(
+            f"⚠ 响应面仅使用前 2 个因子 ({c1}, {c2})，"
+            f"忽略其余 {len(cols) - 2} 个因子: {cols[2:]}。"
+            "如需要，请手动选择 2 个关键因子。"
+        )
     df = req.data[[req.target_col, c1, c2]].dropna()
     if len(df) < 6:
         return AnalysisResult(
@@ -294,6 +322,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 最优点查找 ──
     direction = req.params.get("direction", "maximize")
+    # colormap 方向适配: maximize→绿高红低, minimize→红低绿高(RdYlGn反转)
+    _rsm_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
     if direction == "minimize":
         opt_idx = np.unravel_index(np.argmin(ZI), ZI.shape)
     else:  # default "maximize"
@@ -324,7 +354,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 左: 3D 曲面
     if _has_3d:
         ax_3d = fig.add_subplot(1, 2, 1, projection="3d")
-        surf = ax_3d.plot_surface(XI, YI, ZI, cmap="RdYlGn", alpha=0.85, linewidth=0, antialiased=True)
+        surf = ax_3d.plot_surface(XI, YI, ZI, cmap=_rsm_cmap, alpha=0.85, linewidth=0, antialiased=True)
         ax_3d.scatter(X1, X2, y, color=PALETTE["data"]["primary"], s=25, alpha=0.7, label="观测数据")
         # 标注最优点
         ax_3d.scatter([opt_x1], [opt_x2], [opt_z], color=PALETTE["anomaly"]["primary"], s=120,
@@ -340,7 +370,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 右 (或全幅): 2D 填充等高线
     ax_contour = fig.add_subplot(1, 2 if _has_3d else 1, 2 if _has_3d else 1)
     levels = 20
-    cf = ax_contour.contourf(XI, YI, ZI, levels=levels, cmap="RdYlGn", alpha=0.9)
+    cf = ax_contour.contourf(XI, YI, ZI, levels=levels, cmap=_rsm_cmap, alpha=0.9)
     cs = ax_contour.contour(XI, YI, ZI, levels=8, colors="black", linewidths=0.5, alpha=0.3)
     ax_contour.clabel(cs, inline=True, fontsize=7, fmt="%.2f")
     ax_contour.scatter(X1, X2, color=PALETTE["data"]["primary"], s=20, alpha=0.6, label="观测数据")
@@ -364,6 +394,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     return AnalysisResult(
         task="response_surface",
+        messages=rsm_warn_msgs,
         tables={
             "coefficients": coef_df,
             "model_fit": pd.DataFrame({
@@ -406,6 +437,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     if total_points > 50000:
         n_points = max(2, int(50000 ** (1.0 / len(ranges))))
     direction = req.params.get("direction", "maximize")
+    _gs_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
 
     grids = {col: np.linspace(lo, hi, n_points) for col, (lo, hi) in ranges.items()}
     mesh = np.meshgrid(*grids.values(), indexing="ij")
@@ -467,7 +499,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             ax = fig.add_subplot(111)
             Z = predictions.reshape(n_points, n_points)
             X, Y = mesh
-            cs = ax.contourf(X, Y, Z, levels=15, cmap="RdYlGn")
+            cs = ax.contourf(X, Y, Z, levels=15, cmap=_gs_cmap)
             ax.scatter(X_train[:, 0], X_train[:, 1], alpha=0.4, s=12,
                       color=PALETTE["data"]["primary"], label="训练数据")
             ax.scatter(points[best_idx, 0], points[best_idx, 1], marker="*",
