@@ -57,7 +57,7 @@ tests/
 ├── test_integration_reliability.py # 可靠性场景集成测试
 ├── test_integration_warranty.py    # 保修场景集成测试
 ├── test_master_integration.py      # 39 方法全量集成测试
-├── test_web_e2e.py             # Web UI 端到端测试
+├── test_web_e2e.py             # Web UI E2E (需服务器运行, 自动 skip)
 ├── test_workflows.py           # 工作流串联测试
 ├── verify_all_modules.py       # 模块导入 + 基本调用验证
 │
@@ -65,13 +65,16 @@ tests/
 │   ├── test_root_cause.py      # 要因分析测试
 │   ├── test_doe_opt.py         # DOE/优化测试
 │   ├── test_spc_monitor.py     # SPC 监控测试
-│   ├── test_correctness.py     # 数值正确性断言（14/39 方法覆盖，其余 25 个方法待补充）
+│   ├── test_correctness.py     # 数值正确性断言 — 39/39 方法全覆盖
 │   ├── test_edge_cases.py      # 边界情况测试
+│   ├── test_invariants.py      # 数学不变量测试 (p∈[0,1], Cpk≤Cp, R²≥0…)
+│   ├── test_fuzz.py            # 边界模糊测试 (NaN/空/常量/大样本/共线)
 │   └── test_new_functions.py   # 新函数验证
 │
 └── test_services/              # 服务层单元测试
     ├── test_orchestrator.py    # 编排路由测试
-    └── test_reporter.py        # 报告生成测试
+    ├── test_reporter.py        # 报告生成测试
+    └── test_differential.py    # CLI vs Web 路径一致性测试
 ```
 
 ### 启动脚本
@@ -147,12 +150,37 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 ## 测试策略
 
+测试分为 4 层防线，逐层深入：
+
+### 第 1 层：数值正确性（参考实现对比）
+- 文件：`tests/test_engine/test_correctness.py`
+- 每个分析函数至少一个测试：构造已知属性数据 → 调用函数 → 与 scipy/statsmodels 直接计算结果对比
+- 覆盖：**39/39 方法**（100%）
+- 重点验证：效应量、p 值、置信区间、系数估计的正确性
+
+### 第 2 层：数学不变量
+- 文件：`tests/test_engine/test_invariants.py`
+- 不依赖"正确答案"，只验证数学上不可能违反的约束
+- 示例：p∈[0,1]、Cpk≤Cp、R²≥0、KM 曲线单调递减、R 图 LCL≥0
+- 能捕获系统性偏差（如公式用错导致 Cpk 异常）
+
+### 第 3 层：边界模糊测试
+- 文件：`tests/test_engine/test_fuzz.py`
+- 极端/随机输入下不应崩溃、不产生 NaN p 值
+- 覆盖：空数据、单行、全 NaN、常量列、共线性、n>5000、不等子组
+- 能捕获静默失败、NaN 传播、p>1 等
+
+### 第 4 层：差分测试（路径一致性）
+- 文件：`tests/test_services/test_differential.py`
+- 验证 CLI 路径（preprocess → orchestrate）与 Web API 路径产生相同数值
+- 能捕获参数默认值不一致、预处理路径差异
+- TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性检查
+
+### 集成与 E2E
 - 引擎层：pytest 单元测试，每个分析函数至少一个标准输入→断言输出正确性
-- 服务层：集成测试，验证 Orchestrator 路由 + Reporter 文件输出
-- Web E2E 测试：`tests/test_web_e2e.py`
+- 服务层：`tests/test_services/` — Orchestrator 路由 + Reporter 文件输出
+- Web E2E：`tests/test_web_e2e.py` — 需运行 `python smartsuite/web/app.py`，自动 skip 若服务器未启动
 - 回归：基准 Excel 文件 + 已知正确结果，pandas.testing 自动比对
-- 测试文件放在 `tests/test_engine/` 和 `tests/test_services/`
-- Web E2E 测试：`tests/test_web_e2e.py`
 
 ## 开发原则
 
@@ -171,7 +199,11 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 5. 在 `services/orchestrator.py` 的 `TASK_LABELS` 和 `TASK_GROUPS` 中添加条目
 6. 在 `web/static/app.js` 的 `TASK_PARAMS` 中添加参数默认值（如有）
 7. 创建 YAML 模板到 `templates/`
-8. 添加测试：至少 1 个集成测试 + 1 个正确性测试
+8. 添加测试（4 层防线，按适用性至少覆盖 2 层）：
+   - **必做**：`test_correctness.py` 添加参考实现对比测试
+   - **必做**：`test_invariants.py` 添加数学不变量断言（如函数返回 p 值必须 ∈ [0,1]）
+   - **推荐**：`test_fuzz.py` 添加边界输入用例（空数据/NaN/常量列等）
+   - **如涉及 Web 参数**：确保 `DEFAULT_PARAMS` 与 `app.js` 的 `TASK_PARAMS` 一致
 9. 更新 `docs/api-reference.md`
 10. 更新 `docs/skill.md` 决策树（如引入新的分析场景）
 11. 更新 `docs/user-manual.md`（如为面向用户的新方法）
