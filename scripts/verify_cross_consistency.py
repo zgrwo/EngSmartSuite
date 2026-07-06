@@ -98,7 +98,7 @@ TEST_CASES = [
     ("robust_regression", "不良率", ["熔体温度"], [], {}),
     ("quantile_regression", "不良率", ["熔体温度"], [], {"quantile": 0.5}),
     # === 过程监控 ===
-    ("spc_xbar", "不良率", [], [], {"subgroup_col": "车间"}),
+    ("spc_xbar", "不良率", [], [], {}),  # 不指定subgroup_col, 让引擎自动生成子组
     ("spc_attribute", "不良率", [], [], {"chart_type": "c"}),
     ("spc_cusum", "不良率", [], [], {}),
     ("spc_ewma", "不良率", [], [], {}),
@@ -136,8 +136,20 @@ for task, target, features, cats, params in TEST_CASES:
     # ── Path A: Python 直接调用 ──
     try:
         df_a = df_raw.copy()
+        params_a = dict(params)
+        # spc_xbar: Web UI 自动生成子组, 直接路径也需模拟
+        if task == "spc_xbar" and "subgroup_col" not in params_a:
+            n = len(df_a)
+            target_size = 5
+            n_subgroups = max(2, min(n // target_size, 50))
+            subgroup_col_name = "_auto_subgroup"
+            df_a[subgroup_col_name] = pd.cut(
+                range(n), bins=n_subgroups,
+                labels=[f"子组{i+1}" for i in range(n_subgroups)]
+            ).astype(str)
+            params_a["subgroup_col"] = subgroup_col_name
         req_a = AnalysisRequest(task=task, data=df_a, target_col=target,
-                                feature_cols=features, params=params)
+                                feature_cols=features, params=params_a)
         result_a = orchestrate(req_a)
         status_a = result_a.status
         summary_a = result_a.summary
@@ -163,8 +175,21 @@ for task, target, features, cats, params in TEST_CASES:
             cat_set = set(cats)
             df_b, feat_b, _, _, _ = preprocess_data(df_b, features, cat_set)
 
+        # 模拟 Web UI 的 spc_xbar 自动子组生成 (api.py run_analysis)
+        params_b = dict(params)
+        if task == "spc_xbar" and "subgroup_col" not in params_b:
+            n = len(df_b)
+            target_size = 5
+            n_subgroups = max(2, min(n // target_size, 50))
+            subgroup_col_name = "_auto_subgroup"
+            df_b[subgroup_col_name] = pd.cut(
+                range(n), bins=n_subgroups,
+                labels=[f"子组{i+1}" for i in range(n_subgroups)]
+            ).astype(str)
+            params_b["subgroup_col"] = subgroup_col_name
+
         req_b = AnalysisRequest(task=task, data=df_b, target_col=target,
-                                feature_cols=feat_b, params=params)
+                                feature_cols=feat_b, params=params_b)
         result_b = orchestrate(req_b)
         status_b = result_b.status
         summary_b = result_b.summary

@@ -41,15 +41,15 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     # 预处理：为 SPC 缺子组列时自动生成（使用随机后缀避免列名冲突）
     if task == "spc_xbar" and "subgroup_col" not in params:
         n = len(df)
-        default_n = min(n // 5, 10)
-        if default_n < 2:
-            default_n = 2
+        # 目标每组5个观测, 最多50组, 确保子组大小在2-25范围内
+        target_size = 5
+        n_subgroups = max(2, min(n // target_size, 50))
         df = df.copy()
         subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
         while subgroup_col_name in df.columns:
             subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
-        df[subgroup_col_name] = pd.cut(range(n), bins=default_n,
-            labels=[f"子组{i+1}" for i in range(default_n)]).astype(str)
+        df[subgroup_col_name] = pd.cut(range(n), bins=n_subgroups,
+            labels=[f"子组{i+1}" for i in range(n_subgroups)]).astype(str)
         params["subgroup_col"] = subgroup_col_name
 
     # ── 相关性：先构建合并矩阵 ──
