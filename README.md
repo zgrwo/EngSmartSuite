@@ -54,6 +54,16 @@ SmartSuite 将 Python 生态的统计分析能力（pandas、scipy、statsmodels
 
 ## 快速开始
 
+### 🚀 一键启动（推荐）
+
+**Windows 用户**：双击 `run_smartsuite.bat`  
+**macOS / Linux 用户**：双击 `run_smartsuite.sh`
+
+脚本会自动完成：检测 Python → 创建虚拟环境 → 安装依赖 → 打开浏览器。  
+你只需要：**上传 Excel → 选列 → 点按钮 → 看结果**。
+
+> 首次运行需下载依赖包（约 2-5 分钟），之后秒启动。
+
 ### 环境要求
 
 - Python 3.10 或更高版本（[python.org](https://www.python.org/downloads/)）

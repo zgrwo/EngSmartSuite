@@ -74,6 +74,14 @@ tests/
     └── test_reporter.py        # 报告生成测试
 ```
 
+### 启动脚本
+
+```
+run_smartsuite.bat              # Windows 一键启动（双击运行）
+run_smartsuite.sh               # macOS/Linux 一键启动（双击或 ./run_smartsuite.sh）
+run_server.py                   # Web UI 启动入口（被上述脚本调用，也可单独运行）
+```
+
 ### 模板与脚本
 
 ```

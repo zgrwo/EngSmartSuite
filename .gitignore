@@ -9,10 +9,12 @@ __pycache__/
 
 # 构建
 dist/
+build/
 *.egg
 
 # 虚拟环境
 .venv/
+.venv-smartsuite/
 venv/
 
 # 覆盖率
