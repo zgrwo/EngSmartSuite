@@ -161,7 +161,7 @@ for task, target, features, cats, params in TEST_CASES:
             feat_b = list(features)
         else:
             cat_set = set(cats)
-            df_b, feat_b, _, _ = preprocess_data(df_b, features, cat_set)
+            df_b, feat_b, _, _, _ = preprocess_data(df_b, features, cat_set)
 
         req_b = AnalysisRequest(task=task, data=df_b, target_col=target,
                                 feature_cols=feat_b, params=params)

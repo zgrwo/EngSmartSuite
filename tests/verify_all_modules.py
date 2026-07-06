@@ -197,7 +197,7 @@ for name, task_key, targets, features, cats, params, verifier in TESTS:
             feat_enc = list(features)
         else:
             cat_set = set(cats) if cats else set()
-            df_enc, feat_enc, _, _ = preprocess_data(df_raw, features, cat_set)
+            df_enc, feat_enc, _, _, _ = preprocess_data(df_raw, features, cat_set)
         # 处理 target
         target = targets[0] if targets else ""
         req_py = AnalysisRequest(task=task_key, data=df_enc,
