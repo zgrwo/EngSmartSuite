@@ -1,5 +1,11 @@
 """逐一复核全部38个模块: Web UI路径 vs 直接Python路径"""
-import pandas as pd, numpy as np, json, time, sys, io, urllib.request, uuid
+import io
+import json
+import sys
+import urllib.request
+import uuid
+
+import pandas as pd
 
 # 解决终端编码
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')

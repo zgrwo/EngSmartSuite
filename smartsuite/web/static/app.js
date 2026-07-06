@@ -127,7 +127,7 @@ const TASK_PARAMS = {
   spc_nonparametric: { side: 'two-sided' },
   spc_cusum:         { k: 0.5, h: 5.0 },
   spc_ewma:          { lam: 0.2, L: 2.7 },
-  spc_attribute:     { chart_type: 'c' },
+  spc_attribute:     { chart_type: 'p' },
   power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5 },
   bootstrap_ci:      { statistic: 'mean', n_bootstrap: 2000 },
   median_ci:         { ci_level: 0.95 },
@@ -260,7 +260,7 @@ function buildParamInput(k, v, task) {
 
   if (meta?.type === 'column') {
     const opts = columnData.map(c =>
-      `<option value="${c.name}" ${String(v) === c.name ? 'selected' : ''}>${c.name}</option>`
+      `<option value="${escHtml(c.name)}" ${String(v) === c.name ? 'selected' : ''}>${escHtml(c.name)}</option>`
     ).join('');
     return `<div class="param-item">
       <label class="param-label" for="${id}">${label}</label>
@@ -367,7 +367,7 @@ async function executeRequest(task) {
     renderResults(d.results || []);
   } catch(e) {
     document.getElementById('results').innerHTML =
-      `<div class="empty-hint" style="color:#c62828">错误: ${e.message}</div>`;
+      `<div class="empty-hint" style="color:#c62828">错误: ${escHtml(e.message)}</div>`;
   } finally {
     _running = false;
     document.querySelectorAll('.btn-analysis').forEach(b => b.disabled = false);

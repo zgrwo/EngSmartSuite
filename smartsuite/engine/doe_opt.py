@@ -26,7 +26,7 @@ def _std_beta(model, X):
         else:
             param_val = model.params[col]
             x_std = np.std(X[col])
-            if np.isnan(param_val) or x_std < 1e-10 or y_std < 1e-10:
+            if np.isnan(param_val) or x_std < 1e-10:
                 beta.append(0.0)
             else:
                 beta.append(float(param_val * x_std / y_std))
@@ -433,7 +433,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         best_alpha = float(ridge_cv.alpha_)
 
         # 交叉验证 R²
-        cv_r2 = float(cross_val_score(ridge_cv, X_train, y_train, cv=min(5, len(df)//3),
+        cv_r2 = float(cross_val_score(ridge_cv, X_train, y_train, cv=max(2, min(5, len(df)//3)),
                                        scoring="r2").mean())
 
         predictions = ridge_cv.predict(points)
@@ -519,7 +519,10 @@ def _desirability(vals, direction):
     rng = vmax - vmin + 1e-10
     if direction == "maximize":
         return (vals - vmin) / rng
-    return (vmax - vals) / rng
+    elif direction == "minimize":
+        return (vmax - vals) / rng
+    else:
+        raise ValueError(f"不支持的优化方向「{direction}」，请使用 'maximize' 或 'minimize'")
 
 
 def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
@@ -724,7 +727,7 @@ def _lenth_pse(effects):
     # 剔除 > 2.5*s0 的效应后重新计算 PSE
     trimmed = abs_effects[abs_effects < 2.5 * s0]
     if len(trimmed) == 0:
-        return s0
+        return max(s0, 1e-10)
     pse = 1.5 * np.median(trimmed)
     return max(pse, 1e-10)
 
@@ -788,7 +791,8 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             effect = float(2 * beta[1])
             # t 检验
             resid_std = float(np.std(y - X @ beta, ddof=2)) if len(y) > 2 else 1.0
-            se = resid_std / np.sqrt(np.sum(coded**2)) if np.sum(coded**2) > 0 else 1.0
+            Sxx = np.sum((coded - np.mean(coded))**2)
+            se = resid_std / np.sqrt(Sxx) if Sxx > 1e-10 else 1.0
             t_val = float(beta[1] / se) if se > 1e-10 else 0.0
             dof = len(y) - 2
             p_val = float(2 * sp_stats.t.sf(abs(t_val), dof)) if dof > 0 else 1.0
@@ -1024,6 +1028,8 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     try:
         X = sm.add_constant(sub[cols])
         model = sm.Logit(y, X).fit(disp=0)
+        if not getattr(model, 'mle_retvals', {}).get('converged', True):
+            logger.warning("Logistic 模型未收敛，结果可能不可靠")
     except Exception:
         logger.debug("Logistic 模型拟合失败", exc_info=True)
         return AnalysisResult(task="logistic_regression", status="error",
@@ -1099,10 +1105,14 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=summary,
+        messages=[
+            "⚠ Logistic 模型未收敛，系数和 OR 估计可能不可靠。请检查数据是否存在完美分离或共线性。"
+        ] if not getattr(model, 'mle_retvals', {}).get('converged', True) else [],
         metadata={
             "accuracy": accuracy, "sensitivity": sensitivity,
             "specificity": specificity, "mcfadden_r2": mcfadden_r2,
             "aic": float(model.aic),
+            "model_converged": getattr(model, 'mle_retvals', {}).get('converged', True),
         },
     )
 
@@ -1133,14 +1143,15 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     alpha = req.params.get("alpha_lasso", None)
     l1_ratio = req.params.get("l1_ratio", 1.0)  # 1.0 = pure Lasso, <1 = ElasticNet
 
+    _lasso_max_iter = 5000
     if alpha is not None:
         from sklearn.linear_model import Lasso
-        model = Lasso(alpha=alpha, max_iter=5000).fit(X_scaled, y)
+        model = Lasso(alpha=alpha, max_iter=_lasso_max_iter).fit(X_scaled, y)
         best_alpha = alpha
         train_r2 = None
     elif l1_ratio < 1.0:
         model = ElasticNetCV(l1_ratio=[l1_ratio], cv=min(5, len(sub)//3),
-                            max_iter=5000, random_state=42).fit(X_scaled, y)
+                            max_iter=_lasso_max_iter, random_state=42).fit(X_scaled, y)
         best_alpha = float(model.alpha_)
         train_r2 = float(model.score(X_scaled, y))
     else:
@@ -1159,7 +1170,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     convergence_warning = ""
     if hasattr(model, "n_iter_"):
         n_iter_actual = int(model.n_iter_) if np.isscalar(model.n_iter_) else int(np.max(model.n_iter_))
-        if n_iter_actual >= 4999:
+        if n_iter_actual >= _lasso_max_iter - 1:
             convergence_warning = "⚠ Lasso 模型在最大迭代次数内未收敛，系数可能不准确，建议增大 max_iter 或调整 alpha"
 
     coef_df = pd.DataFrame({

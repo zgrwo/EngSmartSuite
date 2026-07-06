@@ -88,7 +88,6 @@ def test_vif_analysis(sample_doe_data):
 
 def test_mcnemar_numeric_binary_data():
     """验证 McNemar 检验对数值型二值数据 (0/1) 正确计数（修复 P0 Bug F2.1）。"""
-    import numpy as np
     from smartsuite.core.contracts import AnalysisRequest
     from smartsuite.engine.root_cause import hypothesis_test
 
@@ -111,7 +110,6 @@ def test_mcnemar_numeric_binary_data():
 def test_cronbach_zero_variance_item():
     """验证 Cronbach's α 对零方差题项不崩溃（修复 P2 Bug F2.10）。"""
     from smartsuite.core.contracts import AnalysisRequest
-    from smartsuite.engine.root_cause import cronbach_alpha
 
     # 一个题项零方差（所有值相同）
     df = pd.DataFrame({

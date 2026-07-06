@@ -1,9 +1,37 @@
-"""End-to-end test of all 37 analysis tasks via Web API."""
-import urllib.request, json, time, sys, uuid
+"""End-to-end test of all 39 analysis tasks via Web API.
+
+Requires a running server: `python smartsuite/web/app.py`
+Run manually: pytest tests/test_web_e2e.py -v
+"""
+import http.cookiejar
+import json
+import time
+import urllib.request
+import uuid
+
+import pytest
 
 BASE = "http://127.0.0.1:5050"
 
-# Upload
+# ── Check server availability ──
+try:
+    _check = urllib.request.urlopen(f"{BASE}/api/csrf-token", timeout=2)
+    _check.close()
+except Exception:
+    pytest.skip("Server not running on port 5050 — skip E2E test", allow_module_level=True)
+
+# ── Session with cookie jar (required for CSRF) ──
+cookie_jar = http.cookiejar.CookieJar()
+opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+
+# ── Get CSRF token ──
+print("=== CSRF Token ===")
+csrf_req = urllib.request.Request(f"{BASE}/api/csrf-token")
+csrf_resp = opener.open(csrf_req)
+csrf_token = json.loads(csrf_resp.read())["token"]
+print(f"  Got token: {csrf_token[:16]}...")
+
+# ── Upload ──
 print("=== Upload ===")
 with open("tests/test_data.xlsx", "rb") as f:
     data = f.read()
@@ -14,12 +42,13 @@ body = (b'--' + B.encode() + b'\r\n'
         + data +
         b'\r\n--' + B.encode() + b'--\r\n')
 req = urllib.request.Request(f"{BASE}/api/upload", body,
-    {"Content-Type": f"multipart/form-data; boundary={B}"})
-r = urllib.request.urlopen(req)
+    {"Content-Type": f"multipart/form-data; boundary={B}",
+     "X-CSRF-Token": csrf_token})
+r = opener.open(req)
 d = json.loads(r.read())
 print(f"  OK: {len(d['columns'])} cols, {d['shape']}")
 
-# Test all 37 tasks
+# ── Test all 39 tasks ──
 ALL_TASKS = [
     ("correlation", ["不良率"], ["熔体温度","模具温度","注射压力"], []),
     ("anova", ["不良率"], ["原料类型"], ["原料类型"]),
@@ -58,6 +87,8 @@ ALL_TASKS = [
     ("tolerance_interval", ["不良率"], [], []),
     ("grid_search", ["不良率"], ["熔体温度"], []),
     ("multi_objective", ["不良率"], ["熔体温度","模具温度"], []),
+    ("spc_nonparametric", ["不良率"], [], []),
+    ("box_chart", ["不良率"], ["原料类型"], ["原料类型"]),
 ]
 
 ok, fail, total = 0, 0, 0
@@ -65,7 +96,7 @@ for task, targets, features, cats in ALL_TASKS:
     total += 1
     params = {}
     if task == "spc_xbar": params = {"subgroup_col": "车间"}
-    if task == "spc_attribute": params = {"chart_type": "c"}
+    if task == "spc_attribute": params = {"chart_type": "p"}
     if task == "power_analysis": params = {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5}
     if task == "grid_search": params = {"ranges": {"熔体温度": [180, 220]}, "n_points": 5}
     if task == "multi_objective":
@@ -78,17 +109,21 @@ for task, targets, features, cats in ALL_TASKS:
                         "categoricals": cats, "params": params},
                        ensure_ascii=False).encode("utf-8")
     req2 = urllib.request.Request(f"{BASE}/api/analyze", body2,
-        {"Content-Type": "application/json; charset=utf-8"})
+        {"Content-Type": "application/json; charset=utf-8",
+         "X-CSRF-Token": csrf_token})
     try:
-        r2 = urllib.request.urlopen(req2)
+        r2 = opener.open(req2)
         d2 = json.loads(r2.read())
         res = d2["results"][0]
         elapsed = time.time() - t0
         status = res["status"]
         summary = res.get("summary", "")[:60]
+        n_tables = len(res.get("tables", {}))
+        n_charts = len(res.get("charts", []))
         msgs = res.get("messages", [])
         msg = msgs[0][:50] if msgs else ""
-        print(f"  {'OK' if status=='ok' else '--':2s} {task:25s} {elapsed:5.1f}s  {status}")
+        print(f"  {'OK' if status=='ok' else '--':2s} {task:25s} {elapsed:5.1f}s  "
+              f"tables={n_tables} charts={n_charts}  {status}")
         ok += 1
     except urllib.error.HTTPError as e:
         elapsed = time.time() - t0
@@ -102,4 +137,4 @@ for task, targets, features, cats in ALL_TASKS:
 
 print(f"\n{'='*50}")
 print(f"Results: {ok}/{total} responded, {fail} failed")
-print(f"All tasks reachable via Web API!" if fail == 0 else f"{fail} tasks have issues")
+print("All tasks reachable via Web API!" if fail == 0 else f"{fail} tasks have issues")

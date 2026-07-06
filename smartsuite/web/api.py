@@ -83,7 +83,8 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
             pass  # 校验失败不阻塞分析
 
     # 以下任务需要原始类别列（不做one-hot编码，让引擎自行处理因子水平）
-    _raw_cat_tasks = {"box_chart", "anova", "variance_test", "contingency", "cohens_kappa"}
+    _raw_cat_tasks = {"box_chart", "anova", "variance_test", "contingency", "cohens_kappa",
+                      "hypothesis_test"}
     if task in _raw_cat_tasks:
         df_enc = df.copy()
         feat_enc = list(features)

@@ -65,7 +65,7 @@ tests/
 │   ├── test_root_cause.py      # 要因分析测试
 │   ├── test_doe_opt.py         # DOE/优化测试
 │   ├── test_spc_monitor.py     # SPC 监控测试
-│   ├── test_correctness.py     # 数值正确性断言（10/39 方法覆盖）
+│   ├── test_correctness.py     # 数值正确性断言（14/39 方法覆盖，其余 25 个方法待补充）
 │   ├── test_edge_cases.py      # 边界情况测试
 │   └── test_new_functions.py   # 新函数验证
 │
@@ -143,7 +143,7 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 - 错误信息使用中文工艺术语，不暴露 Python traceback 给最终用户
 - `from scipy import stats` 使用模块级别名 `sp_stats = stats`，不要在函数内重复导入
 - 使用 ruff 做 lint（E, F, I, N, W, UP, B 规则）
-- Web UI 的任务分组和标签集中定义在 `smartsuite/web/app.py`（`TASK_GROUPS`, `TASK_LABELS`）
+- Web UI 的任务分组和标签集中定义在 `smartsuite/services/orchestrator.py`（`TASK_GROUPS`, `TASK_LABELS`），`web/app.py` 通过 import 引用
 
 ## 测试策略
 
@@ -168,7 +168,7 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 2. 在 `engine/__init__.py` 中导出
 3. 在 `services/orchestrator.py` 的 `TASK_REGISTRY` 中注册
 4. 如有默认参数，添加到 `DEFAULT_PARAMS`
-5. 在 `web/app.py` 的 `TASK_LABELS` 和 `TASK_GROUPS` 中添加条目
+5. 在 `services/orchestrator.py` 的 `TASK_LABELS` 和 `TASK_GROUPS` 中添加条目
 6. 在 `web/static/app.js` 的 `TASK_PARAMS` 中添加参数默认值（如有）
 7. 创建 YAML 模板到 `templates/`
 8. 添加测试：至少 1 个集成测试 + 1 个正确性测试

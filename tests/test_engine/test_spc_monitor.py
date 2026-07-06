@@ -108,8 +108,8 @@ def test_xbar_constants_correct_limits():
 def test_ewma_first_data_point_included():
     """验证 EWMA 首个数据点参与计算（修复 P0 Bug F2.2）。"""
     import numpy as np
+
     from smartsuite.core.contracts import AnalysisRequest
-    from smartsuite.engine.spc_monitor import ewma_chart
 
     np.random.seed(42)
     # 构造序列: 首个点为极端异常值，应被 EWMA 捕获

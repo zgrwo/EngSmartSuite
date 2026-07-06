@@ -59,6 +59,13 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     cols = list(dict.fromkeys(req.feature_cols + [req.target_col]))
     cols = [c for c in cols if c in req.data.columns]
 
+    # 校验所有列为数值型，避免非数值列静默失败
+    non_numeric = [c for c in cols if not pd.api.types.is_numeric_dtype(req.data[c])]
+    if non_numeric:
+        return AnalysisResult(task="correlation", status="error",
+            messages=[f"以下列非数值型，无法计算相关性: {non_numeric}。"
+                      "请使用数据预处理将类别列转换为数值型。"])
+
     method = req.params.get("method", "pearson")  # "pearson" | "spearman" | "kendall"
     if method == "spearman":
         corr = req.data[cols].corr(method="spearman")
@@ -390,6 +397,11 @@ def _effect_interpretation(eta2):
     return _threshold_label(eta2, [0.01, 0.06, 0.14])
 
 
+def _cramers_v_interpretation(v):
+    """Cramér's V 效应量解读 (df≥1 通用阈值, Cohen 1988)。"""
+    return _threshold_label(v, [0.1, 0.3, 0.5])
+
+
 def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     """多因子 ANOVA 方差分析，含效应量、假设检验前提验证和事后比较。"""
     cols = [c for c in req.feature_cols if c in req.data.columns]
@@ -442,8 +454,13 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         if sw_p < 0.05:
             warn_msgs.append(
                 f"⚠ 残差正态性检验 (Shapiro-Wilk) p={sw_p:.4f}<0.05，"
-                f"残差不满足正态性假设"
+                "ANOVA 对正态性偏离有一定稳健性，但严重偏离可能影响结果"
             )
+    elif len(residuals) > 5000:
+        warn_msgs.append(
+            "样本量 > 5000，Shapiro-Wilk 不适用。"
+            "请参考 Q-Q 图或使用偏度/峰度评估正态性"
+        )
 
     # ── 效应量计算 ──
     effect_sizes = _eta_squared(anova_table)
@@ -703,7 +720,7 @@ def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
     Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
     denom = k * np.sum(row_sums) - np.sum(row_sums**2)
     Q = Q / (denom + 1e-10)
-    p = float(1 - sp_stats.chi2.cdf(Q, k - 1))
+    p = float(1 - sp_stats.chi2.cdf(max(Q, 0), k - 1))
     test_name = f"Cochran Q 检验 ({k} 条件)"
     alpha = req.params.get("alpha", 0.05)
     conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
@@ -1152,7 +1169,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                     "结论": [conclusion],
                 }),
                 "contingency_2x2": pd.DataFrame({
-                    f"{col2}={neg}": [d, a], f"{col2}={pos}": [c, b],
+                    f"{col2}={neg}": [d, b], f"{col2}={pos}": [c, a],
                 }, index=[f"{col1}={neg}", f"{col1}={pos}"]),
             },
             figures=[fig],
@@ -1251,7 +1268,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         n_i = np.array([len(g) for g in group_data_ordered])
         E_JT = (n_total**2 - np.sum(n_i**2)) / 4
         V_JT = (n_total**2 * (2*n_total + 3) - np.sum(n_i**2 * (2*n_i + 3))) / 72
-        z_JT = (JT - E_JT) / np.sqrt(V_JT + 1e-10)
+        # 结校正：当数据中存在重复值（结）时，需减去每个结的校正项
+        for g in group_data_ordered:
+            _, counts = np.unique(g, return_counts=True)
+            ties = counts[counts >= 2]
+            V_JT -= np.sum(ties * (ties - 1) * (2 * ties + 5)) / 72
+        z_JT = (JT - E_JT) / np.sqrt(max(V_JT, 1e-10))
         p = float(2 * sp_stats.norm.sf(abs(z_JT)))
 
         test_name = "Jonckheere-Terpstra 趋势检验"
@@ -1353,6 +1375,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 自动选择参数/非参数检验 ──
     norm_warn: list[str] = []
+    sw1 = sw2 = 1.0  # 初始化为正态（用于 auto 分支中条件不满足时的回退）
     if test_type == "auto":
         normal = True
         if len(g1) >= 3 and len(g2) >= 3 and len(g1) <= 5000 and len(g2) <= 5000:
@@ -1665,7 +1688,7 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
         target_power: 目标功效 (默认 0.80)
         mode: "required_n" (计算所需样本量) 或 "achieved" (计算已达功效)
         current_n: 当前样本量 (mode="achieved" 时必需)
-        test_type: "ttest" (默认) | "anova" | "correlation"
+        test_type: "ttest" (默认) | "anova" | "proportion"
         n_groups: ANOVA 分组数 (test_type="anova" 时使用)
     """
     from math import ceil
@@ -1862,7 +1885,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
             stat_label = "Chi²"
             effect = float(np.sqrt(chi2 / (len(sub) * (min(*ctab.shape) - 1) + 1e-10)))
             effect_name = "Cramér's V"
-            effect_label = _effect_interpretation(effect**2)
+            effect_label = _cramers_v_interpretation(effect)
         p_val = fish_p
     else:
         test_name = "卡方独立性检验"
@@ -1874,12 +1897,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         min_dim = min(*ctab.shape) - 1
         effect = float(np.sqrt(chi2 / (n_total * min_dim + 1e-10))) if min_dim > 0 else 0.0
         effect_name = "Cramér's V"
-        if effect > 0.3:
-            effect_label = "强关联"
-        elif effect > 0.15:
-            effect_label = "中等关联"
-        else:
-            effect_label = "弱关联"
+        effect_label = _cramers_v_interpretation(effect)
 
     alpha = req.params.get("alpha", 0.05)
     conclusion = "两变量存在显著关联" if p_val < alpha else "两变量未发现显著关联"
@@ -1950,7 +1968,7 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
         successes = int((data == success_val).sum())
     else:
         # 尝试常见标签
-        for label in ["合格", "是", "pass", "ok", "1", 1, True]:
+        for label in ["合格", "是", "pass", "ok", 1, "1"]:
             if label in unique_vals:
                 successes = int((data == label).sum())
                 break

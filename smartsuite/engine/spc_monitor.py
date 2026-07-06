@@ -166,9 +166,6 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             task="spc_xbar", status="error", messages=["子组数量不足"]
         )
 
-    xbar_bar = float(xbar.mean())
-    r_bar = float(r.mean())
-
     # 校验子组大小一致性 — 不等时自动修剪到最小子组大小
     subgroup_sizes = subgroups.count()
     warn_unequal = ""
@@ -191,6 +188,10 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         warn_unequal = f" (子组大小不一致，已取每组前{min_n}个值修剪为n={min_n})"
     else:
         n = int(subgroup_sizes.iloc[0]) if len(subgroups) > 0 else 5
+
+    # 在修剪后计算 xbar_bar 和 r_bar，确保控制限与图表数据一致
+    xbar_bar = float(xbar.mean())
+    r_bar = float(r.mean())
 
     if n not in _XBR_CONSTANTS:
         return AnalysisResult(
@@ -629,25 +630,37 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     within_sigma = float(np.mean(mr) / 1.128) if len(mr) > 0 else sigma_overall
 
     # ── 计算各项能力指数 ──
-    has_spec = (usl is not None) and (lsl is not None)
+    has_upper = usl is not None
+    has_lower = lsl is not None
+    has_both = has_upper and has_lower
 
-    # Cp/Cpk (短期/组内)
-    cp = float((usl - lsl) / (6 * within_sigma)) if has_spec and within_sigma > 0 else None
-    cpk_val = float(min(
-        (usl - mu) / (3 * within_sigma),
-        (mu - lsl) / (3 * within_sigma)
-    )) if has_spec and within_sigma > 0 else None
+    # Cp/Cpk (短期/组内) — 单侧公差仅计算 Cpk
+    cp = float((usl - lsl) / (6 * within_sigma)) if has_both and within_sigma > 0 else None
+    if has_upper and has_lower:
+        cpk_val = float(min((usl - mu) / (3 * within_sigma),
+                            (mu - lsl) / (3 * within_sigma))) if within_sigma > 0 else None
+    elif has_upper:
+        cpk_val = float((usl - mu) / (3 * within_sigma)) if within_sigma > 0 else None
+    elif has_lower:
+        cpk_val = float((mu - lsl) / (3 * within_sigma)) if within_sigma > 0 else None
+    else:
+        cpk_val = None
 
-    # Pp/Ppk (长期/整体)
-    pp = float((usl - lsl) / (6 * sigma_overall)) if has_spec and sigma_overall > 0 else None
-    ppk_val = float(min(
-        (usl - mu) / (3 * sigma_overall),
-        (mu - lsl) / (3 * sigma_overall)
-    )) if has_spec and sigma_overall > 0 else None
+    # Pp/Ppk (长期/整体) — 单侧公差仅计算 Ppk
+    pp = float((usl - lsl) / (6 * sigma_overall)) if has_both and sigma_overall > 0 else None
+    if has_upper and has_lower:
+        ppk_val = float(min((usl - mu) / (3 * sigma_overall),
+                            (mu - lsl) / (3 * sigma_overall))) if sigma_overall > 0 else None
+    elif has_upper:
+        ppk_val = float((usl - mu) / (3 * sigma_overall)) if sigma_overall > 0 else None
+    elif has_lower:
+        ppk_val = float((mu - lsl) / (3 * sigma_overall)) if sigma_overall > 0 else None
+    else:
+        ppk_val = None
 
-    # Cpm (Taguchi 能力指数)
+    # Cpm (Taguchi 能力指数, 需双侧公差)
     cpm = None
-    if has_spec and target is not None and sigma_overall > 0:
+    if has_both and target is not None and sigma_overall > 0:
         tau = np.sqrt(sigma_overall**2 + (mu - target)**2)
         cpm = float((usl - lsl) / (6 * tau)) if tau > 0 else None
 
@@ -1299,7 +1312,10 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     # Part Variation (PV)
     part_means = sub.groupby(part_col)[req.target_col].mean()
     rp = float(part_means.max() - part_means.min())
-    d2_p = d2_table.get(n_parts, 3.735)
+    d2_p = d2_table.get(n_parts)
+    if d2_p is None:
+        # 使用理论近似公式（与 d2_r 一致）
+        d2_p = float(_math_sqrt(2) * np.exp(lgamma((n_parts + 1) / 2) - lgamma(n_parts / 2)))
     pv = rp / d2_p
     pv_pct = pv * sigma_mult
 
@@ -1511,7 +1527,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     median_idx = np.where(np.array(km_survival_val) <= 0.5)[0]
     median_survival = float(km_times[median_idx[0]]) if len(median_idx) > 0 else None
 
-    # Weibull 拟合 (仅失效数据)
+    # Weibull 拟合 (仅失效数据；注：scipy 不支持删失数据 MLE，结果有偏)
     fail_times = times[events == 1]
     weibull_shape, weibull_scale = None, None
     if len(fail_times) >= 5:

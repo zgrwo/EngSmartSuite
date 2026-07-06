@@ -182,6 +182,8 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
             "AnalysisError": "分析计算过程出现异常，请检查数据完整性",
             "DataSelectionError": "数据选区无效，请重新选择数据区域",
             "OutputError": "报告输出失败，请检查输出路径是否可写",
+            "ZeroDivisionError": "计算中遇到除零错误，数据可能存在常数列或标准差为零",
+            "ImportError": "缺少必要的依赖库，请确认已安装完整的 smartsuite[all]",
         }
         detail = detail_map.get(err_cls, "分析计算过程中出现异常，请检查数据完整性")
         return AnalysisResult(
