@@ -1273,10 +1273,11 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     d2_r = d2_table.get(r)
     if d2_r is None:
         # r > 30: 使用理论近似公式 d2 ≈ √2 · Γ((n+1)/2) / Γ(n/2)
+        # (标准 d2 表仅覆盖 2-30，超出范围时理论近似已足够精确)
         d2_r = float(_math_sqrt(2) * np.exp(lgamma((r + 1) / 2) - lgamma(r / 2)))
-        logger.warning(
-            "Gage R&R 重复次数 r=%d 超出标准表范围 (2-30)，"
-            "d2 使用理论近似 %.3f", r, d2_r
+        logger.info(
+            "Gage R&R 重复次数 r=%d > 30，d2 使用理论近似 %.3f（标准表仅覆盖 2-30）",
+            r, d2_r
         )
 
     sigma_mult = req.params.get("sigma_multiplier", 5.15)
