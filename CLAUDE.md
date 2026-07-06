@@ -134,7 +134,7 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 - 每个公开分析函数必须返回 `AnalysisResult`，包含 `summary` 字段（中文工艺语言结论）
 - 错误信息使用中文工艺术语，不暴露 Python traceback 给最终用户
 - `from scipy import stats` 使用模块级别名 `sp_stats = stats`，不要在函数内重复导入
-- 使用 ruff 做 lint（E, F, I, N, W, UP 规则）
+- 使用 ruff 做 lint（E, F, I, N, W, UP, B 规则）
 - Web UI 的任务分组和标签集中定义在 `smartsuite/web/app.py`（`TASK_GROUPS`, `TASK_LABELS`）
 
 ## 测试策略

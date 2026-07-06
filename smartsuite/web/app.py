@@ -25,8 +25,7 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
-from smartsuite.engine._palette import GROUP_COLORS
-from smartsuite.services.orchestrator import TASK_GROUPS, TASK_LABELS, TASK_REGISTRY
+from smartsuite.services.orchestrator import GROUP_COLORS, TASK_GROUPS, TASK_LABELS, TASK_REGISTRY
 from smartsuite.web.api import column_info, run_analysis
 
 logger = logging.getLogger(__name__)
@@ -128,9 +127,10 @@ else:
         app.config["SECRET_KEY"] = _fallback_key
         logger.warning("无法持久化密钥到 %s，使用临时密钥", _secret_file)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
-# Session cookie 安全标志
+# Session 安全配置
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 小时后过期，限制 CSRF token 重用窗口
 
 
 @app.route("/")

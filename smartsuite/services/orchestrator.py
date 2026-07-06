@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
+from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — re-export for web layer
 from smartsuite.engine import (
     anomaly_detect,
     anova_analysis,

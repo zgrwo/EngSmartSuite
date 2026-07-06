@@ -15,12 +15,20 @@ from smartsuite.engine._palette import PALETTE
 logger = logging.getLogger(__name__)
 
 # ── X-bar/R 控制图常数表 (子组大小 n → A2, D3, D4) ──
+# 标准 ASTM/ISO Shewhart 控制图常数 (Montgomery, 9th ed.)
 _XBR_CONSTANTS: dict[int, tuple[float, float, float]] = {
-    2: (1.880, 0, 3.267), 3: (1.023, 0, 2.574),
-    4: (0.729, 0, 2.282), 5: (0.577, 0, 2.114),
-    6: (0.483, 0, 2.004), 7: (0.419, 0.076, 1.924),
-    8: (0.373, 0.136, 1.864), 9: (0.337, 0.184, 1.816),
-    10: (0.308, 0.223, 1.777),
+    2: (1.880, 0, 3.267),   3: (1.023, 0, 2.574),
+    4: (0.729, 0, 2.282),   5: (0.577, 0, 2.114),
+    6: (0.483, 0, 2.004),   7: (0.419, 0.076, 1.924),
+    8: (0.373, 0.136, 1.864),   9: (0.337, 0.184, 1.816),
+    10: (0.308, 0.223, 1.777),  11: (0.285, 0.256, 1.744),
+    12: (0.266, 0.283, 1.717),  13: (0.249, 0.307, 1.693),
+    14: (0.235, 0.328, 1.672),  15: (0.223, 0.347, 1.653),
+    16: (0.212, 0.363, 1.637),  17: (0.203, 0.378, 1.622),
+    18: (0.194, 0.391, 1.609),  19: (0.187, 0.404, 1.596),
+    20: (0.180, 0.415, 1.585),  21: (0.173, 0.425, 1.575),
+    22: (0.167, 0.435, 1.565),  23: (0.162, 0.443, 1.557),
+    24: (0.157, 0.452, 1.548),  25: (0.153, 0.459, 1.541),
 }
 
 
@@ -180,14 +188,14 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         r = pd.Series([np.max(d["values"]) - np.min(d["values"]) for d in trimmed_data],
                       index=[d["subgroup"] for d in trimmed_data])
         n = min_n
-        warn_unequal = f" (子组大小不一致，已修剪为 n={min_n})"
+        warn_unequal = f" (子组大小不一致，已取每组前{min_n}个值修剪为n={min_n})"
     else:
         n = int(subgroup_sizes.iloc[0]) if len(subgroups) > 0 else 5
 
     if n not in _XBR_CONSTANTS:
         return AnalysisResult(
             task="spc_xbar", status="error",
-            messages=[f"子组大小 n={n} 不在支持范围 (2-10)"],
+            messages=[f"子组大小 n={n} 不在支持范围 (2-25)"],
         )
     A2, D3, D4 = _XBR_CONSTANTS[n]
 
@@ -311,6 +319,13 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         else f"过程存在异常，共触发 {len(xbar_violations) + len(r_violations)} 条规则"
     )
 
+    messages: list[str] = []
+    if warn_unequal:
+        messages.append(
+            f"⚠ 子组大小不一致: {warn_unequal.strip(' ()')}。"
+            "注：取每组前N个值，后续值被丢弃。如需完整分析，建议使用等大子组。"
+        )
+
     return AnalysisResult(
         task="spc_xbar",
         tables={
@@ -320,6 +335,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=f"{stability_summary}。X-bar CL={xbar_bar:.4f}, UCL={ucl_x:.4f}, LCL={lcl_x:.4f}",
+        messages=messages,
         metadata={
             "xbar_mean": xbar_bar,
             "r_mean": r_bar,

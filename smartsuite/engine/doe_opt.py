@@ -179,7 +179,8 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 6. Actual vs Predicted
         ax6 = fig_res.add_subplot(2, 3, 6)
         ax6.scatter(fitted, y, alpha=0.5, s=15, color=PALETTE["data"]["primary"])
-        ax6.plot([y.min(), y.max()], [y.min(), y.max()], "r--", linewidth=1,
+        ax6.plot([y.min(), y.max()], [y.min(), y.max()],
+                 color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1,
                  label="完美预测")
         ax6.set_xlabel("预测值", fontsize=9)
         ax6.set_ylabel("实际值", fontsize=9)
@@ -663,8 +664,17 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     ax_score = fig.add_subplot(1, 2, 2) if len(objectives) == 2 else fig.add_subplot(111)
     top_n = min(20, len(score_valid))
     top_idx = np.argsort(score_valid)[-top_n:]
-    # 显示各目标分解
-    bar_colors = [PALETTE["data"]["primary"], PALETTE["data"]["secondary"], PALETTE["data"]["tertiary"], PALETTE["contrast"]["d"]]
+    # 显示各目标分解（PALETTE 对比色 + 数据色，支持 ≥5 目标）
+    bar_colors = [
+        PALETTE["data"]["primary"],    # 深蓝
+        PALETTE["target"]["primary"],  # 深橙
+        PALETTE["center"]["primary"],  # 绿色
+        PALETTE["contrast"]["d"],      # 紫色
+        PALETTE["contrast"]["a"],      # 浅蓝
+        PALETTE["contrast"]["b"],      # 橙色
+        PALETTE["data"]["secondary"],  # 浅蓝灰
+        PALETTE["judge"]["warn"],      # 橙色警告
+    ]
     bottom_vals = np.zeros(top_n)
     for oi, obj in enumerate(objectives):
         col = obj["col"]

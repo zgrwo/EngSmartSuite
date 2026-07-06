@@ -29,7 +29,7 @@ def process_audit(
     health_checks: list[dict] = []
     numeric_features = [
         c for c in feature_cols
-        if str(df[c].dtype) in ("float64", "float32", "int64", "int32")
+        if pd.api.types.is_numeric_dtype(df[c])
     ]
 
     # ── 1. 数据质量 ──

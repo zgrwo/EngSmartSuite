@@ -16,7 +16,24 @@ import platform
 _logger = logging.getLogger(__name__)
 
 # ── 跨平台中文字体加载 ──
-_WINDOWS_SYSROOT = os.environ.get("SystemRoot", os.environ.get("WINDIR", "C:/Windows"))
+# Windows: 先尝试环境变量 SystemRoot/WINDIR，再查注册表，最后用 C:/Windows 回退
+def _get_windows_font_dir() -> str:
+    sysroot = os.environ.get("SystemRoot", os.environ.get("WINDIR", ""))
+    if sysroot and os.path.isdir(f"{sysroot}/Fonts"):
+        return sysroot
+    # 注册表查询（支持非标安装路径，如 D:\Windows）
+    try:
+        import winreg as _wr
+        with _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE,
+                         r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as key:
+            sysroot = _wr.QueryValueEx(key, "SystemRoot")[0]
+        if os.path.isdir(f"{sysroot}/Fonts"):
+            return sysroot
+    except Exception:
+        pass
+    return "C:/Windows"  # 最终回退
+
+_WINDOWS_SYSROOT = _get_windows_font_dir()
 _FONT_CANDIDATES = {
     "Windows": [
         (f"{_WINDOWS_SYSROOT}/Fonts/msyh.ttc", "Microsoft YaHei"),
@@ -33,6 +50,14 @@ _FONT_CANDIDATES = {
         ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
         ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
         ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", "Droid Sans Fallback"),
+        # Flatpak / Snap 容器路径
+        ("/app/share/fonts/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+        ("/snap/current/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+         "Noto Sans CJK SC"),
+        # 用户字体目录
+        (os.path.expanduser("~/.fonts/NotoSansCJK-Regular.ttc"), "Noto Sans CJK SC"),
+        (os.path.expanduser("~/.local/share/fonts/NotoSansCJK-Regular.ttc"),
+         "Noto Sans CJK SC"),
     ],
 }
 
@@ -108,6 +133,13 @@ try:
         robust_regression,
         roc_analysis,
     )
+except ImportError as e:
+    raise ImportError(
+        f"SmartSuite 引擎初始化失败 (doe_opt): {e}\n"
+        "请确保已安装所有核心依赖：pip install smartsuite"
+    ) from e
+
+try:
     from smartsuite.engine.root_cause import (
         anova_analysis,
         cohens_kappa,
@@ -123,6 +155,13 @@ try:
         variance_test,
         vif_analysis,
     )
+except ImportError as e:
+    raise ImportError(
+        f"SmartSuite 引擎初始化失败 (root_cause): {e}\n"
+        "请确保已安装所有核心依赖：pip install smartsuite"
+    ) from e
+
+try:
     from smartsuite.engine.spc_monitor import (
         anomaly_detect,
         attribute_chart,
@@ -143,9 +182,8 @@ try:
     )
 except ImportError as e:
     raise ImportError(
-        f"SmartSuite 引擎初始化失败，缺少依赖包：{e}\n"
-        "请确保已安装所有核心依赖：pip install smartsuite\n"
-        "核心依赖包括：pandas, numpy, scipy, statsmodels, scikit-learn, matplotlib"
+        f"SmartSuite 引擎初始化失败 (spc_monitor): {e}\n"
+        "请确保已安装所有核心依赖：pip install smartsuite"
     ) from e
 
 __all__ = [

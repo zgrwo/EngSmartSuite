@@ -40,6 +40,7 @@ web = [
 report = [
     "python-pptx>=0.6",
     "reportlab>=4.0",
+    "openpyxl>=3.0",
 ]
 dev = [
     "pytest>=7.0",
@@ -47,7 +48,11 @@ dev = [
     "ruff>=0.1",
 ]
 all = [
-    "smartsuite[web,report]",
+    "flask>=3.0",
+    "pyarrow>=14.0",
+    "python-pptx>=0.6",
+    "reportlab>=4.0",
+    "openpyxl>=3.0",
 ]
 
 [project.scripts]

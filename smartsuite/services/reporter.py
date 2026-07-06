@@ -17,7 +17,16 @@ logger = logging.getLogger(__name__)
 
 def to_excel(result: AnalysisResult, workbook,
              sheet_name: str = "分析结果") -> str:
-    """将分析结果写入 Excel 新 Sheet。"""
+    """将分析结果写入 Excel 新 Sheet。
+
+    注意: 此函数依赖 xlwings Excel add-in 运行环境，需要:
+      1. 安装 xlwings: ``pip install xlwings``
+      2. Excel 实例正在运行（通过 xlwings 连接）
+      3. 传入有效的 xlwings Workbook 对象
+
+    Web UI 和 CLI 入口不调用此函数。如需导出 Excel 报告，请使用
+    ``audit.export_workbook()``（基于 openpyxl，无需 Excel 实例）。
+    """
     try:
         ws = workbook.sheets.add(sheet_name, after=workbook.sheets[-1])
         r = 1

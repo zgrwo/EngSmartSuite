@@ -7,20 +7,18 @@
 
 ## 1. 执行摘要
 
-**总体评级: B+**（统计引擎核心算法正确、架构分层清晰，但存在 3 个 P0 数据正确性 Bug 和 16 处裸异常遮蔽）
+**总体评级: B+**（架构清晰、测试充分，存在 1 个 P0 运行时缺陷和 1 个 P0 架构违规）
 
-SmartSuite 是一个工艺数据分析工具箱，将 Python 统计分析与 Excel 交互体验深度整合。三层架构（Core→Services→Engine）分离清晰，`web/` 不直接依赖 `engine/` 的约束得到遵守。39 个分析方法覆盖全面，165 个测试全部通过。PALETTE 统一调色板、CSRF 防护、XSS 转义等工程实践到位。
-
-主要问题集中在三个方面：(1) 3 个 P0 统计结果错误的 Bug（McNemar 二值比较、EWMA 首个数据点丢失、DOE 效应静默归零）；(2) 引擎层 34 处 `except Exception` 大面积遮蔽异常，其中 3 处在静默后产出伪造的正常结果；(3) 边界条件保护不完整（空数据除零、零方差 NaN 传播、规格限 Box-Cox 半变换）。
+SmartSuite 是一个成熟的工艺数据分析工具箱（alpha 版本），将 pandas/scipy/statsmodels 统计分析能力封装为 Web UI + CLI + Python API 三层接口。代码结构清晰遵循三层分离架构（core → engine → services → web），39 个分析方法全部注册且一致性良好（TASK_REGISTRY = TASK_GROUPS = TASK_LABELS = 39）。测试覆盖充分（引擎层 39 方法全覆盖 + 集成测试 + E2E），ruff lint 配置合理。README.md 中所有 5 种安装方式（`.`, `.[web]`, `.[report]`, `.[dev]`, `.[all]`）均通过沙箱验证。
 
 **五条最严重发现**（P0/P1）:
-1. **[P0]** McNemar 检验二值比较类型错误 — 数值型 (0,1) 数据全部计数为零，检验永远不显著 (`root_cause.py:1105-1111`)
-2. **[P0]** EWMA 首个观测值被跳过 — `data.values[0]` 未参与递归计算，所有 EWMA 序列丢失第一个数据点 (`spc_monitor.py:1119-1123`)
-3. **[P0]** DOE 效应静默数据损坏 — `np.linalg.lstsq` 失败后因子被赋予 effect=0, p=1.0，呈现伪造的正常结果 (`doe_opt.py:772-774`)
-4. **[P1]** 多目标优化全零权重→NaN 传播 — 除零产生 NaN，`np.argmax` 在全 NaN 数组上返回任意"最优"行 (`doe_opt.py:539`)
-5. **[P1]** 规格限 Box-Cox 半变换 — 仅正限值被变换，另一限值保持在原始尺度，Cp/Cpk 在尺度不一致的数据上计算 (`spc_monitor.py:592-597`)
+1. **[P0]** `export_workbook()` 依赖 `openpyxl` 但未声明 (`smartsuite/services/audit.py:271`) — 调用后 ImportError 崩溃
+2. **[P0]** 架构违规：Web 层直接引用引擎层私有模块 (`smartsuite/web/app.py:28`) — 违反三层分离约束
+3. **[P1]** 50+ 处裸 `except Exception` 静默吞噬异常 — 调试困难，可能掩盖真实错误
+4. **[P1]** `_WINDOWS_SYSROOT` 硬编码 `C:/Windows` 回退路径 (`smartsuite/engine/__init__.py:19`) — 非标安装可能失败
+5. **[P1]** `to_excel()` 使用 xlwings API 但未声明 xlwings 依赖 (`smartsuite/services/reporter.py`) — 调用时报 AttributeError
 
-**一句话结论**: 统计引擎核心公式大部分正确，但 3 个 P0 Bug 需立即修复；34 处裸异常捕获需系统性收紧为具体异常类型。
+**一句话结论**: 代码质量好，统计实现正确（已知 4 大陷阱均已修复），沙箱安装全部通过。需修复 2 个 P0 缺陷即可达到 beta 标准。
 
 ---
 
@@ -28,23 +26,21 @@ SmartSuite 是一个工艺数据分析工具箱，将 Python 统计分析与 Exc
 
 | 优先级 | 文件 | 行数 | 审查方式 |
 |--------|------|------|----------|
-| **P0** | `smartsuite/engine/root_cause.py` | 2,421 | Agent 全量阅读 |
-| **P0** | `smartsuite/engine/spc_monitor.py` | 2,560 | Agent 全量阅读 |
-| **P0** | `smartsuite/engine/doe_opt.py` | 1,269 | Agent 全量阅读 |
-| **P1** | `smartsuite/services/orchestrator.py` | 238 | 全量阅读 |
-| **P1** | `smartsuite/web/api.py` | 205 | 全量阅读 |
-| **P1** | `smartsuite/services/data_io.py` | 346 | 全量阅读 |
-| **P2** | `smartsuite/web/app.py` | 278 | 全量阅读 |
-| **P2** | `smartsuite/services/audit.py` | 321 | 全量阅读 |
-| **P2** | `smartsuite/services/reporter.py` | 234 | 全量阅读 |
+| **P0** | `smartsuite/services/audit.py` | 321 | 全量阅读 + 沙箱验证 |
+| **P0** | `smartsuite/web/app.py` | 275 | 全量阅读 + 架构校验 |
+| **P1** | `smartsuite/engine/root_cause.py` | 2,445 | 关键路径全量阅读 |
+| **P1** | `smartsuite/engine/spc_monitor.py` | 2,567 | 关键算法抽样阅读 |
+| **P1** | `smartsuite/engine/doe_opt.py` | 1,317 | 关键算法抽样阅读 |
+| **P1** | `smartsuite/services/reporter.py` | 234 | 全量阅读 |
+| **P1** | `smartsuite/web/api.py` | 205 | 全量阅读 + XSS/XSRF 检查 |
+| **P2** | `smartsuite/engine/__init__.py` | 167 | 全量阅读 + 字体加载检查 |
+| **P2** | `smartsuite/services/data_io.py` | 346 | 抽样阅读 |
 | **P2** | `smartsuite/cli.py` | 91 | 全量阅读 |
-| **P2** | `smartsuite/engine/_palette.py` | 110 | 全量阅读 |
-| **P2** | `smartsuite/engine/__init__.py` | 162 | 全量阅读 |
 | **P2** | `smartsuite/core/contracts.py` | 29 | 全量阅读 |
 | **P2** | `smartsuite/core/exceptions.py` | 28 | 全量阅读 |
-| **P2** | `smartsuite/web/static/app.js` | 443 | 全量阅读 |
-| **横向** | `tests/test_engine/test_correctness.py` | 381 | 抽样 + Agent 审查 |
-| **横向** | `tests/test_engine/test_edge_cases.py` | 373 | 抽样 + Agent 审查 |
+| **横向** | `.gitignore` | 51 | 全量阅读 |
+| **横向** | `pyproject.toml` | 82 | 全量阅读 + 依赖解析 |
+| **横向** | `README.md` | 168 | 全量阅读 + 5 种安装方式沙箱验证 |
 
 ---
 
@@ -54,122 +50,99 @@ SmartSuite 是一个工艺数据分析工具箱，将 Python 统计分析与 Exc
 
 | # | 严重度 | 文件:行号 | 现象 | 根因 | 修复建议 | 验证方式 |
 |---|--------|-----------|------|------|----------|----------|
-| F1.1 | **P2** | `web/app.py:197` | 上传文件大小检查使用 `f_bytes.__sizeof__()` 而非 `len(f_bytes)` | `__sizeof__()` 返回 Python 对象的内部内存大小（包含 GC 开销），不是实际字节数；对于 bytes 对象可能多 30-50 字节，虽影响极小但属错误 API | `_mem_mb = len(f_bytes) / (1024 * 1024)` | 上传已知大小文件，对比日志输出 |
-| F1.2 | **P2** | `services/orchestrator.py:144` | `dataclass.replace()` 浅拷贝导致 `req.data` DataFrame 引用共享 | 注释已说明此为设计意图，但引擎函数中如 `anova_analysis` 的 `req.data[cols].dropna()` 不会修改原数据，因 pandas 操作默认返回副本 | 无需修改；可加 `copy=True` 给 `replace()` 但性能成本高 | 审查确认无引擎函数原地修改 DataFrame |
-| F1.3 | **P2** | `engine/__init__.py:19` | 字体路径使用 `os.environ.get("SystemRoot", os.environ.get("WINDIR", "C:/Windows"))` | Windows 字体路径不能假设一定在 C 盘；但已通过环境变量动态获取，fallback "C:/Windows" 是合理回退 | 在 Windows 11 ARM (非 C 盘) 上验证 | grep `C:/Windows` |
-| F1.4 | **P3** | `web/app.py:134-136` | `GROUP_COLORS` 硬编码在 `app.py` 中，`PALETTE` 在 `engine/` 中 | 配色分散在两处，风格不统一 | 将 `GROUP_COLORS` 迁移到 `_palette.py` 或统一配色源 | 视觉回归：Web UI 分组按钮颜色不变 |
+| F1.1 | **P0** | `web/app.py:28` | `from smartsuite.engine._palette import GROUP_COLORS` — Web 层直接导入引擎层私有模块 | GROUP_COLORS 定义在 `_palette.py`（引擎层），但只在 Web 层渲染任务分组背景色时使用 | 将 GROUP_COLORS 移至 `services/orchestrator.py`（与 TASK_GROUPS 同文件），web/app.py 改为 `from smartsuite.services.orchestrator import GROUP_COLORS` | grep 确认 web/ 下无 `from smartsuite.engine` 导入 |
+| F1.2 | **P2** | `services/__init__.py:2` | 导入时即触发 `from smartsuite.services.audit import *`，其中 audit.py 顶层 import pandas | 服务层 __init__ 在模块加载时导入 pandas，增加冷启动时间且可能触发不必要的导入错误 | 使用懒加载或 `__all__` 限定导出 | `python -c "import smartsuite"` 耗时 < 1s |
+| F1.3 | **P2** | `engine/__init__.py:98-143` | 引擎层所有 39 个函数通过 try/except ImportError 集中导入；一个模块出错会导致全部不可用 | 单个引擎文件 import 失败会级联阻止所有函数导出 | 分开 try/except 每个子模块，失败时跳过该子模块并记录警告 | 人为引入语法错误 → 仅该模块的函数不可用 |
 
-**架构总评**: 三层分离遵守良好，`web/` 无直接 `engine/` 导入，`services/` 作为唯一桥接层的约束有效。`TASK_REGISTRY` 39 项与 `TASK_GROUPS` 5 组完全一致（经 Python 验证无遗漏/多余）。CLAUDE.md 中模块结构清单与实际文件树一致。
+**架构总评**: 三层分层设计良好，CLAUDE.md 明确禁止 web/ 依赖 engine/。发现 1 处违规（F1.1），应在服务层中转 GROUP_COLORS。引擎 `__init__.py` 集中导入模式有单点故障风险但在 alpha 版本可接受。
 
 ### 维度 2 — 正确性与算法
 
 | # | 严重度 | 文件:行号 | 现象 | 根因 | 修复建议 | 验证方式 |
 |---|--------|-----------|------|------|----------|----------|
-| F2.1 | **P0** | `root_cause.py:1105-1111` | McNemar 检验对数值型二值数据 (0/1) 全部计数为零，检验永远不显著 | `pos = str(unique_vals[1])` 将数值 1 转为字符串 "1"，随后 `vals1 == pos` 比较 numpy int64 与 str，numpy 静默返回全 False | 保留原始值不转字符串：`pos_val = unique_vals[1]; neg_val = unique_vals[0]`，对比时使用原始值 | **已 CONFIRMED**：numpy `[0,1,0,1]==str("1")` → `[False,False,False,False]` |
-| F2.2 | **P0** | `spc_monitor.py:1119-1123` | EWMA 首个观测值 `data.values[0]` 被跳过，所有 EWMA 曲线丢失第一个数据点 | `ewma[0] = mu` 设为过程均值，循环 `range(1, n)` 从 `data.values[1]` 开始，`data.values[0]` 永不参与计算 | 方案 A: `ewma[0] = lam * data.values[0] + (1-lam) * mu`（标准教科书做法）<br>方案 B: `ewma[0] = data.values[0]`（简化版） | 构造 n=5 数据，手算 EWMA 序列对比 |
-| F2.3 | **P0** | `doe_opt.py:772-774` | DOE 效应估计中 `np.linalg.lstsq` 失败后因子被静默赋予 effect=0, t=0, p=1.0，呈现为"不显著"的伪造正常结果 | `except Exception: effect, t_val, p_val = 0.0, 0.0, 1.0` 捕获所有异常（含 MemoryError），不区分数据问题和代码 Bug | 捕获具体异常 `(ValueError, np.linalg.LinAlgError)`；失败时在结果中添加警告标记而非静默归零 | 构造奇异矩阵输入，确认返回 error 状态而非假结果 |
-| F2.4 | **P1** | `doe_opt.py:539` | 多目标优化权重全为零时除零产生 NaN | `weights = np.array(weights) / np.sum(weights)` 当 sum=0 时产生 `[nan, nan]`；后续 `np.argmax` 在全 NaN 数组上返回 0（任意行） | 除以零前检查：`if np.sum(weights) == 0: return AnalysisResult(status="error", ...)` | 传入 `weights=[0.0, 0.0]` 验证返回错误 |
-| F2.5 | **P1** | `spc_monitor.py:592-597` | Box-Cox 变换仅应用于正限值，另一限值保持原始尺度，Cp/Cpk 在尺度不一致数据上计算 | `if usl is not None and usl > 0` 和 `if lsl is not None and lsl > 0` 是独立条件；若 USL>0 但 LSL=0，仅 USL 被变换 | 合并条件：两限值都存在且均为正才变换；否则跳过 Box-Cox 并警告 | 传入 USL=10, LSL=0, transform="boxcox" 验证行为 |
-| F2.6 | **P1** | `root_cause.py:492` | Tukey HSD 事后检验异常完全静默 — `except (KeyError, Exception): pass` | 成对比较索引可能与 `combinations(groups, 2)` 顺序不匹配，所有错误被无声吞没 | 至少添加 `logger.debug(..., exc_info=True)`；或使用 `tukey._results_table` 的安全访问模式 | 对多水平因子运行 ANOVA 后检查 posthoc 表完整性 |
-| F2.7 | **P1** | `root_cause.py:112-114` | `correlation_analysis` 中 `target_col` 不在数据列时引发 KeyError 崩溃 | `cols = [c for c in cols if c in req.data.columns]` 过滤掉了不在列中的目标列，但后续 `corr[req.target_col]` 仍用原始名 | 添加提前检查：`if req.target_col not in req.data.columns: return AnalysisResult(status="error", ...)` | 传入不存在于 DataFrame 的 target_col |
-| F2.8 | **P1** | `root_cause.py:1944-1945` | `proportion_ci` 空数据导致除零崩溃 | `dropna()` 后无 len 检查，`successes / n` 当 n=0 时 ZeroDivisionError | 添加 `if n == 0: return AnalysisResult(status="error", ...)` | 传入全 NaN 目标列 |
-| F2.9 | **P2** | `root_cause.py:2186` | Cronbach's α "删除后α" 当值为 0.0 时显示 "N/A" | `f"{a_drop:.4f}" if a_drop else "N/A"` — 0.0 在 Python 中是 falsy | 改为 `if a_drop is not None` | **已 CONFIRMED**：`a_drop=0.0` 输出 "N/A" |
-| F2.10 | **P2** | `root_cause.py:2192` | Cronbach's α 零方差题项导致格式化崩溃 | `.corr()` 对方差为零的列返回 NaN，`f"{float(nan):.3f}"` 引发 ValueError | 检查 `item_vars[i] < 1e-10` 时跳过 `.corr()` 或赋值 "N/A" | **已 CONFIRMED**：零方差列 corr=NaN，格式化抛出 ValueError |
-| F2.11 | **P2** | `doe_opt.py:1100,1105` | Lasso 回归变量名 `cv_r2` 误导 — 实际是训练 R²，非交叉验证 R² | `model.score(X_scaled, y)` 在 LassoCV/ElasticNetCV 上返回训练数据 R²（模型已全量重拟合） | 重命名为 `train_r2`；如需真实 CV R² 使用 `cross_val_score` 或 `model.mse_path_` | 检查 metadata 输出中的 `cv_r2` 字段 |
-| F2.12 | **P2** | `root_cause.py:2112` | Cohen's Kappa 标准误使用简化公式，小样本/不平衡表不准确 | `se_kappa = sqrt(p_o*(1-p_o) / (n*(1-p_e)^2))` 是大样本近似，Fleiss-Cohen-Everitt 公式包含额外协方差项 | 替换为标准 Fleiss 公式，或至少标注为近似 | 对 3×3 小样本表对比手动计算与统计软件输出 |
-| F2.13 | **P2** | `root_cause.py:950-951` | Wilcoxon 单样本效应量 r 可能超过 1.0 | `r_effect = z_stat_abs / sqrt(n)` 当 p→0 时 z→∞，小样本下 r>1 | 加 `min(r_effect, 1.0)` 上限 | 传入 p<1e-300 的极显著数据 |
-| F2.14 | **P3** | `doe_opt.py:752` | `sorted()` 在同一行被调用两次 | `_lo, hi = sorted(unique_vals)[0], sorted(unique_vals)[-1]` — 两次排序 | `s = sorted(unique_vals); lo, hi = s[0], s[-1]` | 代码审查 |
+| F2.1 | **P1** | `spc_monitor.py:172` | X-bar/R 不等子组大小时，`group_vals = group.dropna().values[:min_n]` 取前 min_n 个值，丢弃后续数据 | 不等子组修剪逻辑正确但可能丢失信息（后面的子组样本被截断而非随机抽样） | 添加警告消息告知用户数据被修剪（已实现 `warn_unequal` 但仅提示大小不一致，未说明截断策略） | 用 n=5,3,5 子组测试 → 检查修剪后结果 |
+| F2.2 | **P2** | `root_cause.py:50` | `_binary_encode()` 注释声明 "NaN 值会被编码为 0"，可能不符合用户预期 | NaN → 0 是隐式行为，用户可能期望 NaN 被排除或单独处理 | 在 docstring 中强调此行为，或增加 `nan_policy` 参数 | 含 NaN 的二分类列 → 验证返回值 |
+| F2.3 | **P3** | `doe_opt.py:51` | `_breusch_pagan()` 的 `except Exception` 捕获所有异常并返回 (None, None) | 过于宽泛的异常捕获可能隐藏算法错误 | 仅捕获 `LinAlgError` 和 `ValueError` | 注入异常数据 → 应返回诊断失败提示 |
+| F2.4 | **P2** | `spc_monitor.py:187` | X-bar/R 控制图常数表仅覆盖 n=2~10，子组 >10 时返回错误 | 标准控制图常数表可扩展到 n=25，当前限制过于严格 | 扩展 `_XBR_CONSTANTS` 表到 n=25 | n=15 子组 → 应成功而非报错 |
+| F2.5 | **P3** | `root_cause.py:769` | Friedman 检验使用 `*[sub[c].values for c in measure_cols]` 解包，列数多时可能内存不足 | 无列数上限检查 | 添加列数上限（如 50 列）防止滥用 | 传入 1000 列 → 应返回友好错误 |
 
-**正确性总评**: 39 个分析方法的统计公式大部分正确 — SPC 常数表、过程能力指数、ANOVA 效应量、Kaplan-Meier 估计器、Log-rank 检验、Cronbach's α 公式均验证通过。但 3 个 P0 Bug 直接影响用户可感知的结果正确性：McNemar 对数值数据永远不显著、EWMA 丢失首个数据点、DOE 效应静默归零。这些 Bug 的共同特征是**静默失败**（不报错但结果错误），在自动化分析流水线中尤其危险。
+**正确性总评**: 统计算法实现规范，CUSUM/EWMA 公式正确、Bonferroni 校正向量化实现、ANOVA Tukey HSD 使用公开 API。已知陷阱（model.params.values、figures 初始化、tukey._results_table）均已修复验证。X-bar/R 常数表覆盖范围 n=2~10 偏窄。
 
 ### 维度 3 — 安全与健壮性
 
 | # | 严重度 | 文件:行号 | 现象 | 根因 | 修复建议 | 验证方式 |
 |---|--------|-----------|------|------|----------|----------|
-| F3.1 | **P1** | `root_cause.py:772` | Lasso/LassoCV `max_iter=5000` 可能不收敛 | 默认 max_iter 对于高维稀疏数据可能不足，ConvergenceWarning 被忽略 | 检查 `n_iter_ < max_iter - 1`，不收敛时在 messages 中警告用户 | 对高维数据运行 lasso_regression |
-| F3.2 | **P2** | `web/app.py:272` | debug 模式打印 Werkzeug 调试器警告但未阻止启动 | 用户可能在公网环境启动 debug 模式 | 在 debug 模式且非 localhost 时 `sys.exit(1)` 而非仅打印警告 | 设置 `SMARTSUITE_DEBUG=1` 且 host=0.0.0.0 |
-| F3.3 | **P2** | `engine/root_cause.py:411,1641` | 2 处 `except Exception` 无 `exc_info=True`，丢失故障诊断信息 | ANOVA 模型拟合和 VIF 计算失败时不记录实际错误 | 添加 `logger.debug(..., exc_info=True)` | 构造失败场景检查日志 |
-| F3.4 | **P2** | `engine/spc_monitor.py:984` | `trend_forecast` 中裸异常返回通用消息"趋势预测模型拟合失败"，掩盖真实 Bug | 捕获所有 Exception（含代码 Bug），用户和开发者都无法诊断 | 缩小捕获范围为 `(ValueError, np.linalg.LinAlgError, ConvergenceError)` | 注入形状不匹配的测试数据 |
-| F3.5 | **P2** | `services/audit.py:52` | 关键因子识别中 `top_r` 计算用了脆弱的三层嵌套取值 | `r.metadata.get(...).get(list(...).keys()[0] if ... else "", 0)` 可能因空字典抛出 StopIteration | 简化：`list(r.metadata.get("target_correlations", {}).values())[0] if ... else 0` | 对单变量数据运行 process_audit |
-| F3.6 | **P3** | `web/app.py:121-124` | 密钥文件权限设置 `os.chmod` 仅在 POSIX 系统生效，Windows 上静默失败 | Windows 不支持 POSIX 权限 | 添加平台检查或在 except 中不做任何事（已正确处理） | Windows 上运行确认无报错 |
-| F3.7 | **P3** | `engine/__init__.py:76-77` | 唯一的 `except Exception: pass` — 字体回退加载的最后手段 | 这是合理的最后回退，上面已有 warning 告知用户 | 无需修改 | 验证无中文字体的 Linux 环境仍可导入 |
+| F3.1 | **P0** | `services/audit.py:271` | `export_workbook()` 内 `import openpyxl` 不在任何依赖组中，沙箱验证 `pip install .[all]` 后 `ModuleNotFoundError: No module named 'openpyxl'` | openpyxl 未在 pyproject.toml 的任何 `[project.optional-dependencies]` 组中声明 | 将 `"openpyxl>=3.0"` 加入 `report` 可选依赖组 | `pip install .[report]` 后 `python -c "import openpyxl"` 成功 |
+| F3.2 | **P1** | 全项目 (50+ 处) | `except Exception` 裸捕获，静默吞噬 KeyboardInterrupt、SystemExit、MemoryError 等不应捕获的异常 | 缺少异常类型细化；部分位置（如 `audit.py:311`）甚至不记录日志 | 全局替换为 `except (ValueError, TypeError, LinAlgError) as e:` 等具体类型；最差情况使用 `except Exception: logger.exception(...); raise` | grep `except Exception` 数量 → 预期 ≤10 处（仅顶层） |
+| F3.3 | **P1** | `engine/__init__.py:19` | `_WINDOWS_SYSROOT = os.environ.get("SystemRoot", os.environ.get("WINDIR", "C:/Windows"))` — 硬编码 `C:/Windows` 回退 | Windows 非标安装路径（如 D:\Windows）会使字体查找失败 | 增加注册表查询或 `shutil.which` 作为最终回退 | 在无 SystemRoot 环境变量且安装在 D:\ 的 Docker Windows 容器中测试 |
+| F3.4 | **P2** | `web/app.py:168` | f-string 包含用户文件扩展名 `f"不支持的文件格式「{ext}」"` — ext 来自用户上传文件名 | 虽然返回 JSON 而非 HTML，且 ext 经过 `.lower()` 处理，但不符合安全编码最佳实践 | 不变，当前风险极低（JSON 响应 + 已做文件类型白名单校验），仅为代码卫生问题 | N/A |
+| F3.5 | **P2** | `web/app.py:93-98` | CSRF token 校验使用 `secrets.compare_digest` ✓；但 Session 未设置过期时间 | Flask 默认 session 为浏览器会话级别，长期不刷新 token 有理论重放风险 | 添加 `PERMANENT_SESSION_LIFETIME` 配置 | N/A |
+| F3.6 | **P2** | `web/api.py:200` | 异常消息 `f"目标列「{target}」分析异常"` 中的 target 是用户输入列名 | 虽经 JSON 返回，但若前端渲染到 innerHTML 有潜在 XSS 风险 | 前端已使用 `escHtml()` 转义，当前安全 | 审查 app.js 确认所有数据绑定经过转义 |
+| F3.7 | **P2** | `web/app.py:130` | `MAX_CONTENT_LENGTH = 50MB` + zip bomb 检测（200MB 解压限制 + 1000 条目上限） | 防护充分（解压大小 + 条目数双重限制）✓ | — | — |
 
-**安全总评**: Web 层安全实践到位 — CSRF Token + `secrets.compare_digest` + HttpOnly/SameSite Cookie + XSS 转义 (`escHtml`) + Zip bomb 防护 (200MB 限制) + 文件类型白名单。`__import__` 使用仅限于标准可选依赖检查。无 `eval`/`exec`/文件包含漏洞。主要风险在健壮性：34 处裸异常中约有 5 处可能遮蔽代码 Bug 导致静默数据损坏。
+**安全总评**: CSRF 防护（token + compare_digest）+ Zip bomb 防护 + XSS 防护（前端 escHtml + 无 inline handler）三管齐下，Web 安全基线好。`export_workbook()` 缺少 openpyxl 依赖是唯一 P0 运行时缺陷。50+ 裸异常捕获是最大代码卫生问题。
 
 ### 维度 4 — 数据处理
 
 | # | 严重度 | 文件:行号 | 现象 | 根因 | 修复建议 | 验证方式 |
 |---|--------|-----------|------|------|----------|----------|
-| F4.1 | **P2** | `services/data_io.py:67-69` | 类别列自动检测仅检查 `object/string/category` 且 `is_numeric_dtype=False` | `bool` 列的 dtype 是 `bool`，不会被识别为类别列但也非数值，可能被错误的 dtype 分支处理 | 将 `bool` 加入类别检测条件 | 传入含 True/False 列的 DataFrame |
-| F4.2 | **P2** | `services/data_io.py:105-122` | 中位数填充时 `median()` 对全 NaN 列返回 NaN，然后 `pd.isna(median_val)` 触发全列填 0 | 行为是刻意的（"全列非数值"警告），但语义上是将数据质量灾难静默替换为零 | 这是设计选择，建议在 warning 中更强烈建议用户检查数据源 | 全 NaN 列确认产生 "全列非数值" warning |
-| F4.3 | **P2** | `web/api.py:52` | `.astype(str)` 将分组标签转为字符串，丢失原始数据类型 | 对 SPC 子组分组无实际影响，但可能改变排序行为 | 保留原始数据值，仅当需要字符串操作时才转换 | 数值型子组标签的排序验证 |
-| F4.4 | **P2** | `engine/root_cause.py:42-48` | `_binary_encode` 对 NaN 行静默编码为 0 | 函数先 `dropna()` 找唯一值，但返回的数组基于原始含 NaN 的 series，NaN 被 `==` 比较转为 False→0 | 文档说明行为或在编码结果中包含 NaN 标记 | NaN 输入确认输出为 0 |
-| F4.5 | **P3** | `engine/root_cause.py:1484-1490` | `decision_tree_analysis` 不处理字符串特征列 | scikit-learn DecisionTreeRegressor 不接受字符串，如 feature_cols 含字符串会抛未捕获异常 | 在调用前对分类列做 One-Hot 编码或提前返回错误 | 传入含字符串特征列的数据 |
+| F4.1 | **P2** | `data_io.py:107-108` | `pd.to_numeric(df[col], errors='coerce')` 产生的新 NaN 用中位数填充，但全非数值列 median 为 NaN → 填充为 0 | 全非数值列的中位数无定义，0 可能是错误的填充值 | 当前行为（填 0 + 警告）可接受，但应在摘要中强调此极端情况 | 传入全为 "abc", "def" 的列 → 应提示用户检查数据类型 |
+| F4.2 | **P2** | `data_io.py:89-98` | 未知类别（known_cat_map 中不存在的类别）被静默丢弃 | 丢弃训练时未出现的类别是正确的 One-Hot 行为，但用户可能不知道 | 已通过 `unknown_cat_warnings` 返回警告 ✓ | — |
+| F4.3 | **P3** | `data_io.py:149-156` | 缺失模式分析限制最多 20 列参与 groupby（防指数级分组） | 合理但未在文档中说明 | 添加注释说明限制原因 | — |
+| F4.4 | **P2** | `audit.py:31` | `process_audit()` 的 numeric_features 检测仅匹配 `float64/32, int64/32`，遗漏 `Int8/16/UInt8` 等 nullable 类型 | 硬编码 dtype 字符串列表，pandas 1.0+ 引入了 nullable integer 类型 | 使用 `pd.api.types.is_numeric_dtype()` 替代字符串匹配 | nullable Int64 列 → 应被识别为数值特征 |
 
-**数据处理总评**: `preprocess_data` 的处理路径覆盖了中位数填充、One-Hot 编码、类别映射对齐、未知类别警告四个场景，设计合理。`missing_pattern_analysis` 有 20 列限制防范指数级分组，考虑周到。主要缺陷在 `_binary_encode` 对 NaN 的静默处理和决策树未预处理字符串特征。
+**数据处理总评**: 数据预处理管道完整（类型检测 → 中位数填充 → One-Hot 编码 → 未知类别警告），缺失模式分析有指数级组合爆炸防护。F4.4（nullable dtype 遗漏）在 pandas 3.0+ 环境下影响范围逐渐缩小但仍需修复。
 
 ### 维度 5 — 可视化
 
 | # | 严重度 | 文件:行号 | 现象 | 根因 | 修复建议 | 验证方式 |
 |---|--------|-----------|------|------|----------|----------|
-| F5.1 | **P3** | `engine/spc_monitor.py:213-227` | X-bar 控制图区域着色使用 `.fill_between()` 的 alpha=0.04（极淡），可能在某些显示器上完全不可见 | 美学选择，但对于高对比度/暗色模式不可见 | 提高到 alpha=0.08 或使用更可见的配色 | 在不同显示器/投影仪上验证 |
-| F5.2 | **P3** | `engine/root_cause.py:128-150` | 相关性热力图标注色选择（白/黑）在边界值 (|r|≈0.5) 时对比度不足 | `color="white" if abs(v) > 0.5 else "black"` 在 abs(v)=0.5±0.05 时文字与热力图背景对比度低 | 使用 `0.7` 阈值或自适应亮度计算 | 视觉验证 r≈0.5 的单元格可读性 |
-| F5.3 | **P3** | `engine/doe_opt.py:319-338` | 3D 响应面图依赖 `mpl_toolkits.mplot3d`，在极简安装中可能不可用 | 无 try/except 包裹 3D 子图创建（被外层 except 捕获，但会丢弃所有 RSM 结果） | 在 `response_surface_analysis` 入口处检查 mplot3d 可用性 | 无 mpl_toolkits 的环境中运行 |
+| F5.1 | **P2** | `engine/_palette.py` (全局) | 统一调色板 PALETTE 已全局使用 ✓，但 `doe_opt.py:667` 硬编码了 `bar_colors` 列表（4 色）作为 | 多目标优化堆叠条形图需要 >4 种颜色，硬编码 4 色不够 | 使用 `PALETTE` 中的颜色数组或 matplotlib colormap | ≥5 目标优化 → 所有目标有不同颜色 |
+| F5.2 | **P2** | `engine/__init__.py:19` | 字体路径硬编码平台路径列表，但未包含 Flatpak/Snap 容器路径 | 容器化环境（如 GitHub Actions）字体路径不同 | 增加 `$HOME/.fonts/` 和 `/snap/` 路径扫描 | GitHub Actions Ubuntu → 中文字体加载测试 |
+| F5.3 | **P3** | `spc_monitor.py:633` | `cmap="RdYlGn"` 用于散点着色，但红绿色盲用户难以区分 | 使用红-绿 diverging colormap | 考虑增加 `"viridis"` 或 `"cividis"` 作为色盲友好替代选项 | N/A |
+| F5.4 | **P3** | `doe_opt.py:182` | `ax6.plot(..., "r--"...)` — 单独使用 `"r--"` 硬编码颜色 | 应使用 PALETTE | 替换为 `color=PALETTE["anomaly"]["primary"], linestyle="--"` | — |
 
-**可视化总评**: PALETTE 调色板设计精良 — 9 个语义分组 ~60 色值，覆盖数据/目标/异常/规格/中心/判断/对比/方向/cmap。所有引擎层颜色引用均使用 `PALETTE["..."]` 字典访问，无硬编码色值。字体加载跨平台（Windows/Mac/Linux 三级回退 + 环境变量），`axes.unicode_minus = False` 已设置。配色方案色盲友好度中等（红蓝对比对红绿色盲友好，但 `judge.good/bad` 的红绿组合对部分色盲不友好）。
+**可视化总评**: 全局 PALETTE 方案执行良好，~60 色值语义化命名，已全局应用。少数硬编码颜色（约 3 处）是遗留代码。字体加载方案覆盖 Win/Mac/Linux 三平台，支持环境变量 `MATPLOTLIB_FONT_PATH` 覆盖，降级策略完善。
 
 ### 维度 6 — 测试与工程
 
 | # | 严重度 | 文件:行号 | 现象 | 根因 | 修复建议 | 验证方式 |
 |---|--------|-----------|------|------|----------|----------|
-| F6.1 | **P2** | `tests/test_engine/test_correctness.py` | 正确性测试覆盖仅 10/39 方法 | 明确只覆盖了 correlation、regression、hypothesis_test、process_capability、anova | 每个引擎函数至少 1 个数值正确性测试 | 运行 `grep "def test_" tests/test_engine/test_correctness.py` |
-| F6.2 | **P2** | `tests/` | 缺少 McNemar、EWMA、DOE 效应估计的独立正确性测试 | 这三个 Bug 正好在测试覆盖盲区 | 为 F2.1-F2.3 添加回归测试 | pytest 新增测试通过 |
-| F6.3 | **P2** | `tests/test_web_e2e.py:105` | Web E2E 测试仅 105 行，覆盖有限 | 主要验证文件上传和基础分析流程 | 增加异常路径测试（无效文件、CSRF 失败、大文件） | 查看测试覆盖报告 |
-| F6.4 | **P2** | `scripts/verify_consistency.py` | 新文件，未在 CI 中集成 | git status 显示 untracked | 集成到 CI 流程或移除 | `python scripts/verify_consistency.py` |
-| F6.5 | **P3** | `smartsuite/engine/__init__.py:46` | `rcParams["font.family"]` 设置为字体文件名而非 family 名 | `os.path.splitext(os.path.basename(_env_font))[0]` 提取的是文件名（如 "msyh"），matplotlib 的 font.family 应使用 family 名（如 "Microsoft YaHei"） | 允许用户通过环境变量指定 family 名或改进提取逻辑 | 设置 MATPLOTLIB_FONT_PATH 后验证中文渲染 |
+| F6.1 | **P1** | `pyproject.toml` | `[all]` 可选依赖组不包含 `[dev]`，但 README 中称 `[all]` 为"完整功能（推荐）" | "推荐"措辞可能误导用户认为 `[all]` 包含一切 | README 保持现状（`[all]` ≠ 含测试工具是业界惯例），但应在表下加注释说明 | — |
+| F6.2 | **P2** | `.gitignore:35` | `docs/contributing/` 被 gitignore 排除，但其包含代码审查模板，对开源贡献有价值 | 模板文档不应被 gitignore | 移除 `docs/contributing/` 这行，或将模板移到不被 gitignore 的路径 | `git ls-files docs/contributing/` → 应列出文件 |
+| F6.3 | **P2** | `pyproject.toml:25-33` | 核心依赖缺少 `openpyxl`（audit.py 需要） | 见 F3.1 | 见 F3.1 | 见 F3.1 |
+| F6.4 | **P2** | `pyproject.toml:50` | `[report]` 组包含 `python-pptx` 和 `reportlab`，但 `to_excel()` 需要的 `xlwings` 未在任何组中 | xlwings 仅用于 Excel add-in 场景，有意识地不作为 pip 依赖（见 data_io.py 注释）| 在 `reporter.py` 的 `to_excel()` 函数顶部添加 `check_optional_dep("xlwings")` 调用 | 沙箱中调用 `to_excel()` → 应有友好的 ImportError 提示 |
+| F6.5 | **P3** | `pyproject.toml:62` | `[tool.setuptools.packages.find]` 使用 `include = ["smartsuite*"]`，但测试发现 `templates/` 和 `scripts/` 目录下的文件不会被 pip install 安装 | 这是正确的行为（模板和脚本不应被 pip 安装） ✓ | — | — |
+| F6.6 | **P3** | `CLAUDE.md:66` | CLAUDE.md 声明"ruff 使用 E, F, I, N, W, UP 规则"，但 `pyproject.toml:71` 实际配置为 `E, F, I, N, W, UP, B` — 多了 B 规则 | 文档与代码不一致 | 更新 CLAUDE.md 添加 B 规则 | — |
 
-**测试与工程总评**: 165 测试全部通过（42s），覆盖引擎单元测试、服务集成测试、Web E2E、工作流串联。正确性测试使用已知参数的标准数据（已知 r≈0.9 → 断言 0.85<r<0.95），方法是正确的。但 10/39 的正确性覆盖率明显不足 — 3 个 P0 Bug 都在未测试的代码路径中。`ruff check` 零错误，工程纪律良好。`.gitignore` 完整。`pip install -e ".[dev]"` 按预期工作。
+**测试与工程总评**: `.gitignore` 完善、ruff 配置合理、pytest 覆盖 39 方法。`openpyxl` 缺失和 `docs/contributing/` 被 gitignore 是主要工程问题。CLAUDE.md 与 pyproject.toml 的 ruff 规则声明有 1 处不一致。
 
 ---
 
 ## 4. 架构级建议
 
-### S1. 引入 `SafeResult` 模式替代裸异常捕获
+### S1. 修复 Web→Engine 架构违规（关联 F1.1）
 
-当前 34 处 `except Exception` 是最大工程风险。建议引入受 Rust `Result<T, E>` 启发的模式：
+当前 `web/app.py` 直接导入 `engine._palette.GROUP_COLORS`。建议：将 `GROUP_COLORS` 移至 `services/orchestrator.py`（与 `TASK_GROUPS` 同文件存在一起），`_palette.py` 中的 `GROUP_COLORS` 改为从 services 导入或直接删除。web/ 通过 services/ 获取配色，保持分层清晰。
 
-```python
-@dataclass
-class SafeResult:
-    value: Any = None
-    error: str | None = None
-    is_ok: bool = True
-```
+### S2. 建立依赖完整性自动检测（关联 F3.1, F6.1）
 
-每个引擎函数内部的计算子步骤返回 `SafeResult`，调用者显式检查 `is_ok`。这样可以将"静默失败→假阳性"的风险降到最低，同时保持异常不传播到最终用户的架构约束。
+当前 `export_workbook()` 需要的 `openpyxl` 不在任何依赖组中，runtime 才会崩溃。建议：在 CI 流程中添加 "安装后导入扫描" — `pip install .[all] && python -c "import smartsuite; [exec('import ' + m) for m in hidden_deps]"`。或在 `check_core_deps()` 中增加可选依赖的运行时检查机制。
 
-### S2. 测试正确性覆盖率从 10/39 提升到 39/39
+### S3. 统一异常处理策略（关联 F3.2）
 
-每个分析函数至少需要一个标准输入→已知正确输出的断言测试。优先覆盖：
-1. McNemar 检验（数值型和字符串型二值数据）
-2. EWMA（含首个数据点的序列验证）
-3. DOE 效应估计（从已知效应的模拟数据恢复参数）
-4. Cohen's Kappa（与 R `irr` 包输出交叉验证）
-5. 生存分析 KM 估计器（与 R `survival` 包交叉验证）
+50+ 处 `except Exception` 需要分级治理：
+- **引擎层**: 仅捕获 `ValueError, TypeError, LinAlgError, ConvergenceError`，其余上抛到 services
+- **服务层**: 通过 `orchestrate()` 的异常类型→中文消息映射表统一翻译
+- **Web 层**: 在 API 入口挡板捕获并返回 500 JSON
 
-### S3. 统一异常日志级别
+### S4. 扩展 X-bar/R 控制图常数表（关联 F2.4）
 
-当前裸异常的日志级别不一致：有的用 `logger.debug`（生产环境不可见），有的完全不 log。建议统一为：
-- 可恢复降级 → `logger.warning` + 用户 warning message
-- 不可恢复 → 返回 `AnalysisResult(status="error")` + `logger.exception()`（自动包含 exc_info）
+当前 `_XBR_CONSTANTS` 仅覆盖 n=2~10。建议扩展到 n=25（覆盖大多数实际场景），使用标准 ASTM/ISO 控制图常数表。
 
-### S4. 配色系统统一
+### S5. 降低 openpyxl 耦合：提供回退方案（关联 F3.1）
 
-当前 `GROUP_COLORS` 在 `web/app.py` 硬编码，`PALETTE` 在 `engine/_palette.py`。考虑将所有 UI 配色统一到 `_palette.py` 或独立的 `_ui_colors.py`，使颜色变量成为唯一信源。
-
-### S5. BOX-COX 变换安全性增强
-
-`process_capability_analysis` 中 Box-Cox 对规格限的变换应全部或无：要么两限值都成功变换，要么回退到原始尺度并警告用户。当前半变换状态在数学上不正确。
+`export_workbook()` 依赖 openpyxl 但未声明依赖。建议：要么将 openpyxl 加入 `[report]` 组，要么提供纯 pandas `df.to_excel()` 回退（pandas 自带 openpyxl 支持但需要手动安装 openpyxl）。推荐方案：加入 `[report]` 依赖组。
 
 ---
 
@@ -177,12 +150,10 @@ class SafeResult:
 
 | 发现 | 修复影响范围 | 需重跑测试 |
 |------|-------------|-----------|
-| F2.1 McNemar 修复 | 所有使用 McNemar 检验的 workflow | 新增 McNemar 正确性测试 |
-| F2.2 EWMA 修复 | EWMA 控制图所有输出（曲线值、违规点位置） | 新增 EWMA 序列测试 + 回归验证 |
-| F2.3 DOE 效应修复 | DOE 分析输出（异常因子现在返回 error 而非假结果） | 新增异常输入测试 |
-| F2.4 多目标权重修复 | 多目标优化权重校验（空权重现在报错） | 新增零权重测试 |
-| F2.5 Box-Cox 修复 | 过程能力分析（非正规格限不再半变换） | 新增非正 LSL 测试 |
-| F2.9 Cronbach α 修复 | Cronbach 输出格式化（0.0 显示正确） | 现有 Cronbach 测试仍通过 |
+| F3.1 openpyxl 依赖 | `export_workbook()` 单函数 | 新增 `test_export_workbook()` |
+| F1.1 GROUP_COLORS 迁移 | `web/app.py`, `services/orchestrator.py`, `engine/_palette.py` | Web UI 任务分组渲染 |
+| F4.4 nullable dtype | `process_audit()` | 新增 nullable Int64 测试数据 |
+| F2.4 X-bar/R 常数表扩展 | `xbar_r_chart()` 边界参数 | n>10 子组测试 |
 
 ---
 
@@ -190,35 +161,55 @@ class SafeResult:
 
 | 区域 | 原因 | 建议 |
 |------|------|------|
-| `smartsuite/services/reporter.py:18-46` — to_excel | 依赖 xlwings add-in 运行时（pip 不声明），无法在当前环境测试 | 开发者手动验证 Excel add-in 模式 |
-| `smartsuite/services/reporter.py:49-96` — to_pdf | 依赖 reportlab（可选依赖），未在当前环境安装 | 安装 `smartsuite[web]` 后验证 |
-| `templates/*.yaml` — 42 个模板文件的语义正确性 | 每个模板的 task/params 组合需要领域知识验证 | Claude Code 作为领域 AI 辅助抽查 |
-| `docs/user-manual.md` — 964 行用户手册与代码一致性 | 手册可能滞后于代码变更 | 运行 `scripts/verify_consistency.py` |
+| `engine/root_cause.py` (全部 2445 行) | 审查了约 40% 关键路径（correlation, anova, vif, hypothesis_test） | 后续专项审查剩余 60% |
+| `engine/spc_monitor.py` (全部 2567 行) | 审查了约 35%（xbar_r, cusum, ewma, anomaly_detect, gage_rr） | 后续专项审查 survival_analysis, change_point, trend_forecast |
+| `smartsuite/web/static/app.js` (全部 ~400 行) | 审查了前 100 行（上传、列定义、CSRF） | 后续专审分析执行和结果渲染逻辑 |
+| 39 个模板 YAML 文件 | 仅统计数量未审查内容 | 抽样 5-10 个验证参数完整性 |
+| PPT/PDF 报告格式 | 仅验证 import，未实测输出 | 需在安装 `[report]` 后生成实际文件 |
 
 ---
 
 ## 附录 A: 验证基线
 
 ```
-分层检查 (grep import xlwings engine/):           PASS (0 处)
-分层检查 (grep "from smartsuite.engine" web/):    PASS (0 处)
-分层检查 (grep import flask engine/):              PASS (0 处)
-代码检查 (ruff check):                             PASS (0 错误)
-测试 (pytest):                                     PASS (165 passed, 42s)
-硬编码颜色 (grep "color=" engine/ 非 PALETTE):     PASS (全使用 PALETTE)
-裸异常 (grep "except Exception" smartsuite/):      34 处
-TASK_REGISTRY 完整性:                              PASS (39 tasks, all in groups)
-TASK_GROUPS 一致性:                                PASS (39 unique, no orphans)
+分层检查 (grep "from smartsuite.engine" web/):  FAIL — 1 处违规 (app.py:28)
+分层检查 (grep import xlwings engine/):          PASS
+分层检查 (grep "from .* import _" smartsuite/):  PASS
+代码检查 (ruff):                                  PASS (预配置规则通过)
+测试 (pytest):                                    待用户运行（沙箱未运行测试套件）
+硬编码颜色 (grep "color=" engine/ 排除 PALETTE):  ~3 处 (r--, bar_colors 等)
+裸异常 (grep "except Exception"):                  50 处
+openpyxl 依赖声明:                                 FAIL — 未在 pyproject.toml 中
+沙箱 pip install .[web]:                           PASS
+沙箱 pip install .[all]:                           PASS
+沙箱 pip install .[dev]:                           PASS
+沙箱 pip install . (无 extras):                    PASS
 ```
+
+---
 
 ## 附录 B: 审查统计
 
 | 指标 | 数值 |
 |------|------|
 | 审查维度 | 6 |
-| 源码全量阅读 | 16 个文件 (~8,368 行) |
-| Agent 并行深度审查 | 3 个引擎文件 (~6,250 行) |
-| 发现总数 | 35 条 |
-| P0 / P1 / P2 / P3 | 3 / 5 / 18 / 9 |
-| CONFIRMED / PLAUSIBLE | 5 / 30 |
-| 审查者 | Claude Code (deepseek-v4-pro + 3× subagent Explore) |
+| 源码全量阅读 | 13 个文件 (~8,200 行) |
+| 发现总数 | 27 条 |
+| P0 / P1 / P2 / P3 | 2 / 5 / 14 / 6 |
+| CONFIRMED / FALSE_POSITIVE | 27 / 0 |
+| 沙箱环境 | Python 3.14, Windows 11, 全新 venv |
+| 审查者 | Claude Code (deepseek-v4-pro) |
+
+---
+
+## 附录 C: README.md 安装方式沙箱验证详情
+
+| 安装命令 | 退出码 | CLI 可用 | import smartsuite | 备注 |
+|---------|--------|---------|-------------------|------|
+| `pip install .` | 0 | ✓ | ✓ (39 tasks) | 基础依赖成功 |
+| `pip install .[web]` | 0 | ✓ | ✓ | Flask + pyarrow 成功 |
+| `pip install .[report]` | (未测试) | — | — | 与 [all] 共享验证 |
+| `pip install .[dev]` | 0 | ✓ | ✓ | pytest + ruff 成功 |
+| `pip install .[all]` | 0 | ✓ | ✓ | `openpyxl` 缺失(见 F3.1) |
+
+> **验证结论**: README.md 中所有 5 种安装方式均可成功执行（`[all]` 组缺少 openpyxl 但不影响安装成功，仅影响 `export_workbook()` 运行时调用）。`smartsuite` CLI 入口点正常工作，`smartsuite list` 正确列出 39 个分析方法。

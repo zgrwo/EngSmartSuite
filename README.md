@@ -54,11 +54,31 @@ SmartSuite 将 Python 生态的统计分析能力（pandas、scipy、statsmodels
 
 ## 快速开始
 
+### 环境要求
+
+- Python 3.10 或更高版本（[python.org](https://www.python.org/downloads/)）
+- Windows / macOS / Linux
+
+### 安装
+
+SmartSuite 未发布到 PyPI，请从 GitHub 下载后本地安装：
+
+```bash
+# 1. 下载项目压缩包（GitHub → Code → Download ZIP）并解压
+#    或通过 git clone：
+git clone https://github.com/<your-org>/SmartExcel-Suite.git
+cd SmartExcel-Suite
+
+# 2. 本地安装（注意末尾有个点 "."，代表当前目录）
+pip install .[web]          # Web 界面（推荐）
+# pip install .[all]        # 完整安装（含 PPT/PDF 报告输出）
+```
+
+安装完成后，`smartsuite` 命令即可在终端中使用。
+
 ### 方式一：Web 界面（推荐）
 
 ```bash
-pip install smartsuite[web]
-cd SmartExcel-Suite
 python smartsuite/web/app.py
 ```
 
@@ -67,10 +87,6 @@ python smartsuite/web/app.py
 > 📖 完整操作指南见 **[用户操作手册](docs/user-manual.md)**
 
 ### 方式二：Python API（灵活定制）
-
-```bash
-pip install smartsuite
-```
 
 ```python
 import pandas as pd
@@ -94,12 +110,17 @@ print(result.figures)   # matplotlib 图表
 
 ### 可选依赖组
 
+安装时通过 `[<组名>]` 选择需要的功能：
+
 | 安装命令 | 包含 | 适用场景 |
 |---------|------|---------|
-| `pip install smartsuite` | pandas, numpy, scipy, statsmodels, scikit-learn, matplotlib | Python API / 纯分析 |
-| `pip install smartsuite[web]` | + flask, pyarrow | Web UI |
-| `pip install smartsuite[report]` | + python-pptx, reportlab | 导出 PPT/PDF 报告 |
-| `pip install smartsuite[all]` | 全部 | 开发/完整功能 |
+| `pip install .` | pandas, numpy, scipy, statsmodels, scikit-learn, matplotlib, pyyaml | Python API / 纯分析 |
+| `pip install .[web]` | 基础 + flask, pyarrow | Web UI |
+| `pip install .[report]` | 基础 + python-pptx, reportlab | 导出 PPT/PDF 报告 |
+| `pip install .[dev]` | 基础 + pytest, ruff | 运行测试 / 代码检查 |
+| `pip install .[all]` | 基础 + web + report | 完整功能（推荐） |
+
+> 💡 **开发模式**：如果需要修改源码，加 `-e` 参数（`pip install -e .[all]`），代码修改即时生效，无需重新安装。
 
 ---
 
