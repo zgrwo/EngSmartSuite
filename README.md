@@ -126,9 +126,9 @@ print(result.figures)   # matplotlib 图表
 |---------|------|---------|
 | `pip install .` | pandas, numpy, scipy, statsmodels, scikit-learn, matplotlib, pyyaml | Python API / 纯分析 |
 | `pip install .[web]` | 基础 + flask, pyarrow | Web UI |
-| `pip install .[report]` | 基础 + python-pptx, reportlab | 导出 PPT/PDF 报告 |
+| `pip install .[report]` | 基础 + python-pptx, reportlab, openpyxl | 导出 PPT/PDF/Excel 报告 |
 | `pip install .[dev]` | 基础 + pytest, ruff | 运行测试 / 代码检查 |
-| `pip install .[all]` | 基础 + web + report | 完整功能（推荐） |
+| `pip install .[all]` | 基础 + web + report + openpyxl | 完整功能（推荐） |
 
 > 💡 **开发模式**：如果需要修改源码，加 `-e` 参数（`pip install -e .[all]`），代码修改即时生效，无需重新安装。
 
