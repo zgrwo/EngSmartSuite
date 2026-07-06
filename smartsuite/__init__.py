@@ -40,6 +40,12 @@ def check_core_deps():
         raise ImportError(msg)
 
 
+# ── 包导入时立即检查核心依赖 ──
+# 必须在任何子模块导入之前执行，确保无论从 engine/ 还是 services/ 入口，
+# 都能得到友好的中文错误提示而非原始 ModuleNotFoundError。
+check_core_deps()
+
+
 def check_optional_dep(pkg: str) -> None:
     """检查单个可选依赖，缺失时给出明确的安装提示。
 
