@@ -11,6 +11,7 @@ sp_stats = stats  # 别名，供函数内统一使用
 
 from sklearn.tree import DecisionTreeRegressor, plot_tree
 from statsmodels.formula.api import ols
+from statsmodels.nonparametric.smoothers_lowess import lowess
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
@@ -124,7 +125,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         for j, c2 in enumerate(cols):
             r = corr.iloc[i, j]
             p = pmat.iloc[i, j]
-            stars = _significance_stars(p) if not (np.isnan(p) if isinstance(p, float) else p is None) else ""
+            stars = _significance_stars(p)  # _significance_stars 内部处理 NaN/None
             annotated.iloc[i, j] = f"{r:+.2f}{stars}"
 
     # 按相关系数降序排列（展示用）
@@ -211,7 +212,6 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                             # LOWESS 平滑趋势线
                             if len(sub) >= 20:
                                 try:
-                                    from statsmodels.nonparametric.smoothers_lowess import lowess
                                     smoothed = lowess(sub[cv2].values, sub[cv1].values,
                                                      frac=0.3, return_sorted=True)
                                     ax.plot(smoothed[:, 0], smoothed[:, 1], "-",
@@ -473,14 +473,14 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     effect_sizes = _eta_squared(anova_table)
 
     alpha = req.params.get("alpha", 0.05)
-    sig_factors: list[str] = []
+    sig_factors: list[tuple[str, str]] = []  # (raw_col_name, formatted_display_str)
     for col in cols:
         try:
             p_val = anova_table.loc[f"Q('{col}')", "PR(>F)"]
             es = effect_sizes.get(f"Q('{col}')", {})
             eta2 = es.get("η²", 0)
             if p_val < alpha:
-                sig_factors.append(f"{col}(p={p_val:.4f}, η²={eta2:.3f})")
+                sig_factors.append((col, f"{col}(p={p_val:.4f}, η²={eta2:.3f})"))
         except KeyError:
             warn_msgs.append(f"因子「{col}」在 ANOVA 结果表中未找到")
 
@@ -542,7 +542,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 汇总 ──
     if sig_factors:
-        summary = (f"显著影响「{req.target_col}」的因子: {'; '.join(sig_factors)}。"
+        summary = (f"显著影响「{req.target_col}」的因子: {'; '.join(sf[1] for sf in sig_factors)}。"
                    f"模型 R²={model.rsquared:.3f}, 调整 R²={model.rsquared_adj:.3f}")
     else:
         summary = (f"未发现对「{req.target_col}」显著影响的因子 (α={alpha})。"
@@ -557,7 +557,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 箱线图：按第一个显著因子分组，含显著性注释 ──
     fig_box = Figure(figsize=(max(len(cols)*2.0, 6), 4.5))
     ax_box = fig_box.add_subplot(111)
-    group_col = sig_factors[0].split("(")[0] if sig_factors else cols[0]
+    group_col = sig_factors[0][0] if sig_factors else cols[0]
     groups = req.data[[req.target_col, group_col]].dropna()
     group_names = sorted(groups[group_col].unique(), key=str)
     group_data = [groups[groups[group_col] == g][req.target_col].values for g in group_names]
@@ -726,7 +726,11 @@ def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
     row_sums = binary.sum(axis=1).values
     Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
     denom = k * np.sum(row_sums) - np.sum(row_sums**2)
-    Q = Q / (denom + 1e-10)
+    if denom < 1e-10:
+        return AnalysisResult(task="hypothesis_test", status="error",
+            messages=["Cochran Q 无法计算：所有样本在各条件下的响应完全一致（分母为零），"
+                      "不满足检验前提。"])
+    Q = Q / denom
     p = float(1 - sp_stats.chi2.cdf(max(Q, 0), k - 1))
     test_name = f"Cochran Q 检验 ({k} 条件)"
     alpha = req.params.get("alpha", 0.05)
@@ -1465,8 +1469,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     ax.set_ylabel(req.target_col, fontsize=10)
     ax.set_title(
         f"{test_name} — {req.target_col}\n"
-        f"p={p:.4f} | {effect_name}={effect_size:.3f} ({effect_label}) | "
-        f"功效={power:.1%}" if power else f"p={p:.4f} | {effect_name}={effect_size:.3f} ({effect_label})",
+        f"p={p:.4f} | {effect_name}={effect_size:.3f} ({effect_label})"
+        + (f" | 功效={power:.1%}" if power else ""),
         fontsize=10
     )
     fig.tight_layout()

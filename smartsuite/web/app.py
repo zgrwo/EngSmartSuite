@@ -56,10 +56,10 @@ _CLEANUP_INTERVAL = 50  # 每 50 次上传/分析请求尝试清理
 def _periodic_cleanup() -> None:
     """清理不存在对应 session 的过期临时文件。"""
     global _request_counter
-    _request_counter += 1
-    if _request_counter % _CLEANUP_INTERVAL != 0:
-        return
     with _upload_lock:
+        _request_counter += 1
+        if _request_counter % _CLEANUP_INTERVAL != 0:
+            return
         for path in list(_UPLOAD_FILES):
             try:
                 # 检查文件最后修改时间，超过 24h 的清理
@@ -190,8 +190,16 @@ def upload():
     if df.empty:
         return jsonify({"error": "文件为空或无法读取数据"}), 400
 
+    # ── 大数据防护：限制行数和列数，防止 OOM ──
+    max_rows = 100_000
+    max_cols = 500
+    if df.shape[0] > max_rows:
+        return jsonify({"error": f"数据行数 ({df.shape[0]}) 超过限制 ({max_rows}行)，请减少数据量"}), 400
+    if df.shape[1] > max_cols:
+        return jsonify({"error": f"数据列数 ({df.shape[1]}) 超过限制 ({max_cols}列)，请减少列数"}), 400
+
     # 大文件内存警告（当前实现将整个文件读入内存）
-    _mem_mb = f_bytes.__sizeof__() / (1024 * 1024)
+    _mem_mb = len(f_bytes) / (1024 * 1024)
     if _mem_mb > 20:
         logger.warning("上传文件较大 (%.0f MB)，内存占用可能较高", _mem_mb)
 

@@ -1,6 +1,4 @@
 import logging
-from math import lgamma
-from math import sqrt as _math_sqrt
 
 import numpy as np
 import pandas as pd
@@ -49,9 +47,13 @@ def _we_rules_xbar(values, cl, sigma):
     for i in range(n - 2):
         above = np.sum(vals[i:i+3] > cl + 2*sigma)
         below = np.sum(vals[i:i+3] < cl - 2*sigma)
-        if above >= 2 or below >= 2:
+        if above >= 2:
             for j in range(i, i+3):
-                if abs(vals[j] - cl) > 2*sigma and j not in r2:
+                if vals[j] > cl + 2*sigma and j not in r2:
+                    r2.append(j)
+        if below >= 2:
+            for j in range(i, i+3):
+                if vals[j] < cl - 2*sigma and j not in r2:
                     r2.append(j)
     if r2:
         violations["规则2: 3点中≥2点超出±2σ"] = sorted(set(r2))
@@ -61,9 +63,13 @@ def _we_rules_xbar(values, cl, sigma):
     for i in range(n - 4):
         above = np.sum(vals[i:i+5] > cl + 1*sigma)
         below = np.sum(vals[i:i+5] < cl - 1*sigma)
-        if above >= 4 or below >= 4:
+        if above >= 4:
             for j in range(i, i+5):
-                if abs(vals[j] - cl) > 1*sigma and j not in r3:
+                if vals[j] > cl + 1*sigma and j not in r3:
+                    r3.append(j)
+        if below >= 4:
+            for j in range(i, i+5):
+                if vals[j] < cl - 1*sigma and j not in r3:
                     r3.append(j)
     if r3:
         violations["规则3: 5点中≥4点超出±1σ"] = sorted(set(r3))
@@ -1326,11 +1332,13 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                 r, d2_r
             )
         else:
-            # r > 30: 使用理论近似公式 d2 ≈ √2 · Γ((n+1)/2) / Γ(n/2)
-            # (标准 d2 表仅覆盖 2-30，超出范围时理论近似已足够精确)
-            d2_r = float(_math_sqrt(2) * np.exp(lgamma((r + 1) / 2) - lgamma(r / 2)))
+            # r > 30: 使用 Blom 近似公式 d2 ≈ 2 · Φ⁻¹((n-0.375)/(n+0.25))
+            # 参考: Harter (1960), ASTM E2282。该公式在 n>30 时比 chi 分布均值
+            # 近似（√2·Γ((n+1)/2)/Γ(n/2)）更准确（误差 <0.5% vs ~35%）
+            _blom_arg = (r - 0.375) / (r + 0.25)
+            d2_r = float(2.0 * sp_stats.norm.ppf(_blom_arg))
             logger.info(
-                "Gage R&R 重复次数 r=%d > 30，d2 使用理论近似 %.3f（标准表仅覆盖 2-30）",
+                "Gage R&R 重复次数 r=%d > 30，d2 使用 Blom 近似 %.3f（标准表仅覆盖 2-30）",
                 r, d2_r
             )
 
@@ -1355,8 +1363,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     rp = float(part_means.max() - part_means.min())
     d2_p = d2_table.get(n_parts)
     if d2_p is None:
-        # 使用理论近似公式（与 d2_r 一致）
-        d2_p = float(_math_sqrt(2) * np.exp(lgamma((n_parts + 1) / 2) - lgamma(n_parts / 2)))
+        # 使用 Blom 近似公式（与 d2_r 一致）
+        _blom_arg = (n_parts - 0.375) / (n_parts + 0.25)
+        d2_p = float(2.0 * sp_stats.norm.ppf(_blom_arg))
     pv = rp / d2_p
     pv_pct = pv * sigma_mult
 

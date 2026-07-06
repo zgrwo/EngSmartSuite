@@ -119,11 +119,11 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
              "说明": "模型解释的变异比例"},
             {"指标": "调整R²", "值": f"{model.rsquared_adj:.4f}",
              "说明": "惩罚变量数后的拟合优度"},
-            {"指标": "F 统计量", "值": f"{model.fvalue:.4f}",
-             "说明": f"p={model.f_pvalue:.4f}"},
+            {"指标": "F 统计量", "值": f"{model.fvalue:.4f}" if np.isfinite(model.fvalue) else "N/A (退化模型)",
+             "说明": f"p={model.f_pvalue:.4f}" if np.isfinite(model.f_pvalue) else "N/A"},
             {"指标": "Durbin-Watson", "值": f"{dw:.4f}",
              "说明": "接近2=无自相关, <1=正自相关, >3=负自相关"},
-            {"指标": "Breusch-Pagan", "值": f"LM={bp_lm:.4f}, p={bp_p:.4f}" if bp_lm is not None else "N/A",
+            {"指标": "Breusch-Pagan", "值": f"LM={bp_lm:.4f}, p={bp_p:.4f}" if (bp_lm is not None and bp_p is not None) else "N/A",
              "说明": "p<0.05=存在异方差"},
             {"指标": "AIC", "值": f"{model.aic:.1f}", "说明": "越小越好(模型比较用)"},
             {"指标": "BIC", "值": f"{model.bic:.1f}", "说明": "越小越好(惩罚更重)"},
@@ -607,6 +607,12 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
                 messages=[f"列「{col}」有效数据不足"],
             )
         direction = obj.get("direction", "maximize")
+        if direction not in ("maximize", "minimize"):
+            return AnalysisResult(
+                task="multi_objective", status="error",
+                messages=[f"目标列「{col}」的优化方向「{direction}」无效，"
+                          "请使用 'maximize' 或 'minimize'"],
+            )
         desirability = _desirability(vals, direction)
         scores[valid_rows] += w * desirability
 
@@ -1053,8 +1059,12 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="logistic_regression", status="error",
             messages=["目标列需要恰好 2 个不同值"])
 
-    # 二值化
-    pos_label = unique_y[1] if len(unique_y) > 1 else unique_y[0]
+    # 二值化 — 使用与 roc_analysis 相同的阳性标签检测逻辑
+    for pos_label in ["不合格", "是", "1", 1, True, "fail", "异常"]:
+        if pos_label in unique_y:
+            break
+    else:
+        pos_label = sorted(unique_y)[-1]
     y = (sub[req.target_col] == pos_label).astype(int).values
 
     try:
@@ -1177,8 +1187,14 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
 
     _lasso_max_iter = 5000
     if alpha is not None:
-        from sklearn.linear_model import Lasso
-        model = Lasso(alpha=alpha, max_iter=_lasso_max_iter).fit(X_scaled, y)
+        if l1_ratio < 1.0:
+            # 用户既指定了 alpha 又指定了 l1_ratio → 使用 ElasticNet
+            from sklearn.linear_model import ElasticNet
+            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio,
+                              max_iter=_lasso_max_iter).fit(X_scaled, y)
+        else:
+            from sklearn.linear_model import Lasso
+            model = Lasso(alpha=alpha, max_iter=_lasso_max_iter).fit(X_scaled, y)
         best_alpha = alpha
         train_r2 = None
     elif l1_ratio < 1.0:
@@ -1187,7 +1203,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         best_alpha = float(model.alpha_)
         train_r2 = float(model.score(X_scaled, y))
     else:
-        model = LassoCV(cv=min(5, len(sub)//3), max_iter=5000,
+        model = LassoCV(cv=min(5, len(sub)//3), max_iter=_lasso_max_iter,
                         random_state=42).fit(X_scaled, y)
         best_alpha = float(model.alpha_)
         train_r2 = float(model.score(X_scaled, y))
