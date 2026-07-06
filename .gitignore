@@ -47,6 +47,9 @@ scripts/smartsuite_gui.py
 # 演示脚本
 scripts/demo_all_analyses.py
 
+# CodeGraph 索引（本地重建，不推送）
+.codegraph/
+
 # 历史残留
 .superpowers/
 docs/superpowers/
