@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
-from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — re-export for web layer
+from smartsuite.engine import GROUP_COLORS  # noqa: F401 — re-export for web layer
 from smartsuite.engine import (
     anomaly_detect,
     anova_analysis,
@@ -239,3 +239,8 @@ TASK_GROUPS = {
     "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval",
                  "survival_analysis"],
 }
+
+# ── 需要保留原始类别列的任务（不做 One-Hot 编码）──
+# 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
+RAW_CAT_TASKS: set[str] = {"box_chart", "anova", "variance_test", "contingency",
+                            "cohens_kappa", "hypothesis_test"}

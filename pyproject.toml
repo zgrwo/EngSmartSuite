@@ -23,13 +23,13 @@ classifiers = [
 ]
 
 dependencies = [
-    "pandas>=2.0",
-    "numpy>=1.24",
-    "scipy>=1.10",
-    "statsmodels>=0.14",
-    "scikit-learn>=1.3",
-    "matplotlib>=3.7",
-    "pyyaml>=6.0",
+    "pandas>=2.0,<3.0",
+    "numpy>=1.24,<2.2",
+    "scipy>=1.10,<1.16",
+    "statsmodels>=0.14,<0.15",
+    "scikit-learn>=1.3,<1.7",
+    "matplotlib>=3.7,<3.11",
+    "pyyaml>=6.0,<7.0",
 ]
 
 [project.optional-dependencies]
@@ -82,4 +82,4 @@ ignore = ["E501"]  # line-length handled by formatter
 "smartsuite/web/*" = ["E402"]  # matplotlib config before imports
 "smartsuite/services/orchestrator.py" = ["I001"]  # sorted engine imports for readability
 "smartsuite/services/reporter.py" = ["N806", "B904"]  # txBox variable + raise from err (Python 3.10)
-"tests/*" = ["N806", "E501", "F841"]  # test fixtures + math vars
+"tests/*" = ["N806", "E501", "F841", "B007", "E701", "E402"]  # test fixtures + math vars

@@ -25,6 +25,21 @@ htmlcov/
 *.swp
 *.swo
 
+# 环境变量（含密钥，切勿提交）
+.env
+.env.*
+
+# 日志
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 类型检查缓存
+.mypy_cache/
+
 # 个人配置
 .claude/settings.local.json
 

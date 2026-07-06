@@ -945,7 +945,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # ── ACF 计算 ──
         max_lag = min(20, n // 4)
         acf_vals = []
-        acf_conf = 1.96 / np.sqrt(n)  # 95% 置信限
+        acf_conf = float(sp_stats.norm.ppf(0.975)) / np.sqrt(n)  # 95% 置信限
         for lag in range(max_lag + 1):
             if lag == 0:
                 acf_vals.append(1.0)
@@ -984,7 +984,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         ax3 = fig.add_subplot(2, 2, 3)
         lags = range(max_lag + 1)
         ax3.bar(lags, acf_vals, color=PALETTE["data"]["secondary"], width=0.4, edgecolor="white")
-        ax3.axhline(0, color="black", linewidth=0.5)
+        ax3.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
         ax3.axhline(acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6)
         ax3.axhline(-acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6)
         ax3.set_xlabel("滞后阶数", fontsize=9)
@@ -1802,7 +1802,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     # 分段均值线
     if changepoints:
         boundaries = [0] + changepoints + [n]
-        colors = [PALETTE["data"]["primary"], PALETTE["target"]["primary"], PALETTE["center"]["primary"], "#9e9ac8", "#fd8d3c"]
+        colors = [PALETTE["data"]["primary"], PALETTE["target"]["primary"], PALETTE["center"]["primary"], PALETTE["contrast"]["d"], PALETTE["contrast"]["b"]]
         for seg_i in range(len(boundaries) - 1):
             start, end = boundaries[seg_i], boundaries[seg_i + 1]
             seg_mean = float(np.mean(values[start:end]))
@@ -2410,7 +2410,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
                 for i, gdata in enumerate(sg_groups, 1):
                     jitter = np.random.uniform(-0.12, 0.12, len(gdata))
                     ax.scatter(np.full(len(gdata), i)+jitter, gdata,
-                             alpha=0.3, s=8, color="black", zorder=3)
+                             alpha=0.3, s=8, color=PALETTE["misc"]["grid"], zorder=3)
             ax.set_title(f"{sub_col}={sg} (n={len(sg_data)})", fontsize=9)
             ax.set_xlabel(group_col, fontsize=8)
             ax.set_ylabel(req.target_col, fontsize=8)
@@ -2428,7 +2428,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         for i, gdata in enumerate(group_data, 1):
             jitter = np.random.uniform(-0.12, 0.12, len(gdata))
             ax.scatter(np.full(len(gdata), i)+jitter, gdata,
-                     alpha=0.3, s=10, color="black", zorder=3)
+                     alpha=0.3, s=10, color=PALETTE["misc"]["grid"], zorder=3)
         ax.set_xlabel(group_col, fontsize=10)
         ax.set_ylabel(req.target_col, fontsize=10)
         title = f"分组箱线图 — {req.target_col} by {group_col}"

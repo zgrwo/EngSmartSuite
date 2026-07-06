@@ -29,7 +29,7 @@ def _get_windows_font_dir() -> str:
             sysroot = _wr.QueryValueEx(key, "SystemRoot")[0]
         if os.path.isdir(f"{sysroot}/Fonts"):
             return sysroot
-    except Exception:
+    except (OSError, RuntimeError):
         pass
     return "C:/Windows"  # 最终回退
 
@@ -68,12 +68,14 @@ _env_font = os.environ.get("MATPLOTLIB_FONT_PATH")
 if _env_font and os.path.exists(_env_font):
     try:
         _font_prop = matplotlib.font_manager.fontManager.addfont(_env_font)
-        # 优先使用字体文件内部的 family 名，回退到文件名
-        if hasattr(_font_prop, "family_name") and _font_prop.family_name:
-            matplotlib.rcParams["font.family"] = _font_prop.family_name
-        else:
-            matplotlib.rcParams["font.family"] = os.path.splitext(
-                os.path.basename(_env_font))[0]
+        # 仅当用户未自定义 font.family 时才覆盖（保护用户配置）
+        if "font.family" not in matplotlib.rcParams or \
+           matplotlib.rcParams["font.family"] == ["sans-serif"]:
+            if hasattr(_font_prop, "family_name") and _font_prop.family_name:
+                matplotlib.rcParams["font.family"] = _font_prop.family_name
+            else:
+                matplotlib.rcParams["font.family"] = os.path.splitext(
+                    os.path.basename(_env_font))[0]
         _font_loaded = True
     except Exception as e:
         _logger.debug("环境变量字体 %s 加载失败: %s", _env_font, e)
@@ -85,7 +87,9 @@ if not _font_loaded:
         if os.path.exists(font_path):
             try:
                 matplotlib.font_manager.fontManager.addfont(font_path)
-                matplotlib.rcParams["font.family"] = family
+                if "font.family" not in matplotlib.rcParams or \
+                   matplotlib.rcParams["font.family"] == ["sans-serif"]:
+                    matplotlib.rcParams["font.family"] = family
                 _font_loaded = True
                 break
             except Exception as e:
@@ -93,17 +97,21 @@ if not _font_loaded:
                 continue
 
 if not _font_loaded:
-    # 回退: 尝试使用 matplotlib 字体查找机制
+    # 回退: 尝试使用 matplotlib 字体查找机制（保护用户已有配置）
     _fallback_fonts = ["SimHei", "Microsoft YaHei", "PingFang SC",
                        "Noto Sans CJK SC", "DejaVu Sans"]
-    matplotlib.rcParams["font.sans-serif"] = _fallback_fonts
+    # 仅当未自定义时才设置回退链
+    if matplotlib.rcParams.get("font.sans-serif", ["sans-serif"]) == ["sans-serif"]:
+        matplotlib.rcParams["font.sans-serif"] = _fallback_fonts
     # 尝试为每个 fallback 字体查找并注册字体文件
+    # 需要显式导入 font_manager（新版 matplotlib lazy-loading 不自动暴露为属性）
+    import matplotlib.font_manager as _fm  # noqa: E402
     for _fb in _fallback_fonts:
         try:
-            _fb_path = matplotlib.font_manager.findfont(_fb, fallback_to_default=False)
+            _fb_path = _fm.findfont(_fb, fallback_to_default=False)
             if _fb_path and os.path.exists(_fb_path):
-                matplotlib.font_manager.fontManager.addfont(_fb_path)
-        except Exception:
+                _fm.fontManager.addfont(_fb_path)
+        except (OSError, RuntimeError, ValueError):
             pass
     _logger.warning(
         "未检测到中文字体，图表中文可能无法正常显示。"
@@ -114,6 +122,7 @@ if not _font_loaded:
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 # ── 统一可视化样式 ──
+from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._palette import get_palette_style
 
 _palette_style = get_palette_style()

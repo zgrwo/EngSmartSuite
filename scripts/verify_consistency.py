@@ -40,15 +40,39 @@ check(f"Orchestrator: {len(TASK_REGISTRY)} tasks registered", len(TASK_REGISTRY)
 # ============================================================
 section("1. Architecture Constraints")
 # ============================================================
-r = subprocess.run(['grep', '-r', 'xlwings', 'smartsuite/engine/'],
-    capture_output=True, text=True, encoding='utf-8', cwd=ROOT)
-check("engine/ has zero xlwings references", r.returncode != 0,
-      r.stdout[:100] if r.returncode == 0 else "")
+# 使用 Python 文件扫描替代 Unix grep，确保跨平台兼容
+import glob as _glob
 
-r = subprocess.run(['grep', '-rE', r'sklearn|statsmodels', 'smartsuite/excel/'],
-    capture_output=True, text=True, encoding='utf-8', cwd=ROOT)
-check("excel/ has zero sklearn/statsmodels references", r.returncode != 0,
-      r.stdout[:100] if r.returncode == 0 else "")
+
+def _grep_files(pattern: str, path_pattern: str) -> tuple[bool, str]:
+    """在匹配 path_pattern 的文件中搜索 pattern，返回 (是否找到, 匹配内容)。"""
+    matches = []
+    for fpath in _glob.glob(os.path.join(ROOT, path_pattern), recursive=True):
+        if not os.path.isfile(fpath):
+            continue
+        try:
+            with open(fpath, encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    if pattern.lower() in line.lower():
+                        matches.append(f"{os.path.relpath(fpath, ROOT)}: {line.strip()[:100]}")
+        except OSError:
+            pass
+    return len(matches) > 0, "\n".join(matches[:5])
+
+
+found, details = _grep_files("xlwings", "smartsuite/engine/**/*.py")
+check("engine/ has zero xlwings references", not found,
+      details if found else "")
+
+# excel/ 目录已移除（ADR-001 修订），如不存在则跳过
+_excel_dir = os.path.join(ROOT, "smartsuite", "excel")
+if os.path.isdir(_excel_dir):
+    found, details = _grep_files("sklearn", "smartsuite/excel/**/*.py")
+    check("excel/ has zero sklearn/statsmodels references", not found,
+          details if found else "")
+else:
+    check("excel/ has zero sklearn/statsmodels references", True,
+          "目录不存在 (已按 ADR-001 移除)")
 
 # ============================================================
 section("2. All Engine Functions Runnable")

@@ -216,7 +216,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                                                      frac=0.3, return_sorted=True)
                                     ax.plot(smoothed[:, 0], smoothed[:, 1], "-",
                                            color=PALETTE["target"]["primary"], linewidth=1.5, alpha=0.7)
-                                except Exception:
+                                except (ValueError, RuntimeError):
                                     logger.debug("LOWESS 平滑失败", exc_info=True)
                                     pass
                             r_val = corr.loc[cv1, cv2] if cv1 in corr.index and cv2 in corr.columns else 0
@@ -308,7 +308,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                     color=PALETTE["data"]["secondary"], alpha=0.8)
             ax_p.bar(x + width/2, partial_vals, width, label="偏相关(控制混淆)",
                     color=PALETTE["data"]["primary"], alpha=0.9)
-            ax_p.axhline(0, color="black", linewidth=0.5)
+            ax_p.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
             ax_p.set_xticks(x)
             ax_p.set_xticklabels(partial_df["因子"], rotation=45, ha="right", fontsize=9)
             ax_p.set_ylabel("相关系数", fontsize=10)
@@ -570,7 +570,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     for i, gdata in enumerate(group_data, 1):
         jitter = np.random.uniform(-0.12, 0.12, len(gdata))
         ax_box.scatter(np.full(len(gdata), i) + jitter, gdata,
-                       alpha=0.3, s=10, color="black", zorder=3)
+                       alpha=0.3, s=10, color=PALETTE["misc"]["grid"], zorder=3)
     ax_box.set_xlabel(group_col, fontsize=10)
     ax_box.set_ylabel(req.target_col, fontsize=10)
     ax_box.set_title(f"箱线图 — {req.target_col} by {group_col}", fontsize=11)
@@ -981,7 +981,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = f"单样本 Wilcoxon 检验 (H0: 中位数={popmedian})"
         # 效应量: 匹配对秩相关 r = Z / sqrt(N)
         n = len(data)
-        z_stat_abs = abs(sp_stats.norm.ppf(max(p, 1e-300) / 2))
+        z_stat_abs = abs(sp_stats.norm.ppf(1 - max(p, 1e-300) / 2))
         r_effect = min(float(z_stat_abs / np.sqrt(n)), 1.0)  # capped at 1.0 (theoretical max)
         effect_size = r_effect
         effect_name = "秩相关 r"
@@ -1163,9 +1163,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = f"McNemar 检验 ({col1} → {col2}){test_name_suffix}"
         alpha = req.params.get("alpha", 0.05)
         conclusion = "前后存在显著变化" if p < alpha else "前后未发现显著变化"
-        # Odds Ratio = b/c
+        # Odds Ratio = b/c（保留原始值，不做截断）
         or_val = b / (c + 1e-10)
-        effect_size = float(or_val) if or_val < 100 else float("inf")
 
         # 可视化：前后对比堆叠柱状图
         fig = Figure(figsize=(5, 4))
@@ -1338,8 +1337,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         diff = sub[col1].values - sub[col2].values
         # 匹配对效应量: r = Z / sqrt(N)
         n_pairs = len(sub)
-        z_stat = float(sp_stats.norm.ppf(max(p, 1e-300) / 2))
-        r_effect = abs(z_stat) / np.sqrt(n_pairs)
+        z_stat = float(sp_stats.norm.ppf(1 - max(p, 1e-300) / 2))
+        r_effect = z_stat / np.sqrt(n_pairs)
         effect_size = float(r_effect)
         effect_name = "匹配对秩相关 r"
         effect_label = _effect_size_label(r_effect, "cohens_d")
@@ -1465,7 +1464,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     for i, gdata in enumerate([g1, g2], 1):
         jitter = np.random.uniform(-0.12, 0.12, len(gdata))
         ax.scatter(np.full(len(gdata), i) + jitter, gdata.values,
-                   alpha=0.35, s=12, color="black", zorder=3)
+                   alpha=0.35, s=12, color=PALETTE["misc"]["grid"], zorder=3)
     ax.set_ylabel(req.target_col, fontsize=10)
     ax.set_title(
         f"{test_name} — {req.target_col}\n"
@@ -1751,7 +1750,8 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
             z_alpha = abs(sp_stats.norm.ppf(alpha / 2))
             z_beta = abs(sp_stats.norm.ppf(1 - target_power))
             d = abs(p1 - p0)
-            required = ceil((z_alpha + z_beta)**2 * p0 * (1 - p0) / (d**2 + 1e-10))
+            # 双比例检验: 总方差 = p0*(1-p0) + p1*(1-p1)
+            required = ceil((z_alpha + z_beta)**2 * (p0 * (1 - p0) + p1 * (1 - p1)) / (d**2 + 1e-10))
             label = f"比例检验所需样本量: {required} (p0={p0}, p1={p1}, d={d:.3f})"
         else:
             return AnalysisResult(
@@ -1908,7 +1908,10 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
                 fish_p = chi_p
             stat = chi2
             stat_label = "Chi²"
-            effect = float(np.sqrt(chi2 / (len(sub) * (min(*ctab.shape) - 1) + 1e-10)))
+            # Cramér's V: 确保 min_dim >= 1 防止除零
+            _ctab_shape = ctab.shape
+            min_dim = max(1, min(*_ctab_shape) - 1) if min(*_ctab_shape) > 1 else 1
+            effect = float(np.sqrt(chi2 / (len(sub) * min_dim + 1e-10)))
             effect_name = "Cramér's V"
             effect_label = _cramers_v_interpretation(effect)
         p_val = fish_p
@@ -2231,6 +2234,13 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
 
     alpha = (k / (k - 1)) * (1 - np.sum(item_vars) / total_var)
 
+    # Cronbach's α 为负值时的诊断警告
+    if alpha < 0:
+        warn_msgs = ["⚠ Cronbach's α 为负值，可能原因: 项目编码方向不一致、"
+                      "负协方差项目存在、或量表结构性失效。建议检查项目编码方向。"]
+    else:
+        warn_msgs = []
+
     # 如果删除某项后的 α
     alpha_if_deleted = []
     for i, col in enumerate(items):
@@ -2281,6 +2291,7 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
         },
         summary=f"Cronbach's α={alpha:.3f} ({level}), {k} 题项, n={n}",
         metadata={"alpha": float(alpha), "k": k, "n": n, "level": level},
+        messages=warn_msgs,
     )
 
 

@@ -26,6 +26,7 @@ if __name__ == "__main__":
         try:
             webbrowser.open(f"http://{host}:{port}")
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).debug("浏览器自动打开失败", exc_info=True)
 
     main(host=host, port=port, debug=False)

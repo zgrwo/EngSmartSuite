@@ -22,7 +22,7 @@ echo.
 :: ── 1. 查找 Python 3.10+ ──
 echo   [1/4] 检测 Python 环境...
 for %%p in (python python3) do (
-    where %%p >nul 2>&1
+    where %%p >nul 2>nul
     if !errorlevel!==0 (
         for /f "tokens=2" %%v in ('%%p --version 2^>^&1') do (
             for /f "tokens=1,2 delims=." %%a in ("%%v") do (
@@ -67,8 +67,8 @@ set "SMARTSUITE_OK=0"
 if !errorlevel!==0 (set "SMARTSUITE_OK=1")
 
 if "%SMARTSUITE_OK%"=="0" (
-    echo         正在安装 SmartSuite 及依赖 (约需 2-5 分钟)...
-    "%VENV_DIR%\Scripts\python" -m pip install "%PROJECT_DIR%[web]" --quiet
+    echo         正在安装 SmartSuite 及全部依赖 (约需 2-5 分钟)...
+    "%VENV_DIR%\Scripts\python" -m pip install "%PROJECT_DIR%[all]" --quiet
     if !errorlevel! neq 0 (
         echo   [✗] 安装失败，请检查网络连接后重试
         echo       或手动运行: pip install .[web]

@@ -870,8 +870,11 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── Lenth PSE 参考线（无重复时替代 p 值作为显著性参考）──
     effect_array = valid_effects["主效应"].values
     pse = _lenth_pse(effect_array) if len(effect_array) >= 3 else 0
-    # t 临界值近似 (α=0.05, 双侧)
-    me = 2.0 * pse  # margin of error ≈ t(0.975) * PSE, t 近似取 2
+    # Lenth 临界值使用 t 分布近似（自由度 ≈ m/3，m = 效应数目）
+    m = len(effect_array)
+    lenth_df = max(1, int(m / 3))
+    lenth_t_crit = float(sp_stats.t.ppf(1 - alpha / 2, lenth_df)) if m >= 3 else 2.0
+    me = lenth_t_crit * pse  # 同步边际误差 (SME) 近似
 
     # ── Pareto 图含显著性阈值 ──
     n_plot = max(len(valid_effects), 1)
@@ -880,7 +883,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     ef = valid_effects.sort_values("主效应", key=abs)
     colors = [PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in ef["主效应"]]
     ax.barh(ef["因子"], ef["主效应"], color=colors, height=0.6)
-    ax.axvline(0, color="black", linewidth=0.8)
+    ax.axvline(0, color=PALETTE["direction"]["zero"], linewidth=0.8)
     if me > 0:
         ax.axvline(me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6,
                    label=f"Lenth ME={me:.3f} (≈α=0.05)")
@@ -1234,7 +1237,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     if len(nonzero_coefs) > 0:
         colors = [PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in nonzero_coefs["标准化系数"]]
         ax.barh(nonzero_coefs["变量"], nonzero_coefs["标准化系数"], color=colors)
-    ax.axvline(0, color="black", linewidth=0.5)
+    ax.axvline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
     ax.set_xlabel("标准化系数", fontsize=10)
     ax.set_title(
         f"Lasso 回归 — {req.target_col} | "
@@ -1316,7 +1319,7 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         ax.set_xticks(x_pos)
         ax.set_xticklabels(coef_df["变量"], rotation=45, ha="right", fontsize=8)
         ax.set_ylabel("系数", fontsize=10)
-        ax.axhline(0, color="black", linewidth=0.5)
+        ax.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
         ax.set_title("Huber 稳健回归 vs OLS", fontsize=11)
         ax.legend(fontsize=8)
         fig.tight_layout()

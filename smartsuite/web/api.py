@@ -82,9 +82,9 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         except ValidationError:
             pass  # 校验失败不阻塞分析
 
-    # 以下任务需要原始类别列（不做one-hot编码，让引擎自行处理因子水平）
-    _raw_cat_tasks = {"box_chart", "anova", "variance_test", "contingency", "cohens_kappa",
-                      "hypothesis_test"}
+    # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
+    from smartsuite.services.orchestrator import RAW_CAT_TASKS
+    _raw_cat_tasks = RAW_CAT_TASKS
     if task in _raw_cat_tasks:
         df_enc = df.copy()
         feat_enc = list(features)

@@ -1,5 +1,6 @@
 """过程综合审计 — 一站式工艺健康检查报告。"""
 import logging
+import math
 
 import pandas as pd
 
@@ -50,7 +51,9 @@ def process_audit(
             results["correlation"] = {"status": r.status, "summary": r.summary}
             target_corr = r.metadata.get("target_correlations", {})
             corr_values = list(target_corr.values())
-            top_r = abs(corr_values[0]) if corr_values else 0
+            # 安全提取第一个数值型相关值，非数值视为 0
+            first_val = corr_values[0] if corr_values else 0
+            top_r = abs(first_val) if isinstance(first_val, (int, float)) and math.isfinite(first_val) else 0
             if top_r > 0.5:
                 health_checks.append({"检查项": "关键因子识别", "状态": "✓ 良好",
                                      "详情": f"存在 |r|>{top_r:.2f} 的相关因子"})
@@ -299,7 +302,7 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
                 # Headers
                 for ci, col in enumerate(table.columns):
                     ws.cell(row=row, column=ci+1, value=str(col)).font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                    ws.cell(row=row, column=ci+1).fill = openpyxl.styles.PatternFill("solid", fgColor="2171b5")
+                    ws.cell(row=row, column=ci+1).fill = openpyxl.styles.PatternFill("solid", fgColor="2171b5")  # PALETTE["data"]["primary"]
                 row += 1
                 # Data
                 for _, data_row in table.head(100).iterrows():

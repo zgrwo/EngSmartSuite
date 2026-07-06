@@ -56,8 +56,8 @@ fi
 # ── 3. 安装/更新依赖 ──
 echo "  [3/4] 检查依赖..."
 if [ "$NEED_INSTALL" = "1" ] || ! "$VENV_DIR/bin/python" -c "import smartsuite" 2>/dev/null; then
-    echo "        正在安装 SmartSuite 及依赖 (约需 2-5 分钟)..."
-    "$VENV_DIR/bin/python" -m pip install "$PROJECT_DIR[web]" --quiet
+    echo "        正在安装 SmartSuite 及全部依赖 (约需 2-5 分钟)..."
+    "$VENV_DIR/bin/python" -m pip install "$PROJECT_DIR[all]" --quiet
     echo "  [✓] 安装完成"
 else
     echo "  [✓] SmartSuite 已安装"

@@ -102,24 +102,24 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                 encoded_cols.append(dc)
             cat_map[col] = list(dummies.columns)
         else:
-            # 转为数值型；只填充因"非数值→NaN"产生的缺失，保留原有的合法NaN
-            was_na = df[col].isna()  # 转换前的NaN位置
+            # 转为数值型，然后统一用中位数填充所有缺失值
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            new_na = df[col].isna() & ~was_na  # 仅因转换失败产生的新NaN
-            n_coerced = int(new_na.sum())
-            if n_coerced > 0:
-                median_val = df[col].median()
-                if pd.isna(median_val):
+            total_na = df[col].isna()
+            n_missing = int(total_na.sum())
+            if n_missing > 0:
+                # 仅基于有效值计算中位数，避免 NaN 污染统计量
+                valid_vals = df[col].dropna()
+                if len(valid_vals) == 0:
                     logger.warning("列「%s」全部为非数值，填充为 0", col)
                     df[col] = df[col].fillna(0)
-                    imputation_log[col] = n_coerced
-                    # 整列无法转为数值 → 追加严重警告
+                    imputation_log[col] = n_missing
                     unknown_cat_warnings.append(
-                        (col, {"<全列非数值，已强制填充为0>"}, n_coerced)
+                        (col, {"<全列非数值，已强制填充为0>"}, n_missing)
                     )
                 else:
-                    df.loc[new_na, col] = median_val
-                imputation_log[col] = n_coerced
+                    median_val = valid_vals.median()
+                    df.loc[total_na, col] = median_val
+                    imputation_log[col] = n_missing
             encoded_cols.append(col)
 
     return df, encoded_cols, cat_map, imputation_log, unknown_cat_warnings
@@ -209,14 +209,27 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
     """
     n_rows, n_cols = df.shape
     numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    cat_cols = [c for c in df.columns if c not in numeric_cols]
-    binary_cols = [c for c in df.columns if df[c].nunique(dropna=True) <= 2]
+    cat_cols = [c for c in df.columns
+                if str(df[c].dtype) in ("object", "string", "category")
+                and not pd.api.types.is_datetime64_any_dtype(df[c])]
+    binary_cols = [c for c in df.columns
+                   if c != target_col and df[c].nunique(dropna=True) <= 2]
     date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    # 启发式检测隐式日期列（object/string 类型但内容可解析为日期）
+    for c in [c for c in df.columns if str(df[c].dtype) in ("object", "string")]:
+        try:
+            sample = df[c].dropna().head(20)
+            if len(sample) >= 5:
+                converted = pd.to_datetime(sample, errors="coerce")
+                if converted.notna().mean() > 0.8 and c not in date_cols:
+                    date_cols.append(c)
+        except (ValueError, TypeError, OverflowError):
+            pass  # 日期解析试探失败，非关键路径
     high_card = [c for c in cat_cols if df[c].nunique() > 50]
 
     recommendations: list[dict] = []
 
-    # ── 数据量检查 ──
+    # ── 数据量检查（警告但不阻止其他推荐）──
     if n_rows < 10:
         recommendations.append({
             "优先级": "P0",
@@ -224,7 +237,6 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
             "推荐分析": "数据不足",
             "原因": f"仅 {n_rows} 行数据，大部分统计方法需要更多样本",
         })
-        return {"recommendations": pd.DataFrame(recommendations), "summary": "数据不足，建议先扩充样本量"}
 
     # ── 缺失值检查 ──
     missing_pct = df.isna().mean().max() * 100
@@ -263,14 +275,16 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
             "原因": f"存在二分类列 ({binary_cols[0]})，可进行组间差异检验",
         })
     if len(cat_cols) >= 1 and target_col:
-        group_col = cat_cols[0]
-        n_groups = df[group_col].nunique()
-        if 2 <= n_groups <= 10:
-            recommendations.append({
-                "优先级": "P2", "类别": "对比分析",
-                "推荐分析": "anova",
-                "原因": f"「{group_col}」有 {n_groups} 个水平，可用 ANOVA 检测组间差异",
-            })
+        # 遍历 cat_cols 找第一个适合分组的列
+        for group_col in cat_cols:
+            n_groups = df[group_col].nunique()
+            if 2 <= n_groups <= 10:
+                recommendations.append({
+                    "优先级": "P2", "类别": "对比分析",
+                    "推荐分析": "anova",
+                    "原因": f"「{group_col}」有 {n_groups} 个水平，可用 ANOVA 检测组间差异",
+                })
+                break
 
     # ── DOE/优化 ──
     if target_col and len(numeric_cols) >= 3:
@@ -289,12 +303,24 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
     # ── 时序/SPC ──
     has_time = len(date_cols) > 0
     if n_rows >= 20:
-        recommendations.append({
-            "优先级": "P1" if has_time else "P2",
-            "类别": "过程监控",
-            "推荐分析": "trend_forecast" if has_time else "spc_xbar (需子组列)",
-            "原因": f"{n_rows} 行数据{'，含日期列' if has_time else ''}，可进行趋势分析或过程监控",
-        })
+        if has_time:
+            recommendations.append({
+                "优先级": "P1",
+                "类别": "过程监控",
+                "推荐分析": "trend_forecast",
+                "原因": f"{n_rows} 行数据，含日期列，可进行趋势预测",
+            })
+        else:
+            # 检查是否有潜在子组列
+            subgroup_candidates = [c for c in df.columns
+                                  if c != target_col and 2 <= df[c].nunique() <= 30]
+            if subgroup_candidates:
+                recommendations.append({
+                    "优先级": "P2",
+                    "类别": "过程监控",
+                    "推荐分析": f"spc_xbar (子组列: {subgroup_candidates[0]})",
+                    "原因": f"{n_rows} 行数据，检测到潜在子组列「{subgroup_candidates[0]}」",
+                })
     if target_col:
         recommendations.append({
             "优先级": "P2", "类别": "过程监控",
