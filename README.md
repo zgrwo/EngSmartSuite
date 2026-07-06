@@ -54,22 +54,36 @@ SmartSuite 将 Python 生态的统计分析能力（pandas、scipy、statsmodels
 
 ## 快速开始
 
-### 🚀 一键启动（推荐）
+**两条路径，选一条即可：**
 
-**Windows 用户**：双击 `run_smartsuite.bat`  
-**macOS / Linux 用户**：双击 `run_smartsuite.sh`
+| 方案 | 适合 | 操作 |
+|------|------|------|
+| **🖱️ 方案 A：一键启动** | 只想上传 Excel 看结果，不关心 Python | 双击脚本 → 自动打开浏览器 |
+| **⌨️ 方案 B：手动安装** | 需要 Python API、自定义参数、或集成到已有项目 | pip install → 命令行启动 |
 
-脚本会自动完成：检测 Python → 创建虚拟环境 → 安装依赖 → 打开浏览器。  
-你只需要：**上传 Excel → 选列 → 点按钮 → 看结果**。
+---
 
-> 首次运行需下载依赖包（约 2-5 分钟），之后秒启动。
+### 🖱️ 方案 A：一键启动（零门槛）
 
-### 环境要求
+1. 下载并解压本项目
+2. **Windows**：双击 `run_smartsuite.bat`
+3. **macOS / Linux**：双击 `run_smartsuite.sh`
+
+脚本自动完成所有配置（首次约 2-5 分钟），浏览器自动打开 `http://127.0.0.1:5050`。  
+之后每次双击秒启动。
+
+> 你只需要：**上传 Excel → 选列 → 点按钮 → 看结果**。
+
+---
+
+### ⌨️ 方案 B：手动安装（灵活定制）
+
+#### 环境要求
 
 - Python 3.10 或更高版本（[python.org](https://www.python.org/downloads/)）
 - Windows / macOS / Linux
 
-### 安装
+#### 安装
 
 SmartSuite 未发布到 PyPI，请从 GitHub 下载后本地安装：
 
@@ -86,7 +100,21 @@ pip install .[web]          # Web 界面（推荐）
 
 安装完成后，`smartsuite` 命令即可在终端中使用。
 
-### 方式一：Web 界面（推荐）
+#### 可选依赖组
+
+| 安装命令 | 包含 | 适用场景 |
+|---------|------|---------|
+| `pip install .` | pandas, numpy, scipy, statsmodels, scikit-learn, matplotlib, pyyaml | Python API / 纯分析 |
+| `pip install .[web]` | 基础 + flask, pyarrow | Web UI |
+| `pip install .[report]` | 基础 + python-pptx, reportlab, openpyxl | 导出 PPT/PDF/Excel 报告 |
+| `pip install .[dev]` | 基础 + pytest, ruff | 运行测试 / 代码检查 |
+| `pip install .[all]` | 基础 + web + report + openpyxl | 完整功能（推荐） |
+
+> 💡 **开发模式**：如果修改源码，加 `-e`（`pip install -e .[all]`），修改即时生效。
+
+#### 启动方式
+
+**Web 界面（推荐）**
 
 ```bash
 python smartsuite/web/app.py
@@ -96,7 +124,7 @@ python smartsuite/web/app.py
 
 > 📖 完整操作指南见 **[用户操作手册](docs/user-manual.md)**
 
-### 方式二：Python API（灵活定制）
+**Python API（灵活定制）**
 
 ```python
 import pandas as pd
@@ -117,20 +145,6 @@ print(result.figures)   # matplotlib 图表
 ```
 
 > 📋 全部 39 个分析方法的参数和返回值见 **[API 参考文档](docs/api-reference.md)**
-
-### 可选依赖组
-
-安装时通过 `[<组名>]` 选择需要的功能：
-
-| 安装命令 | 包含 | 适用场景 |
-|---------|------|---------|
-| `pip install .` | pandas, numpy, scipy, statsmodels, scikit-learn, matplotlib, pyyaml | Python API / 纯分析 |
-| `pip install .[web]` | 基础 + flask, pyarrow | Web UI |
-| `pip install .[report]` | 基础 + python-pptx, reportlab, openpyxl | 导出 PPT/PDF/Excel 报告 |
-| `pip install .[dev]` | 基础 + pytest, ruff | 运行测试 / 代码检查 |
-| `pip install .[all]` | 基础 + web + report + openpyxl | 完整功能（推荐） |
-
-> 💡 **开发模式**：如果需要修改源码，加 `-e` 参数（`pip install -e .[all]`），代码修改即时生效，无需重新安装。
 
 ---
 
