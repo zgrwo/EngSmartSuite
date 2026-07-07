@@ -167,19 +167,21 @@ def upload():
     if ext not in (".xlsx", ".xls", ".xlsm"):
         return jsonify({"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xls 文件"}), 400
 
-    # Zip bomb 防护：检查解压后大小
+    # Zip bomb 防护：仅对 ZIP 格式的 Excel (.xlsx/.xlsm) 检查解压后大小
+    # .xls 是 OLE2 二进制格式，不是 ZIP，跳过此项检查
     import io
     import zipfile
     f_bytes = f.read()
-    try:
-        with zipfile.ZipFile(io.BytesIO(f_bytes)) as zf:
-            total_size = sum(info.file_size for info in zf.infolist())
-            if total_size > 200 * 1024 * 1024:
-                return jsonify({"error": "文件解压后过大（限制200MB），请减少数据量"}), 400
-            if len(zf.infolist()) > 1000:
-                return jsonify({"error": "文件包含过多条目，可能不是有效的 Excel 文件"}), 400
-    except zipfile.BadZipFile:
-        return jsonify({"error": "不是有效的 Excel 文件，请确认文件格式正确"}), 400
+    if ext in (".xlsx", ".xlsm"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(f_bytes)) as zf:
+                total_size = sum(info.file_size for info in zf.infolist())
+                if total_size > 200 * 1024 * 1024:
+                    return jsonify({"error": "文件解压后过大（限制200MB），请减少数据量"}), 400
+                if len(zf.infolist()) > 1000:
+                    return jsonify({"error": "文件包含过多条目，可能不是有效的 Excel 文件"}), 400
+        except zipfile.BadZipFile:
+            return jsonify({"error": "不是有效的 Excel 文件，请确认文件格式正确"}), 400
 
     try:
         df = pd.read_excel(io.BytesIO(f_bytes))

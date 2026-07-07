@@ -9,9 +9,13 @@ import pandas as pd
 import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.data_io import preprocess_data, validate_data
+from smartsuite.services.data_io import preprocess_data
 from smartsuite.services.orchestrator import (
-    DEFAULT_PARAMS, TASK_REGISTRY, TASK_LABELS, TASK_GROUPS, orchestrate
+    DEFAULT_PARAMS,
+    TASK_GROUPS,
+    TASK_LABELS,
+    TASK_REGISTRY,
+    orchestrate,
 )
 
 # ═══════════════════════════════════════════════════════════════

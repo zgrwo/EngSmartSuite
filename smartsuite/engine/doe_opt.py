@@ -106,7 +106,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         try:
             influence = model.get_influence()
             cooks_d = influence.cooks_distance[0]
-        except (ValueError, np.linalg.LinAlgError, Exception) as e:
+        except Exception as e:
             logger.warning("Cook's D 计算失败 (矩阵可能接近奇异): %s", e)
             warn_msgs.append(
                 "⚠ Cook's Distance 无法计算（数据可能存在严重共线性），"
@@ -146,7 +146,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # ── 增强诊断图 (3×2) ──
         fig_res = Figure(figsize=(12, 8))
 
-        # 1. Residual vs Fitted + loess 平滑
+        # 1. Residual vs Fitted
         ax1 = fig_res.add_subplot(2, 3, 1)
         ax1.scatter(fitted, residuals, alpha=0.6, s=20, color=PALETTE["data"]["primary"])
         ax1.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
@@ -1080,12 +1080,13 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="logistic_regression", status="error",
             messages=["Logistic 模型拟合失败"])
 
-    # Odds Ratios
-    params = np.asarray(model.params)
+    # Odds Ratios — clamp coefficients to prevent exp overflow (>700 → inf)
+    _EXP_MAX = 700.0
+    params = np.clip(np.asarray(model.params), -_EXP_MAX, _EXP_MAX)
     ci = model.conf_int()
     or_vals = np.exp(params)
-    or_ci_lower = np.exp(ci.iloc[:, 0].values)
-    or_ci_upper = np.exp(ci.iloc[:, 1].values)
+    or_ci_lower = np.exp(np.clip(ci.iloc[:, 0].values, -_EXP_MAX, _EXP_MAX))
+    or_ci_upper = np.exp(np.clip(ci.iloc[:, 1].values, -_EXP_MAX, _EXP_MAX))
 
     coef_df = pd.DataFrame({
         "变量": X.columns,
@@ -1359,6 +1360,9 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效样本不足"])
 
     quantile = req.params.get("quantile", 0.5)
+    if not 0 < quantile < 1:
+        return AnalysisResult(task="quantile_regression", status="error",
+            messages=[f"分位数 τ 必须在 (0, 1) 范围内，当前值: {quantile}"])
     try:
 
         X_df = sub[cols]

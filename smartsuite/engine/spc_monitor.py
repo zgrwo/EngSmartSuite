@@ -709,7 +709,7 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
         {"指标": "Cpm (田口能力)", "值": f"{cpm:.3f}" if cpm else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Sigma Level (长期, Z_LT)", "值": f"{sigma_lvl:.2f}" if sigma_lvl else "N/A",
+        {"指标": "Sigma Level (无偏移理论值)", "值": f"{sigma_lvl:.2f}" if sigma_lvl else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
         {"指标": "DPMO (无偏移假设)", "值": f"{dpmo:,}" if dpmo else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
@@ -1880,7 +1880,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             X = data.values.reshape(-1, 1)
             iso_preds = iso.fit_predict(X)
             iso_mask = pd.Series(iso_preds == -1, index=data.index)
-    except Exception:
+    except (ValueError, RuntimeError, ImportError):
         logger.debug("IsolationForest failed in outlier_consensus", exc_info=True)
         iso_mask = pd.Series(False, index=data.index)
 
@@ -2376,14 +2376,14 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             _, anova_p = sp_stats.f_oneway(*group_data)
             _, kw_p = sp_stats.kruskal(*group_data)
             test_note = f"ANOVA p={anova_p:.4f}, Kruskal-Wallis p={kw_p:.4f}"
-        except Exception:
+        except (ValueError, RuntimeError):
             logger.debug("ANOVA/Kruskal-Wallis test failed in box_chart", exc_info=True)
     else:
         try:
             _, t_p = sp_stats.ttest_ind(*group_data)
             _, mw_p = sp_stats.mannwhitneyu(*group_data)
             test_note = f"t检验 p={t_p:.4f}, MWU p={mw_p:.4f}"
-        except Exception:
+        except (ValueError, RuntimeError):
             logger.debug("t-test/Mann-Whitney test failed in box_chart", exc_info=True)
 
     # ── 箱线图 ──

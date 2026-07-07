@@ -28,6 +28,8 @@ def validate_data(df: pd.DataFrame, target_col: str,
                   feature_cols: list[str]) -> list[str]:
     """校验数据列存在性、类型、缺失值。返回警告消息列表。"""
     messages = []
+    if df.empty:
+        raise ValidationError("数据为空，无法进行验证")
     missing = [c for c in [target_col] + feature_cols if c not in df.columns]
     if missing:
         raise ValidationError(f"以下列不存在于数据中: {missing}")
@@ -41,7 +43,13 @@ def validate_data(df: pd.DataFrame, target_col: str,
 
     null_count = int(df[[target_col] + feature_cols].isna().sum(axis=None))
     if null_count > 0:
-        messages.append(f"检测到 {null_count} 个缺失值，分析中将自动排除")
+        messages.append(f"检测到 {null_count} 个缺失值，分析中将自动填充（数值型用中位数，类别型标记为'缺失'）")
+
+    n_rows = len(df)
+    if n_rows < 3:
+        messages.append(f"数据仅 {n_rows} 行，样本量过小，统计结果可能不可靠")
+    elif n_rows < 10:
+        messages.append(f"数据仅 {n_rows} 行，样本量偏小，建议增加数据量以获得更可靠的统计推断")
 
     return messages
 
@@ -77,8 +85,16 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
 
     for col in features:
         if col in categorical_cols:
-            col_str = df[col].astype(str)
-            dummies = pd.get_dummies(col_str, prefix=col, drop_first=True)
+            col_str = df[col].fillna("(缺失)").astype(str)
+            n_unique = col_str.nunique()
+            if n_unique > 50:
+                logger.warning(
+                    "列「%s」有 %d 个唯一值，One-Hot 编码将产生 %d 个虚拟列，"
+                    "建议先分组归并或降维处理", col, n_unique, n_unique - 1
+                )
+            # 单唯一值列 (如全 NaN→"(缺失)"): drop_first 会导致零列输出, 保留该列
+            _drop_first = True if n_unique > 1 else False
+            dummies = pd.get_dummies(col_str, prefix=col, drop_first=_drop_first)
             # 对齐已知类别映射
             if known_cat_map and col in known_cat_map:
                 expected = set(known_cat_map[col])
@@ -86,13 +102,13 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                 # 缺失的已知类别 → 补 0 列
                 for missing_col in expected - actual:
                     dummies[missing_col] = 0
-                # 未知的新类别 → 记录警告并跟踪，不再静默丢弃
+                # 未知的新类别 → 记录警告 (行将被归入参照组，提示用户检查)
                 extra = actual - expected
                 if extra:
                     n_affected = int((col_str.isin(extra)).sum())
                     unknown_cat_warnings.append((col, extra, n_affected))
                     logger.warning(
-                        "列「%s」出现 %d 个未知类别，影响 %d 行，已丢弃: %s。"
+                        "列「%s」出现 %d 个未知类别，影响 %d 行，已归入参照组: %s。"
                         "建议检查数据或重新训练模型以确保分析准确性。",
                         col, len(extra), n_affected, extra
                     )
@@ -100,7 +116,11 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
             for dc in dummies.columns:
                 df[dc] = dummies[dc].astype(float)
                 encoded_cols.append(dc)
-            cat_map[col] = list(dummies.columns)
+            # 记录参照类别 (drop_first 丢弃的第一个类别) 用于系数解读
+            _all_cats = list(pd.get_dummies(col_str, prefix=col, drop_first=False).columns)
+            _ref_cat = [c for c in _all_cats if c not in dummies.columns]
+            cat_map[col] = list(dummies.columns) + (
+                [f"_(参照) {_ref_cat[0]}"] if _ref_cat else [])
         else:
             # 转为数值型，然后统一用中位数填充所有缺失值
             df[col] = pd.to_numeric(df[col], errors='coerce')

@@ -139,7 +139,9 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 tables[tname] = {
                     "columns": [str(c) for c in tbl.columns],
                     "index": [str(i) for i in tbl.index],
-                    "data": tbl.round(4).fillna("").values.tolist(),
+                    "data": tbl.apply(
+                        lambda col: col.round(4) if pd.api.types.is_numeric_dtype(col) and not pd.api.types.is_datetime64_any_dtype(col) else col
+                    ).fillna("").values.tolist(),
                     "shape": list(tbl.shape),
                 }
             # 附加合并矩阵到第一个结果

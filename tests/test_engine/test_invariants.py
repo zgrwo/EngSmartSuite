@@ -237,13 +237,13 @@ def test_survival_km_monotonic():
                           feature_cols=["event"])
     result = survival_analysis(req)
     if result.status == "ok":
-        surv_table = result.tables.get("survival_table")
-        if surv_table is not None and "生存率" in surv_table.columns:
-            surv_values = surv_table["生存率"].values
-            # KM 曲线必须单调非增
-            assert all(surv_values[i] >= surv_values[i + 1] - 0.001
+        surv_table = result.tables.get("km_survival")
+        if surv_table is not None and "生存概率" in surv_table.columns:
+            surv_values = surv_table["生存概率"].values
+            # KM 生存概率必须单调非增
+            assert all(float(surv_values[i]) >= float(surv_values[i + 1]) - 0.001
                        for i in range(len(surv_values) - 1)), \
-                "KM 生存率不是单调递减"
+                "KM 生存概率不是单调递减"
 
 
 # ═══════════════════════════════════════════════════════════

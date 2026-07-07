@@ -15,6 +15,19 @@ _PDF_DPI = 200
 logger = logging.getLogger(__name__)
 
 
+def _validate_output_path(output_path: str) -> str:
+    """验证输出路径安全性: 解析为绝对路径并检查是否在合理目录内。
+
+    防御性检查 — 当前调用者不暴露用户控制路径, 但作为未来防护。
+    """
+    abs_path = os.path.abspath(output_path)
+    # 确保目录存在
+    out_dir = os.path.dirname(abs_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    return abs_path
+
+
 def to_excel(result: AnalysisResult, workbook,
              sheet_name: str = "分析结果") -> str:
     """将分析结果写入 Excel 新 Sheet。
@@ -57,18 +70,43 @@ def to_excel(result: AnalysisResult, workbook,
 
 def to_pdf(result: AnalysisResult, output_path: str) -> str:
     """生成 PDF 报告。"""
+    output_path = _validate_output_path(output_path)
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.utils import ImageReader
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.pdfgen import canvas
+
+        # ── 注册中文字体，避免 CJK 文本渲染为空白 ──
+        _cjk_font_name = None
+        _cjk_fonts = [
+            ("C:/Windows/Fonts/msyh.ttc", "MSYH"),
+            ("C:/Windows/Fonts/simhei.ttf", "SimHei"),
+            ("/System/Library/Fonts/PingFang.ttc", "PingFang"),
+            ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "NotoCJK"),
+        ]
+        for _fp, _fn in _cjk_fonts:
+            if os.path.exists(_fp):
+                try:
+                    pdfmetrics.registerFont(TTFont(_fn, _fp))
+                    _cjk_font_name = _fn
+                    break
+                except Exception:
+                    continue
+
+        # 字体选择: CJK 字体仅注册单一 weight, 全部文本使用同一字体;
+        # 回退到 Helvetica (无 CJK 字形) 仅在无中文字体时
+        _title_font = _cjk_font_name if _cjk_font_name else "Helvetica-Bold"
+        _body_font = _cjk_font_name if _cjk_font_name else "Helvetica"
 
         c = canvas.Canvas(output_path, pagesize=A4)
         w, h = A4
         y = h - 50
-        c.setFont("Helvetica-Bold", 16)
+        c.setFont(_title_font, 16)
         c.drawString(50, y, f"分析报告: {result.task}")
         y -= 30
-        c.setFont("Helvetica", 11)
+        c.setFont(_body_font, 11)
         c.drawString(50, y, result.summary)
         y -= 50
 
@@ -76,7 +114,7 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
             if y < 200:
                 c.showPage()
                 y = h - 50
-            c.setFont("Helvetica-Bold", 10)
+            c.setFont(_title_font, 10)
             c.drawString(50, y, name)
             y -= 18
             c.setFont("Courier", 7)
@@ -87,12 +125,12 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
                 y -= 12
             y -= 10
 
-        for fig in result.figures[:3]:
+        for fig in result.figures:
             if y < 350:
                 c.showPage()
                 y = h - 50
             buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+            fig.savefig(buf, format='png', dpi=_PDF_DPI, bbox_inches='tight')
             buf.seek(0)
             c.drawImage(ImageReader(buf), 50, y - 300, width=450, height=300)
             plt.close(fig)
@@ -108,6 +146,7 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
 def to_ppt(result: AnalysisResult, output_path: str,
            template_path: str | None = None) -> str:
     """生成 PPT 报告。"""
+    output_path = _validate_output_path(output_path)
     try:
         from pptx import Presentation
         from pptx.util import Inches
@@ -142,6 +181,7 @@ def to_ppt(result: AnalysisResult, output_path: str,
 
 def to_html(result: AnalysisResult, output_path: str) -> str:
     """生成自包含 HTML 分析报告 (Base64 内嵌图表)。"""
+    output_path = _validate_output_path(output_path)
     import base64
     import html as _html
 
@@ -154,7 +194,7 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
             "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>",
             "<title>SmartSuite 分析报告</title>",
             "<style>",
-            "body{font-family:'Microsoft YaHei',sans-serif;max-width:1100px;margin:0 auto;padding:20px;color:#333}",
+            "body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans CJK SC',sans-serif;max-width:1100px;margin:0 auto;padding:20px;color:#333}",
             "h1{color:#2171b5;border-bottom:3px solid #2171b5;padding-bottom:10px}",
             "h2{color:#2171b5;margin-top:30px;border-bottom:1px solid #deebf7}",
             ".summary{background:#deebf7;padding:15px;border-radius:5px;margin:15px 0;font-size:14px}",

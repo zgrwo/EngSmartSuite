@@ -8,18 +8,19 @@
 原则: 同一份数据 + 同一组参数 → 同一个数字
 """
 
-import os
 import warnings
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.data_io import preprocess_data, validate_data
+from smartsuite.services.data_io import preprocess_data
 from smartsuite.services.orchestrator import (
-    DEFAULT_PARAMS, RAW_CAT_TASKS, TASK_REGISTRY, orchestrate
+    DEFAULT_PARAMS,
+    RAW_CAT_TASKS,
+    TASK_REGISTRY,
+    orchestrate,
 )
 
 # 抑制 scipy/statsmodels 的已知警告

@@ -269,7 +269,14 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             resid_feat = sm.OLS(sub[fc].astype(float), X_ctrl_feat).fit().resid
             # 残差相关
             if len(resid_target) >= 3:
-                r_partial, p_partial = stats.pearsonr(resid_target, resid_feat)
+                r_partial, _ = stats.pearsonr(resid_target, resid_feat)
+                # 偏相关自由度修正: 残差来自两次回归(各消耗 k+1 df),
+                # 偏相关有效 df = n - k - 2 (k=控制变量数)
+                n = len(resid_target)
+                k_ctrl = len(control_vars)
+                df_partial = max(1, n - k_ctrl - 2)
+                t_partial = r_partial * np.sqrt(df_partial / (1 - r_partial**2 + 1e-10))
+                p_partial = float(2 * sp_stats.t.sf(abs(t_partial), df_partial))
             else:
                 r_partial, p_partial = np.nan, np.nan
             # 零阶相关（原始）
@@ -393,6 +400,8 @@ def _threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大"
         thresholds: 升序阈值列表，如 [0.01, 0.06, 0.14]
         labels: 对应标签元组，比 thresholds 多一个元素
     """
+    if not np.isfinite(value):
+        return "N/A"
     for t, label in zip(thresholds, labels):
         if value < t:
             return label
@@ -421,11 +430,13 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["没有可用于 ANOVA 分析的特征列"])
 
     # 构建公式：可选两两交互项
-    terms = [f"Q('{c}')" for c in cols]
+    # 对列名中的单引号做 SQL-style 转义（patsy Q() 语法要求）
+    _escaped = [c.replace(chr(39), chr(39) + chr(39)) for c in cols]
+    terms = [f"Q('{ec}')" for ec in _escaped]
     if req.params.get("interactions") and len(cols) >= 2:
         for i in range(len(cols)):
             for j in range(i + 1, len(cols)):
-                terms.append(f"Q('{cols[i]}'):Q('{cols[j]}')")
+                terms.append(f"Q('{_escaped[i]}'):Q('{_escaped[j]}')")
     formula = f"Q('{req.target_col}') ~ " + " + ".join(terms)
 
     warn_msgs: list[str] = []
@@ -673,6 +684,8 @@ def _effect_size_label(d, test_type="cohens_d"):
     ad = abs(d)
     if test_type == "cohens_d":
         return _threshold_label(ad, [0.2, 0.5, 0.8])
+    if test_type == "correlation":
+        return _threshold_label(ad, [0.1, 0.3, 0.5])
     # cliffs_delta
     return _threshold_label(ad, [0.147, 0.33, 0.474])
 
@@ -982,10 +995,13 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         # 效应量: 匹配对秩相关 r = Z / sqrt(N)
         n = len(data)
         z_stat_abs = abs(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
-        r_effect = min(float(z_stat_abs / np.sqrt(n)), 1.0)  # capped at 1.0 (theoretical max)
+        # 从数据中位数恢复符号: 中位数>H0 → 正效应, <H0 → 负效应
+        z_signed = z_stat_abs if np.median(data.values) >= popmedian else -z_stat_abs
+        r_effect = min(float(z_signed / np.sqrt(n)), 1.0)
+        r_effect = max(r_effect, -1.0)
         effect_size = r_effect
         effect_name = "秩相关 r"
-        effect_label = _effect_size_label(r_effect, "cliffs_delta")
+        effect_label = _effect_size_label(r_effect, "correlation")
 
         alpha = req.params.get("alpha", 0.05)
         conclusion = f"中位数显著偏离 {popmedian}" if p < alpha else f"中位数未显著偏离 {popmedian}"
@@ -1303,9 +1319,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         conclusion = f"存在显著{trend_dir}" if p < alpha else "未发现显著趋势"
 
         # Kendall's tau-b 效应量近似
-        tau_b = 2 * JT / (n_total**2 - np.sum(n_i**2) + 1e-10)
+        tau_b = 4 * JT / (n_total**2 - np.sum(n_i**2) + 1e-10) - 1
         effect_size = float(tau_b)
-        effect_label = _effect_size_label(abs(tau_b), "cohens_d")
+        effect_label = _effect_size_label(abs(tau_b), "correlation")
 
         return AnalysisResult(
             task="hypothesis_test",
@@ -1335,13 +1351,15 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         stat, p = sp_stats.wilcoxon(sub[col1], sub[col2])
         test_name = f"Wilcoxon 符号秩检验 ({col1} vs {col2})"
         diff = sub[col1].values - sub[col2].values
-        # 匹配对效应量: r = Z / sqrt(N)
+        # 匹配对效应量: r = Z / sqrt(N), 符号从差值中位数恢复
         n_pairs = len(sub)
-        z_stat = float(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
+        z_stat_abs = float(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
+        z_stat = z_stat_abs if np.median(diff) >= 0 else -z_stat_abs
         r_effect = z_stat / np.sqrt(n_pairs)
+        r_effect = max(min(r_effect, 1.0), -1.0)  # cap to theoretical bounds
         effect_size = float(r_effect)
         effect_name = "匹配对秩相关 r"
-        effect_label = _effect_size_label(r_effect, "cohens_d")
+        effect_label = _effect_size_label(r_effect, "correlation")
 
         alpha = req.params.get("alpha", 0.05)
         conclusion = "前后存在显著差异" if p < alpha else "前后未发现显著差异"

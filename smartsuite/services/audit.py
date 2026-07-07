@@ -2,6 +2,7 @@
 import logging
 import math
 
+import numpy as np
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
@@ -185,7 +186,7 @@ def batch_analyze(df, target_col, feature_cols, tasks=None, **kwargs):
             r = orchestrate(req)
             results[task] = {"status": r.status, "summary": r.summary}
         except Exception as e:
-            results[task] = {"status": "error", "summary": str(e)[:100]}
+            results[task] = {"status": "error", "summary": str(e)[:200]}
 
     ok = sum(1 for v in results.values() if v["status"] == "ok")
     return {"results": results, "summary": f"Batch: {ok}/{len(tasks)} tasks OK"}
@@ -307,7 +308,16 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
                 # Data
                 for _, data_row in table.head(100).iterrows():
                     for ci, val in enumerate(data_row):
-                        ws.cell(row=row, column=ci+1, value=str(val)[:50] if val is not None else "")
+                        if val is None:
+                            ws.cell(row=row, column=ci+1, value="")
+                        elif isinstance(val, (int, float)):
+                            # np.nan is a float — must guard before writing to openpyxl
+                            if isinstance(val, float) and np.isnan(val):
+                                ws.cell(row=row, column=ci+1, value="NaN")
+                            else:
+                                ws.cell(row=row, column=ci+1, value=val)
+                        else:
+                            ws.cell(row=row, column=ci+1, value=str(val)[:100])
                     row += 1
                 row += 2
 
