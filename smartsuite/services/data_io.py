@@ -42,7 +42,7 @@ def validate_data(df: pd.DataFrame, target_col: str,
             except (ValueError, TypeError):
                 messages.append(f"列「{col}」包含非数值数据")
 
-    null_count = int(df[[target_col] + feature_cols].isna().sum(axis=None))
+    null_count = int(df[[target_col] + feature_cols].isna().sum().sum())
     if null_count > 0:
         messages.append(f"检测到 {null_count} 个缺失值，分析中将自动填充（数值型用中位数，类别型标记为'缺失'）")
 
