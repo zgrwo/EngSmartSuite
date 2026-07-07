@@ -40,8 +40,8 @@ desktop.ini
 # 类型检查缓存
 .mypy_cache/
 
-# 个人配置
-.claude/settings.local.json
+# Claude Code 配置（个人工具，不推送）
+.claude/
 
 # 运行时产物
 smartsuite_report.html

@@ -235,6 +235,8 @@ const PARAM_LABELS = {
   operator_col: '操作员列', subgroup_col: '子组列', alpha_lasso: 'α (正则化强度)',
   model_type: '模型类型', min_segment: '最小段长', n_changepoints: '变点数',
   group_col: '分组列', max_depth: '最大深度',
+  sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
+  target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
 };
 
 const PARAM_HINTS = {

@@ -12,15 +12,6 @@ _CORE_DEPS: dict[str, str] = {
     "matplotlib":  "pip install matplotlib",
 }
 
-# ── 可选依赖映射：包名 → (extras 名称, 安装提示) ──
-_OPTIONAL_DEPS: dict[str, tuple[str, str]] = {
-    "flask":       ("web",    "pip install smartsuite[web]"),
-    "pptx":        ("report", "pip install smartsuite[report]"),
-    "reportlab":   ("report", "pip install smartsuite[report]"),
-    "pyarrow":     ("web",    "pip install smartsuite[web]"),
-}
-
-
 def check_core_deps():
     """检查核心依赖，缺失时抛出友好的中文 ImportError。"""
     missing: list[str] = []
@@ -44,22 +35,3 @@ def check_core_deps():
 # 必须在任何子模块导入之前执行，确保无论从 engine/ 还是 services/ 入口，
 # 都能得到友好的中文错误提示而非原始 ModuleNotFoundError。
 check_core_deps()
-
-
-def check_optional_dep(pkg: str) -> None:
-    """检查单个可选依赖，缺失时给出明确的安装提示。
-
-    用于延迟检查仅在特定功能路径上才需要的包（如 Flask），
-    避免在不需要该功能的用户那里触发不必要的安装。
-    """
-    if pkg not in _OPTIONAL_DEPS:
-        return
-    try:
-        __import__(pkg)
-    except ImportError:
-        extra, hint = _OPTIONAL_DEPS[pkg]
-        raise ImportError(
-            f"此功能需要「{pkg}」包，但它未安装。\n"
-            f"请运行：{hint}\n"
-            f"（{pkg} 属于 [{extra}] 可选依赖组）"
-        ) from None

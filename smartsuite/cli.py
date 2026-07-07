@@ -9,8 +9,9 @@ import pandas as pd
 import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.data_io import preprocess_data, validate_data
-from smartsuite.services.orchestrator import TASK_LABELS, TASK_REGISTRY, orchestrate
+from smartsuite.services.data_io import (auto_generate_subgroup_col, infer_group_col,
+    preprocess_data, preprocess_for_task, validate_data)
+from smartsuite.services.orchestrator import RAW_CAT_TASKS, TASK_LABELS, TASK_REGISTRY, orchestrate
 
 
 def main():
@@ -61,6 +62,8 @@ def main():
 
         raw = pd.read_excel(args.input, sheet_name=args.sheet)
         features = config.get("feature_cols", [])
+        params = config.get("params", {})
+        task = config["task"]
         # 数据校验：提前发现列存在性、类型、缺失值问题
         try:
             validate_warnings = validate_data(raw, config["target_col"], features)
@@ -69,17 +72,30 @@ def main():
         except Exception as e:
             logger.warning("数据校验异常: %s", e)
             print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
-        df, feature_cols, _, imputation_log, unknown_cat_warnings = preprocess_data(raw, features)
+        # SPC 缺子组列时自动生成（与 Web 路径保持一致）
+        if task == "spc_xbar" and "subgroup_col" not in params:
+            raw, params = auto_generate_subgroup_col(raw, params)
+        # 任务感知的数据预处理（与 Web 路径保持一致）
+        df, feature_cols, imputation_log, unknown_cat_warnings = preprocess_for_task(
+            raw, features, task, raw_cat_tasks=RAW_CAT_TASKS)
         # 输出数据预处理警告
         for col, n_coerced in imputation_log.items():
             print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
         for col, extra_cats, _n_affected in unknown_cat_warnings:
             print(f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。")
+        # 假设检验缺 group_col 时自动推断（与 Web 路径保持一致）
+        if task == "hypothesis_test" and "group_col" not in params:
+            extra = infer_group_col(raw, features)
+            if extra:
+                extra_col = extra["group_col"]
+                if extra_col not in feature_cols:
+                    feature_cols = list(feature_cols) + [extra_col]
+                params = {**params, **extra}
         req = AnalysisRequest(
-            task=config["task"], data=df,
+            task=task, data=df,
             target_col=config["target_col"],
             feature_cols=feature_cols,
-            params=config.get("params", {}),
+            params=params,
         )
         result = orchestrate(req)
         print(result.summary)

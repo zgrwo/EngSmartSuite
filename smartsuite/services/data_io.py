@@ -1,6 +1,8 @@
 """Data I/O — Excel 数据读写与校验。"""
 import logging
+import random
 
+import numpy as np
 import pandas as pd
 
 from smartsuite.core.exceptions import ValidationError
@@ -390,3 +392,65 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
             "target_specified": target_col is not None,
         },
     }
+
+
+def auto_generate_subgroup_col(df: pd.DataFrame, params: dict) -> tuple[pd.DataFrame, dict]:
+    """SPC 缺子组列时自动生成（使用随机后缀避免列名冲突）。
+
+    从 web/api.py 提取至 services/ 层，CLI 和 Web 路径共享。
+
+    Returns:
+        (修改后的 df, 更新后的 params)
+    """
+    n = len(df)
+    target_size = 5
+    n_subgroups = max(2, min(n // target_size, 50))
+    df = df.copy()
+    subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
+    while subgroup_col_name in df.columns:
+        subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
+    df[subgroup_col_name] = pd.cut(
+        range(n), bins=n_subgroups,
+        labels=[f"子组{i+1}" for i in range(n_subgroups)]
+    ).astype(str)
+    params = {**params, "subgroup_col": subgroup_col_name}
+    return df, params
+
+
+def infer_group_col(df: pd.DataFrame, features: list[str],
+                    categoricals: list[str] | None = None) -> dict | None:
+    """为假设检验自动推断分组列（查找恰好有 2 个水平的列）。
+
+    从 web/api.py 提取至 services/ 层，CLI 和 Web 路径共享。
+
+    Returns:
+        {'group_col': col_name} 或 None（未找到合适的列）
+    """
+    cat_set = set(categoricals) if categoricals else set()
+    candidates = [c for c in features if c in cat_set or
+        str(df[c].dtype) in ('object', 'string', 'category')] or \
+        [c for c in features if df[c].nunique() <= 10]
+    for col in candidates:
+        if df[col].dropna().nunique() == 2:
+            return {"group_col": col}
+    return None
+
+
+def preprocess_for_task(df: pd.DataFrame, features: list[str], task: str,
+                        categoricals: list[str] | None = None,
+                        raw_cat_tasks: set[str] | None = None
+                        ) -> tuple[pd.DataFrame, list[str], dict[str, int],
+                                   list[tuple[str, set[str], int]]]:
+    """任务感知的数据预处理：对需要原始类别列的任务跳过 One-Hot 编码。
+
+    Args:
+        raw_cat_tasks: 需要保留原始类别列的任务名集合（可从 orchestrator 导入）
+
+    Returns:
+        (encoded_df, encoded_cols, imputation_log, unknown_cat_warnings)
+    """
+    if raw_cat_tasks and task in raw_cat_tasks:
+        return df.copy(), list(features), {}, []
+    cat_set = set(categoricals) if categoricals else set()
+    df_enc, feat_enc, _, imputation_log, unknown_cat_warnings = preprocess_data(df, features, cat_set)
+    return df_enc, feat_enc, imputation_log, unknown_cat_warnings

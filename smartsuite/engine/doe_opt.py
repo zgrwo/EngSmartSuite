@@ -772,6 +772,8 @@ def _lenth_pse(effects):
 
 def _effect_label_doe(effect_ratio):
     """DOE 效应量解读。"""
+    if not np.isfinite(effect_ratio):
+        return "N/A"
     thresholds = [0.05, 0.15, 0.30]
     for t, label in zip(thresholds, ["可忽略", "小", "中"]):
         if effect_ratio < t:
@@ -1222,7 +1224,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     convergence_warning = ""
     if hasattr(model, "n_iter_"):
         n_iter_actual = int(model.n_iter_) if np.isscalar(model.n_iter_) else int(np.max(model.n_iter_))
-        if n_iter_actual >= _lasso_max_iter - 1:
+        if n_iter_actual >= _lasso_max_iter:
             convergence_warning = "⚠ Lasso 模型在最大迭代次数内未收敛，系数可能不准确，建议增大 max_iter 或调整 alpha"
 
     coef_df = pd.DataFrame({

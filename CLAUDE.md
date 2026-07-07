@@ -14,7 +14,7 @@
 
 ```
 smartsuite/                     # 主包
-├── __init__.py                 # 包初始化 + check_optional_dep() 工具
+├── __init__.py                 # 包初始化 + check_core_deps() 核心依赖检查
 ├── cli.py                      # CLI 入口: smartsuite run / list
 │
 ├── core/                       # ① 数据契约层：零依赖，仅 dataclass
@@ -120,7 +120,7 @@ docs/                           # 项目文档
 ├── skill.md                    # AI Agent 决策知识库
 ├── adr/                        # 架构决策记录 (2 项)
 ├── contributing/               # 贡献指南 (含代码审查模板)
-└── images/                     # 用户手册配图 (38 PNG)
+└── images/                     # 用户手册配图 (37 PNG)
 
 .github/workflows/ci.yml        # GitHub Actions: ruff + pytest (3.10/3.11/3.12)
 ```

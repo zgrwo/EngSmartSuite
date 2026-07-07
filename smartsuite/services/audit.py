@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine._palette import PALETTE
 from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
 from smartsuite.services.orchestrator import orchestrate
 
@@ -309,7 +310,7 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
                 # Headers
                 for ci, col in enumerate(table.columns):
                     ws.cell(row=row, column=ci+1, value=str(col)).font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                    ws.cell(row=row, column=ci+1).fill = openpyxl.styles.PatternFill("solid", fgColor="2171b5")  # PALETTE["data"]["primary"]
+                    ws.cell(row=row, column=ci+1).fill = openpyxl.styles.PatternFill("solid", fgColor=PALETTE["data"]["primary"])
                 row += 1
                 # Data
                 for _, data_row in table.head(100).iterrows():

@@ -693,33 +693,6 @@ def _effect_size_label(d, test_type="cohens_d"):
     return _threshold_label(ad, [0.147, 0.33, 0.474])
 
 
-def _make_ht_result_row(test_name, stat_label, stat_value, p_val, alpha,
-                         effect_str, conclusion, **extra_cols):
-    """构造假设检验结果表的统一 DataFrame 行。
-
-    Args:
-        test_name: 检验方法名
-        stat_label: 统计量标签 (如 "t值", "H统计量")
-        stat_value: 统计量值 (已格式化的字符串或数值)
-        p_val: p 值
-        alpha: 显著性水平
-        effect_str: 效应量描述字符串
-        conclusion: 中文结论
-        **extra_cols: 额外列 (如 "条件数", "样本量")
-    """
-    row = {
-        "检验方法": [test_name],
-        stat_label: [str(stat_value)],
-        "p值": [f"{p_val:.4f}"],
-        "显著性水平": [str(alpha)],
-        "效应量": [effect_str],
-        "结论": [conclusion],
-    }
-    for k, v in extra_cols.items():
-        row[k] = [str(v)]
-    return pd.DataFrame(row)
-
-
 # ── 假设检验分支调度 ── 新增检验类型只需在此注册 + 实现私有函数
 def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
     """Cochran Q 检验 (3+ 配对二分类条件)。"""
@@ -1418,12 +1391,14 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── 自动选择参数/非参数检验 ──
     norm_warn: list[str] = []
     sw1 = sw2 = 1.0  # 初始化为正态（用于 auto 分支中条件不满足时的回退）
+    norm_already_checked = False
     if test_type == "auto":
         normal = True
         if len(g1) >= 3 and len(g2) >= 3 and len(g1) <= 5000 and len(g2) <= 5000:
             _, sw1 = sp_stats.shapiro(g1)
             _, sw2 = sp_stats.shapiro(g2)
             normal = min(sw1, sw2) >= 0.05
+            norm_already_checked = True
         if normal:
             test_type = "ttest_ind"
         else:
@@ -1432,7 +1407,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 f"自动选择 Mann-Whitney U (正态性p={min(sw1,sw2):.4f}<0.05)"
             )
 
-    if len(g1) >= 3 and len(g2) >= 3 and test_type != "mannwhitney":
+    if not norm_already_checked and len(g1) >= 3 and len(g2) >= 3 and test_type != "mannwhitney":
         _, sw1 = sp_stats.shapiro(g1) if len(g1) <= 5000 else (None, 1.0)
         _, sw2 = sp_stats.shapiro(g2) if len(g2) <= 5000 else (None, 1.0)
         if min(sw1, sw2) < 0.05:
@@ -1461,12 +1436,11 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     from math import sqrt
     # 非中心参数近似
     ncp = abs(effect_size) * sqrt(n1 * n2 / (n1 + n2)) if (n1 + n2) > 0 else 0
-    from scipy.stats import nct
     dof = n1 + n2 - 2
     if test_type != "mannwhitney" and dof > 0:
         try:
             t_crit = sp_stats.t.ppf(1 - alpha / 2, dof)
-            power = float(1 - nct.cdf(t_crit, dof, ncp) + nct.cdf(-t_crit, dof, ncp))
+            power = float(1 - sp_stats.nct.cdf(t_crit, dof, ncp) + sp_stats.nct.cdf(-t_crit, dof, ncp))
         except Exception:
             logger.debug("统计功效计算失败", exc_info=True)
             power = None
@@ -1699,8 +1673,16 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 排除无意义的 const 列
         vif_data = vif_full[vif_full["变量"] != "const"].copy()
         high_vif = vif_data[vif_data["VIF"] > 5]
-        warning = f"注意: {len(high_vif)} 个变量 VIF>5，存在共线性风险" if len(high_vif) > 0 \
-            else "所有变量 VIF<=5，无明显共线性"
+        # VIF < 1 在数学上不可能（VIF = 1/(1-R²) ≥ 1），异常值提示常量列或数值问题
+        invalid_vif = vif_data[vif_data["VIF"] < 0.99]  # 允许浮点舍入误差 (~0.999…)
+        vif_warnings = []
+        if len(high_vif) > 0:
+            vif_warnings.append(f"{len(high_vif)} 个变量 VIF>5，存在共线性风险")
+        if len(invalid_vif) > 0:
+            bad_cols = invalid_vif["变量"].tolist()
+            vif_warnings.append(f"⚠ {len(invalid_vif)} 个变量 VIF<1 异常（{bad_cols}），"
+                               "可能为零方差常量列或数值计算误差，请检查数据")
+        warning = "; ".join(vif_warnings) if vif_warnings else "所有变量 VIF<=5，无明显共线性"
 
         # VIF 柱状图
         vif_plot = vif_data
@@ -1716,7 +1698,7 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         return AnalysisResult(
             task="vif", tables={"vif_table": vif_data}, figures=[fig], summary=warning,
-            metadata={"high_vif_count": len(high_vif)},
+            metadata={"high_vif_count": len(high_vif), "invalid_vif_count": len(invalid_vif)},
         )
     except Exception:
         logger.debug("VIF 计算失败", exc_info=True)
@@ -1759,15 +1741,15 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
             n_groups = req.params.get("n_groups", 3)
             from statsmodels.stats.power import FTestAnovaPower
             analysis = FTestAnovaPower()
-            required = ceil(float(analysis.solve_power(
+            total_n = ceil(float(analysis.solve_power(
                 effect_size=abs(effect_size), alpha=alpha,
                 power=target_power, k_groups=n_groups
             )))
+            required = ceil(total_n / n_groups)
             label = f"ANOVA ({n_groups}组) 所需每组样本量: {required} (总计 {required*n_groups})"
         elif test_type == "proportion":
             p0 = req.params.get("p0", 0.5)
             p1 = req.params.get("p1", 0.6)
-            from math import ceil
             z_alpha = abs(sp_stats.norm.ppf(alpha / 2))
             z_beta = abs(sp_stats.norm.ppf(1 - target_power))
             d = abs(p1 - p0)
@@ -2255,12 +2237,14 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
 
     alpha = (k / (k - 1)) * (1 - np.sum(item_vars) / total_var)
 
-    # Cronbach's α 为负值时的诊断警告
+    # Cronbach's α 异常值诊断警告
+    warn_msgs = []
     if alpha < 0:
-        warn_msgs = ["⚠ Cronbach's α 为负值，可能原因: 项目编码方向不一致、"
-                      "负协方差项目存在、或量表结构性失效。建议检查项目编码方向。"]
-    else:
-        warn_msgs = []
+        warn_msgs.append("⚠ Cronbach's α 为负值，可能原因: 项目编码方向不一致、"
+                         "负协方差项目存在、或量表结构性失效。建议检查项目编码方向。")
+    elif alpha > 1:
+        warn_msgs.append("⚠ Cronbach's α 超过理论上限 1.0（当前 {:.4f}），"
+                         "可能原因: 总分方差被低估或存在计算精度问题，请检查数据完整性。".format(alpha))
 
     # 如果删除某项后的 α
     alpha_if_deleted = []

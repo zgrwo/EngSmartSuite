@@ -2,14 +2,14 @@
 import base64
 import io
 import logging
-import random
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import ValidationError
-from smartsuite.services.data_io import preprocess_data, validate_data
+from smartsuite.services.data_io import (auto_generate_subgroup_col, infer_group_col,
+    preprocess_data, preprocess_for_task, validate_data)
 from smartsuite.services.orchestrator import orchestrate
 
 logger = logging.getLogger(__name__)
@@ -38,19 +38,9 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         params = {}
     results = []
 
-    # 预处理：为 SPC 缺子组列时自动生成（使用随机后缀避免列名冲突）
+    # 预处理：为 SPC 缺子组列时自动生成（委托至 services 层，CLI/Web 共享）
     if task == "spc_xbar" and "subgroup_col" not in params:
-        n = len(df)
-        # 目标每组5个观测, 最多50组, 确保子组大小在2-25范围内
-        target_size = 5
-        n_subgroups = max(2, min(n // target_size, 50))
-        df = df.copy()
-        subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
-        while subgroup_col_name in df.columns:
-            subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
-        df[subgroup_col_name] = pd.cut(range(n), bins=n_subgroups,
-            labels=[f"子组{i+1}" for i in range(n_subgroups)]).astype(str)
-        params["subgroup_col"] = subgroup_col_name
+        df, params = auto_generate_subgroup_col(df, params)
 
     # ── 相关性：先构建合并矩阵 ──
     merged_corr = None
@@ -84,47 +74,31 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
 
     # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
     from smartsuite.services.orchestrator import RAW_CAT_TASKS
-    _raw_cat_tasks = RAW_CAT_TASKS
-    if task in _raw_cat_tasks:
-        df_enc = df.copy()
-        feat_enc = list(features)
-    else:
-        cat_set = set(categoricals) if categoricals else set()
-        df_enc, feat_enc, _, imputation_log, unknown_cat_warnings = preprocess_data(df, features, cat_set)
-        # 将数据预处理日志转换为用户可见的警告
-        for col, n_coerced in imputation_log.items():
-            data_warnings.append(f"列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
-        # 未知类别警告：提升为用户可见的 P0 级警告（可能影响分析准确性）
-        for col, extra_cats, n_affected in unknown_cat_warnings:
-            data_warnings.append(
-                f"⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别，"
-                f"影响 {n_affected} 行，已丢弃: {extra_cats}。"
-                f"建议检查数据或重新训练模型。"
-            )
+    df_enc, feat_enc, imputation_log, unknown_cat_warnings = preprocess_for_task(
+        df, features, task, categoricals, RAW_CAT_TASKS)
+    # 将数据预处理日志转换为用户可见的警告
+    for col, n_coerced in imputation_log.items():
+        data_warnings.append(f"列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
+    # 未知类别警告：提升为用户可见的 P0 级警告（可能影响分析准确性）
+    for col, extra_cats, n_affected in unknown_cat_warnings:
+        data_warnings.append(
+            f"⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别，"
+            f"影响 {n_affected} 行，已丢弃: {extra_cats}。"
+            f"建议检查数据或重新训练模型。"
+        )
 
     for target in targets:
         try:
 
             if task == "hypothesis_test" and "group_col" not in params:
-                extra = {}
-                # 自动寻找恰好有 2 个水平的列作为分组变量
-                candidates = [c for c in features if c in categoricals or
-                    str(df[c].dtype) in ('object', 'string', 'category')] or \
-                    [c for c in features if df[c].nunique() <= 10]
-                for col in candidates:
-                    if df[col].dropna().nunique() == 2:
-                        extra["group_col"] = col
-                        # 从编码特征列表中移除该列的 one-hot 编码，保留原始列
-                        feat_enc_filtered = []
-                        col_prefix = col + "_"
-                        for f in feat_enc:
-                            if f == col or not f.startswith(col_prefix):
-                                feat_enc_filtered.append(f)
-                        if col not in feat_enc_filtered:
-                            feat_enc_filtered.append(col)
-                        feat_enc = feat_enc_filtered
-                        break
+                extra = infer_group_col(df, features, categoricals)
                 if extra:
+                    # 确保分组列在特征列表中（RAW_CAT_TASKS 下 feat_enc 为原始列名）
+                    extra_col = extra["group_col"]
+                    if extra_col not in feat_enc:
+                        feat_enc = list(feat_enc) + [extra_col]
+                    else:
+                        feat_enc = list(feat_enc)
                     params = {**params, **extra}
 
             req = AnalysisRequest(

@@ -529,12 +529,11 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
 
 def _cp_confidence_interval(cp, n, alpha=0.05):
     """Cp/Cpk 95% 置信区间 (基于 χ² 分布)。"""
-    from scipy.stats import chi2
     dof = n - 1
     if dof <= 0 or cp is None:
         return (None, None)
-    chi2_lower = chi2.ppf(alpha / 2, dof)
-    chi2_upper = chi2.ppf(1 - alpha / 2, dof)
+    chi2_lower = sp_stats.chi2.ppf(alpha / 2, dof)
+    chi2_upper = sp_stats.chi2.ppf(1 - alpha / 2, dof)
     ci_lower = cp * np.sqrt(chi2_lower / dof)
     ci_upper = cp * np.sqrt(chi2_upper / dof)
     return (float(ci_lower), float(ci_upper))
@@ -1477,18 +1476,16 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
                  f"[{lower:.4f}, {upper:.4f}]")
     elif side == "upper":
         # 单侧上限
-        from scipy.stats import nct
         delta = sp_stats.norm.ppf(coverage) * sqrt(n)
-        t_val = nct.ppf(confidence, n - 1, delta) / sqrt(n)
+        t_val = sp_stats.nct.ppf(confidence, n - 1, delta) / sqrt(n)
         k_upper = t_val
         upper = mu + k_upper * sigma
         lower = float("-inf")
         label = f"{coverage*100:.0f}% 总体 ≤ {upper:.4f} ({confidence*100:.0f}% 置信)"
     else:
         # 单侧下限
-        from scipy.stats import nct
         delta = sp_stats.norm.ppf(coverage) * sqrt(n)
-        t_val = nct.ppf(confidence, n - 1, delta) / sqrt(n)
+        t_val = sp_stats.nct.ppf(confidence, n - 1, delta) / sqrt(n)
         k_lower = t_val
         lower = mu - k_lower * sigma
         upper = float("inf")
