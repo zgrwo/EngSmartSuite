@@ -272,8 +272,14 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
 
     每个分析任务的结果 (表格+图表) 写入独立 Sheet。
     """
+    import os
+
     import openpyxl
 
+    # 确保输出目录存在 (与 reporter.to_pdf/to_ppt/to_html 保持一致)
+    out_dir = os.path.dirname(os.path.abspath(output_path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 

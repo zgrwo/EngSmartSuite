@@ -432,12 +432,13 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 构建公式：可选两两交互项
     # 对列名中的单引号做 SQL-style 转义（patsy Q() 语法要求）
     _escaped = [c.replace(chr(39), chr(39) + chr(39)) for c in cols]
+    _escaped_target = req.target_col.replace(chr(39), chr(39) + chr(39))
     terms = [f"Q('{ec}')" for ec in _escaped]
     if req.params.get("interactions") and len(cols) >= 2:
         for i in range(len(cols)):
             for j in range(i + 1, len(cols)):
                 terms.append(f"Q('{_escaped[i]}'):Q('{_escaped[j]}')")
-    formula = f"Q('{req.target_col}') ~ " + " + ".join(terms)
+    formula = f"Q('{_escaped_target}') ~ " + " + ".join(terms)
 
     warn_msgs: list[str] = []
     try:
@@ -485,10 +486,11 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     alpha = req.params.get("alpha", 0.05)
     sig_factors: list[tuple[str, str]] = []  # (raw_col_name, formatted_display_str)
-    for col in cols:
+    for i, col in enumerate(cols):
+        _esc_key = _escaped[i]
         try:
-            p_val = anova_table.loc[f"Q('{col}')", "PR(>F)"]
-            es = effect_sizes.get(f"Q('{col}')", {})
+            p_val = anova_table.loc[f"Q('{_esc_key}')", "PR(>F)"]
+            es = effect_sizes.get(f"Q('{_esc_key}')", {})
             eta2 = es.get("η²", 0)
             if p_val < alpha:
                 sig_factors.append((col, f"{col}(p={p_val:.4f}, η²={eta2:.3f})"))
@@ -503,9 +505,10 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         from itertools import combinations
 
         from statsmodels.stats.multicomp import pairwise_tukeyhsd
-        for col in cols:
+        for i, col in enumerate(cols):
+            _esc_key = _escaped[i]
             try:
-                p_val = anova_table.loc[f"Q('{col}')", "PR(>F)"]
+                p_val = anova_table.loc[f"Q('{_esc_key}')", "PR(>F)"]
                 n_groups = req.data[col].nunique()
                 if p_val < alpha and n_groups >= 2:
                     if n_groups > _MAX_TUKEY_GROUPS:

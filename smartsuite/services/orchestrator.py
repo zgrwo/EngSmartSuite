@@ -152,6 +152,10 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
 
     defaults = DEFAULT_PARAMS.get(req.task, {})
     merged = {**defaults, **req.params}
+    # 规范化: JS 端空字符串 '' → Python None (修复 Web/CLI 参数桥接)
+    # 仅对默认值为 None 的参数做此转换，保留 explicit '' 的语义
+    merged = {k: (None if v == '' and defaults.get(k) is None else v)
+              for k, v in merged.items()}
     req = replace(req, params=merged)
 
     try:
