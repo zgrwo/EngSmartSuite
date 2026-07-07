@@ -48,6 +48,10 @@ smartsuite_report.html
 tests/results.pptx
 tests/demo_output/
 
+# 代码审查产物（本地保留，不推送）
+docs/code-review-report-*.md
+docs/known-issues.md
+
 # 开发者工具（本地保留，不推送）
 docs/contributing/
 # 一次性数据生成脚本
