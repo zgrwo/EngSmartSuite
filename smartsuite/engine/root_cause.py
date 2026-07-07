@@ -981,7 +981,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = f"单样本 Wilcoxon 检验 (H0: 中位数={popmedian})"
         # 效应量: 匹配对秩相关 r = Z / sqrt(N)
         n = len(data)
-        z_stat_abs = abs(sp_stats.norm.ppf(1 - max(p, 1e-300) / 2))
+        z_stat_abs = abs(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
         r_effect = min(float(z_stat_abs / np.sqrt(n)), 1.0)  # capped at 1.0 (theoretical max)
         effect_size = r_effect
         effect_name = "秩相关 r"
@@ -1219,7 +1219,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         S = int(round(tau_mk * np.sqrt(max(n0 * (n0 - n2), 1.0))))
         effect_size = float(tau_mk)
         # 从 p 值反推近似 Z（用于展示）
-        p_safe = max(p, 1e-300)  # protect against p=0 causing ppf(1.0)=inf
+        p_safe = max(p, 1e-10)  # protect against p=0 causing ppf(1.0)=inf (1e-10 keeps z≤6.47 finite)
         z_mk = float(sp_stats.norm.ppf(1 - p_safe / 2)) * np.sign(S) if p < 1.0 else 0.0
 
         test_name = "Mann-Kendall 趋势检验"
@@ -1337,7 +1337,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         diff = sub[col1].values - sub[col2].values
         # 匹配对效应量: r = Z / sqrt(N)
         n_pairs = len(sub)
-        z_stat = float(sp_stats.norm.ppf(1 - max(p, 1e-300) / 2))
+        z_stat = float(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
         r_effect = z_stat / np.sqrt(n_pairs)
         effect_size = float(r_effect)
         effect_name = "匹配对秩相关 r"

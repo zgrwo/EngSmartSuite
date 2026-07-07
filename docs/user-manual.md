@@ -144,7 +144,7 @@ python smartsuite/web/app.py
 from smartsuite.engine.root_cause import correlation_analysis
 from smartsuite.services.data_io import preprocess_data
 
-df_enc, feat_enc, _, _ = preprocess_data(df_raw, [...], set())
+df_enc, feat_enc, _, _, _ = preprocess_data(df_raw, [...], set())
 req = AnalysisRequest(task="correlation", data=df_enc, target_col="不良率", feature_cols=feat_enc)
 result = correlation_analysis(req)
 print(result.summary)

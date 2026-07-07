@@ -337,7 +337,7 @@ class AnalysisResult:
 路由分析请求到对应引擎函数，注入默认参数，统一异常处理。
 
 ### TASK_REGISTRY: dict[str, Callable]
-全部 39 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/web/app.py` 的 `TASK_GROUPS` 中）。
+全部 39 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
 
 ### DEFAULT_PARAMS: dict[str, dict]
 各 task key 的默认参数。编排器会自动合并用户参数到默认参数之上。

@@ -74,7 +74,8 @@ tests/
 └── test_services/              # 服务层单元测试
     ├── test_orchestrator.py    # 编排路由测试
     ├── test_reporter.py        # 报告生成测试
-    └── test_differential.py    # CLI vs Web 路径一致性测试
+    ├── test_differential.py    # CLI vs Web 路径一致性测试
+    └── test_manual_parity.py   # Web/CLI/Python/手册 四路一致性验证
 ```
 
 ### 启动脚本
@@ -88,7 +89,7 @@ run_server.py                   # Web UI 启动入口（被上述脚本调用，
 ### 模板与脚本
 
 ```
-templates/                      # YAML 分析模板 (42 个，39 方法 + 3 变体)
+templates/                      # YAML 分析模板 (42 个，39 方法 + 2 变体 + 1 教程模板)
 │                               # CLI 调用: smartsuite run --template <name>
 ├── example_correlation.yaml    # 每个 task key 对应一个模板
 ├── example_anova.yaml
