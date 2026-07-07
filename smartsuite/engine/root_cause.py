@@ -2243,8 +2243,8 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
         warn_msgs.append("⚠ Cronbach's α 为负值，可能原因: 项目编码方向不一致、"
                          "负协方差项目存在、或量表结构性失效。建议检查项目编码方向。")
     elif alpha > 1:
-        warn_msgs.append("⚠ Cronbach's α 超过理论上限 1.0（当前 {:.4f}），"
-                         "可能原因: 总分方差被低估或存在计算精度问题，请检查数据完整性。".format(alpha))
+        warn_msgs.append(f"⚠ Cronbach's α 超过理论上限 1.0（当前 {alpha:.4f}），"
+                         "可能原因: 总分方差被低估或存在计算精度问题，请检查数据完整性。")
 
     # 如果删除某项后的 α
     alpha_if_deleted = []

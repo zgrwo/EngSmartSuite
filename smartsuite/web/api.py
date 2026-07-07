@@ -8,8 +8,13 @@ import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import ValidationError
-from smartsuite.services.data_io import (auto_generate_subgroup_col, infer_group_col,
-    preprocess_data, preprocess_for_task, validate_data)
+from smartsuite.services.data_io import (
+    auto_generate_subgroup_col,
+    infer_group_col,
+    preprocess_data,
+    preprocess_for_task,
+    validate_data,
+)
 from smartsuite.services.orchestrator import orchestrate
 
 logger = logging.getLogger(__name__)

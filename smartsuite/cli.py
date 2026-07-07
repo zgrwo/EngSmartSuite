@@ -9,8 +9,12 @@ import pandas as pd
 import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.data_io import (auto_generate_subgroup_col, infer_group_col,
-    preprocess_data, preprocess_for_task, validate_data)
+from smartsuite.services.data_io import (
+    auto_generate_subgroup_col,
+    infer_group_col,
+    preprocess_for_task,
+    validate_data,
+)
 from smartsuite.services.orchestrator import RAW_CAT_TASKS, TASK_LABELS, TASK_REGISTRY, orchestrate
 
 

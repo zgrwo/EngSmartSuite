@@ -2,7 +2,6 @@
 import logging
 import random
 
-import numpy as np
 import pandas as pd
 
 from smartsuite.core.exceptions import ValidationError
