@@ -94,13 +94,13 @@ def process_audit(
             r = orchestrate(req)
             results["capability"] = {"status": r.status, "summary": r.summary}
             cpk = r.metadata.get("cpk")
-            if cpk and cpk >= 1.33:
+            if cpk is not None and cpk >= 1.33:
                 health_checks.append({"检查项": "过程能力", "状态": "✓ 合格",
                                      "详情": f"Cpk={cpk:.3f} ≥ 1.33"})
-            elif cpk and cpk >= 1.0:
+            elif cpk is not None and cpk >= 1.0:
                 health_checks.append({"检查项": "过程能力", "状态": "⚠ 勉强",
                                      "详情": f"Cpk={cpk:.3f} (1.0~1.33)"})
-            elif cpk:
+            elif cpk is not None:
                 health_checks.append({"检查项": "过程能力", "状态": "✗ 不合格",
                                      "详情": f"Cpk={cpk:.3f} < 1.0"})
             else:
@@ -217,8 +217,8 @@ def auto_report(df, target_col, feature_cols=None, output_path=None,
     quality = missing_pattern_analysis(df)
     rec = recommend_analysis(df, target_col=target_col)
 
-    # 批量分析
-    tasks_to_run = ["correlation", "regression", "anova", "normality_check",
+    # 批量分析 (不含 regression，因其将在后续 HTML 生成时单独运行)
+    tasks_to_run = ["correlation", "anova", "normality_check",
                    "distribution_summary"]
     if usl is not None and lsl is not None:
         tasks_to_run.append("process_capability")

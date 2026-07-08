@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-from matplotlib.figure import Figure
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 
 @dataclass

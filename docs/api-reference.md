@@ -88,7 +88,7 @@ class AnalysisResult:
 
 ### contingency_analysis
 - **Task Key**: `contingency`
-- **描述**: 列联表分析 — Chi-square / Fisher 精确检验 + Cramér's V / Odds Ratio
+- **描述**: 列联表分析 — Chi-square（含小期望频数标注）+ Cramér's V / Odds Ratio（2×2 表）
 - **params**: `alpha` (0.05)
 - **返回**: `contingency_table`, `expected_frequencies`
 - **图**: 堆叠柱状图
@@ -247,7 +247,7 @@ class AnalysisResult:
 ### process_capability_analysis
 - **Task Key**: `process_capability`
 - **描述**: 过程能力分析 — Cp/Cpk/Pp/Ppk/Cpm + 95%CI + Sigma Level + DPMO
-- **params**: `usl`, `lsl`, `target` (Cpm 目标), `transform` ("boxcox")
+- **params**: `usl`, `lsl`, `target` (Cpm 目标), `transform` ("boxcox", 要求数据和规格限均为正值)
 - **返回**: `capability_indices`, `descriptive_stats`
 - **图**: 直方图 + 正态拟合 + 规格限
 

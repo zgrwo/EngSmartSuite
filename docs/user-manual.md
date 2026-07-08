@@ -307,7 +307,9 @@ req = AnalysisRequest(task="contingency", data=df, target_col="原料类型",
     feature_cols=["保养日"])
 result = contingency_analysis(req)
 print(f"检验方法: {result.metadata['test']}, p={result.metadata['p_value']:.4f}")
-# → "卡方独立性检验" 或 "Fisher 精确检验"
+# → "卡方独立性检验"（期望频数充足时）或
+#   "卡方检验 (期望频数<5, 结果仅供参考)"（期望频数不足时）
+#   （非 2×2 表格无法使用 Fisher 精确检验，scipy 不支持）
 ```
 
 ### 4.7 比例置信区间 (`proportion_ci`)
@@ -364,7 +366,7 @@ print(f"Kappa={result.metadata['kappa']:.3f} ({result.metadata['level']})")
 
 ### 5.2 信度分析 Cronbach α (`cronbach_alpha`)
 
-**功能**: 评估多个测量项的内部一致性（如多个质量检验项目是否在测同一个东西）。
+**功能**: 评估多个测量项的内部一致性（如多个质量检验项目是否在测同一个东西）。当 α > 1.0（数学上不可能）时返回 error 状态，α < 0 时标记为"不可接受"但状态仍为 ok（可能由项目编码方向不一致导致）。
 
 **操作**: X=`熔体温度, 模具温度, 注射压力` → 点击 **信度分析**
 
@@ -641,7 +643,7 @@ print(f"受控: {result.metadata['is_stable']}, 违规: {len(result.tables.get('
 
 **操作**: Y=`不良率`(Y), 参数面板填入 `usl: 10, lsl: 1` → 点击 **过程能力Cp/Cpk**
 
-**参数说明**: usl=规格上限, lsl=规格下限。可选 `target`（目标值，用于 Cpm）和 `transform: boxcox`（非正态数据变换）。
+**参数说明**: usl=规格上限, lsl=规格下限。可选 `target`（目标值，用于 Cpm）和 `transform: boxcox`（非正态数据变换，要求数据和规格限均为正值；若规格限非正，将跳过能力指数计算并以 "N/A" 显示，同时提示使用原始数据分析）。
 
 **Web UI 输出表格**:
 
@@ -898,7 +900,7 @@ print(f"拟合={result.metadata.get('best_fit','?')}, UCL={result.metadata['ucl'
 
 ### 9.2 验证结果对照表
 
-以 `tests/test_data.xlsx` 为输入，验证日期: 2026-07-04。
+以 `tests/test_data.xlsx` 为输入，验证日期: 2026-07-08。
 
 | 分析方法 | Web UI status | Python status | summary 一致 | 耗时 |
 |---------|--------------|--------------|-------------|------|

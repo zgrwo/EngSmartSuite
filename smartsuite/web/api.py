@@ -11,7 +11,6 @@ from smartsuite.core.exceptions import ValidationError
 from smartsuite.services.data_io import (
     auto_generate_subgroup_col,
     infer_group_col,
-    preprocess_data,
     preprocess_for_task,
     validate_data,
 )
@@ -47,27 +46,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     if task == "spc_xbar" and "subgroup_col" not in params:
         df, params = auto_generate_subgroup_col(df, params)
 
-    # ── 相关性：先构建合并矩阵 ──
-    merged_corr = None
-    if task == "correlation" and len(targets) > 1:
-        cat_set = set(categoricals) if categoricals else set()
-        df_enc, feat_enc, _, _, _ = preprocess_data(df, features, cat_set)
-        merged_rows = {}
-        for target in targets:
-            try:
-                req = AnalysisRequest(task="correlation", data=df_enc, target_col=target,
-                    feature_cols=feat_enc, params=params)
-                r = orchestrate(req)
-                m = r.tables.get("correlation_matrix")
-                if m is not None and target in m.index:
-                    merged_rows[target] = m.loc[target, feat_enc]
-            except Exception as e:
-                logger.warning("目标列 %s 相关性合并失败: %s", target, e, exc_info=True)
-        if merged_rows:
-            merged_corr = pd.DataFrame(merged_rows).T
-            merged_corr.index.name = "目标"
-
-    # 预处理只执行一次，避免每个目标列重复编码
+    # ── 预处理只执行一次，避免每个目标列重复编码 ──
     # 数据校验：检测列存在性、类型问题、缺失值
     data_warnings: list[str] = []
     all_validate_cols = list(targets) + list(features)
@@ -91,6 +70,24 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
             f"影响 {n_affected} 行，已丢弃: {extra_cats}。"
             f"建议检查数据或重新训练模型。"
         )
+
+    # ── 相关性：先构建合并矩阵（复用已预处理的数据）──
+    merged_corr = None
+    if task == "correlation" and len(targets) > 1:
+        merged_rows = {}
+        for target in targets:
+            try:
+                req = AnalysisRequest(task="correlation", data=df_enc, target_col=target,
+                    feature_cols=feat_enc, params=params)
+                r = orchestrate(req)
+                m = r.tables.get("correlation_matrix")
+                if m is not None and target in m.index:
+                    merged_rows[target] = m.loc[target, feat_enc]
+            except Exception as e:
+                logger.warning("目标列 %s 相关性合并失败: %s", target, e, exc_info=True)
+        if merged_rows:
+            merged_corr = pd.DataFrame(merged_rows).T
+            merged_corr.index.name = "目标"
 
     for target in targets:
         try:

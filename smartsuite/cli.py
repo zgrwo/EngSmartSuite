@@ -27,7 +27,7 @@ def main():
     run_parser.add_argument("template", help="YAML 分析模板路径")
     run_parser.add_argument("--input", "-i", required=True,
                              help="输入 Excel 文件路径")
-    run_parser.add_argument("--sheet", "-s", default="0",
+    run_parser.add_argument("--sheet", "-s", default=0,
                              help="Sheet 名或索引 (默认: 第一个)")
 
     subparsers.add_parser("list", help="列出支持的分析方法")

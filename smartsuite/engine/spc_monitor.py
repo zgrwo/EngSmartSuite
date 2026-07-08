@@ -43,70 +43,54 @@ def _we_rules_xbar(values, cl, sigma):
         violations["规则1: 超出±3σ"] = [int(i) for i in r1]
 
     # Rule 2: 连续3点中≥2点超出 ±2σ (同侧)
-    r2 = []
+    r2: set[int] = set()
     for i in range(n - 2):
         above = np.sum(vals[i:i+3] > cl + 2*sigma)
         below = np.sum(vals[i:i+3] < cl - 2*sigma)
         if above >= 2:
-            for j in range(i, i+3):
-                if vals[j] > cl + 2*sigma and j not in r2:
-                    r2.append(j)
+            r2.update(j for j in range(i, i+3) if vals[j] > cl + 2*sigma)
         if below >= 2:
-            for j in range(i, i+3):
-                if vals[j] < cl - 2*sigma and j not in r2:
-                    r2.append(j)
+            r2.update(j for j in range(i, i+3) if vals[j] < cl - 2*sigma)
     if r2:
-        violations["规则2: 3点中≥2点超出±2σ"] = sorted(set(r2))
+        violations["规则2: 3点中≥2点超出±2σ"] = sorted(r2)
 
     # Rule 3: 连续5点中≥4点超出 ±1σ (同侧)
-    r3 = []
+    r3: set[int] = set()
     for i in range(n - 4):
         above = np.sum(vals[i:i+5] > cl + 1*sigma)
         below = np.sum(vals[i:i+5] < cl - 1*sigma)
         if above >= 4:
-            for j in range(i, i+5):
-                if vals[j] > cl + 1*sigma and j not in r3:
-                    r3.append(j)
+            r3.update(j for j in range(i, i+5) if vals[j] > cl + 1*sigma)
         if below >= 4:
-            for j in range(i, i+5):
-                if vals[j] < cl - 1*sigma and j not in r3:
-                    r3.append(j)
+            r3.update(j for j in range(i, i+5) if vals[j] < cl - 1*sigma)
     if r3:
-        violations["规则3: 5点中≥4点超出±1σ"] = sorted(set(r3))
+        violations["规则3: 5点中≥4点超出±1σ"] = sorted(r3)
 
     # Rule 4: 连续8点在同一侧
-    r4 = []
+    r4: set[int] = set()
     for i in range(n - 7):
         if all(vals[i:i+8] > cl) or all(vals[i:i+8] < cl):
-            for j in range(i, i+8):
-                if j not in r4:
-                    r4.append(j)
+            r4.update(range(i, i+8))
     if r4:
-        violations["规则4: 连续8点同侧"] = sorted(set(r4))
+        violations["规则4: 连续8点同侧"] = sorted(r4)
 
     # Rule 5: 连续6点单调上升或下降
-    r5 = []
+    r5: set[int] = set()
     for i in range(n - 5):
         if all(vals[i+k+1] > vals[i+k] for k in range(5)):
-            for j in range(i, i+6):
-                if j not in r5:
-                    r5.append(j)
+            r5.update(range(i, i+6))
         if all(vals[i+k+1] < vals[i+k] for k in range(5)):
-            for j in range(i, i+6):
-                if j not in r5:
-                    r5.append(j)
+            r5.update(range(i, i+6))
     if r5:
-        violations["规则5: 连续6点趋势"] = sorted(set(r5))
+        violations["规则5: 连续6点趋势"] = sorted(r5)
 
     # Rule 6: 连续15点在 ±1σ 内（分层/虚假受控）
-    r6 = []
+    r6: set[int] = set()
     for i in range(n - 14):
         if all(abs(vals[i:i+15] - cl) < 1*sigma):
-            for j in range(i, i+15):
-                if j not in r6:
-                    r6.append(j)
+            r6.update(range(i, i+15))
     if r6:
-        violations["规则6: 连续15点在±1σ内"] = sorted(set(r6))
+        violations["规则6: 连续15点在±1σ内"] = sorted(r6)
 
     return violations
 
@@ -653,9 +637,10 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
                     target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
             elif usl is not None or lsl is not None:
                 warn_msgs.append(
-                    "⚠ Box-Cox 变换要求规格限均为正值，规格限保持在原始尺度，"
-                    "Cp/Cpk 可能不准确，建议使用原始数据分析"
+                    "⚠ Box-Cox 变换要求规格限均为正值，规格限无法变换，"
+                    "已跳过过程能力指数计算，请使用原始数据分析"
                 )
+                usl, lsl, target = None, None, None  # 阻止混合尺度计算
         else:
             warn_msgs.append("⚠ Box-Cox 变换失败（数据必须全部为正值），使用原始数据分析")
 
@@ -1892,6 +1877,12 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     # ── 方法 1: IQR ──
     Q1, Q3 = data.quantile(0.25), data.quantile(0.75)
     IQR = Q3 - Q1
+    if IQR == 0:
+        return AnalysisResult(
+            task="outlier_consensus",
+            status="error",
+            messages=["数据无变化(IQR=0)，无法检测异常"],
+        )
     iqr_mask = (data < Q1 - 1.5 * IQR) | (data > Q3 + 1.5 * IQR)
 
     # ── 方法 2: Z-score ──

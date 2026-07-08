@@ -1044,7 +1044,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = "Kruskal-Wallis H 检验 (非参数 ANOVA)"
         n_total = len(sub)
         # 效应量: η²_H = H / (N-1) 近似
-        eta2_h = float(stat / (n_total - 1)) if n_total > 1 else 0.0
+        eta2_h = min(float(stat / (n_total - 1)), 1.0) if n_total > 1 else 0.0
         effect_size = eta2_h
         effect_name = "η²_H"
         effect_label = _effect_interpretation(eta2_h)
@@ -1913,12 +1913,10 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
             else:
                 effect_label = "弱/无关联"
         else:
-            test_name = "Fisher 精确检验 (模拟)"
-            try:
-                _, fish_p = sp_stats.fisher_exact(ctab, simulate_p_value=True)
-            except Exception:
-                logger.debug("Fisher 精确检验模拟失败", exc_info=True)
-                fish_p = chi_p
+            # 非 2×2 表格无法使用 Fisher 精确检验 (scipy 不支持)
+            # 期望频数不足时仍使用卡方检验，但标注局限性
+            test_name = "卡方检验 (期望频数<5, 结果仅供参考)"
+            fish_p = chi_p
             stat = chi2
             stat_label = "Chi²"
             # Cramér's V: 确保 min_dim >= 1 防止除零
@@ -2284,19 +2282,33 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
             "项总相关": corr_str,
         })
 
-    if alpha >= 0.9:
+    if alpha > 1.0:
+        # α > 1.0 在数学上不可能，标记为错误
+        level = "无效 (超出理论范围)"
+        status = "error"
+    elif alpha < 0.0:
+        # α < 0 表示项目编码方向不一致或负协方差，仍为可报告结果
+        level = "不可接受"
+        status = "ok"
+    elif alpha >= 0.9:
         level = "优秀"
+        status = "ok"
     elif alpha >= 0.8:
         level = "良好"
+        status = "ok"
     elif alpha >= 0.7:
         level = "可接受"
+        status = "ok"
     elif alpha >= 0.6:
         level = "需改进"
+        status = "ok"
     else:
         level = "不可接受"
+        status = "ok"
 
     return AnalysisResult(
         task="cronbach_alpha",
+        status=status,
         tables={
             "alpha_summary": pd.DataFrame({
                 "指标": ["Cronbach's α", "题项数", "样本量", "判读"],
