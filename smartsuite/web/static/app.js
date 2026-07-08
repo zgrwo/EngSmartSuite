@@ -326,8 +326,14 @@ let _running = false;     // 防抖标志
 async function runAnalysis(task) {
   if (_running) return;  // 防抖：上一次分析尚未完成
   if (!selectedY.size) { alert('请至少选择一个 Y 列'); return; }
-  if (task !== 'process_capability' && task !== 'trend_forecast' && task !== 'anomaly_detect'
-      && task !== 'power_analysis' && task !== 'spc_nonparametric' && !selectedX.size) {
+  // 仅需 Y 列即可运行的任务（无需选择 X 列）
+  const _yOnlyTasks = new Set([
+    'process_capability', 'trend_forecast', 'anomaly_detect',
+    'power_analysis', 'spc_nonparametric',
+    'distribution_summary', 'normality_check', 'proportion_ci',
+    'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
+  ]);
+  if (!_yOnlyTasks.has(task) && !selectedX.size) {
     alert('请至少选择一个 X 列'); return;
   }
   // 有参数配置 → 第一步: 显示参数面板, 等待用户编辑后点"运行"

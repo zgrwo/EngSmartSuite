@@ -197,6 +197,7 @@ except ImportError as e:
     ) from e
 
 __all__ = [
+    "GROUP_COLORS", "PALETTE",  # 公开配色常量，供 services/web 层使用
     "correlation_analysis", "anova_analysis", "contingency_analysis",
     "cohens_kappa", "cronbach_alpha",
     "hypothesis_test",

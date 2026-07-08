@@ -77,16 +77,6 @@ PALETTE = {
         "heatmap": "RdBu_r",        # 热力图
     },
 
-    # ── 文本/排版 ──
-    "text": {
-        "title": 11,
-        "subtitle": 10,
-        "axis_label": 9,
-        "tick": 8,
-        "annotation": 7,
-        "legend": 8,
-    },
-
     # ── 其他 ──
     "misc": {
         "grid": "#e0e0e0",          # 网格线

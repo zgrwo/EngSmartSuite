@@ -441,6 +441,19 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             messages=["需要提供参数搜索范围 (ranges)"],
         )
 
+    # ── ranges 格式校验 (P2 fix: 防止非 tuple 输入导致解包失败) ──
+    _invalid_ranges = []
+    for _col, _r in ranges.items():
+        if not isinstance(_r, (tuple, list)) or len(_r) != 2:
+            _invalid_ranges.append(f"「{_col}」应为 (下限, 上限) 格式")
+        elif not all(isinstance(v, (int, float)) for v in _r):
+            _invalid_ranges.append(f"「{_col}」的上下限必须为数值")
+        elif _r[0] >= _r[1]:
+            _invalid_ranges.append(f"「{_col}」下限 ({_r[0]}) 必须小于上限 ({_r[1]})")
+    if _invalid_ranges:
+        return AnalysisResult(task="grid_search", status="error",
+            messages=["参数搜索范围格式无效:"] + _invalid_ranges)
+
     n_points = req.params.get("n_points", 10)
     # 防止内存耗尽：限制搜索点数
     n_points = min(n_points, 30)

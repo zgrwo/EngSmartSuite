@@ -196,6 +196,14 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     xbar_bar = float(xbar.mean())
     r_bar = float(r.mean())
 
+    # ── NaN 校验：全 NaN 目标列产生 NaN 均值/极差 (P2 fix) ──
+    if np.isnan(xbar_bar) or np.isnan(r_bar):
+        return AnalysisResult(
+            task="spc_xbar", status="error",
+            messages=[f"目标列「{req.target_col}」的所有值均为缺失值或不可计算，"
+                      f"无法估计控制限。请检查数据是否包含有效数值。"],
+        )
+
     if n not in _XBR_CONSTANTS:
         return AnalysisResult(
             task="spc_xbar", status="error",
@@ -576,9 +584,14 @@ def _sigma_level(cpk_val):
     注意: DPMO 公式使用短期 (unshifted) sigma，假设过程均值不发生偏移。
     实际生产中常考虑 1.5σ 偏移，此时 DPMO 会更高。该公式提供的是
     理论最优条件下的缺陷率估算，用于能力对比而非绝对预测。
+
+    Cpk < 0 时（过程均值在规格限外），钳位为 0 以确保 DPMO ≤ 1,000,000
+    和 Sigma Level ≥ 0 的物理合理性。
     """
     # Sigma Level ≈ 3 * Cpk（长期 Z 值）
     # DPMO = 2 * Φ(-3*Cpk) * 1e6（双边正态，无偏移假设）
+    # 负 Cpk 钳位 — 避免 DPMO > 1,000,000 (P1 fix)
+    cpk_val = max(cpk_val, 0)
     sigma = 3 * cpk_val
     dpmo = int(2 * sp_stats.norm.cdf(-3 * cpk_val) * 1_000_000)
     return float(sigma), dpmo
@@ -625,6 +638,14 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     lsl = req.params.get("lsl")
     target = req.params.get("target")  # Cpm 目标值
     transform = req.params.get("transform")  # None | "boxcox"
+
+    # ── 规格限有效性校验 (P2 fix: 防止 USL ≤ LSL 导致负 Cp) ──
+    if usl is not None and lsl is not None and usl <= lsl:
+        return AnalysisResult(
+            task="process_capability", status="error",
+            messages=[f"规格限无效: USL ({usl}) ≤ LSL ({lsl})，"
+                      f"请确保 USL > LSL。"],
+        )
     n = len(data)
 
     warn_msgs: list[str] = []
@@ -1056,7 +1077,8 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         logger.warning("趋势预测模型拟合失败: %s", e)
         return AnalysisResult(
             task="trend_forecast", status="error",
-            messages=[f"趋势预测模型拟合失败: {e}"])
+            messages=["趋势预测模型拟合失败，数据可能不足或存在共线性问题，"
+                      "请检查数据中是否包含足够的有效观测值。"])
 
 
 def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -1097,6 +1119,14 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     z = (data.values - mu) / sigma
     k = req.params.get("k", 0.5)   # 默认检测 1σ 偏移
     h = req.params.get("h", 5.0)   # 默认决策区间
+
+    # ── 参数有效性校验 (P3 fix: 防止 k≤0 或 h≤0 导致算法退化) ──
+    if k <= 0:
+        return AnalysisResult(task="spc_cusum", status="error",
+            messages=[f"参数 k ({k}) 无效：参考值必须为正数，建议 k=0.5"])
+    if h <= 0:
+        return AnalysisResult(task="spc_cusum", status="error",
+            messages=[f"参数 h ({h}) 无效：决策区间必须为正数，建议 h=4~5"])
 
     # 双侧 CUSUM
     c_plus = np.zeros(len(z))
@@ -1304,8 +1334,13 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
         tolerance: 公差范围 (用于 %P/T 计算，可选)
         sigma_multiplier: 研究变异乘数 (默认 5.15 = 99% 研究变异)
     """
-    part_col = req.params.get("part_col", req.feature_cols[0] if len(req.feature_cols) > 0 else None)
-    operator_col = req.params.get("operator_col", req.feature_cols[1] if len(req.feature_cols) > 1 else None)
+    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P2 fix)
+    part_col = req.params.get("part_col")
+    if part_col is None:
+        part_col = req.feature_cols[0] if len(req.feature_cols) > 0 else None
+    operator_col = req.params.get("operator_col")
+    if operator_col is None:
+        operator_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
     if not part_col or not operator_col:
         return AnalysisResult(task="gage_rr", status="error",
             messages=["需要提供部件列和操作员列"])

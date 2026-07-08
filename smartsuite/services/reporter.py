@@ -280,4 +280,4 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
         return output_path
     except Exception as e:
         logger.exception("HTML 报告生成失败")
-        raise OutputError(f"HTML 报告生成失败: {e}") from e
+        raise OutputError("HTML 报告生成失败，请检查输出路径是否可写以及数据格式是否正确。") from e

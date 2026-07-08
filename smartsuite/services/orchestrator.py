@@ -100,7 +100,7 @@ DEFAULT_PARAMS = {
     "vif": {},
     "contingency": {"alpha": 0.05},
     "proportion_ci": {},
-    "variance_test": {"alpha": 0.05, "group_col": None},
+    "variance_test": {"alpha": 0.05},
     "cohens_kappa": {},
     "cronbach_alpha": {},
     "distribution_summary": {},
@@ -132,7 +132,7 @@ DEFAULT_PARAMS = {
     "box_chart": {"mode": "facet"},
     "bootstrap_ci": {"statistic": "mean", "n_bootstrap": 2000, "ci_level": 0.95},
     "median_ci": {"ci_level": 0.95},
-    "gage_rr": {"part_col": None, "operator_col": None, "tolerance": None, "sigma_multiplier": 5.15},
+    "gage_rr": {"tolerance": None, "sigma_multiplier": 5.15},
     "tolerance_interval": {"coverage": 0.99, "confidence": 0.95, "side": "two-sided"},
     "survival_analysis": {},
 }

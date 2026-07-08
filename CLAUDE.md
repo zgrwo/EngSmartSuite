@@ -25,9 +25,11 @@ smartsuite/                     # 主包
 ├── engine/                     # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
 │   ├── __init__.py             # matplotlib 全局配置 + 字体加载 + 公开 API 导出
 │   ├── _palette.py             # 统一可视化配色方案（PALETTE 字典，~60 色值）
-│   ├── root_cause.py           # 要因分析 13 函数 (correlation, anova, hypothesis_test, ...)
-│   ├── doe_opt.py              # DOE/优化 10 函数 (regression, rsm, grid_search, ...)
-│   └── spc_monitor.py          # 过程监控 16 函数 (xbar_r, cpk, cusum, survival, ...)
+│   ├── _constants.py            # 统计分析常量（阈值/乘数/效应量判定，15 常量）
+│   ├── _palette.py               # 统一可视化配色方案（PALETTE 字典，~60 色值）
+│   ├── root_cause.py             # 要因分析 13 函数 (correlation, anova, hypothesis_test, ...)
+│   ├── doe_opt.py                # DOE/优化 10 函数 (regression, rsm, grid_search, ...)
+│   └── spc_monitor.py            # 过程监控 16 函数 (xbar_r, cpk, cusum, survival, ...)
 │
 ├── services/                   # ② 应用服务层：唯一桥接层，engine 和 web 通过它通信
 │   ├── __init__.py
@@ -115,11 +117,12 @@ scripts/                        # 开发辅助脚本（非 pip 安装）
 
 ```
 docs/                           # 项目文档
-├── user-manual.md              # 用户操作手册 (964 行)
+├── user-manual.md              # 用户操作手册 (968 行)
 ├── api-reference.md            # API 参考 (39 函数完整签名)
 ├── skill.md                    # AI Agent 决策知识库
 ├── adr/                        # 架构决策记录 (2 项)
 ├── contributing/               # 贡献指南 (含代码审查模板)
+├── known-issues.md              # 代码审查豁免清单与已评估问题
 └── images/                     # 用户手册配图 (37 PNG)
 
 .github/workflows/ci.yml        # GitHub Actions: ruff + pytest (3.10/3.11/3.12)

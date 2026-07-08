@@ -144,6 +144,12 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         f"（{n_comparisons} 对比较）"
     )
 
+    # ── 零方差提前检查：避免浪费图表生成计算 (P2 fix: 移到图表生成之前) ──
+    if pd.isna(top_value):
+        return AnalysisResult(task="correlation", status="error",
+            messages=[f"目标列「{req.target_col}」方差为零（常量列），无法计算相关性分析。"
+                      f"请检查数据中该列是否所有值相同。"])
+
     # ── 热力图增强：只标注显著单元格，添加星号 ──
     n = len(cols)
     fig = Figure(figsize=(max(n*0.95, 6), max(n*0.85, 4.5)))
@@ -244,11 +250,6 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     control_vars = req.params.get("control_vars", [])
     control_vars = [c for c in control_vars if c in req.data.columns and c != req.target_col
                     and pd.api.types.is_numeric_dtype(req.data[c])]
-    # 零方差目标列会产生 NaN 相关性 (P1-1 fix)
-    if pd.isna(top_value):
-        return AnalysisResult(task="correlation", status="error",
-            messages=[f"目标列「{req.target_col}」方差为零（常量列），无法计算相关性分析。"
-                      f"请检查数据中该列是否所有值相同。"])
     direction = "正相关" if top_value >= 0 else "负相关"
     summary_parts = [
         f"与「{req.target_col}」相关性最强(|r|)的因子是「{top_factor}」"
@@ -376,9 +377,10 @@ def _eta_squared(aov_table):
     ss_residual = aov_table["sum_sq"].get("Residual", 0)
     ss_total = sum(aov_table["sum_sq"])
     effect_sizes = {}
-    # 安全获取 Resudual 自由度，防止除零
+    # 安全获取 Resudual 自由度，防止除零和 NaN 传播 (P2 fix: NaN > any number → NaN)
     if "Residual" in aov_table.index:
-        df_residual = max(aov_table.loc["Residual", "df"], 1)
+        _df_r = float(aov_table.loc["Residual", "df"])
+        df_residual = max(_df_r, 1) if not np.isnan(_df_r) else 1
     else:
         df_residual = 1
     ms_residual = ss_residual / df_residual
@@ -390,7 +392,8 @@ def _eta_squared(aov_table):
         # 偏 η² = SS_effect / (SS_effect + SS_residual)
         eta2 = ss_effect / (ss_effect + ss_residual) if (ss_effect + ss_residual) > 0 else 0
         # ω² 近似
-        df_effect = max(aov_table.loc[idx, "df"], 1)
+        _df_e = float(aov_table.loc[idx, "df"])
+        df_effect = max(_df_e, 1) if not np.isnan(_df_e) else 1
         denom = ss_total + ms_residual
         omega2 = (ss_effect - df_effect * ms_residual) / denom if denom > 0 else 0
         omega2 = max(0, omega2)
@@ -2010,7 +2013,7 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
         successes = int((data == success_val).sum())
     else:
         # 尝试常见标签
-        for label in ["合格", "是", "pass", "ok", 1, "1"]:
+        for label in ["合格", "是", "pass", "ok", "yes", "true", "success", "通过", "正常", 1, "1"]:
             if label in unique_vals:
                 successes = int((data == label).sum())
                 break
@@ -2077,7 +2080,10 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
 
     用于 ANOVA 前验证方差齐性假设，或比较不同组的离散程度。
     """
-    group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else None)
+    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P2 fix)
+    group_col = req.params.get("group_col")
+    if group_col is None:
+        group_col = req.feature_cols[0] if req.feature_cols else None
     if group_col is None or group_col not in req.data.columns:
         return AnalysisResult(task="variance_test", status="error",
             messages=["需要提供分组列 (group_col)"])

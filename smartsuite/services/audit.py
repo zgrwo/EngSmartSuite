@@ -202,7 +202,9 @@ def batch_analyze(df, target_col, feature_cols, tasks=None, **kwargs):
             _close_figures(r)
             results[task] = {"status": r.status, "summary": r.summary}
         except Exception as e:
-            results[task] = {"status": "error", "summary": str(e)[:200]}
+            logger.warning("批量分析任务「%s」执行失败: %s", task, e)
+            results[task] = {"status": "error",
+                             "summary": f"分析任务「{task}」执行失败，请检查数据格式和参数配置。"}
 
     ok = sum(1 for v in results.values() if v["status"] == "ok")
     return {"results": results, "summary": f"Batch: {ok}/{len(tasks)} tasks OK"}
