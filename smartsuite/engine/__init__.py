@@ -123,6 +123,7 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 
 # ── 统一可视化样式 ──
 from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — 公开导出，供 services 层使用
+from smartsuite.engine._palette import PALETTE  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._palette import get_palette_style
 
 _palette_style = get_palette_style()

@@ -2,15 +2,24 @@
 import logging
 import math
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine._constants import DW_SAFE_LOWER, DW_SAFE_UPPER
 from smartsuite.engine._palette import PALETTE
 from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
 from smartsuite.services.orchestrator import orchestrate
 
 logger = logging.getLogger(__name__)
+
+
+def _close_figures(result):
+    """关闭 AnalysisResult 中的所有 matplotlib Figure，防止内存泄漏。"""
+    if hasattr(result, 'figures'):
+        for fig in result.figures:
+            plt.close(fig)
 
 
 def process_audit(
@@ -50,6 +59,7 @@ def process_audit(
             req = AnalysisRequest(task="correlation", data=df,
                 target_col=target_col, feature_cols=numeric_features)
             r = orchestrate(req)
+            _close_figures(r)
             results["correlation"] = {"status": r.status, "summary": r.summary}
             target_corr = r.metadata.get("target_correlations", {})
             corr_values = list(target_corr.values())
@@ -73,6 +83,7 @@ def process_audit(
             req = AnalysisRequest(task="vif", data=df,
                 target_col=target_col, feature_cols=numeric_features)
             r = orchestrate(req)
+            _close_figures(r)
             results["vif"] = {"status": r.status, "summary": r.summary}
             high_vif = r.metadata.get("high_vif_count", 0)
             if high_vif == 0:
@@ -92,6 +103,7 @@ def process_audit(
             req = AnalysisRequest(task="process_capability", data=df,
                 target_col=target_col, params={"usl": usl, "lsl": lsl, "target": target})
             r = orchestrate(req)
+            _close_figures(r)
             results["capability"] = {"status": r.status, "summary": r.summary}
             cpk = r.metadata.get("cpk")
             if cpk is not None and cpk >= 1.33:
@@ -117,9 +129,10 @@ def process_audit(
             req = AnalysisRequest(task="trend_forecast", data=df,
                 target_col=target_col, params={"forecast_steps": 5})
             r = orchestrate(req)
+            _close_figures(r)
             results["trend"] = {"status": r.status, "summary": r.summary}
             dw = r.metadata.get("durbin_watson", 2)
-            if 1.5 <= dw <= 2.5:
+            if DW_SAFE_LOWER <= dw <= DW_SAFE_UPPER:
                 health_checks.append({"检查项": "过程稳定性", "状态": "✓ 稳定",
                                      "详情": f"DW={dw:.3f} (无自相关)"})
             else:
@@ -135,6 +148,7 @@ def process_audit(
         req = AnalysisRequest(task="outlier_consensus", data=df,
             target_col=target_col, feature_cols=numeric_features[:3])
         r = orchestrate(req)
+        _close_figures(r)
         results["outliers"] = {"status": r.status, "summary": r.summary}
         high_conf = r.metadata.get("high_confidence_count", 0)
         if high_conf == 0:
@@ -185,6 +199,7 @@ def batch_analyze(df, target_col, feature_cols, tasks=None, **kwargs):
                                   feature_cols=feature_cols,
                                   params=kwargs.get(task, {}))
             r = orchestrate(req)
+            _close_figures(r)
             results[task] = {"status": r.status, "summary": r.summary}
         except Exception as e:
             results[task] = {"status": "error", "summary": str(e)[:200]}
@@ -257,6 +272,7 @@ def auto_report(df, target_col, feature_cols=None, output_path=None,
         f"---\n{r.summary}"
     )
     to_html(r, output_path)
+    _close_figures(r)
 
     return {
         "output_path": output_path,
@@ -293,6 +309,7 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
             req = AnalysisRequest(task=task, data=df, target_col=target_col,
                                   feature_cols=feature_cols)
             r = orchestrate(req)
+            _close_figures(r)
             if r.status != "ok":
                 continue
 

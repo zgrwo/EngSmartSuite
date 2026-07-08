@@ -53,8 +53,9 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     if all_validate_cols:
         try:
             data_warnings = validate_data(df, targets[0] if targets else "", features)
-        except ValidationError:
-            pass  # 校验失败不阻塞分析
+        except ValidationError as e:
+            logger.warning("数据校验未通过（不阻塞分析）: %s", e)
+            data_warnings = [f"数据校验提示: {e}"]
 
     # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
     from smartsuite.services.orchestrator import RAW_CAT_TASKS

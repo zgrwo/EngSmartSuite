@@ -150,6 +150,15 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"未知的分析任务「{req.task}」, 支持: {list(TASK_REGISTRY.keys())}"]
         )
 
+    # ── 集中列存在性检查：在分派到引擎函数之前验证 target_col ──
+    if req.target_col and req.target_col not in req.data.columns:
+        return AnalysisResult(
+            task=req.task, status="error",
+            messages=[f"目标列「{req.target_col}」不存在于数据中。"
+                      f"可用列: {list(req.data.columns)[:20]}"
+                      + ("…" if len(req.data.columns) > 20 else "")]
+        )
+
     defaults = DEFAULT_PARAMS.get(req.task, {})
     merged = {**defaults, **req.params}
     # 规范化: JS 端空字符串 '' → Python None (修复 Web/CLI 参数桥接)

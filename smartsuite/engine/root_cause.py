@@ -4,10 +4,11 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from matplotlib.figure import Figure
-from scipy import stats
+from scipy import stats as sp_stats
+
+from smartsuite.engine._constants import VIF_THRESHOLD
 
 logger = logging.getLogger(__name__)
-sp_stats = stats  # 别名，供函数内统一使用
 
 from sklearn.tree import DecisionTreeRegressor, plot_tree
 from statsmodels.formula.api import ols
@@ -1633,7 +1634,7 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 图2: 决策树结构图 ──
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     fig_tree = Figure(figsize=(12, max(tree.get_depth() * 1.2, 4)))
-    FigureCanvasAgg(fig_tree)
+    FigureCanvasAgg(fig_tree)  # plot_tree 需要 canvas renderer 初始化
     ax_tree = fig_tree.add_subplot(111)
     plot_tree(tree, ax=ax_tree, feature_names=cols, filled=True,
               rounded=True, fontsize=8, precision=2, max_depth=4)
@@ -1682,25 +1683,27 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         vif_full = pd.DataFrame({"变量": X.columns, "VIF": vif_vals})
         # 排除无意义的 const 列
         vif_data = vif_full[vif_full["变量"] != "const"].copy()
-        high_vif = vif_data[vif_data["VIF"] > 5]
+        high_vif = vif_data[vif_data["VIF"] > VIF_THRESHOLD]
         # VIF < 1 在数学上不可能（VIF = 1/(1-R²) ≥ 1），异常值提示常量列或数值问题
         invalid_vif = vif_data[vif_data["VIF"] < 0.99]  # 允许浮点舍入误差 (~0.999…)
         vif_warnings = []
         if len(high_vif) > 0:
-            vif_warnings.append(f"{len(high_vif)} 个变量 VIF>5，存在共线性风险")
+            vif_warnings.append(f"{len(high_vif)} 个变量 VIF>{VIF_THRESHOLD}，存在共线性风险")
         if len(invalid_vif) > 0:
             bad_cols = invalid_vif["变量"].tolist()
             vif_warnings.append(f"⚠ {len(invalid_vif)} 个变量 VIF<1 异常（{bad_cols}），"
                                "可能为零方差常量列或数值计算误差，请检查数据")
-        warning = "; ".join(vif_warnings) if vif_warnings else "所有变量 VIF<=5，无明显共线性"
+        warning = "; ".join(vif_warnings) if vif_warnings else f"所有变量 VIF<={VIF_THRESHOLD}，无明显共线性"
 
         # VIF 柱状图
         vif_plot = vif_data
         fig = Figure(figsize=(max(len(vif_plot)*0.7, 5), 3.5))
         ax = fig.add_subplot(111)
-        colors = [PALETTE["target"]["primary"] if v > 5 else PALETTE["data"]["primary"] for v in vif_plot["VIF"]]
+        colors = [PALETTE["target"]["primary"] if v > VIF_THRESHOLD else PALETTE["data"]["primary"]
+                  for v in vif_plot["VIF"]]
         ax.barh(vif_plot["变量"], vif_plot["VIF"], color=colors)
-        ax.axvline(5, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, label="VIF=5 阈值")
+        ax.axvline(VIF_THRESHOLD, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1,
+                  label=f"VIF={VIF_THRESHOLD} 阈值")
         ax.set_xlabel("VIF", fontsize=9)
         ax.set_title("共线性诊断 — VIF", fontsize=11)
         ax.legend(fontsize=8)

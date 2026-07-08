@@ -168,7 +168,7 @@ for task, target, features, cats, params in TEST_CASES:
     try:
         df_b = df_raw.copy()
         # 模拟 Web UI 预处理: 要因分析/box_chart/anova 保留原始类别列
-        raw_cat_tasks = {"box_chart", "anova", "variance_test"}
+        raw_cat_tasks = {"box_chart", "anova", "variance_test", "contingency", "cohens_kappa", "hypothesis_test"}
         if task in raw_cat_tasks:
             feat_b = list(features)
         else:

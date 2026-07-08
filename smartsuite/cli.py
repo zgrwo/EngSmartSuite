@@ -66,6 +66,7 @@ def main():
 
         raw = pd.read_excel(args.input, sheet_name=args.sheet)
         features = config.get("feature_cols", [])
+        categoricals = config.get("categoricals", [])
         params = config.get("params", {})
         task = config["task"]
         # 数据校验：提前发现列存在性、类型、缺失值问题
@@ -81,7 +82,7 @@ def main():
             raw, params = auto_generate_subgroup_col(raw, params)
         # 任务感知的数据预处理（与 Web 路径保持一致）
         df, feature_cols, imputation_log, unknown_cat_warnings = preprocess_for_task(
-            raw, features, task, raw_cat_tasks=RAW_CAT_TASKS)
+            raw, features, task, categoricals=categoricals, raw_cat_tasks=RAW_CAT_TASKS)
         # 输出数据预处理警告
         for col, n_coerced in imputation_log.items():
             print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
@@ -89,7 +90,7 @@ def main():
             print(f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。")
         # 假设检验缺 group_col 时自动推断（与 Web 路径保持一致）
         if task == "hypothesis_test" and "group_col" not in params:
-            extra = infer_group_col(raw, features)
+            extra = infer_group_col(raw, features, categoricals=categoricals)
             if extra:
                 extra_col = extra["group_col"]
                 if extra_col not in feature_cols:

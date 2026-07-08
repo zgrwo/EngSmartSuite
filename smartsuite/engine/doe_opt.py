@@ -4,18 +4,29 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from matplotlib.figure import Figure
-from scipy import stats
+from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine.root_cause import _threshold_label
 from smartsuite.engine.spc_monitor import durbin_watson
 
 logger = logging.getLogger(__name__)
-sp_stats = stats  # 别名，供函数内统一使用
 
 # 阳性标签候选列表 — roc_analysis 和 logistic_regression 共享 (P2-12 fix)
 _POSITIVE_LABELS = ["不合格", "是", "1", 1, True, "fail", "异常"]
+
+
+def _detect_positive_label(unique_values: list) -> object:
+    """从候选列表中自动识别二分类的阳性标签。
+
+    按 _POSITIVE_LABELS 顺序匹配，若都不存在则取排序后的最后一个值。
+    """
+    for pos_label in _POSITIVE_LABELS:
+        if pos_label in unique_values:
+            return pos_label
+    return sorted(unique_values)[-1]
 
 
 def _std_beta(model, X):
@@ -52,8 +63,8 @@ def _breusch_pagan(model, X):
         k = X.shape[1] - 1
         p_val = float(1 - sp_stats.chi2.cdf(lm, max(k, 1)))
         return float(lm), p_val
-    except Exception:
-        logger.debug("Breusch-Pagan 异方差检验失败", exc_info=True)
+    except (ValueError, np.linalg.LinAlgError):
+        logger.debug("Breusch-Pagan 异方差检验失败（数据异常或矩阵奇异）", exc_info=True)
         return None, None
 
 
@@ -142,10 +153,10 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
                 f"⚠ Breusch-Pagan 检验 p={bp_p:.4f}<0.05，残差存在异方差，"
                 "系数标准误可能不准确"
             )
-        if dw < 1.0:
-            warn_msgs.append(f"⚠ Durbin-Watson={dw:.3f}<1.0，残差存在正自相关")
-        elif dw > 3.0:
-            warn_msgs.append(f"⚠ Durbin-Watson={dw:.3f}>3.0，残差存在负自相关")
+        if dw < DW_POSITIVE_AUTOCORR:
+            warn_msgs.append(f"⚠ Durbin-Watson={dw:.3f}<{DW_POSITIVE_AUTOCORR}，残差存在正自相关")
+        elif dw > DW_NEGATIVE_AUTOCORR:
+            warn_msgs.append(f"⚠ Durbin-Watson={dw:.3f}>{DW_NEGATIVE_AUTOCORR}，残差存在负自相关")
 
         # ── 增强诊断图 (3×2) ──
         fig_res = Figure(figsize=(12, 8))
@@ -957,11 +968,7 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["目标列需要恰好 2 个不同值"])
 
     # 自动识别阳性标签
-    for pos_label in _POSITIVE_LABELS:
-        if pos_label in unique_labels:
-            break
-    else:
-        pos_label = sorted(unique_labels)[-1]
+    pos_label = _detect_positive_label(unique_labels)
 
     y_true = (sub[label_col] == pos_label).astype(int).values
     scores = sub[score_col].values
@@ -1066,11 +1073,7 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
             messages=["目标列需要恰好 2 个不同值"])
 
     # 二值化 — 使用与 roc_analysis 相同的阳性标签检测逻辑
-    for pos_label in _POSITIVE_LABELS:
-        if pos_label in unique_y:
-            break
-    else:
-        pos_label = sorted(unique_y)[-1]
+    pos_label = _detect_positive_label(unique_y)
     y = (sub[req.target_col] == pos_label).astype(int).values
 
     try:

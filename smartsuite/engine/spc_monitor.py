@@ -8,6 +8,14 @@ from scipy import stats as sp_stats
 from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.engine._constants import (
+    DW_NEGATIVE_AUTOCORR,
+    DW_POSITIVE_AUTOCORR,
+    DW_SAFE_LOWER,
+    DW_SAFE_UPPER,
+    IQR_OUTLIER_MULTIPLIER,
+    ZSCORE_OUTLIER_THRESHOLD,
+)
 from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
@@ -868,15 +876,15 @@ def _ljung_box(residuals, lags=None):
 def _dw_interpretation(dw, n, k=1):
     """Durbin-Watson 判读（近似阈值）。
 
-    注意: 阈值 1.0/1.5/2.5/3.0 为近似经验值，精确的 DW 临界值
-    取决于样本量 n 和自变量数 k。对于小样本 (n<30) 或多变量回归，
-    建议查阅 DW 临界值表进行精确判读。本函数提供快速近似判读。
+    注意: 阈值为近似经验值，精确的 DW 临界值取决于样本量 n 和自变量数 k。
+    对于小样本 (n<30) 或多变量回归，建议查阅 DW 临界值表进行精确判读。
+    本函数提供快速近似判读。
     """
-    if dw < 1.0:
-        return f"正自相关 (DW={dw:.3f}<1.0)"
-    elif dw > 3.0:
-        return f"负自相关 (DW={dw:.3f}>3.0)"
-    elif 1.5 <= dw <= 2.5:
+    if dw < DW_POSITIVE_AUTOCORR:
+        return f"正自相关 (DW={dw:.3f}<{DW_POSITIVE_AUTOCORR})"
+    elif dw > DW_NEGATIVE_AUTOCORR:
+        return f"负自相关 (DW={dw:.3f}>{DW_NEGATIVE_AUTOCORR})"
+    elif DW_SAFE_LOWER <= dw <= DW_SAFE_UPPER:
         return f"无显著自相关 (DW={dw:.3f})"
     else:
         return f"不确定 (DW={dw:.3f})"
@@ -1883,11 +1891,11 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=["数据无变化(IQR=0)，无法检测异常"],
         )
-    iqr_mask = (data < Q1 - 1.5 * IQR) | (data > Q3 + 1.5 * IQR)
+    iqr_mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR)
 
     # ── 方法 2: Z-score ──
     z_scores = np.abs((data - data.mean()) / (data.std(ddof=1) + 1e-10))
-    z_mask = z_scores > 3
+    z_mask = z_scores > ZSCORE_OUTLIER_THRESHOLD
 
     # ── 方法 3: Isolation Forest ──
     try:
@@ -2133,7 +2141,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=["数据无变化(IQR=0)，无法检测异常"],
             )
-        mask = (data < Q1 - 1.5 * IQR) | (data > Q3 + 1.5 * IQR)
+        mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR)
     else:
         if data_std < 1e-10:
             return AnalysisResult(
@@ -2142,7 +2150,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                 messages=["数据标准差接近零，无法进行 Z-score 异常检测"],
             )
         z = np.abs((data - data.mean()) / data_std)
-        mask = z > 3
+        mask = z > ZSCORE_OUTLIER_THRESHOLD
 
     idx = data.index[mask]
     anomalies = req.data.loc[idx] if mask.sum() > 0 else pd.DataFrame()
