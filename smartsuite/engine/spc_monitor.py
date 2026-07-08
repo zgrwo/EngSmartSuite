@@ -246,7 +246,15 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     ax1.axhline(xbar_bar + 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
     ax1.axhline(xbar_bar - 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
 
-    ax1.plot(indices, xbar.values, "o-", markersize=5, color=PALETTE["data"]["primary"], linewidth=1.2)
+    # 子组颜色区分 — 使用 tab10 色表 + 连线保持统一色调
+    subgroup_colors = cm.tab10(np.linspace(0, 1, min(len(xbar), 10)))
+    subgroup_color_map = {i: subgroup_colors[i % 10] for i in range(len(xbar))}
+    for i, idx in enumerate(indices):
+        ax1.plot([idx], [xbar.values[i]], "o", markersize=6,
+                color=subgroup_color_map[i], markeredgewidth=0.5,
+                markeredgecolor="white", zorder=4)
+    ax1.plot(indices, xbar.values, "-", color=PALETTE["data"]["primary"],
+            linewidth=1.0, alpha=0.4, zorder=2)
 
     # 标记所有违规点
     all_xbar_violated = set()
@@ -259,6 +267,20 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         ax1.scatter(vio_idx, xbar.values[list(vio_idx)], s=80, color=PALETTE["anomaly"]["primary"],
                    marker="o", facecolors="none", linewidths=2, zorder=5,
                    label=f"违规点 ({len(vio_idx)}个)")
+
+    # USL/LSL/Target 规格线 (来自 params, 可选)
+    usl = req.params.get("usl")
+    lsl = req.params.get("lsl")
+    target_spec = req.params.get("target")
+    if usl is not None:
+        ax1.axhline(float(usl), color=PALETTE["anomaly"]["primary"], linestyle="-.",
+                   linewidth=1.0, alpha=0.7, label=f"USL={usl}")
+    if lsl is not None:
+        ax1.axhline(float(lsl), color=PALETTE["anomaly"]["secondary"], linestyle="-.",
+                   linewidth=1.0, alpha=0.7, label=f"LSL={lsl}")
+    if target_spec is not None:
+        ax1.axhline(float(target_spec), color=PALETTE["center"]["primary"], linestyle=":",
+                   linewidth=1.0, alpha=0.6, label=f"Target={target_spec}")
 
     ax1.set_ylabel(req.target_col, fontsize=10)
     ax1.set_title(f"X-bar 控制图 — {req.target_col} ({len(xbar)}子组×{n}样本{warn_unequal})",
@@ -275,7 +297,13 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 label=f"UCL={ucl_r:.4f}")
     ax2.axhline(lcl_r, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"LCL={lcl_r:.4f}")
-    ax2.plot(indices, r.values, "o-", markersize=5, color=PALETTE["target"]["primary"], linewidth=1.2)
+    # R 图子组颜色 (与 X-bar 图一致)
+    for i, idx in enumerate(indices):
+        ax2.plot([idx], [r.values[i]], "o", markersize=6,
+                color=subgroup_color_map[i], markeredgewidth=0.5,
+                markeredgecolor="white", zorder=4)
+    ax2.plot(indices, r.values, "-", color=PALETTE["target"]["primary"],
+            linewidth=1.0, alpha=0.4, zorder=2)
 
     # 标记 R 图违规（所有规则）
     all_r_violated: set[int] = set()
@@ -593,11 +621,12 @@ def _normality_warning(data):
 def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     """过程能力分析：Cp/Cpk/Pp/Ppk/Cpm，含置信区间、DPMO 和 Sigma Level。"""
     data = req.data[req.target_col].dropna()
-    if len(data) < 2:
+    if len(data) < 3:
         return AnalysisResult(
             task="process_capability",
             status="error",
-            messages=["有效数据不足"],
+            messages=[f"有效数据不足：过程能力分析至少需要 3 个观测值"
+                      f"（当前 {len(data)} 个，无法可靠估计标准差）"],
         )
 
     usl = req.params.get("usl")
@@ -816,18 +845,23 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     )
 
 
-def durbin_watson(residuals):
-    """Durbin-Watson 统计量 — 检测残差一阶自相关。
+def _durbin_watson(residuals):
+    """Durbin-Watson 统计量 — 检测残差一阶自相关 (内部工具函数)。
 
     跨模块共享工具：被 regression_analysis (doe_opt.py) 和 trend_forecast 调用。
     """
+    if len(residuals) < 2:
+        raise ValueError(
+            f"Durbin-Watson 统计量需要至少 2 个残差值，当前仅有 {len(residuals)} 个。"
+            f"请确保回归模型有足够的观测数据。"
+        )
     diff = np.diff(residuals)
     dw = np.sum(diff**2) / (np.sum(residuals**2) + 1e-10)
     return float(dw)
 
 
-# 向后兼容别名
-_durbin_watson = durbin_watson
+# 公开别名 — 向后兼容
+durbin_watson = _durbin_watson
 
 
 def _ljung_box(residuals, lags=None):
@@ -1545,6 +1579,9 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["需要提供事件指示列 (1=失效, 0=删失)"])
 
     sub = req.data[[time_col, event_col] + ([group_col] if group_col else [])].dropna()
+    if len(sub) == 0:
+        return AnalysisResult(task="survival_analysis", status="error",
+            messages=["有效数据为空：时间列与事件列无共同有效值，请检查数据完整性。"])
     times = sub[time_col].values
     # 自动二值化事件列：支持 0/1 数值和 "是"/"否" 等文本
     try:
@@ -2134,6 +2171,10 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                       linewidth=1, alpha=0.6, label=f"下界={Q1-1.5*IQR:.3f}")
             ax.axhline(Q3 + 1.5 * IQR, color=PALETTE["spec"]["secondary"], linestyle="--",
                       linewidth=1, alpha=0.6, label=f"上界={Q3+1.5*IQR:.3f}")
+        elif method == "grubbs":
+            # Grubbs 使用迭代临界值 (t 分布)，不画 ±3σ 线避免误导
+            ax.axhline(data.mean(), color=PALETTE["spec"]["secondary"], linestyle=":",
+                      linewidth=1, alpha=0.4, label=f"均值={data.mean():.3f}")
         else:
             ax.axhline(data.mean() + 3*data_std, color=PALETTE["spec"]["secondary"], linestyle="--",
                       linewidth=1, alpha=0.6, label=f"上界={data.mean()+3*data_std:.3f}")
@@ -2435,9 +2476,21 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     fig.tight_layout()
 
     n_total = len(sub)
+    # 统计检验结论 — 明确告知组间是否存在显著差异
+    conclusion = ""
+    if test_note:
+        # 从 test_note 中提取 p 值判断显著性 (α=0.05)
+        import re as _re
+        p_vals = [float(m) for m in _re.findall(r"p=([\d.eE+-]+)", test_note)]
+        any_sig = any(p < 0.05 for p in p_vals)
+        if any_sig:
+            conclusion = "各组之间存在显著差异（p<0.05），建议进一步做多重比较确认差异来源。"
+        else:
+            conclusion = "各组之间未发现显著差异（p≥0.05），但建议结合效应量和业务经验综合判断。"
     summary = (
         f"{req.target_col} 按 {group_col} 分组 (共 {len(groups)} 组, n={n_total})。"
         + (f" {test_note}。" if test_note else "")
+        + (f" {conclusion}" if conclusion else "")
     )
 
     return AnalysisResult(

@@ -92,15 +92,15 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             mask = req.data[c1].notna() & req.data[c2].notna()
             if mask.sum() >= 3:
                 if method == "spearman":
-                    _, p = stats.spearmanr(
+                    _, p = sp_stats.spearmanr(
                         req.data.loc[mask, c1], req.data.loc[mask, c2]
                     )
                 elif method == "kendall":
-                    _, p = stats.kendalltau(
+                    _, p = sp_stats.kendalltau(
                         req.data.loc[mask, c1], req.data.loc[mask, c2]
                     )
                 else:
-                    _, p = stats.pearsonr(
+                    _, p = sp_stats.pearsonr(
                         req.data.loc[mask, c1], req.data.loc[mask, c2]
                     )
                 pmat.loc[c1, c2] = p
@@ -243,6 +243,11 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     control_vars = req.params.get("control_vars", [])
     control_vars = [c for c in control_vars if c in req.data.columns and c != req.target_col
                     and pd.api.types.is_numeric_dtype(req.data[c])]
+    # 零方差目标列会产生 NaN 相关性 (P1-1 fix)
+    if pd.isna(top_value):
+        return AnalysisResult(task="correlation", status="error",
+            messages=[f"目标列「{req.target_col}」方差为零（常量列），无法计算相关性分析。"
+                      f"请检查数据中该列是否所有值相同。"])
     direction = "正相关" if top_value >= 0 else "负相关"
     summary_parts = [
         f"与「{req.target_col}」相关性最强(|r|)的因子是「{top_factor}」"
@@ -269,7 +274,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             resid_feat = sm.OLS(sub[fc].astype(float), X_ctrl_feat).fit().resid
             # 残差相关
             if len(resid_target) >= 3:
-                r_partial, _ = stats.pearsonr(resid_target, resid_feat)
+                r_partial, _ = sp_stats.pearsonr(resid_target, resid_feat)
                 # 偏相关自由度修正: 残差来自两次回归(各消耗 k+1 df),
                 # 偏相关有效 df = n - k - 2 (k=控制变量数)
                 n = len(resid_target)
@@ -957,6 +962,15 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             },
         )
 
+    def _wilcoxon_effect_size(p: float, n: int, diff_median: float) -> float:
+        """Wilcoxon 效应量: 匹配对秩相关 r = Z / sqrt(N), 钳位到 [-1, 1]。
+
+        单样本和配对 Wilcoxon 共享此实现，确保效应量公式一致。"""
+        z_stat_abs = float(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
+        z_signed = z_stat_abs if diff_median >= 0 else -z_stat_abs
+        r_effect = z_signed / np.sqrt(n)
+        return float(max(min(r_effect, 1.0), -1.0))
+
     # ── 单样本 Wilcoxon 符号秩检验 ──
     if test_type == "wilcoxon_1samp":
         data = req.data[req.target_col].dropna()
@@ -968,13 +982,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         # Wilcoxon 符号秩检验 (双边): 检验中位数是否等于 popmedian
         stat, p = sp_stats.wilcoxon(data.values - popmedian)
         test_name = f"单样本 Wilcoxon 检验 (H0: 中位数={popmedian})"
-        # 效应量: 匹配对秩相关 r = Z / sqrt(N)
         n = len(data)
-        z_stat_abs = abs(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
-        # 从数据中位数恢复符号: 中位数>H0 → 正效应, <H0 → 负效应
-        z_signed = z_stat_abs if np.median(data.values) >= popmedian else -z_stat_abs
-        r_effect = min(float(z_signed / np.sqrt(n)), 1.0)
-        r_effect = max(r_effect, -1.0)
+        r_effect = _wilcoxon_effect_size(p, n, np.median(data.values) - popmedian)
         effect_size = r_effect
         effect_name = "秩相关 r"
         effect_label = _effect_size_label(r_effect, "correlation")
@@ -1327,12 +1336,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         stat, p = sp_stats.wilcoxon(sub[col1], sub[col2])
         test_name = f"Wilcoxon 符号秩检验 ({col1} vs {col2})"
         diff = sub[col1].values - sub[col2].values
-        # 匹配对效应量: r = Z / sqrt(N), 符号从差值中位数恢复
         n_pairs = len(sub)
-        z_stat_abs = float(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
-        z_stat = z_stat_abs if np.median(diff) >= 0 else -z_stat_abs
-        r_effect = z_stat / np.sqrt(n_pairs)
-        r_effect = max(min(r_effect, 1.0), -1.0)  # cap to theoretical bounds
+        r_effect = _wilcoxon_effect_size(p, n_pairs, np.median(diff))
         effect_size = float(r_effect)
         effect_name = "匹配对秩相关 r"
         effect_label = _effect_size_label(r_effect, "correlation")
@@ -1387,6 +1392,11 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
 
+    # 最小样本量检查 — 与其他分支保持一致 (P2-3 fix)
+    min_n = 3
+    if len(g1) < min_n or len(g2) < min_n:
+        return AnalysisResult(task="hypothesis_test", status="error",
+            messages=[f"每组至少需要 {min_n} 个有效数据，当前 g1={len(g1)}, g2={len(g2)}"])
 
     # ── 自动选择参数/非参数检验 ──
     norm_warn: list[str] = []
@@ -2178,7 +2188,7 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
     # 生产环境使用简化公式；如需精确 SE 可用 bootstrap 方法
     se_kappa = np.sqrt((p_o * (1 - p_o)) / (n * (1 - p_e)**2 + 1e-10))
     z_kappa = kappa / (se_kappa + 1e-10)
-    p_val = float(2 * (1 - stats.norm.cdf(abs(z_kappa))))
+    p_val = float(2 * (1 - sp_stats.norm.cdf(abs(z_kappa))))
 
     # 判读
     if kappa > 0.8:

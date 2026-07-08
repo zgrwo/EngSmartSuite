@@ -4,7 +4,7 @@ class SmartSuiteError(Exception):
 
 
 class DataSelectionError(SmartSuiteError):
-    """Excel 交互层 — 数据选区无效。"""
+    """数据选区无效 (V1 中 Web/CLI 入口不使用此类，保留供未来扩展)。"""
     pass
 
 

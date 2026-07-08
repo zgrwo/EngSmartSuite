@@ -114,7 +114,7 @@ DEFAULT_PARAMS = {
     "multi_objective": {"objectives": None},
     "doe_analysis": {"alpha": 0.05},
     "roc_analysis": {},
-    "logistic_regression": {},
+    "logistic_regression": {"threshold": 0.5},
     "lasso_regression": {"alpha_lasso": None, "l1_ratio": 1.0},
     "robust_regression": {},
     "quantile_regression": {"quantile": 0.5},

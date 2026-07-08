@@ -115,6 +115,13 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                     )
                 dummies = dummies[known_cat_map[col]]
             for dc in dummies.columns:
+                # 检测列名冲突 — One-Hot 编码列名可能与已有列重名 (P2-2 fix)
+                if dc in df.columns and dc not in encoded_cols:
+                    raise ValidationError(
+                        f"One-Hot 编码列名「{dc}」与数据中已有列名冲突。"
+                        f"请重命名列「{col}」或其类别值「{dc.replace(col + '_', '', 1)}」，"
+                        f"避免与已有列名重复。"
+                    )
                 df[dc] = dummies[dc].astype(float)
                 encoded_cols.append(dc)
             # 记录参照类别 (drop_first 丢弃的第一个类别) 用于系数解读

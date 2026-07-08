@@ -142,6 +142,8 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
 
             # 序列化 metadata：递归处理嵌套结构，标量转为可序列化类型
             def _serialize_meta(val, _depth=0):
+                import math as _math
+
                 import numpy as _np
                 if _depth > 10:  # 循环引用保护
                     return str(val)
@@ -150,11 +152,16 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 if isinstance(val, (_np.integer,)):
                     return int(val)
                 if isinstance(val, (_np.floating,)):
-                    return float(val)
+                    v = float(val)
+                    if _math.isfinite(v):
+                        return v
+                    return None  # Inf/NaN → null (合法 JSON)
                 if isinstance(val, int):
                     return val  # Python int 保持原样，不丢失精度
                 if isinstance(val, float):
-                    return val
+                    if _math.isfinite(val):
+                        return val
+                    return None  # Inf/NaN → null
                 if isinstance(val, str):
                     return val
                 if isinstance(val, dict):

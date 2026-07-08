@@ -8,10 +8,14 @@ from scipy import stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine.root_cause import _threshold_label
 from smartsuite.engine.spc_monitor import durbin_watson
 
 logger = logging.getLogger(__name__)
 sp_stats = stats  # 别名，供函数内统一使用
+
+# 阳性标签候选列表 — roc_analysis 和 logistic_regression 共享 (P2-12 fix)
+_POSITIVE_LABELS = ["不合格", "是", "1", 1, True, "fail", "异常"]
 
 
 def _std_beta(model, X):
@@ -156,7 +160,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         # 2. Q-Q Plot
         ax2 = fig_res.add_subplot(2, 3, 2)
-        stats.probplot(residuals, dist="norm", plot=ax2)
+        sp_stats.probplot(residuals, dist="norm", plot=ax2)
         ax2.set_title("Q-Q Plot", fontsize=10)
 
         # 3. Scale-Location (sqrt|resid| vs fitted)
@@ -273,10 +277,11 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
             "如需要，请手动选择 2 个关键因子。"
         )
     df = req.data[[req.target_col, c1, c2]].dropna()
-    if len(df) < 6:
+    if len(df) < 7:
         return AnalysisResult(
             task="response_surface", status="error",
-            messages=[f"有效样本({len(df)})不足"],
+            messages=[f"有效样本不足：二次响应面模型含 6 个参数，至少需要 7 个数据点"
+                      f"（当前 {len(df)} 个，残差自由度为 0 会导致标准误为 NaN）"],
         )
 
     try:
@@ -771,14 +776,8 @@ def _lenth_pse(effects):
 
 
 def _effect_label_doe(effect_ratio):
-    """DOE 效应量解读。"""
-    if not np.isfinite(effect_ratio):
-        return "N/A"
-    thresholds = [0.05, 0.15, 0.30]
-    for t, label in zip(thresholds, ["可忽略", "小", "中"]):
-        if effect_ratio < t:
-            return label
-    return "大"
+    """DOE 效应量解读 — 委托 _threshold_label 统一实现。"""
+    return _threshold_label(effect_ratio, [0.05, 0.15, 0.30], ("可忽略", "小", "中", "大"))
 
 
 def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -958,7 +957,7 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["目标列需要恰好 2 个不同值"])
 
     # 自动识别阳性标签
-    for pos_label in ["不合格", "是", "1", 1, True, "fail", "异常"]:
+    for pos_label in _POSITIVE_LABELS:
         if pos_label in unique_labels:
             break
     else:
@@ -1018,11 +1017,13 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
         f"最佳阈值={best_threshold:.3f} (TPR={tpr[best_idx]:.3f}, FPR={fpr[best_idx]:.3f})"
     )
 
+    # 清洗阈值数组 — sklearn roc_curve 第一个元素为 np.inf, JSON 不支持
+    thresholds_clean = np.where(np.isinf(thresholds), np.nan, thresholds)
     return AnalysisResult(
         task="roc_analysis",
         tables={
             "roc_points": pd.DataFrame({
-                "阈值": thresholds.round(4),
+                "阈值": thresholds_clean.round(4),
                 "FPR": fpr.round(4),
                 "TPR": tpr.round(4),
                 "Youden_J": (tpr - fpr).round(4),
@@ -1065,7 +1066,7 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
             messages=["目标列需要恰好 2 个不同值"])
 
     # 二值化 — 使用与 roc_analysis 相同的阳性标签检测逻辑
-    for pos_label in ["不合格", "是", "1", 1, True, "fail", "异常"]:
+    for pos_label in _POSITIVE_LABELS:
         if pos_label in unique_y:
             break
     else:
@@ -1101,9 +1102,10 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
         "OR 95%CI上限": or_ci_upper.round(3),
     })
 
-    # 预测和分类表
+    # 预测和分类表 — 支持自定义阈值 (fix: 类不平衡数据默认 0.5 导致 Sens=0%)
+    threshold = float(req.params.get("threshold", 0.5))
     y_pred_prob = model.predict(X)
-    y_pred = (y_pred_prob >= 0.5).astype(int)
+    y_pred = (y_pred_prob >= threshold).astype(int)
     accuracy = float(np.mean(y_pred == y))
     sensitivity = float(np.sum((y_pred == 1) & (y == 1)) / max(np.sum(y == 1), 1))
     specificity = float(np.sum((y_pred == 0) & (y == 0)) / max(np.sum(y == 0), 1))
@@ -1139,6 +1141,7 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     summary = (
         f"Logistic: Acc={accuracy:.1%}, Sens={sensitivity:.1%}, Spec={specificity:.1%}, "
         f"McFadden R²={mcfadden_r2:.3f}"
+        + (f" (阈值={threshold:.2f})" if threshold != 0.5 else "")
     )
 
     return AnalysisResult(
