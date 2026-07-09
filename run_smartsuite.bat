@@ -95,7 +95,7 @@ if !errorlevel!==0 (
 
 for %%p in (python3 python) do (
 
-    where %%p >nul 2>nul
+    where.exe %%p >nul 2>nul
 
     if !errorlevel!==0 (
 
