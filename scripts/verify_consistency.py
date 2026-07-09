@@ -179,7 +179,10 @@ section("8. Test Suite (pytest)")
 # ============================================================
 r = subprocess.run([sys.executable, '-m', 'pytest', 'tests/', '--tb=line', '-q'],
     capture_output=True, text=True, encoding='utf-8', cwd=ROOT)
-check("pytest all pass", 'failed' not in r.stdout+r.stderr and r.returncode==0)
+# 仅检查 returncode，不 grep "failed" 单词 —
+# statsmodels ConvergenceWarning 中含有 "failed to converge" 文字会误判
+check("pytest all pass", r.returncode == 0,
+      f"returncode={r.returncode}")
 
 # ============================================================
 section("9. CLI")
