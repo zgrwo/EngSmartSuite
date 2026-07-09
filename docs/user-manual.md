@@ -322,14 +322,13 @@ python smartsuite/web/app.py
 - **Python API**：`orchestrate(AnalysisRequest(task='decision_tree', params={'max_depth': 5}, ...))`。
 
 ### 4.5 VIF 共线性诊断 (`vif`)
+**功能**: 检测因子之间是否存在共线性（两个因子本质是同一个东西）。
 
 #### 示例分析图片
 
 ![VIF 共线性诊断](images/vif_1.png)
 
 *所有因子 VIF≈1.0 远低于阈值5，无共线性风险*
-
-**功能**: 检测因子之间是否存在共线性（两个因子本质是同一个东西）。
 
 #### 参数选择及说明
 
@@ -477,9 +476,7 @@ python smartsuite/web/app.py
 
 #### 示例分析图片
 
-![方差齐性检验](images/variance_test_1.png)
-
-*分组方差对比图：5 组方差条高度相近（1.4~1.7），Levene p=0.936 确认方差齐性。*
+_本方法不生成独立图表。分组统计和检验结果以表格形式输出。_
 
 #### 数值结果（Web UI ≡ Python）
 
@@ -848,14 +845,13 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 6.5 DOE 效应估计 (`doe_analysis`)
+**功能**: 估计各因子的主效应大小，Pareto 图展示，Lenth PSE 显著性参考线。
 
 #### 示例分析图片
 
 ![DOE 主效应 Pareto 图](images/doe_analysis_1.png)
 
 *蓝色=正效应，橙色=负效应，红色虚线=Lenth ME显著性参考线*
-
-**功能**: 估计各因子的主效应大小，Pareto 图展示，Lenth PSE 显著性参考线。
 
 #### 参数选择及说明
 
@@ -881,14 +877,13 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 6.6 ROC/AUC 分析 (`roc_analysis`)
+**功能**: 评估连续变量对二分类结果的区分能力。
 
 #### 示例分析图片
 
 ![ROC 曲线](images/roc_analysis_1.png)
 
 *AUC=0.489≈0.5模型无区分力，红色圆点=最佳阈值(Youden's J=0.03)*
-
-**功能**: 评估连续变量对二分类结果的区分能力。
 
 #### 参数选择及说明
 
@@ -912,14 +907,13 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 6.7 Logistic 回归 (`logistic_regression`)
+**功能**: 二分类结果建模（如预测是否会出现不良品）。
 
 #### 示例分析图片
 
 ![Logistic OR 森林图](images/logistic_regression_1.png)
 
 *横线=95%CI，竖虚线=OR=1(无效应)，所有因子CI跨越1*
-
-**功能**: 二分类结果建模（如预测是否会出现不良品）。
 
 #### 参数选择及说明
 
@@ -942,14 +936,13 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 6.8 Lasso 回归 (`lasso_regression`)
+**功能**: 带正则化的回归——自动将不重要的变量系数压缩到零，实现特征选择。
 
 #### 示例分析图片
 
 ![Lasso 回归系数](images/lasso_regression_1.png)
 
 *仅显示非零系数，α自动选择，3/3变量被选中但系数均接近零*
-
-**功能**: 带正则化的回归——自动将不重要的变量系数压缩到零，实现特征选择。
 
 #### 参数选择及说明
 
@@ -975,14 +968,13 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 6.9 稳健回归 Huber (`robust_regression`)
+**功能**: 对异常值不敏感的回归——Huber 损失函数自动降低异常值权重。
 
 #### 示例分析图片
 
 ![Huber vs OLS 系数对比](images/robust_regression_1.png)
 
 *深蓝=Huber稳健回归，浅蓝=OLS。随机数据无异常值，两种方法几乎一致*
-
-**功能**: 对异常值不敏感的回归——Huber 损失函数自动降低异常值权重。
 
 #### 参数选择及说明
 
@@ -1074,14 +1066,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.2 计数型控制图 (`spc_attribute`)
+**功能**: p（不良率）/ np（不良数）/ c（缺陷数）/ u（单位缺陷率）控制图。
 
 #### 示例分析图片
 
 ![计数型控制图（c 图模式）：CL 约等于不良率均值，数据点随机分布在控制限内。](images/spc_attribute_1.png)
 
 *计数型控制图（c 图模式）：CL 约等于不良率均值，数据点随机分布在控制限内。*
-
-**功能**: p（不良率）/ np（不良数）/ c（缺陷数）/ u（单位缺陷率）控制图。
 
 #### 参数选择及说明
 
@@ -1107,19 +1098,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.3 CUSUM 控制图 (`spc_cusum`)
 
-#### 示例分析图片
-
-![上:原始数据+均值线。下:C+(橙)和C-(蓝)累积和+h=5决策区间(红虚线)。](images/spc_cusum_1.png)
-
-*上:原始数据+均值线。下:C+(橙)和C-(蓝)累积和+h=5决策区间(红虚线)。*
-
-#### 示例分析图片
-
-![CUSUM 控制图](images/cusum_1.png)
-
-*上:原始数据+均值线(绿)。下:C+(橙)和C-(蓝)累积和+h=5决策区间(红虚线)*
-
-**功能**: 累积和控制图——对小偏移比 X-bar 更敏感。
+**功能**: 累积和控制图——对小偏移（0.5σ~2σ）比 X-bar 更敏感。输出双侧 CUSUM（C⁺上偏移 + C⁻下偏移）及决策区间。
 
 #### 参数选择及说明
 
@@ -1132,6 +1111,12 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 | **参数** | `sigma`（可选） | 过程标准差：不指定则从数据估计 |
 
 > ⚠️ **协同要求**：必须标记 **1 个 Y（数值）**，至少 5 个数据点。
+
+#### 示例分析图片
+
+![CUSUM 控制图](images/spc_cusum_1.png)
+
+*上：原始数据+均值线。下：C⁺(橙)和 C⁻(蓝)累积和 + h=5 决策区间(红虚线)。*
 
 **操作**: 按上表标记 + 配置参数 → 点击 **CUSUM控制图**
 
@@ -1146,19 +1131,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.4 EWMA 控制图 (`spc_ewma`)
 
-#### 示例分析图片
-
-![蓝线=EWMA平滑值(λ=0.2)，浅蓝=原始数据，红虚线=时变控制限(L=2.7)。](images/spc_ewma_1.png)
-
-*蓝线=EWMA平滑值(λ=0.2)，浅蓝=原始数据，红虚线=时变控制限(L=2.7)。*
-
-#### 示例分析图片
-
-![EWMA 控制图](images/ewma_1.png)
-
-*蓝线=EWMA平滑值(λ=0.2)，浅蓝=原始数据，红虚线=时变控制限(L=2.7)*
-
-**功能**: 指数加权移动平均控制图——对近期数据权重更高。
+**功能**: 指数加权移动平均控制图——对近期数据权重更高，λ 越小越平滑。输出时变控制限和渐近控制限。
 
 #### 参数选择及说明
 
@@ -1172,6 +1145,12 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 > ⚠️ **协同要求**：必须标记 **1 个 Y（数值）**，至少 3 个数据点。
 
+#### 示例分析图片
+
+![EWMA 控制图](images/spc_ewma_1.png)
+
+*蓝线=EWMA 平滑值(λ=0.2)，浅蓝=原始数据点，红虚线=时变控制限(L=2.7)。*
+
 **操作**: 按上表标记 + 配置参数 → 点击 **EWMA控制图**
 
 #### 数值结果（Web UI ≡ Python） EWMA 平滑线 + 时变控制限 + 违规点。
@@ -1184,14 +1163,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.5 过程能力 Cp/Cpk (`process_capability`)
+**功能**: 评估工艺是否满足规格要求，输出 Cp/Cpk/Pp/Ppk + Sigma Level + DPMO。
 
 #### 示例分析图片
 
 ![过程能力分析](images/process_capability_1.png)
 
 *直方图+正态拟合+规格限(LSL=1,USL=10)。Cpk=0.923<1.0不合格，中心偏左需调准*
-
-**功能**: 评估工艺是否满足规格要求，输出 Cp/Cpk/Pp/Ppk + Sigma Level + DPMO。
 
 #### 参数选择及说明
 
@@ -1222,14 +1200,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.6 趋势预测 (`trend_forecast`)
+**功能**: 线性趋势外推 + 残差诊断 (DW/Ljung-Box/ACF)。
 
 #### 示例分析图片
 
 ![趋势预测 2×2 诊断](images/trend_forecast_1.png)
 
 *趋势+预测(橙带)/残差(DW≈2)/ACF自相关/Actual vs Predicted(R²≈0)*
-
-**功能**: 线性趋势外推 + 残差诊断 (DW/Ljung-Box/ACF)。
 
 #### 参数选择及说明
 
@@ -1253,14 +1230,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.7 异常检测 (`anomaly_detect`)
+**功能**: IQR / Z-score / Grubbs / Isolation Forest 四种方法检测异常点。
 
 #### 示例分析图片
 
 ![异常检测 (IQR法)](images/anomaly_detect_1.png)
 
 *红色X=异常点，橙色虚线=Q1-1.5IQR和Q3+1.5IQR上下界*
-
-**功能**: IQR / Z-score / Grubbs / Isolation Forest 四种方法检测异常点。
 
 #### 参数选择及说明
 
@@ -1284,14 +1260,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.8 变点检测 (`change_point`)
+**功能**: 基于 CUSUM 识别过程结构性变化的位置。
 
 #### 示例分析图片
 
 ![变点检测](images/change_point_1.png)
 
 *彩色水平线=各段均值，红色虚线=变点位置，红色箭头标注*
-
-**功能**: 基于 CUSUM 识别过程结构性变化的位置。
 
 #### 参数选择及说明
 
@@ -1315,14 +1290,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 7.9 异常共识 (`outlier_consensus`)
+**功能**: IQR + Z-score + Isolation Forest 三种方法投票，≥2 票才是高置信异常。
 
 #### 示例分析图片
 
 ![多方法异常共识](images/outlier_consensus_1.png)
 
 *红色X=高置信异常(≥2票)，橙色方块=低置信(1票)。三方法投票减少误报*
-
-**功能**: IQR + Z-score + Isolation Forest 三种方法投票，≥2 票才是高置信异常。
 
 #### 参数选择及说明
 
@@ -1451,14 +1425,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 8.1 Bootstrap 置信区间 (`bootstrap_ci`)
+**功能**: 不依赖分布假设的置信区间估计（通过重抽样）。
 
 #### 示例分析图片
 
 ![Bootstrap 置信区间](images/bootstrap_ci_1.png)
 
 *直方图=200次重抽样的均值分布，绿线=点估计，红线=95%CI，分布呈钟形*
-
-**功能**: 不依赖分布假设的置信区间估计（通过重抽样）。
 
 #### 参数选择及说明
 
@@ -1489,14 +1462,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 8.2 中位数置信区间 (`median_ci`)
+**功能**: 基于二项分布的符号检验法，不需要任何分布假设。
 
 #### 示例分析图片
 
 ![中位数置信区间](images/median_ci_1.png)
 
 *绿线=中位数，红线=95%CI(基于二项分布符号检验)，粉色=CI区域*
-
-**功能**: 基于二项分布的符号检验法，不需要任何分布假设。
 
 #### 参数选择及说明
 
@@ -1553,14 +1525,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 8.4 统计容许区间 (`tolerance_interval`)
+**功能**: 以指定置信度覆盖总体指定比例的区间（如 "99% 产品以 95% 置信度落在 [L, U]"）。
 
 #### 示例分析图片
 
 ![统计容许区间](images/tolerance_interval_1.png)
 
 *直方图+正态拟合，红/绿虚线=双侧容许限*
-
-**功能**: 以指定置信度覆盖总体指定比例的区间（如 "99% 产品以 95% 置信度落在 [L, U]"）。
 
 #### 参数选择及说明
 
@@ -1585,14 +1556,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 - **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 8.5 生存分析 Kaplan-Meier (`survival_analysis`)
+**功能**: 估计产品的寿命分布和可靠度随时间的变化。
 
 #### 示例分析图片
 
 ![Kaplan-Meier 生存曲线](images/survival_analysis_1.png)
 
 *蓝线=KM估计，浅蓝虚线=Weibull拟合，灰线=删失标记*
-
-**功能**: 估计产品的寿命分布和可靠度随时间的变化。
 
 #### 参数选择及说明
 
