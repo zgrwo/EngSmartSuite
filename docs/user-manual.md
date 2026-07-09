@@ -788,9 +788,9 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 *各候选参数组合的预测值柱状图，红色柱标记最优值。*
 
-**操作**: 按上表标记 + 配置参数 → 点击 **网格搜索寻优**
+#### 数值结果（Web UI ≡ Python）
 
-#### 数值结果（Web UI ≡ Python） 最优熔体温度约在 180-220 之间，CV R² 较低（线性模型对非线性关系拟合有限）。
+最优熔体温度约在 180-220 之间，CV R² 较低（线性模型对非线性关系拟合有限）。
 
 #### 解读说明
 
@@ -798,7 +798,7 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='grid_search', params={'ranges': '熔体温度:180,220', 'n_points': 10}, ...))`
 ### 6.4 多目标优化 (`multi_objective`)
 
 **功能**: 同时优化多个目标（如最小化不良率 + 最大化拉伸强度）。
@@ -815,15 +815,15 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 > ⚠️ **协同要求**：必须标记 **至少 2 个 Y + 至少 1 个 X**。参数 `objectives` 必须与 Y 列一一对应。
 
-**操作**: 按上表标记 + 配置参数 → 点击 **多目标优化**
-
-#### 数值结果（Web UI ≡ Python） Pareto 前沿图 + 综合评分排序。加权最优方案的参数组合。
-
 #### 示例分析图片
 
 ![多目标优化 Pareto 前沿](images/multi_objective_1.png)
 
 *多目标优化 — 左:Pareto 前沿(红点)，右:Top 方案加权期望值分解。每个目标以不同颜色堆叠展示贡献。*
+
+#### 数值结果（Web UI ≡ Python）
+
+Pareto 前沿图 + 综合评分排序。加权最优方案的参数组合。
 
 #### 解读说明
 
@@ -831,7 +831,7 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='multi_objective', ...))`
 ### 6.5 DOE 效应估计 (`doe_analysis`)
 **功能**: 估计各因子的主效应大小，Pareto 图展示，Lenth PSE 显著性参考线。
 
@@ -853,9 +853,9 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 *蓝色=正效应，橙色=负效应，红色虚线=Lenth ME显著性参考线*
 
-**操作**: 按上表标记 → 点击 **DOE效应估计**
+#### 数值结果（Web UI ≡ Python）
 
-#### 数值结果（Web UI ≡ Python） 效应量排序 + Pareto 图。效应占比大多 < 5%（随机数据）。
+效应量排序 + Pareto 图。效应占比大多 < 5%（随机数据）。
 
 #### 解读说明
 
@@ -863,7 +863,7 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='doe_analysis', ...))`
 ### 6.6 ROC/AUC 分析 (`roc_analysis`)
 **功能**: 评估连续变量对二分类结果的区分能力。
 
@@ -883,9 +883,9 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 *AUC=0.489≈0.5模型无区分力，红色圆点=最佳阈值(Youden's J=0.03)*
 
-**操作**: 按上表标记 → 点击 **ROC/AUC分析**
+#### 数值结果（Web UI ≡ Python）
 
-#### 数值结果（Web UI ≡ Python） AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0.03。ROC 曲线接近对角线。
+AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0.03。ROC 曲线接近对角线。
 
 #### 解读说明
 
@@ -893,7 +893,7 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='roc_analysis', ...))`
 ### 6.7 Logistic 回归 (`logistic_regression`)
 **功能**: 二分类结果建模（如预测是否会出现不良品）。
 
@@ -914,15 +914,15 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 *横线=95%CI，竖虚线=OR=1(无效应)，所有因子CI跨越1*
 
-**操作**: 按上表标记 → 点击 **Logistic回归**
+#### 数值结果（Web UI ≡ Python）
 
-#### 数值结果（Web UI ≡ Python） 准确率=89.9%, 灵敏度=0.0%, 特异度=100%, McFadden R²=0.004。OR 森林图——所有因子的 95%CI 跨越 1（无显著效应）。
+准确率=89.9%, 灵敏度=0.0%, 特异度=100%, McFadden R²=0.004。OR 森林图——所有因子的 95%CI 跨越 1（无显著效应）。
 
 #### 解读说明 灵敏度=0% 是因为默认阈值 0.5 下模型始终预测多数类「否」（保养日=是仅占约 10%，特征无区分力）。降低阈值（如 `threshold: 0.1`）可提高灵敏度但会牺牲特异度。准确率高仅反映类别不平衡——模型只需全部预测「否」即可达到 ~90% 准确率。
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='logistic_regression', ...))`
 ### 6.8 Lasso 回归 (`lasso_regression`)
 **功能**: 带正则化的回归——自动将不重要的变量系数压缩到零，实现特征选择。
 
@@ -944,9 +944,9 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 *仅显示非零系数，α自动选择，3/3变量被选中但系数均接近零*
 
-**操作**: 按上表标记 → 点击 **Lasso回归**
+#### 数值结果（Web UI ≡ Python）
 
-#### 数值结果（Web UI ≡ Python） 选中 3/3 个变量（α=0.0033, R²=0.0095）。随机数据下所有系数都很小，Lasso 未将任何变量压缩到零。非零系数柱状图。
+选中 3/3 个变量（α=0.0033, R²=0.0095）。随机数据下所有系数都很小，Lasso 未将任何变量压缩到零。非零系数柱状图。
 
 #### 解读说明
 
@@ -954,7 +954,7 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='lasso_regression', ...))`
 ### 6.9 稳健回归 Huber (`robust_regression`)
 **功能**: 对异常值不敏感的回归——Huber 损失函数自动降低异常值权重。
 
@@ -974,9 +974,9 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 *深蓝=Huber稳健回归，浅蓝=OLS。随机数据无异常值，两种方法几乎一致*
 
-**操作**: 按上表标记 → 点击 **稳健回归(Huber)**
+#### 数值结果（Web UI ≡ Python）
 
-#### 数值结果（Web UI ≡ Python） Huber vs OLS 系数对比柱状图。差异最大变量标注。
+Huber vs OLS 系数对比柱状图。差异最大变量标注。
 
 #### 解读说明
 
@@ -984,7 +984,7 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='robust_regression', ...))`
 ### 6.10 分位数回归 (`quantile_regression`)
 
 **功能**: 对中位数（或任意分位数）建模，不依赖正态假设。
@@ -999,19 +999,13 @@ R²=0.017, 调整R²=0.012。最优区域：熔体温度=197.3, 模具温度=90.
 
 > ⚠️ **协同要求**：必须标记 **1 个 Y + 至少 1 个 X**（数值）。`quantile` 取值范围 (0, 1)。
 
-**操作**: 按上表标记 + 配置参数 → 点击 **分位数回归**
-
 #### 示例分析图片
 
 _本方法仅输出数值表格和系数对比，不生成图表。_
 
-#### 数值结果（Web UI ≡ Python） 各变量的中位数回归系数和显著性。
+#### 数值结果（Web UI ≡ Python）
 
----
-
-## 7. 过程监控（11 个方法）
-
-> "生产过程是否稳定？会不会快出问题了？"
+各变量的中位数回归系数和显著性。
 
 #### 解读说明
 
@@ -1019,7 +1013,14 @@ _本方法仅输出数值表格和系数对比，不生成图表。_
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='quantile_regression', params={'quantile': 0.5}, ...))`
+
+---
+
+## 7. 过程监控（11 个方法）
+
+> "生产过程是否稳定？会不会快出问题了？"
+
 ### 7.1 X-bar/R 控制图 (`spc_xbar`)
 
 **功能**: 均值-极差控制图，含 Western Electric 6 条规则自动检测。
@@ -1036,8 +1037,6 @@ _本方法仅输出数值表格和系数对比，不生成图表。_
 
 > ⚠️ **协同要求**：必须标记 **1 个 Y（数值）**。参数 `subgroup_col` 指定数据中的分组列名。`usl`/`lsl` 可选，不影响控制限计算，仅用于图示参考。
 
-**操作**: 按上表标记 + 配置参数 → 点击 **X-bar/R控制图**
-
 #### 示例分析图片
 
 _控制图需合理的子组结构（每组 2-25 个样本）。本测试数据按"车间"分组每组约 250 个样本，超出子组大小限制。请使用含合理子组列的数据生成图表。_
@@ -1052,7 +1051,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='spc_xbar', params={'subgroup_col': '车间'}, ...))`
 ### 7.2 计数型控制图 (`spc_attribute`)
 **功能**: p（不良率）/ np（不良数）/ c（缺陷数）/ u（单位缺陷率）控制图。
 
@@ -1073,8 +1072,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *计数型控制图（c 图模式）：CL 约等于不良率均值，数据点随机分布在控制限内。*
 
-**操作**: 按上表标记 + 配置参数 → 点击 **计数型控制图**
-
 #### 数值结果（Web UI ≡ Python） C 控制图，CL 约等于不良率均值。
 
 #### 解读说明
@@ -1083,7 +1080,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='spc_attribute', params={'chart_type': 'c'}, ...))`
 ### 7.3 CUSUM 控制图 (`spc_cusum`)
 
 **功能**: 累积和控制图——对小偏移（0.5σ~2σ）比 X-bar 更敏感。输出双侧 CUSUM（C⁺上偏移 + C⁻下偏移）及决策区间。
@@ -1106,8 +1103,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *上：原始数据+均值线。下：C⁺(橙)和 C⁻(蓝)累积和 + h=5 决策区间(红虚线)。*
 
-**操作**: 按上表标记 + 配置参数 → 点击 **CUSUM控制图**
-
 #### 数值结果（Web UI ≡ Python） 总报警 9 次（k=0.5, h=5.0）。不良率波动较大（随机数据），CUSUM 比 X-bar 更敏感。
 
 #### 解读说明
@@ -1116,7 +1111,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='spc_cusum', params={'k': 0.5, 'h': 5.0}, ...))`
 ### 7.4 EWMA 控制图 (`spc_ewma`)
 
 **功能**: 指数加权移动平均控制图——对近期数据权重更高，λ 越小越平滑。输出时变控制限和渐近控制限。
@@ -1139,8 +1134,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *蓝线=EWMA 平滑值(λ=0.2)，浅蓝=原始数据点，红虚线=时变控制限(L=2.7)。*
 
-**操作**: 按上表标记 + 配置参数 → 点击 **EWMA控制图**
-
 #### 数值结果（Web UI ≡ Python） EWMA 平滑线 + 时变控制限 + 违规点。
 
 #### 解读说明
@@ -1149,7 +1142,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='spc_ewma', params={'lam': 0.2, 'L': 2.7}, ...))`
 ### 7.5 过程能力 Cp/Cpk (`process_capability`)
 **功能**: 评估工艺是否满足规格要求，输出 Cp/Cpk/Pp/Ppk + Sigma Level + DPMO。
 
@@ -1171,8 +1164,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *直方图+正态拟合+规格限(LSL=1,USL=10)。Cpk=0.923<1.0不合格，中心偏左需调准。*
 
-**操作**: 按上表标记 + 配置参数 → 点击 **过程能力Cp/Cpk**
-
 #### 数值结果（Web UI ≡ Python）
 
 | 指标 | 值 | 95%CI |
@@ -1188,7 +1179,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='process_capability', params={'usl': 10, 'lsl': 1}, ...))`
 ### 7.6 趋势预测 (`trend_forecast`)
 **功能**: 线性趋势外推 + 残差诊断 (DW/Ljung-Box/ACF)。
 
@@ -1208,8 +1199,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *趋势+预测(橙带)/残差(DW≈2)/ACF自相关/Actual vs Predicted(R²≈0)*
 
-**操作**: 按上表标记 → 点击 **趋势预测**
-
 #### 数值结果（Web UI ≡ Python） R²=0.0002, DW=1.979, MAPE=N/A, RMSE=2.495。数据无趋势（随机数据），预测区间较宽。2×2 诊断图（趋势+预测/残差/ACF/Actual vs Predicted）。
 
 #### 解读说明
@@ -1218,7 +1207,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='trend_forecast', params={'forecast_steps': 5}, ...))`
 ### 7.7 异常检测 (`anomaly_detect`)
 **功能**: IQR / Z-score / Grubbs / Isolation Forest 四种方法检测异常点。
 
@@ -1238,8 +1227,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *红色X=异常点，橙色虚线=Q1-1.5IQR和Q3+1.5IQR上下界*
 
-**操作**: 按上表标记 + 配置参数 → 点击 **异常检测**
-
 #### 数值结果（Web UI ≡ Python） 异常点数量 + 散点图标记（红色 X 标记异常点）。
 
 #### 解读说明
@@ -1248,7 +1235,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='anomaly_detect', params={'method': 'iqr'}, ...))`
 ### 7.8 变点检测 (`change_point`)
 **功能**: 基于 CUSUM 识别过程结构性变化的位置。
 
@@ -1268,8 +1255,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *彩色水平线=各段均值，红色虚线=变点位置，红色箭头标注*
 
-**操作**: 按上表标记 → 点击 **变点检测**
-
 #### 数值结果（Web UI ≡ Python） 分段统计（均值/标准差/方向）+ 变点位置标记。
 
 #### 解读说明
@@ -1278,7 +1263,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='change_point', ...))`
 ### 7.9 异常共识 (`outlier_consensus`)
 **功能**: IQR + Z-score + Isolation Forest 三种方法投票，≥2 票才是高置信异常。
 
@@ -1298,8 +1283,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *红色X=高置信异常(≥2票)，橙色方块=低置信(1票)。三方法投票减少误报*
 
-**操作**: 按上表标记 → 点击 **异常共识(3方法投票)**
-
 #### 数值结果（Web UI ≡ Python） 高置信异常 22 个（2.2%），总标记 58 个（5.8%）。IQR 标记最多、IsoForest 较少——多方法投票可有效减少误报。
 
 #### 解读说明
@@ -1308,7 +1291,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='outlier_consensus', ...))`
 ### 7.10 分组箱线图 (`box_chart`)  🆕
 
 **功能**: 按类别因子分组展示数值分布，支持次分类分面。自动附 ANOVA/Kruskal-Wallis 或 t 检验/MWU 统计检验。
@@ -1322,8 +1305,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 | **参数** | — | 自动附 ANOVA/Kruskal-Wallis 检验结果 |
 
 > ⚠️ **协同要求**：必须标记 **1 个 Y（数值） + 至少 1 个类别列**。
-
-**操作**: 按上表标记 → 点击 **分组箱线图**
 
 #### 示例分析图片
 
@@ -1358,8 +1339,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 > ⚠️ **协同要求**：标记 **1 个 Y（数值） + 至少 2 个类别列**。第一个类别列为主分类（X 轴），其余为次分类（分面）。
 
-**操作**: 按上表标记 → 点击 **分组箱线图**
-
 #### 数值结果（Web UI ≡ Python） 3 张分面箱线图（一车间/二车间/三车间各一张），每张 X 轴=原料类型。次分类 ≤ 8 个水平时自动分面。
 
 #### 解读说明
@@ -1368,7 +1347,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='box_chart', ...))`
 ### 7.11 非参数控制图 (`spc_nonparametric`) 🆕
 
 **功能**: 基于最佳拟合分布的 CDF 逆推控制限，不假设正态分布。自动拟合 Normal/Lognormal/Weibull 三种分布，选 KS 检验最优者，用 PPF(CDF 逆函数)精确计算控制限。
@@ -1390,7 +1369,11 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 > ⚠️ **协同要求**：必须标记 **1 个 Y（数值）**。自动拟合 Normal/Lognormal/Weibull 三种分布，选 KS 检验 p 值最大者，用 PPF(CDF 逆函数)计算控制限（P0.135/P99.865）。
 
-**操作**: 按上表标记 + 配置参数 → 点击 **非参数控制图(分布拟合法)**
+#### 示例分析图片
+
+![非参数控制图(双侧)](images/spc_nonparametric_1.png)
+
+*非参数控制图(双侧) — 控制限由 Lognormal 分布 PPF 计算，上下限不对称。红线=控制限, 绿线=中位数, 红X=违规点。*
 
 #### 数值结果（Web UI ≡ Python）
 
@@ -1401,13 +1384,13 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 | LCL (P0.135) | 1.679 |
 | 最佳拟合分布 | Lognormal |
 
-#### 示例分析图片
+#### 解读说明
 
-![非参数控制图(双侧)](images/spc_nonparametric_1.png)
+自动选择 Lognormal 拟合（偏度数据），控制限不对称——下限距中位数(2.39) &lt; 上限距中位数(5.81)。相比传统 ±3σ（假设正态），此法更准确反映偏态数据的真实尾部概率。
 
-*非参数控制图(双侧) — 控制限由 Lognormal 分布 PPF 计算，上下限不对称。红线=控制限, 绿线=中位数, 红X=违规点。*
+#### 补充备注
 
-#### 解读说明 自动选择 Lognormal 拟合（偏度数据），控制限不对称——下限距中位数(2.39) &lt; 上限距中位数(5.81)。相比传统 ±3σ（假设正态），此法更准确反映偏态数据的真实尾部概率。
+- **Python API**：`orchestrate(AnalysisRequest(task='spc_nonparametric', params={'side': 'two-sided'}, ...))`
 
 ---
 
@@ -1415,9 +1398,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 > "需要更专业的统计分析。"
 
-#### 补充备注
-
-- **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 8.1 Bootstrap 置信区间 (`bootstrap_ci`)
 **功能**: 不依赖分布假设的置信区间估计（通过重抽样）。
 
@@ -1438,8 +1418,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *直方图=200次重抽样的均值分布，绿线=点估计，红线=95%CI，分布呈钟形*
 
-**操作**: 按上表标记 + 配置参数 → 点击 **Bootstrap置信区间**
-
 #### 数值结果（Web UI ≡ Python）
 
 | 统计量 | 值 |
@@ -1454,7 +1432,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='bootstrap_ci', params={'n_bootstrap': 200}, ...))`
 ### 8.2 中位数置信区间 (`median_ci`)
 **功能**: 基于二项分布的符号检验法，不需要任何分布假设。
 
@@ -1474,8 +1452,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *绿线=中位数，红线=95%CI(基于二项分布符号检验)，粉色=CI区域*
 
-**操作**: 按上表标记 → 点击 **中位数置信区间**
-
 #### 数值结果（Web UI ≡ Python） 中位数 + 95% CI（比 Bootstrap 方法更宽，但更保守稳健）。
 
 #### 解读说明
@@ -1484,7 +1460,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='median_ci', ...))`
 ### 8.3 量具 R&R 分析 (`gage_rr`)
 
 **功能**: 评估测量系统的重复性和再现性。
@@ -1501,8 +1477,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 > ⚠️ **协同要求**：必须标记 **1 个 Y（数值） + 2 个类别列**（部件 + 操作员）。参数 `part_col` 和 `operator_col` 必须与标记的类别列名一致。
 
-**操作**: 按上表标记 + 配置参数 → 点击 **量具R&R分析**
-
 #### 示例分析图片
 
 ![量具 R&R 变异源分析](images/gage_rr_1.png)
@@ -1517,7 +1491,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='gage_rr', params={'part_col': '模具编号', 'operator_col': '检验员'}, ...))`
 ### 8.4 统计容许区间 (`tolerance_interval`)
 **功能**: 以指定置信度覆盖总体指定比例的区间（如 "99% 产品以 95% 置信度落在 [L, U]"）。
 
@@ -1538,8 +1512,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *直方图+正态拟合，红/绿虚线=双侧容许限*
 
-**操作**: 按上表标记 → 点击 **统计容许区间**
-
 #### 数值结果（Web UI ≡ Python） 双侧容许限 + 直方图 + 正态拟合。
 
 #### 解读说明
@@ -1548,7 +1520,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='tolerance_interval', params={'coverage': 0.95, 'confidence': 0.95}, ...))`
 ### 8.5 生存分析 Kaplan-Meier (`survival_analysis`)
 **功能**: 估计产品的寿命分布和可靠度随时间的变化。
 
@@ -1568,15 +1540,9 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *蓝线=KM估计，浅蓝虚线=Weibull拟合，灰线=删失标记*
 
-**操作**: 按上表标记 → 点击 **生存分析**
+#### 数值结果（Web UI ≡ Python）
 
-#### 数值结果（Web UI ≡ Python） KM 阶梯曲线 + Weibull 拟合。中位寿命=None（数据中不良率是连续值而非时间/寿命数据，事件列也不适用——结果反映出数据不适合生存分析）。
-
----
-
-## 9. 结果验证
-
-本节将 Web UI 输出结果与 Python 代码直接调用结果进行交叉验证。
+KM 阶梯曲线 + Weibull 拟合。中位寿命=None（数据中不良率是连续值而非时间/寿命数据，事件列也不适用——结果反映出数据不适合生存分析）。
 
 #### 解读说明
 
@@ -1584,7 +1550,14 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(...))`
+- **Python API**：`orchestrate(AnalysisRequest(task='survival_analysis', ...))`
+
+---
+
+## 9. 结果验证
+
+本节将 Web UI 输出结果与 Python 代码直接调用结果进行交叉验证。
+
 ### 9.1 验证方法
 
 ```
@@ -1599,9 +1572,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 └─────────────┘     └──────────────────┘
 ```
 
-#### 补充备注
-
-- **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 9.2 验证结果对照表
 
 以 `tests/test_data.xlsx` 为输入，验证日期: 2026-07-08。
@@ -1627,9 +1597,6 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 **结论**: 全部 39 个分析方法在 Web UI 和 Python 直接调用下产生一致的结果。
 
-#### 补充备注
-
-- **Python API**：`orchestrate(AnalysisRequest(...))`
 ### 9.3 快速验证脚本
 
 ```bash
@@ -1671,7 +1638,3 @@ python tests/test_web_e2e.py
 ---
 
 *SmartSuite Web UI — 让统计分析触手可及。*
-
-#### 补充备注
-
-- **Python API**：`orchestrate(AnalysisRequest(...))`
