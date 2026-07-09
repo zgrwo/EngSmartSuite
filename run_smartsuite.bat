@@ -41,7 +41,7 @@ echo.
 
 :: ── 1. 查找 Python 3.10+ (三级降级策略) ──
 
-echo   [1/4] 检测 Python 环境...
+echo   [1] 检测 Python 环境...
 
 
 
@@ -197,79 +197,70 @@ echo   [OK] 找到 Python %PYVER%  (%PYTHON%)
 
 
 
-:: ── 2. 创建虚拟环境 (首次) ──
+:: ── 2. 检测 SmartSuite (智能路由) ──
 
-echo   [2/4] 准备虚拟环境...
+echo   [2] 检测 SmartSuite...
+
+:: 优先尝试全局导入 — 如果已经 pip install .[all] 或 setup_offline 装过，直接用
+%PYTHON% -c "import smartsuite" >nul 2>&1
+if !errorlevel!==0 (
+    echo   [OK] SmartSuite 已安装，跳过虚拟环境
+    set "RUN_PYTHON=%PYTHON%"
+    goto :launch
+)
+
+:: ── 未找到全局安装 → 创建独立虚拟环境 ──
+
+echo   [ ] 未检测到全局安装，创建独立虚拟环境...
 
 if not exist "%VENV_DIR%\Scripts\python.exe" (
-
     echo        首次运行，正在创建虚拟环境...
-
     %PYTHON% -m venv "%VENV_DIR%" --clear
-
     if !errorlevel! neq 0 (
-
         echo   [X] 虚拟环境创建失败，请检查磁盘空间和权限
-
         pause
-
         exit /b 1
-
     )
-
-    set "NEED_INSTALL=1"
-
+    echo   [OK] 虚拟环境创建成功
 ) else (
-
     echo   [OK] 虚拟环境已就绪
-
 )
 
+set "RUN_PYTHON=%VENV_DIR%\Scripts\python"
 
 
-:: ── 3. 安装/更新依赖 ──
 
-echo   [3/4] 检查依赖...
+:: ── 3. 安装依赖 ──
 
+echo   [3] 安装依赖...
 set "SMARTSUITE_OK=0"
-
-"%VENV_DIR%\Scripts\python" -c "import smartsuite; print(smartsuite.__version__)" >nul 2>&1
-
+"%RUN_PYTHON%" -c "import smartsuite" >nul 2>&1
 if !errorlevel!==0 (set "SMARTSUITE_OK=1")
 
-
-
 if "%SMARTSUITE_OK%"=="0" (
-
     echo        正在安装 SmartSuite 及全部依赖 (约需 2-5 分钟)...
-
-    "%VENV_DIR%\Scripts\python" -m pip install "%PROJECT_DIR%[all]" --quiet
-
+    "%RUN_PYTHON%" -m pip install "%PROJECT_DIR%[all]" --quiet
     if !errorlevel! neq 0 (
-
         echo   [X] 安装失败，请检查网络连接后重试
-
         echo      或手动运行: pip install .[web]
-
         pause
-
         exit /b 1
-
     )
-
     echo   [OK] 安装完成
-
 ) else (
-
     echo   [OK] SmartSuite 已安装
-
 )
 
 
 
-:: ── 4. 启动 Web UI ──
+:launch
 
-echo   [4/4] 启动 Web 界面...
+
+
+:: ── 启动 Web UI ──
+
+echo.
+echo   [启动] 启动 Web 界面...
 
 echo.
 
@@ -289,7 +280,7 @@ echo.
 
 :: 启动 Flask 应用（会自动打开浏览器）
 
-"%VENV_DIR%\Scripts\python" "%PROJECT_DIR%\run_server.py"
+"%RUN_PYTHON%" "%PROJECT_DIR%\run_server.py"
 
 
 
