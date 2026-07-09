@@ -251,4 +251,4 @@ TASK_GROUPS = {
 # ── 需要保留原始类别列的任务（不做 One-Hot 编码）──
 # 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
 RAW_CAT_TASKS: set[str] = {"box_chart", "anova", "variance_test", "contingency",
-                            "cohens_kappa", "hypothesis_test"}
+                            "cohens_kappa", "hypothesis_test", "survival_analysis"}

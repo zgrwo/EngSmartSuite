@@ -48,7 +48,9 @@ def test_all_tasks_registered():
     assert len(eng.__all__) > 0, "engine.__all__ 为空，注册表验证无效"
     registered_func_names = {f.__name__ for f in TASK_REGISTRY.values()}
     # __all__ → TASK_REGISTRY: engine 导出的都在 registry 中
-    missing_in_registry = set(eng.__all__) - registered_func_names
+    # 排除配色常量（GROUP_COLORS/PALETTE，非分析函数，不在 TASK_REGISTRY 中）
+    _analysis_names = {n for n in eng.__all__ if not n.isupper()}
+    missing_in_registry = _analysis_names - registered_func_names
     assert not missing_in_registry, f"engine.__all__ 中有未注册的函数: {missing_in_registry}"
     # TASK_REGISTRY → __all__: registry 中的都在 engine 导出中
     missing_in_all = registered_func_names - set(eng.__all__)
