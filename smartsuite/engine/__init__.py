@@ -29,7 +29,7 @@ def _get_windows_font_dir() -> str:
             sysroot = _wr.QueryValueEx(key, "SystemRoot")[0]
         if os.path.isdir(f"{sysroot}/Fonts"):
             return sysroot
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ImportError):
         pass
     return "C:/Windows"  # 最终回退
 
