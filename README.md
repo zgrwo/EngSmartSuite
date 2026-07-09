@@ -60,6 +60,7 @@ SmartSuite 将 Python 生态的统计分析能力（pandas、scipy、statsmodels
 |------|------|------|
 | **🖱️ 方案 A：一键启动** | 只想上传 Excel 看结果，不关心 Python | 双击脚本 → 自动打开浏览器 |
 | **⌨️ 方案 B：手动安装** | 需要 Python API、自定义参数、或集成到已有项目 | pip install → 命令行启动 |
+| **📦 方案 C：离线安装** | 无互联网环境（内网/保密车间） | 有网机器下载 → 拷贝 → 本地安装 |
 
 ---
 
@@ -111,6 +112,44 @@ pip install .[web]          # Web 界面（推荐）
 | `pip install .[all]` | 基础 + web + report + openpyxl | 完整功能（推荐） |
 
 > 💡 **开发模式**：如果修改源码，加 `-e`（`pip install -e .[all]`），修改即时生效。
+
+#### 离线安装（无互联网环境）
+
+适用于内网、保密车间等无法连接 PyPI 的场景。一次下载，反复使用。
+
+**第 1 步：在有网机器上下载依赖**
+
+```bash
+# Windows
+setup_offline.bat download
+
+# macOS / Linux
+bash setup_offline.sh download
+```
+
+执行后在项目根目录生成 `packages/` 文件夹，包含全部依赖的 `.whl` 文件。
+
+**第 2 步：拷贝到离线机器**
+
+将整个项目文件夹（含 `packages/`）复制到离线机器。
+
+**第 3 步：离线安装**
+
+```bash
+# Windows
+setup_offline.bat install
+
+# macOS / Linux
+bash setup_offline.sh install
+```
+
+脚本自动执行：
+1. `pip install --no-index --find-links=./packages/ smartsuite[web,report,dev]` — 从本地安装全部依赖
+2. `pip install --no-deps -e .` — 注册 smartsuite 本身
+
+全程零网络请求，`packages/` 文件夹可重复用于多台机器。
+
+> ⚠️ **Python 版本注意**：下载的 `.whl` 与下载时的 Python 版本和平台绑定。离线安装的机器必须使用相同的 Python 版本（如 3.12）和操作系统。
 
 #### 启动方式
 
@@ -185,6 +224,7 @@ print(result.figures)   # matplotlib 图表
 
 - 🧪 生成测试数据：`python scripts/generate_test_data.py`
 - ✅ 运行一致性验证：`python scripts/verify_consistency.py`
+- 📦 离线安装：`setup_offline.bat download` → 复制 → `setup_offline.bat install`
 - 🔍 列出所有方法：`python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"`
 
 ---

@@ -43,6 +43,9 @@ desktop.ini
 # Claude Code 配置（个人工具，不推送）
 .claude/
 
+# 离线安装包
+packages/
+
 # 运行时产物
 smartsuite_report.html
 tests/results.pptx
