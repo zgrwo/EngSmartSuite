@@ -39,11 +39,61 @@ echo.
 
 
 
-:: ── 1. 查找 Python 3.10+ ──
+:: ── 1. 查找 Python 3.10+ (三级降级策略) ──
 
 echo   [1/4] 检测 Python 环境...
 
-for %%p in (python python3) do (
+
+
+:: ── 策略 1: py launcher (Windows Python Launcher, 覆盖面最广) ──
+
+:: py.exe 随官方 Python 安装器写入 C:\Windows\py.exe ，
+
+:: 可发现本机所有已安装的 Python 版本（含未加入 PATH 的）。
+
+py --version >nul 2>&1
+
+if !errorlevel!==0 (
+
+    for /f "tokens=2" %%v in ('py --version 2^>^&1') do set "PYVER=%%v"
+
+    for /f "tokens=1,2 delims=." %%a in ("!PYVER!") do (
+
+        set /a _MJ=%%a 2>nul
+
+        set /a _MN=%%b 2>nul
+
+        if !_MJ! gtr 3 set "PYTHON=py" & goto :python_found
+
+        if !_MJ! equ 3 if !_MN! geq 10 set "PYTHON=py" & goto :python_found
+
+    )
+
+    :: py 启动器可用但默认版本 < 3.10，尝试指定更高版本
+
+    for %%v in (3.13 3.12 3.11 3.10) do (
+
+        py -%%v --version >nul 2>&1
+
+        if !errorlevel!==0 (
+
+            for /f "tokens=2" %%x in ('py -%%v --version 2^>^&1') do set "PYVER=%%x"
+
+            set "PYTHON=py -%%v"
+
+            goto :python_found
+
+        )
+
+    )
+
+)
+
+
+
+:: ── 策略 2: where 命令 (PATH 中的 python / python3) ──
+
+for %%p in (python3 python) do (
 
     where %%p >nul 2>nul
 
@@ -53,13 +103,13 @@ for %%p in (python python3) do (
 
             for /f "tokens=1,2 delims=." %%a in ("%%v") do (
 
-                set /a MAJOR=%%a 2>nul
+                set /a _MJ=%%a 2>nul
 
-                set /a MINOR=%%b 2>nul
+                set /a _MN=%%b 2>nul
 
-                if !MAJOR! geq 3 if !MINOR! geq 10 set "PYTHON=%%p"
+                if !_MJ! gtr 3 set "PYTHON=%%p" & set "PYVER=%%v" & goto :python_found
 
-                if !MAJOR! geq 4 set "PYTHON=%%p"
+                if !_MJ! equ 3 if !_MN! geq 10 set "PYTHON=%%p" & set "PYVER=%%v" & goto :python_found
 
             )
 
@@ -71,13 +121,71 @@ for %%p in (python python3) do (
 
 
 
+:: ── 策略 3: 扫描常见安装路径 (未加入 PATH 的用户/系统安装) ──
+
+:: %LOCALAPPDATA%  ← 官方安装器默认路径 (仅当前用户)
+
+:: %ProgramFiles%   ← 系统级安装的备选位置
+
+for %%d in (
+
+    "%LOCALAPPDATA%\Programs\Python\Python313"
+
+    "%LOCALAPPDATA%\Programs\Python\Python312"
+
+    "%LOCALAPPDATA%\Programs\Python\Python311"
+
+    "%LOCALAPPDATA%\Programs\Python\Python310"
+
+    "%ProgramFiles%\Python313"
+
+    "%ProgramFiles%\Python312"
+
+    "%ProgramFiles%\Python311"
+
+    "%ProgramFiles%\Python310"
+
+) do (
+
+    if exist "%%~d\python.exe" (
+
+        for /f "tokens=2" %%v in ('"%%~d\python.exe" --version 2^>^&1') do (
+
+            for /f "tokens=1,2 delims=." %%a in ("%%v") do (
+
+                set /a _MJ=%%a 2>nul
+
+                set /a _MN=%%b 2>nul
+
+                if !_MJ! gtr 3 set "PYTHON=%%~d\python.exe" & set "PYVER=%%v" & goto :python_found
+
+                if !_MJ! equ 3 if !_MN! geq 10 set "PYTHON=%%~d\python.exe" & set "PYVER=%%v" & goto :python_found
+
+            )
+
+        )
+
+    )
+
+)
+
+
+
+:python_found
+
 if "%PYTHON%"=="" (
 
-    echo   [X] 未找到 Python 3.10+，请先安装 Python
+    echo   [X] 未找到 Python 3.10+
 
-    echo      下载地址: https://www.python.org/downloads/
+    echo.
 
-    echo      安装时请勾选 "Add Python to PATH"
+    echo      请从 https://www.python.org/downloads/ 下载安装 Python 3.10+
+
+    echo      安装时请勾选 "Add Python to PATH" 选项
+
+    echo.
+
+    echo      如已安装但未被检测到, 请将 Python 加入系统 PATH 后重试
 
     pause
 
@@ -85,9 +193,7 @@ if "%PYTHON%"=="" (
 
 )
 
-for /f "tokens=2" %%v in ('%PYTHON% --version 2^>^&1') do set "PYVER=%%v"
-
-echo   [OK] 找到 Python %PYVER%
+echo   [OK] 找到 Python %PYVER%  (%PYTHON%)
 
 
 
