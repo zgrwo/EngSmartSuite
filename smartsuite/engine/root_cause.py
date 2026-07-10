@@ -6,7 +6,11 @@ import statsmodels.api as sm
 from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
-from smartsuite.engine._constants import VIF_THRESHOLD
+from smartsuite.engine._constants import (
+    COHENS_D_LARGE, COHENS_D_MEDIUM, COHENS_D_SMALL,
+    EPSILON, ETA_SQ_LARGE, ETA_SQ_MEDIUM, ETA_SQ_SMALL,
+    SIG_EXTREME, SIG_HIGH, SIG_MODERATE, VIF_THRESHOLD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +24,14 @@ from smartsuite.engine._palette import PALETTE
 
 
 def _significance_stars(p):
-    """显著性星号标记。"""
+    """显著性星号标记（使用 _constants.py 中的 SIG_* 阈值）。"""
     if p is None or np.isnan(p):
         return ""
-    if p < 0.001:
+    if p < SIG_EXTREME:
         return "***"
-    elif p < 0.01:
+    elif p < SIG_HIGH:
         return "**"
-    elif p < 0.05:
+    elif p < SIG_MODERATE:
         return "*"
     return ""
 
@@ -282,7 +286,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                 n = len(resid_target)
                 k_ctrl = len(control_vars)
                 df_partial = max(1, n - k_ctrl - 2)
-                t_partial = r_partial * np.sqrt(df_partial / (1 - r_partial**2 + 1e-10))
+                t_partial = r_partial * np.sqrt(df_partial / (1 - r_partial**2 + EPSILON))
                 p_partial = float(2 * sp_stats.t.sf(abs(t_partial), df_partial))
             else:
                 r_partial, p_partial = np.nan, np.nan
@@ -419,7 +423,7 @@ def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")
 
 def _effect_interpretation(eta2):
     """η² 效应量解读 (Cohen 准则)。"""
-    return threshold_label(eta2, [0.01, 0.06, 0.14])
+    return threshold_label(eta2, [ETA_SQ_SMALL, ETA_SQ_MEDIUM, ETA_SQ_LARGE])
 
 
 def _cramers_v_interpretation(v):
@@ -661,7 +665,7 @@ def _cohens_d(x, y, warn_list: list[str] | None = None):
     s1, s2 = np.std(x, ddof=1), np.std(y, ddof=1)
     # 合并标准差
     sp = np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / (n1 + n2 - 2))
-    if sp < 1e-10:
+    if sp < EPSILON:
         return 0.0
     d = (np.mean(x) - np.mean(y)) / sp
     # Hedges' g 小样本校正因子
@@ -692,10 +696,10 @@ def _cliffs_delta(x, y):
 
 
 def _effect_size_label(d, test_type="cohens_d"):
-    """效应量大小解读标签。"""
+    """效应量大小解读标签（Cohen's d 使用 _constants.py 阈值）。"""
     ad = abs(d)
     if test_type == "cohens_d":
-        return threshold_label(ad, [0.2, 0.5, 0.8])
+        return threshold_label(ad, [COHENS_D_SMALL, COHENS_D_MEDIUM, COHENS_D_LARGE])
     if test_type == "correlation":
         return threshold_label(ad, [0.1, 0.3, 0.5])
     # cliffs_delta
@@ -724,7 +728,7 @@ def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
     row_sums = binary.sum(axis=1).values
     Q = (k - 1) * (k * np.sum(col_sums**2) - np.sum(col_sums)**2)
     denom = k * np.sum(row_sums) - np.sum(row_sums**2)
-    if denom < 1e-10:
+    if denom < EPSILON:
         return AnalysisResult(task="hypothesis_test", status="error",
             messages=["Cochran Q 无法计算：所有样本在各条件下的响应完全一致（分母为零），"
                       "不满足检验前提。"])
@@ -855,7 +859,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
         stat, p = sp_stats.ttest_1samp(data, popmean)
         test_name = f"单样本 t 检验 (H0: mu={popmean})"
-        d = (float(data.mean()) - popmean) / (float(data.std(ddof=1)) + 1e-10)
+        d = (float(data.mean()) - popmean) / (float(data.std(ddof=1)) + EPSILON)
         effect_size = float(d)
         effect_name = "Cohen's d (单样本)"
         effect_label = _effect_size_label(abs(d), "cohens_d")
@@ -917,7 +921,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = f"配对 t 检验 ({col1} vs {col2})"
         diff = sub[col1].values - sub[col2].values
         # 配对 Cohen's d: mean(diff) / sd(diff)
-        d_val = float(np.mean(diff) / (np.std(diff, ddof=1) + 1e-10))
+        d_val = float(np.mean(diff) / (np.std(diff, ddof=1) + EPSILON))
         effect_size = d_val
         effect_name = "Cohen's d (配对)"
         effect_label = _effect_size_label(abs(d_val), "cohens_d")
@@ -970,7 +974,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         """Wilcoxon 效应量: 匹配对秩相关 r = Z / sqrt(N), 钳位到 [-1, 1]。
 
         单样本和配对 Wilcoxon 共享此实现，确保效应量公式一致。"""
-        z_stat_abs = float(sp_stats.norm.ppf(1 - max(p, 1e-10) / 2))
+        z_stat_abs = float(sp_stats.norm.ppf(1 - max(p, EPSILON) / 2))
         z_signed = z_stat_abs if diff_median >= 0 else -z_stat_abs
         r_effect = z_signed / np.sqrt(n)
         return float(max(min(r_effect, 1.0), -1.0))
@@ -1096,7 +1100,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 N = len(all_vals)
                 tie_corr = np.sum(tie_counts**3 - tie_counts) / (12 * (N - 1)) if N > 1 else 0
                 z_denom = np.sqrt(((N * (N + 1) / 12) - tie_corr) * (1/n1 + 1/n2))
-                z_stat_dunn = z_num / (z_denom + 1e-10)
+                z_stat_dunn = z_num / (z_denom + EPSILON)
                 p_dunn = float(2 * sp_stats.norm.sf(abs(z_stat_dunn)))
                 # Bonferroni 校正
                 p_adj = min(p_dunn * n_comparisons, 1.0)
@@ -1169,7 +1173,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         alpha = req.params.get("alpha", 0.05)
         conclusion = "前后存在显著变化" if p < alpha else "前后未发现显著变化"
         # Odds Ratio = b/c（保留原始值，不做截断）
-        or_val = b / (c + 1e-10)
+        or_val = b / (c + EPSILON)
 
         # 可视化：前后对比堆叠柱状图
         fig = Figure(figsize=(5, 4))
@@ -1224,7 +1228,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         S = int(round(tau_mk * np.sqrt(max(n0 * (n0 - n2), 1.0))))
         effect_size = float(tau_mk)
         # 从 p 值反推近似 Z（用于展示）
-        p_safe = max(p, 1e-10)  # protect against p=0 causing ppf(1.0)=inf (1e-10 keeps z≤6.47 finite)
+        p_safe = max(p, EPSILON)  # protect against p=0 causing ppf(1.0)=inf (EPSILON keeps z≤6.47 finite)
         z_mk = float(sp_stats.norm.ppf(1 - p_safe / 2)) * np.sign(S) if p < 1.0 else 0.0
 
         test_name = "Mann-Kendall 趋势检验"
@@ -1299,7 +1303,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         _, counts_all = np.unique(all_vals_flat, return_counts=True)
         ties_all = counts_all[counts_all >= 2]
         V_JT -= np.sum(ties_all * (ties_all - 1) * (2 * ties_all + 5)) / 72
-        z_JT = (JT - E_JT) / np.sqrt(max(V_JT, 1e-10))
+        z_JT = (JT - E_JT) / np.sqrt(max(V_JT, EPSILON))
         p = float(2 * sp_stats.norm.sf(abs(z_JT)))
 
         test_name = "Jonckheere-Terpstra 趋势检验"
@@ -1308,7 +1312,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         conclusion = f"存在显著{trend_dir}" if p < alpha else "未发现显著趋势"
 
         # Kendall's tau-b 效应量近似
-        tau_b = 4 * JT / (n_total**2 - np.sum(n_i**2) + 1e-10) - 1
+        tau_b = 4 * JT / (n_total**2 - np.sum(n_i**2) + EPSILON) - 1
         effect_size = float(tau_b)
         effect_label = _effect_size_label(abs(tau_b), "correlation")
 
@@ -1770,7 +1774,7 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
             z_beta = abs(sp_stats.norm.ppf(1 - target_power))
             d = abs(p1 - p0)
             # 双比例检验: 总方差 = p0*(1-p0) + p1*(1-p1)
-            required = ceil((z_alpha + z_beta)**2 * (p0 * (1 - p0) + p1 * (1 - p1)) / (d**2 + 1e-10))
+            required = ceil((z_alpha + z_beta)**2 * (p0 * (1 - p0) + p1 * (1 - p1)) / (d**2 + EPSILON))
             label = f"比例检验所需样本量: {required} (p0={p0}, p1={p1}, d={d:.3f})"
         else:
             return AnalysisResult(
@@ -1928,7 +1932,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
             # Cramér's V: 确保 min_dim >= 1 防止除零
             _ctab_shape = ctab.shape
             min_dim = max(1, min(*_ctab_shape) - 1) if min(*_ctab_shape) > 1 else 1
-            effect = float(np.sqrt(chi2 / (len(sub) * min_dim + 1e-10)))
+            effect = float(np.sqrt(chi2 / (len(sub) * min_dim + EPSILON)))
             effect_name = "Cramér's V"
             effect_label = _cramers_v_interpretation(effect)
         p_val = fish_p
@@ -1940,7 +1944,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         # Cramér's V
         n_total = ctab.sum().sum()
         min_dim = min(*ctab.shape) - 1
-        effect = float(np.sqrt(chi2 / (n_total * min_dim + 1e-10))) if min_dim > 0 else 0.0
+        effect = float(np.sqrt(chi2 / (n_total * min_dim + EPSILON))) if min_dim > 0 else 0.0
         effect_name = "Cramér's V"
         effect_label = _cramers_v_interpretation(effect)
 
@@ -2189,12 +2193,12 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
     col_sums = ctab.sum(axis=0).values
     p_e = np.sum(row_sums * col_sums) / n**2
     # Kappa
-    kappa = (p_o - p_e) / (1 - p_e + 1e-10)
+    kappa = (p_o - p_e) / (1 - p_e + EPSILON)
     # 标准误 (Fleiss-Cohen-Everitt 公式，适用于大样本)
     # SE₀(κ) = √[p_o(1-p_o) / (n(1-p_e)²)]  是 H₀:κ=0 下的近似
     # 生产环境使用简化公式；如需精确 SE 可用 bootstrap 方法
-    se_kappa = np.sqrt((p_o * (1 - p_o)) / (n * (1 - p_e)**2 + 1e-10))
-    z_kappa = kappa / (se_kappa + 1e-10)
+    se_kappa = np.sqrt((p_o * (1 - p_o)) / (n * (1 - p_e)**2 + EPSILON))
+    z_kappa = kappa / (se_kappa + EPSILON)
     p_val = float(2 * (1 - sp_stats.norm.cdf(abs(z_kappa))))
 
     # 判读
@@ -2248,7 +2252,7 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
     # 各项方差 + 总分方差
     item_vars = sub.var(ddof=1).values
     total_var = float(sub.sum(axis=1).var(ddof=1))
-    if total_var < 1e-10:
+    if total_var < EPSILON:
         return AnalysisResult(task="cronbach_alpha", status="error",
             messages=["总分方差为零，无法计算 α"])
 
@@ -2270,13 +2274,13 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
         kd = k - 1
         item_vars_drop = sub_drop.var(ddof=1).values
         total_var_drop = float(sub_drop.sum(axis=1).var(ddof=1))
-        if total_var_drop > 1e-10 and kd > 1:
+        if total_var_drop > EPSILON and kd > 1:
             a_drop = (kd / (kd - 1)) * (1 - np.sum(item_vars_drop) / total_var_drop)
         else:
             a_drop = None
         # 项总相关：零方差列会导致 .corr() 返回 NaN，格式化时需防护
         item_total_corr = sub[col].corr(sub.drop(columns=[col]).sum(axis=1))
-        if pd.isna(item_total_corr) or item_vars[i] < 1e-10:
+        if pd.isna(item_total_corr) or item_vars[i] < EPSILON:
             corr_str = "N/A (零方差)"
         else:
             corr_str = f"{float(item_total_corr):.3f}"
@@ -2355,7 +2359,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
         "P75": float(data.quantile(0.75)), "P90": float(data.quantile(0.90)),
         "P95": float(data.quantile(0.95)), "P99": float(data.quantile(0.99)),
         "IQR": float(data.quantile(0.75) - data.quantile(0.25)),
-        "CV(%)": round(float(data.std(ddof=1) / (abs(data.mean()) + 1e-10) * 100), 2),
+        "CV(%)": round(float(data.std(ddof=1) / (abs(data.mean()) + EPSILON) * 100), 2),
     }
 
     # 正态性

@@ -7,9 +7,9 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
-from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
+from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR, EPSILON
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine.root_cause import threshold_label
+from smartsuite.engine.root_cause import threshold_label  # 通用效应量标签（定义在 root_cause, 通过 engine/__init__.py 公开导出）
 from smartsuite.engine.spc_monitor import durbin_watson  # 同包子模块引用，engine/__init__.py 公开导出供外部使用
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def _detect_positive_label(unique_values: list) -> object:
 def _std_beta(model, X):
     """计算标准化回归系数 (Beta 权重)，用于比较不同量纲变量的重要性。"""
     y_std = np.std(model.model.endog)
-    if y_std < 1e-10:
+    if y_std < EPSILON:
         return [0.0] * len(X.columns)
     beta = []
     for i, col in enumerate(X.columns):
@@ -41,7 +41,7 @@ def _std_beta(model, X):
         else:
             param_val = model.params[col]
             x_std = np.std(X[col])
-            if np.isnan(param_val) or x_std < 1e-10:
+            if np.isnan(param_val) or x_std < EPSILON:
                 beta.append(0.0)
             else:
                 beta.append(float(param_val * x_std / y_std))
@@ -577,7 +577,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
 def _desirability(vals, direction):
     """计算期望值（0-1 归一化）。"""
     vmin, vmax = vals.min(), vals.max()
-    rng = vmax - vmin + 1e-10
+    rng = vmax - vmin + EPSILON
     if direction == "maximize":
         return (vals - vmin) / rng
     elif direction == "minimize":
@@ -795,14 +795,13 @@ def _lenth_pse(effects):
     # 剔除 > 2.5*s0 的效应后重新计算 PSE
     trimmed = abs_effects[abs_effects < 2.5 * s0]
     if len(trimmed) == 0:
-        return max(s0, 1e-10)
+        return max(s0, EPSILON)
     pse = 1.5 * np.median(trimmed)
-    return max(pse, 1e-10)
+    return max(pse, EPSILON)
 
 
-def _effect_label_doe(effect_ratio):
-    """DOE 效应量解读 — 委托 threshold_label 统一实现。"""
-    return threshold_label(effect_ratio, [0.05, 0.15, 0.30], ("可忽略", "小", "中", "大"))
+# DOE 效应量阈值（η² 类逐步效应量, Richardson 2011）
+_DOE_EFFECT_THRESHOLDS = [0.05, 0.15, 0.30]
 
 
 def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -843,7 +842,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             coded = np.where(col_vals == hi, 1, -1)
         else:
             # 多水平/连续因子：标准化后作为线性效应
-            coded = (col_vals - col_vals.mean()) / (col_vals.std(ddof=1) + 1e-10)
+            coded = (col_vals - col_vals.mean()) / (col_vals.std(ddof=1) + EPSILON)
 
         y = df[req.target_col].values
         X = np.column_stack([np.ones(len(coded)), coded])
@@ -856,8 +855,8 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             # t 检验
             resid_std = float(np.std(y - X @ beta, ddof=2)) if len(y) > 2 else 1.0
             Sxx = np.sum((coded - np.mean(coded))**2)
-            se = resid_std / np.sqrt(Sxx) if Sxx > 1e-10 else 1.0
-            t_val = float(beta[1] / se) if se > 1e-10 else 0.0
+            se = resid_std / np.sqrt(Sxx) if Sxx > EPSILON else 1.0
+            t_val = float(beta[1] / se) if se > EPSILON else 0.0
             dof = len(y) - 2
             p_val = float(2 * sp_stats.t.sf(abs(t_val), dof)) if dof > 0 else 1.0
         except (ValueError, np.linalg.LinAlgError, TypeError) as e:
@@ -874,7 +873,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             })
             continue
 
-        effect_ratio = abs(effect) / (abs(grand_mean) + 1e-10) if abs(grand_mean) > 1e-10 else 0.0
+        effect_ratio = abs(effect) / (abs(grand_mean) + EPSILON) if abs(grand_mean) > EPSILON else 0.0
         alpha = req.params.get("alpha", 0.05)
         effects.append({
             "因子": col,
@@ -883,7 +882,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             "t值": round(t_val, 3),
             "p值": round(p_val, 4),
             "显著": "是" if p_val < alpha else "否",
-            "效应量": _effect_label_doe(effect_ratio),
+            "效应量": threshold_label(effect_ratio, _DOE_EFFECT_THRESHOLDS, ("可忽略", "小", "中", "大")),
         })
 
     effects_df = pd.DataFrame(effects)

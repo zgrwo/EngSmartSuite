@@ -9,10 +9,14 @@ from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import (
+    CPK_EXCELLENT,
+    CPK_GOOD,
+    CPK_MINIMUM,
     DW_NEGATIVE_AUTOCORR,
     DW_POSITIVE_AUTOCORR,
     DW_SAFE_LOWER,
     DW_SAFE_UPPER,
+    EPSILON,
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
@@ -42,7 +46,7 @@ def _we_rules_xbar(values, cl, sigma):
     """Western Electric 规则检测 X-bar 图。返回违规子组索引字典。"""
     violations: dict[str, list[int]] = {}
     vals = np.asarray(values)
-    sigma = max(sigma, 1e-10)
+    sigma = max(sigma, EPSILON)
     n = len(vals)
 
     # Rule 1: 单点超出 ±3σ
@@ -764,14 +768,14 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 判定 ──
     if cpk_val is not None:
-        if cpk_val >= 1.67:
-            judge = "优秀 (≥1.67)"
-        elif cpk_val >= 1.33:
-            judge = "合格 (≥1.33)"
-        elif cpk_val >= 1.0:
-            judge = "勉强 (≥1.0，需改进)"
+        if cpk_val >= CPK_EXCELLENT:
+            judge = f"优秀 (≥{CPK_EXCELLENT})"
+        elif cpk_val >= CPK_GOOD:
+            judge = f"合格 (≥{CPK_GOOD})"
+        elif cpk_val >= CPK_MINIMUM:
+            judge = f"勉强 (≥{CPK_MINIMUM}，需改进)"
         else:
-            judge = "不合格 (<1.0)"
+            judge = f"不合格 (<{CPK_MINIMUM})"
     else:
         judge = "未提供规格限"
 
@@ -908,7 +912,7 @@ def _durbin_watson(residuals):
             f"请确保回归模型有足够的观测数据。"
         )
     diff = np.diff(residuals)
-    dw = np.sum(diff**2) / (np.sum(residuals**2) + 1e-10)
+    dw = np.sum(diff**2) / (np.sum(residuals**2) + EPSILON)
     return float(dw)
 
 
@@ -972,7 +976,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
         # ── 精度指标 ──
         # MAPE (处理零值)
-        mape_mask = np.abs(y) > 1e-10
+        mape_mask = np.abs(y) > EPSILON
         mape = float(np.mean(np.abs(residuals[mape_mask] / y[mape_mask])) * 100) if mape_mask.sum() > 0 else None
         rmse = float(np.sqrt(np.mean(residuals**2)))
         mae = float(np.mean(np.abs(residuals)))
@@ -1154,7 +1158,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             "⚠ μ/σ 从全部数据估计，若数据包含过程偏移会导致 CUSUM 灵敏度下降。"
             "建议通过参数 mu/sigma 指定已知受控状态的参数。"
         )
-    if sigma < 1e-10:
+    if sigma < EPSILON:
         return AnalysisResult(
             task="spc_cusum", status="error",
             messages=["数据标准差接近零，无法计算 CUSUM"],
@@ -1287,7 +1291,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             "⚠ μ/σ 从全部数据估计，若数据包含过程偏移会导致 EWMA 控制限偏大。"
             "建议通过参数 mu/sigma 指定已知受控状态的参数。"
         )
-    if sigma < 1e-10:
+    if sigma < EPSILON:
         return AnalysisResult(
             task="spc_ewma", status="error",
             messages=["数据标准差接近零，无法计算 EWMA"],
@@ -1497,7 +1501,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
 
     # Total Variation
     tv = np.sqrt(grr**2 + pv**2)
-    if tv < 1e-10:
+    if tv < EPSILON:
         return AnalysisResult(
             task="gage_rr", status="error",
             messages=["所有测量值完全一致（零变异），无法评估测量系统。"
@@ -1764,8 +1768,8 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
                     O1_sum += o1
                     E1_sum += e1
                 if total_r > 1:
-                    v1 += total_o * (total_r - total_o) * r1_t * r2_t / (total_r**2 * (total_r - 1) + 1e-10)
-            z_lr = (O1_sum - E1_sum) / np.sqrt(v1 + 1e-10)
+                    v1 += total_o * (total_r - total_o) * r1_t * r2_t / (total_r**2 * (total_r - 1) + EPSILON)
+            z_lr = (O1_sum - E1_sum) / np.sqrt(v1 + EPSILON)
             lr_p = float(2 * sp_stats.norm.sf(abs(z_lr)))
             logrank_result = {
                 "分组": f"{groups[0]} vs {groups[1]}",
@@ -2018,7 +2022,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     iqr_mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR)
 
     # ── 方法 2: Z-score ──
-    z_scores = np.abs((data - data.mean()) / (data.std(ddof=1) + 1e-10))
+    z_scores = np.abs((data - data.mean()) / (data.std(ddof=1) + EPSILON))
     z_mask = z_scores > ZSCORE_OUTLIER_THRESHOLD
 
     # ── 方法 3: Isolation Forest ──
@@ -2238,7 +2242,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         for _ in range(max_outliers):
             mu = np.mean(vals)
             sigma = np.std(vals, ddof=1)
-            if sigma < 1e-10:
+            if sigma < EPSILON:
                 break
             g_scores = np.abs(vals - mu) / sigma
             max_idx = np.argmax(g_scores)
@@ -2267,7 +2271,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             )
         mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR)
     else:
-        if data_std < 1e-10:
+        if data_std < EPSILON:
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",

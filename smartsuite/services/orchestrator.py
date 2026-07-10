@@ -252,3 +252,7 @@ TASK_GROUPS = {
 # 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
 RAW_CAT_TASKS: set[str] = {"box_chart", "anova", "variance_test", "contingency",
                             "cohens_kappa", "hypothesis_test", "survival_analysis"}
+
+# ── 不需要目标列 (Y 列) 的任务 ──
+# 这些引擎函数不使用 req.target_col，Web 层通过此常量判断是否允许不选 Y 列
+NO_TARGET_TASKS: set[str] = {"vif", "cohens_kappa", "cronbach_alpha", "power_analysis"}

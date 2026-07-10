@@ -14,7 +14,7 @@ from smartsuite.services.data_io import (
     preprocess_for_task,
     validate_data,
 )
-from smartsuite.services.orchestrator import orchestrate
+from smartsuite.services.orchestrator import NO_TARGET_TASKS, orchestrate
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         params = {}
 
     # 无需目标列的任务：VIF/一致性/信度/功效分析仅依赖 X 列或参数
-    _no_target_tasks = {'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis'}
-    if not targets and task in _no_target_tasks:
+    if not targets and task in NO_TARGET_TASKS:
         targets = ['']  # 占位触发一次迭代，引擎不使用 target_col
 
     results = []

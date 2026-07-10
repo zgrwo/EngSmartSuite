@@ -251,7 +251,8 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
                     date_cols.append(c)
         except (ValueError, TypeError, OverflowError):
             pass  # 日期解析试探失败，非关键路径
-    high_card = [c for c in cat_cols if df[c].nunique() > 50]
+    _cat_nunique = {c: df[c].nunique() for c in cat_cols}
+    high_card = [c for c, nu in _cat_nunique.items() if nu > 50]
 
     recommendations: list[dict] = []
 
@@ -367,7 +368,7 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
         recommendations.append({
             "优先级": "P1", "类别": "数据质量",
             "推荐分析": "preprocess_data (高基数处理)",
-            "原因": f"列「{high_card[0]}」有 {df[high_card[0]].nunique()} 个唯一值，建模前需处理",
+            "原因": f"列「{high_card[0]}」有 {_cat_nunique[high_card[0]]} 个唯一值，建模前需处理",
         })
 
     # 排序

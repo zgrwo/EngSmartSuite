@@ -8,6 +8,7 @@ import secrets
 import sys
 import tempfile
 import threading
+import time as _time
 
 import pandas as pd
 
@@ -56,23 +57,34 @@ _CLEANUP_INTERVAL = 50  # 每 50 次上传/分析请求尝试清理
 def _periodic_cleanup() -> None:
     """清理不存在对应 session 的过期临时文件。"""
     global _request_counter
+    should_cleanup = False
     with _upload_lock:
         _request_counter += 1
-        if _request_counter % _CLEANUP_INTERVAL != 0:
-            return
-        for path in list(_UPLOAD_FILES):
-            try:
-                # 检查文件最后修改时间，超过 24h 的清理
-                if os.path.exists(path):
-                    mtime = os.path.getmtime(path)
-                    import time as _time
-                    if _time.time() - mtime > 86400:  # 24 hours
-                        os.unlink(path)
+        if _request_counter % _CLEANUP_INTERVAL == 0:
+            should_cleanup = True
+
+    if not should_cleanup:
+        return
+
+    # 文件 I/O 在锁外执行，避免阻塞上传请求
+    now = _time.time()
+    with _upload_lock:
+        paths_snapshot = list(_UPLOAD_FILES)
+    for path in paths_snapshot:
+        try:
+            if os.path.exists(path):
+                mtime = os.path.getmtime(path)
+                if now - mtime > 86400:  # 24 hours
+                    os.unlink(path)
+                    with _upload_lock:
+                        if path in _UPLOAD_FILES:
+                            _UPLOAD_FILES.remove(path)
+            else:
+                with _upload_lock:
+                    if path in _UPLOAD_FILES:
                         _UPLOAD_FILES.remove(path)
-                else:
-                    _UPLOAD_FILES.remove(path)
-            except OSError:
-                pass
+        except OSError:
+            pass
 
 # ── CSRF 防护 ──
 _CSRF_TOKEN_KEY = "_csrf_token"

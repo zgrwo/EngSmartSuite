@@ -76,7 +76,7 @@ ignore = ["E501"]  # line-length handled by formatter
 [tool.ruff.lint.per-file-ignores]
 "smartsuite/engine/__init__.py" = ["E402", "I001"]  # matplotlib config + core deps check must precede imports
 "smartsuite/engine/doe_opt.py" = ["E402", "I001", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict + sorted imports
-"smartsuite/engine/root_cause.py" = ["E402", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict
+"smartsuite/engine/root_cause.py" = ["E402", "I001", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict + logger mid-imports
 "smartsuite/engine/spc_monitor.py" = ["N806", "B007", "B905"]  # math vars + zip strict
 "smartsuite/cli.py" = ["E402"]  # matplotlib.use before imports
 "smartsuite/web/*" = ["E402"]  # matplotlib config before imports
