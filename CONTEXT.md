@@ -1,9 +1,6 @@
 # SmartSuite — 领域术语表
 
-> 本文件定义 SmartSuite 项目的领域术语，用于统一团队沟通和代理协作。
-> 格式遵循 skills-main/domain-modeling 约定。
-
----
+> 统一团队沟通和代理协作的术语定义。架构与模块结构见 `CLAUDE.md`，开发陷阱见 `skills/smartsuite-dev.md`。
 
 ## 核心概念
 
@@ -18,40 +15,21 @@ _Avoid_: 参数对象、输入 DTO、请求体
 _Avoid_: 响应对象、输出 DTO、返回结构
 
 ### 分析任务 (task)
-标识分析方法的字符串键。如 `"anova"`、`"correlation"`、`"doe_rsm"`、`"spc_xbar"`。Orchestrator 据此路由到对应引擎函数。
+标识分析方法的字符串键。如 `"anova"`、`"correlation"`、`"spc_xbar"`。Orchestrator 据此路由到对应引擎函数。
 
 _Avoid_: 命令、动作、操作码
 
 ### 分析模板 (template)
-一个 YAML 文件，完整描述一次分析的全部参数（task + 列映射 + 方法参数 + 输出格式）。可保存、复用、分享。使重复性分析一键运行。
+一个 YAML 文件，完整描述一次分析的全部参数（task + 列映射 + 方法参数 + 输出格式）。可保存、复用、分享。
 
 _Avoid_: 配置文件、preset、recipe
 
----
-
-## 架构术语
-
-### 引擎层 (engine/)
-三层架构的底层。纯 Python 包，实现所有分析方法。输入 `AnalysisRequest`，输出 `AnalysisResult`。
-
-_Avoid_: 核心层、算法层、计算层
-
-### 服务层 (services/)
-三层架构的中间层。负责：数据 I/O（Excel → DataFrame）、工作流编排（路由 task 到引擎函数）、报告生成（PDF/PPT/HTML）。
-
-_Avoid_: 业务层、逻辑层、中间件
-
-### Web 层 (web/)
-Flask Web UI。依赖服务层，不直接依赖引擎层。提供文件上传、列定义、一键分析和结果展示。
-
-_Avoid_: 前端
+## 组织术语
 
 ### 工作流编排 (Orchestrator)
 服务层中的路由模块。接收 `AnalysisRequest`，按 `task` 字段分发到对应引擎函数，注入默认参数，返回 `AnalysisResult`。
 
 _Avoid_: 控制器、调度器、router
-
----
 
 ## 分析领域术语
 
@@ -61,7 +39,7 @@ _Avoid_: 控制器、调度器、router
 _Avoid_: 归因分析、因素分析
 
 ### DOE (Design of Experiments)
-实验设计方法。在工艺开发中用于最小实验次数找到最优参数组合。覆盖：全因子、部分因子、响应面、多目标优化。
+实验设计方法。用于最小实验次数找到最优参数组合。覆盖：全因子、部分因子、响应面、多目标优化。
 
 _Avoid_: 实验设计（中英文混用以保持术语一致性）
 
@@ -83,14 +61,12 @@ _Avoid_: 工序能力、工程能力
 ### 工艺参数 (Process Parameter)
 可调可控的生产变量。如：温度、压力、时间、速度。在分析中通常作为自变量 X。
 
-_Avoid_: 因子、变量、特征（在本项目中，"因子"可用，"特征"保留给 ML 语境）
+_Avoid_: 因子、变量、特征（"因子"可用，"特征"保留给 ML 语境）
 
 ### 质量指标 (Quality Characteristic)
 衡量产品/过程质量的结果变量。如：强度、尺寸、不良率。在分析中通常作为因变量 Y。
 
 _Avoid_: 目标变量、响应变量、输出变量
-
----
 
 ## 输出术语
 

@@ -268,6 +268,10 @@ def list_tasks():
 
 
 def main(host="127.0.0.1", port=5050, debug=False):
+    # 日志配置：文件 DEBUG 全量，控制台 INFO
+    from smartsuite import setup_logging
+    setup_logging()
+
     if debug and host != "127.0.0.1":
         print("⚠️  警告: debug 模式仅在 localhost 下安全，已强制绑定 127.0.0.1")
         host = "127.0.0.1"

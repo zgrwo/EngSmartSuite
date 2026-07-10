@@ -72,6 +72,9 @@ scripts/demo_all_analyses.py
 # CodeGraph 索引（本地重建，不推送）
 .codegraph/
 
+# 日志文件（本地运行时产物）
+logs/
+
 # 第三方 skills（本地参考，不推送）
 skills/Auto-Empirical-Research-Skills-main/
 

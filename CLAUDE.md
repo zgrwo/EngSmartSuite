@@ -2,8 +2,22 @@
 
 工艺数据分析工具箱，将 Python 统计分析能力与 Excel 交互体验深度整合。
 
-> **本文档面向 AI 编程助手和开发者**，定义项目开发规范与架构约束。
-> 领域术语见 `CONTEXT.md`，分析工作流模式见 `docs/skill.md`，API 参考见 `docs/api-reference.md`。
+> **本文档面向 AI 编程助手和开发者**，定义项目开发规范与架构约束。是模块结构、架构规则、代码风格、测试策略的**唯一信源**。
+>
+> **文档协作**：各文档各司其职，禁止跨职责重复内容。
+> ```
+> ┌─ 面向 AI ─────────────────┐   ┌─ 面向用户 ────────────────┐
+> │ CLAUDE.md  ← 开发入口     │   │ README.md  ← 用户入口      │
+> │   ↓ 编码时加载             │   │   ↓ 操作时查阅             │
+> │ skills/smartsuite-dev.md  │   │ docs/user-manual.md       │
+> │   (陷阱+模板+快速修复)     │   │   (39 方法操作指南)        │
+> │ docs/skill.md             │   │                           │
+> │   (决策树→选分析方法)     │   │                           │
+> │ docs/api-reference.md     │   │                           │
+> │   (39 函数签名查阅)        │   │                           │
+> └───────────────────────────┘   └───────────────────────────┘
+>               ↕ 共享: CONTEXT.md (领域术语·统一语言)
+> ```
 
 ## 模块结构
 
@@ -24,12 +38,11 @@ smartsuite/                     # 主包
 │
 ├── engine/                     # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
 │   ├── __init__.py             # matplotlib 全局配置 + 字体加载 + 公开 API 导出
-│   ├── _palette.py             # 统一可视化配色方案（PALETTE 字典，~60 色值）
-│   ├── _constants.py            # 统计分析常量（阈值/乘数/效应量判定，15 常量）
-│   ├── _palette.py               # 统一可视化配色方案（PALETTE 字典，~60 色值）
-│   ├── root_cause.py             # 要因分析 13 函数 (correlation, anova, hypothesis_test, ...)
-│   ├── doe_opt.py                # DOE/优化 10 函数 (regression, rsm, grid_search, ...)
-│   └── spc_monitor.py            # 过程监控 16 函数 (xbar_r, cpk, cusum, survival, ...)
+│   ├── _palette.py             # 统一可视化配色方案（PALETTE 字典）
+│   ├── _constants.py           # 统计分析常量（阈值/乘数/效应量判定）
+│   ├── root_cause.py           # 要因分析 (correlation, anova, hypothesis_test, ...)
+│   ├── doe_opt.py              # DOE/优化 (regression, rsm, grid_search, ...)
+│   └── spc_monitor.py          # 过程监控 (xbar_r, cpk, cusum, survival, ...)
 │
 ├── services/                   # ② 应用服务层：唯一桥接层，engine 和 web 通过它通信
 │   ├── __init__.py
@@ -43,7 +56,7 @@ smartsuite/                     # 主包
     ├── app.py                  # Flask 入口 + TASK_GROUPS (5 组) + TASK_LABELS (39 项)
     ├── api.py                  # REST API: run_analysis / column_info
     ├── templates/              # Jinja2 模板
-    │   └── index.html          # 主页面（列定义面板 + 分析按钮区 + 结果展示区）
+    │   └── index.html          # 主页面
     └── static/                 # 静态资源
         ├── app.js              # 前端逻辑：列标记、参数面板、API 调用、结果渲染
         └── style.css           # 前端样式
@@ -53,79 +66,39 @@ smartsuite/                     # 主包
 
 ```
 tests/
-├── conftest.py                 # 共享 fixtures (sample_data, sample_multigroup_data, ...)
+├── conftest.py                 # 共享 fixtures
 ├── test_integration.py         # 通用集成测试
-├── test_integration_chemical.py    # 化工场景集成测试
-├── test_integration_reliability.py # 可靠性场景集成测试
-├── test_integration_warranty.py    # 保修场景集成测试
-├── test_master_integration.py      # 39 方法全量集成测试
-├── test_web_e2e.py             # Web UI E2E (需服务器运行, 自动 skip)
+├── test_integration_chemical.py    # 化工场景
+├── test_integration_reliability.py # 可靠性场景
+├── test_integration_warranty.py    # 保修场景
+├── test_master_integration.py      # 39 方法全量集成
+├── test_web_e2e.py             # Web UI E2E (需服务器运行)
 ├── test_workflows.py           # 工作流串联测试
-├── verify_all_modules.py       # 模块导入 + 基本调用验证
+├── verify_all_modules.py       # 模块导入验证
 │
 ├── test_engine/                # 引擎层单元测试
-│   ├── test_root_cause.py      # 要因分析测试
-│   ├── test_doe_opt.py         # DOE/优化测试
-│   ├── test_spc_monitor.py     # SPC 监控测试
-│   ├── test_correctness.py     # 数值正确性断言 — 39/39 方法全覆盖
-│   ├── test_edge_cases.py      # 边界情况测试
-│   ├── test_invariants.py      # 数学不变量测试 (p∈[0,1], Cpk≤Cp, R²≥0…)
-│   ├── test_fuzz.py            # 边界模糊测试 (NaN/空/常量/大样本/共线)
+│   ├── test_root_cause.py / test_doe_opt.py / test_spc_monitor.py
+│   ├── test_correctness.py     # 数值正确性 — 39/39 全覆盖
+│   ├── test_edge_cases.py      # 边界情况
+│   ├── test_invariants.py      # 数学不变量 (p∈[0,1], Cpk≤Cp, R²≥0…)
+│   ├── test_fuzz.py            # 模糊测试 (NaN/空/常量/大样本)
 │   └── test_new_functions.py   # 新函数验证
 │
 └── test_services/              # 服务层单元测试
-    ├── test_orchestrator.py    # 编排路由测试
-    ├── test_reporter.py        # 报告生成测试
-    ├── test_differential.py    # CLI vs Web 路径一致性测试
-    └── test_manual_parity.py   # Web/CLI/Python/手册 四路一致性验证
+    ├── test_orchestrator.py / test_reporter.py
+    ├── test_differential.py    # CLI vs Web 路径一致性
+    └── test_manual_parity.py   # Web/CLI/Python/手册 四路一致性
 ```
 
-### 启动脚本
+### 其他目录
 
 ```
-run_smartsuite.bat              # Windows 一键启动（双击运行）
-run_smartsuite.sh               # macOS/Linux 一键启动（双击或 ./run_smartsuite.sh）
-run_server.py                   # Web UI 启动入口（被上述脚本调用，也可单独运行）
-```
-
-### 模板与脚本
-
-```
-templates/                      # YAML 分析模板 (42 个，39 方法 + 2 变体 + 1 教程模板)
-│                               # CLI 调用: smartsuite run --template <name>
-├── example_correlation.yaml    # 每个 task key 对应一个模板
-├── example_anova.yaml
-├── ...                         # (共 42 个 .yaml)
-└── example_full_suite.yaml     # 多步骤链式分析教程模板
-
-scripts/                        # 开发辅助脚本（非 pip 安装）
-├── README.md                   # 脚本目录说明
-├── generate_test_data.py       # 通用测试数据生成 (1000行×44列)
-├── generate_chemical_data.py   # 化工场景数据
-├── generate_assembly_data.py   # 装配场景数据
-├── generate_pharma_data.py     # 制药场景数据
-├── generate_reliability_data.py    # 可靠性场景数据
-├── generate_warranty_data.py       # 保修场景数据
-├── generate_manual_images.py       # 用户手册配图生成
-├── demo_all_analyses.py            # 39 方法集成演示
-├── verify_consistency.py           # 文档与代码一致性校验
-├── verify_cross_consistency.py     # Web/CLI 交叉验证
-└── smartsuite_gui.py               # 桌面 GUI 启动器（实验性）
-```
-
-### 文档与 CI
-
-```
-docs/                           # 项目文档
-├── user-manual.md              # 用户操作手册 (968 行)
-├── api-reference.md            # API 参考 (39 函数完整签名)
-├── skill.md                    # AI Agent 决策知识库
-├── adr/                        # 架构决策记录 (2 项)
-├── contributing/               # 贡献指南 (含代码审查模板)
-├── known-issues.md              # 代码审查豁免清单与已评估问题
-└── images/                     # 用户手册配图 (37 PNG)
-
-.github/workflows/ci.yml        # GitHub Actions: ruff + pytest (3.10/3.11/3.12)
+run_smartsuite.bat / run_smartsuite.sh   # 一键启动脚本
+run_server.py                            # Web UI 启动入口
+templates/                               # YAML 分析模板 (42 个)
+scripts/                                 # 开发辅助脚本（非 pip 安装）
+docs/                                    # 项目文档 (adr/ contributing/ user-manual.md ...)
+skills/                                  # Claude Code 自定义技能
 ```
 
 ## 架构约束（硬性规则）
@@ -154,31 +127,14 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 ## 测试策略
 
-测试分为 4 层防线，逐层深入：
+4 层防线，逐层深入：
 
-### 第 1 层：数值正确性（参考实现对比）
-- 文件：`tests/test_engine/test_correctness.py`
-- 每个分析函数至少一个测试：构造已知属性数据 → 调用函数 → 与 scipy/statsmodels 直接计算结果对比
-- 覆盖：**39/39 方法**（100%）
-- 重点验证：效应量、p 值、置信区间、系数估计的正确性
-
-### 第 2 层：数学不变量
-- 文件：`tests/test_engine/test_invariants.py`
-- 不依赖"正确答案"，只验证数学上不可能违反的约束
-- 示例：p∈[0,1]、Cpk≤Cp、R²≥0、KM 曲线单调递减、R 图 LCL≥0
-- 能捕获系统性偏差（如公式用错导致 Cpk 异常）
-
-### 第 3 层：边界模糊测试
-- 文件：`tests/test_engine/test_fuzz.py`
-- 极端/随机输入下不应崩溃、不产生 NaN p 值
-- 覆盖：空数据、单行、全 NaN、常量列、共线性、n>5000、不等子组
-- 能捕获静默失败、NaN 传播、p>1 等
-
-### 第 4 层：差分测试（路径一致性）
-- 文件：`tests/test_services/test_differential.py`
-- 验证 CLI 路径（preprocess → orchestrate）与 Web API 路径产生相同数值
-- 能捕获参数默认值不一致、预处理路径差异
-- TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性检查
+| 层 | 文件 | 验证内容 | 覆盖率 |
+|---|---|---|---|
+| ① 数值正确性 | `test_correctness.py` | 与 scipy/statsmodels 参考实现对比 | 39/39 (100%) |
+| ② 数学不变量 | `test_invariants.py` | p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减、R 图 LCL≥0 | 关键函数 |
+| ③ 边界模糊 | `test_fuzz.py` | 空数据/单行/全NaN/常量列/共线/n>5000/不等子组 | 全部 |
+| ④ 差分测试 | `test_differential.py` | CLI vs Web API 数值一致 + TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性 | 全部 |
 
 ### 集成与 E2E
 - 引擎层：pytest 单元测试，每个分析函数至少一个标准输入→断言输出正确性
@@ -196,123 +152,44 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 ## 新增分析函数的步骤
 
-1. 在对应引擎文件中实现 `(AnalysisRequest) -> AnalysisResult` 函数
-2. 在 `engine/__init__.py` 中导出
-3. 在 `services/orchestrator.py` 的 `TASK_REGISTRY` 中注册
-4. 如有默认参数，添加到 `DEFAULT_PARAMS`
-5. 在 `services/orchestrator.py` 的 `TASK_LABELS` 和 `TASK_GROUPS` 中添加条目
-6. 在 `web/static/app.js` 的 `TASK_PARAMS` 中添加参数默认值（如有）
-7. 创建 YAML 模板到 `templates/`
-8. 添加测试（4 层防线，按适用性至少覆盖 2 层）：
-   - **必做**：`test_correctness.py` 添加参考实现对比测试
-   - **必做**：`test_invariants.py` 添加数学不变量断言（如函数返回 p 值必须 ∈ [0,1]）
-   - **推荐**：`test_fuzz.py` 添加边界输入用例（空数据/NaN/常量列等）
-   - **如涉及 Web 参数**：确保 `DEFAULT_PARAMS` 与 `app.js` 的 `TASK_PARAMS` 一致
+1. 引擎文件中实现 `(AnalysisRequest) -> AnalysisResult` 函数
+2. `engine/__init__.py` 中导出
+3. `services/orchestrator.py` 的 `TASK_REGISTRY` 中注册
+4. `DEFAULT_PARAMS` 中添加默认参数
+5. `TASK_LABELS` + `TASK_GROUPS` 中添加条目
+6. `web/static/app.js` 的 `TASK_PARAMS` 中添加参数默认值
+7. `templates/` 创建 YAML 模板
+8. 测试（≥2 层防线）：`test_correctness.py` + `test_invariants.py` 必做；`test_fuzz.py` 推荐
 9. 更新 `docs/api-reference.md`
-10. 更新 `docs/skill.md` 决策树（如引入新的分析场景）
+10. 更新 `docs/skill.md` 决策树（如引入新分析场景）
 11. 更新 `docs/user-manual.md`（如为面向用户的新方法）
 
-## 常见陷阱
+## 会话管理
 
-1. **`model.params.values` 兼容性**: 新版 statsmodels 的 `.params` 可能返回 numpy 数组而非 pandas Series。使用 `np.asarray(model.params)` 替代 `.values`
-2. **`figures` 列表初始化**: 必须在所有 `figures.append()` 之前初始化 `figures = [fig]`，否则散点矩阵等子图会因 `NameError` 被静默跳过
-3. **Cochran Q 二值化**: 逐列独立编码，每列必须恰好 2 个唯一值。使用 `_binary_encode()` 工具函数
-4. **Tukey HSD 事后检验**: 使用公开 API (`tukey.pvalues`/`tukey.meandiffs`/`tukey.reject`)，不要访问 `_results_table`
-5. **异常消息语言**: `engine/` 和 `services/` 的错误消息必须使用中文工艺术语。`orchestrate()` 中的 `except` 子句使用异常类型映射表翻译
-6. **Web 与 Python 结果一致性**: Web UI 的 `preprocess_data` 会做中位数填充和 One-Hot 编码，与 Python 直接调用结果略有差异（~0.002）。验证时应走相同预处理路径
-
-## 架构决策
-
-见 `docs/adr/`。当前决策：
-- ADR-001：三层分离架构（2026-07-05 修订：Excel 层已移除）
-- ADR-002：Web UI 替换 Excel 交互层（2026-07-04）
+- **上下文膨胀时**（修改超过 5 个文件、持续超过 20 轮对话、token 预算接近耗尽）→ 提醒用户 `/clear` 开启新会话
+- 新会话中先速览本文件（架构+约束）和 `skills/smartsuite-dev.md`（陷阱清单）
+- 跨会话工作通过 **git commit** 衔接，不依赖对话历史传递上下文
+- 每个 commit 应自包含、可追溯：`git log --oneline` 应能独立理解改动意图
 
 ## 常用命令
 
 ```bash
-# 安装开发环境
-pip install -e ".[dev]"
-
-# 运行测试
-pytest
-
-# 代码检查
-ruff check smartsuite/
-
-# 启动 Web UI
-python smartsuite/web/app.py
-
-# 列出所有分析方法
-python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"
+pip install -e ".[dev]"                     # 安装开发环境
+pytest                                      # 运行测试
+pytest tests/ -x -q                         # 快速运行（遇错即停）
+ruff check smartsuite/                      # 代码检查
+python smartsuite/web/app.py                # 启动 Web UI
+python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY))"
 ```
 
-## 用户手册示例编写规范
+## 参考文件索引
 
-`docs/user-manual.md` 中每个分析方法的示例必须遵循统一的六段式结构。
-
-### 结构模板
-
-```markdown
-### X.Y 方法名称 (`task_key`)
-
-**功能**: 一句话说明方法做什么。关键输出指标。
-
-#### 参数选择及说明
-
-| 类别 | 选择 | 作用 |
-|------|------|------|
-| **Y** | `列名` | 为什么选它——从工艺/分析角度说明 |
-| **X** | `列名` | ⚠️ 如需标记为类别，显式标注 |
-| **参数** | `名称=值` | 参数含义及取值范围 |
-
-> ⚠️ **协同要求**：必须同时满足的条件。多列/参数间的依赖关系。
-
-#### 示例分析图片
-
-![图注](images/method_1.png)
-
-*斜体说明图表内容和关键观察点。*
-
-**操作**: 按上表标记 → 点击 **分析按钮名**
-
-#### 数值结果（Web UI ≡ Python）
-
-`表名` — 一句话说明：
-
-| 列1 | 列2 | ... |
-|-----|-----|-----|
-| ... | ... | ... |
-
-> **一致性说明**：必要时标注 Web UI 与 Python 路径的差异。
-
-#### 解读说明
-
-- **关键发现**：工艺语言，从最重要的结论开始。
-- **判定依据**：引用具体数值（p值/效应量/R²）。
-- **判定标准**：效应的实际意义——不要只说"显著/不显著"。
-- **后续建议**：基于分析结果给出下一步行动建议。
-
-#### 补充备注
-
-- **技术限制**：方法的适用条件和注意事项。
-- **Python API**：`orchestrate(AnalysisRequest(task='task_key', ...))` → 返回的表格和图表。
-```
-
-### 硬性约束
-
-1. **节顺序不可变**：参数选择 → 示例图片 → 数值结果 → 解读说明 → 补充备注。逻辑是"选参数→执行→看图看数→读懂→了解更多"。
-2. **图片在参数之后**：`#### 示例分析图片` 必须在 `#### 参数选择及说明` 之后，不得出现在 `**功能**` 之前。
-3. **数值走 Web UI 路径**：所有数值必须通过 `orchestrate()` + `preprocess_data()` 生成，禁止手工计算或直接调引擎函数。
-4. **图片从源码生成**：运行 `orchestrate()` 后 `fig.savefig()` 保存，禁止截图或外部图片。
-5. **表格命名**：每张表格标注对应的 `table key`（如 `annotated_matrix`、`coefficients`），与 `AnalysisResult.tables` 一致。
-6. **协同要求**：每个方法的参数选择及说明后必须有 `⚠️ **协同要求**` 引用框，说明多列/参数的强制依赖。
-7. **Python API**：每个方法的补充备注中必须包含一行 `orchestrate(AnalysisRequest(...))` 调用示例。
-
-### 新增/修改方法时的检查清单
-
-1. 运行 `orchestrate()` → 保存图片到 `docs/images/[task]_1.png`
-2. 核对所有表格的数值（至少 3 位有效数字）
-3. 确认六段式结构完整
-4. 确认图片在参数表之后
-5. 确认解读说明使用中文工艺术语
-6. 确认协同要求框存在且内容准确
+| 文档 | 路径 | 何时查阅 |
+|------|------|---------|
+| 开发技能（陷阱+模板） | `skills/smartsuite-dev.md` | 编码前必读 |
+| 分析决策树 | `docs/skill.md` | 为用户推荐分析方法时 |
+| API 参考 | `docs/api-reference.md` | 查函数签名+表格键名 |
+| 领域术语 | `CONTEXT.md` | 术语统一 |
+| 架构决策 | `docs/adr/` | 理解设计抉择 |
+| 已知问题豁免 | `.claude/known-issues.md` | 代码审查前 |
+| 用户手册 | `docs/user-manual.md` | 用户操作指南 |

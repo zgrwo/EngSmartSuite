@@ -1,15 +1,6 @@
-# SmartSuite AI Agent 领域知识
+# SmartSuite 分析方法决策树
 
-> 帮助 AI 编程助手在工艺数据分析场景中推荐方法、串联工作流、诊断问题。
-> 开发规范见 `CLAUDE.md`，API 参考见 `docs/api-reference.md`，术语见 `CONTEXT.md`。
-
-## 项目定位
-
-工艺数据分析工具箱，面向制造工艺工程师。39 个分析方法，Web UI（`python smartsuite/web/app.py`）+ Python API。V1 不做实时采集、深度学习、云部署。
-
-## 分析方法决策树
-
-**这是本文件的核心**——当用户描述一个分析需求时，按此树推荐方法：
+> 当用户描述一个分析需求时，按此树推荐方法。完整开发规范见 `CLAUDE.md`，操作陷阱见 `skills/smartsuite-dev.md`，API 签名见 `docs/api-reference.md`。
 
 ```
 用户的问题是什么？
@@ -65,9 +56,7 @@
     └── 非参数区间 → bootstrap_ci / median_ci
 ```
 
-## 工作流模式
-
-Agent 应理解这 5 条典型的多步骤分析链：
+## 典型工作流链
 
 ```
 1. 要因筛选:  correlation → vif → regression → decision_tree
@@ -76,11 +65,3 @@ Agent 应理解这 5 条典型的多步骤分析链：
 4. SPC 全流程: spc_xbar → process_capability → trend_forecast → anomaly_detect
 5. DOE 优化:  doe_analysis → regression → response_surface → grid_search → multi_objective
 ```
-
-## 关键约定
-
-**异常处理** — 引擎函数返回 `AnalysisResult(status="error", messages=[...])`；`orchestrate()` 用异常类型映射表将 Python 异常转为中文消息；图表失败不影响数值结果。
-
-**预处理差异** — Web UI 走 `preprocess_data()`（中位数填充 + One-Hot），与裸调引擎结果差约 ~0.002。验证一致性时两边应走相同预处理路径。
-
-**常见陷阱速查** — 因子水平 >50 时 Tukey HSD 自动跳过（防超时）；图表中文需 Microsoft YaHei 字体；`np.asarray(model.params)` 不用 `.values`（statsmodels 兼容性）。

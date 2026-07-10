@@ -19,6 +19,9 @@ from smartsuite.services.orchestrator import RAW_CAT_TASKS, TASK_LABELS, TASK_RE
 
 
 def main():
+    from smartsuite import setup_logging
+    setup_logging()
+
     parser = argparse.ArgumentParser(
         description="SmartSuite — 工艺数据分析工具箱")
     subparsers = parser.add_subparsers(dest="command")
