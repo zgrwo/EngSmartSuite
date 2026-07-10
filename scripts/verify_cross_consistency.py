@@ -17,7 +17,7 @@ np.random.seed(42)
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine import *
-from smartsuite.services.orchestrator import orchestrate, TASK_REGISTRY
+from smartsuite.services.orchestrator import RAW_CAT_TASKS, orchestrate, TASK_REGISTRY
 from smartsuite.services.data_io import preprocess_data
 
 # ── 加载测试数据 ──
@@ -168,7 +168,7 @@ for task, target, features, cats, params in TEST_CASES:
     try:
         df_b = df_raw.copy()
         # 模拟 Web UI 预处理: 要因分析/box_chart/anova 保留原始类别列
-        raw_cat_tasks = {"box_chart", "anova", "variance_test", "contingency", "cohens_kappa", "hypothesis_test"}
+        raw_cat_tasks = RAW_CAT_TASKS
         if task in raw_cat_tasks:
             feat_b = list(features)
         else:

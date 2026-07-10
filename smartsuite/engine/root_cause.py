@@ -729,7 +729,7 @@ def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
             messages=["Cochran Q 无法计算：所有样本在各条件下的响应完全一致（分母为零），"
                       "不满足检验前提。"])
     Q = Q / denom
-    p = float(1 - sp_stats.chi2.cdf(max(Q, 0), k - 1))
+    p = float(sp_stats.chi2.sf(max(Q, 0), k - 1))
     test_name = f"Cochran Q 检验 ({k} 条件)"
     alpha = req.params.get("alpha", 0.05)
     conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
@@ -1163,7 +1163,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         else:
             stat = 0
             test_name_suffix = ""
-        p = float(1 - sp_stats.chi2.cdf(stat, 1))
+        p = float(sp_stats.chi2.sf(stat, 1))
 
         test_name = f"McNemar 检验 ({col1} → {col2}){test_name_suffix}"
         alpha = req.params.get("alpha", 0.05)

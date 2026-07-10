@@ -61,7 +61,7 @@ def _breusch_pagan(model, X):
         rss = np.sum((resid_sq - aux_model.fittedvalues)**2)
         lm = n * ess / (ess + rss)
         k = X.shape[1] - 1
-        p_val = float(1 - sp_stats.chi2.cdf(lm, max(k, 1)))
+        p_val = float(sp_stats.chi2.sf(lm, max(k, 1)))
         return float(lm), p_val
     except (ValueError, np.linalg.LinAlgError):
         logger.debug("Breusch-Pagan 异方差检验失败（数据异常或矩阵奇异）", exc_info=True)
@@ -717,7 +717,8 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         pareto_idx = order[pareto_mask]
         pareto_sorted = pareto_idx[np.argsort(points[pareto_idx, 0])]
         ax_pareto.plot(points[pareto_sorted, 0], points[pareto_sorted, 1],
-                      "r-", linewidth=2, alpha=0.7, label=f"Pareto 前沿 ({len(pareto_sorted)}点)")
+                      color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2, alpha=0.7,
+                      label=f"Pareto 前沿 ({len(pareto_sorted)}点)")
         # 标记最优
         best_pos_in_valid = best_pos
         ax_pareto.scatter([vals0_plot[best_pos_in_valid]], [vals1_plot[best_pos_in_valid]],

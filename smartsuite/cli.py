@@ -5,6 +5,7 @@ import sys
 
 logger = logging.getLogger(__name__)
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import yaml
 
@@ -107,6 +108,8 @@ def main():
         )
         result = orchestrate(req)
         print(result.summary)
+        for fig in result.figures:
+            plt.close(fig)
         for msg in result.messages:
             print(f"  [{result.status}] {msg}")
 

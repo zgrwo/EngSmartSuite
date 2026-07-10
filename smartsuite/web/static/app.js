@@ -255,6 +255,7 @@ const PARAM_LABELS = {
   model_type: '模型类型', min_segment: '最小段长', n_changepoints: '变点数',
   group_col: '分组列', max_depth: '最大深度',
   sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
+  target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
 };
 

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.engine import DW_SAFE_LOWER, DW_SAFE_UPPER, PALETTE
+from smartsuite.engine import CPK_GOOD, CPK_MINIMUM, DW_SAFE_LOWER, DW_SAFE_UPPER, PALETTE
 from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
 from smartsuite.services.orchestrator import orchestrate
 
@@ -105,15 +105,15 @@ def process_audit(
             _close_figures(r)
             results["capability"] = {"status": r.status, "summary": r.summary}
             cpk = r.metadata.get("cpk")
-            if cpk is not None and cpk >= 1.33:
+            if cpk is not None and cpk >= CPK_GOOD:
                 health_checks.append({"检查项": "过程能力", "状态": "✓ 合格",
-                                     "详情": f"Cpk={cpk:.3f} ≥ 1.33"})
-            elif cpk is not None and cpk >= 1.0:
+                                     "详情": f"Cpk={cpk:.3f} ≥ {CPK_GOOD}"})
+            elif cpk is not None and cpk >= CPK_MINIMUM:
                 health_checks.append({"检查项": "过程能力", "状态": "⚠ 勉强",
-                                     "详情": f"Cpk={cpk:.3f} (1.0~1.33)"})
+                                     "详情": f"Cpk={cpk:.3f} ({CPK_MINIMUM}~{CPK_GOOD})"})
             elif cpk is not None:
                 health_checks.append({"检查项": "过程能力", "状态": "✗ 不合格",
-                                     "详情": f"Cpk={cpk:.3f} < 1.0"})
+                                     "详情": f"Cpk={cpk:.3f} < {CPK_MINIMUM}"})
             else:
                 health_checks.append({"检查项": "过程能力", "状态": "—",
                                      "详情": "未计算"})

@@ -75,11 +75,11 @@ ignore = ["E501"]  # line-length handled by formatter
 
 [tool.ruff.lint.per-file-ignores]
 "smartsuite/engine/__init__.py" = ["E402", "I001"]  # matplotlib config + core deps check must precede imports
-"smartsuite/engine/doe_opt.py" = ["E402", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict
+"smartsuite/engine/doe_opt.py" = ["E402", "I001", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict + sorted imports
 "smartsuite/engine/root_cause.py" = ["E402", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict
 "smartsuite/engine/spc_monitor.py" = ["N806", "B007", "B905"]  # math vars + zip strict
 "smartsuite/cli.py" = ["E402"]  # matplotlib.use before imports
 "smartsuite/web/*" = ["E402"]  # matplotlib config before imports
 "smartsuite/services/orchestrator.py" = ["I001"]  # sorted engine imports for readability
 "smartsuite/services/reporter.py" = ["N806", "B904"]  # txBox variable + raise from err (Python 3.10)
-"tests/*" = ["N806", "E501", "F841", "B007", "E701", "E402"]  # test fixtures + math vars
+"tests/*" = ["N806", "E501", "F841", "B007", "E701", "E402", "I001"]  # test fixtures + math vars + import order

@@ -436,7 +436,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         # p-chart: 不良率 = 不良数 / 检验数
         n_col = req.params.get("n_col")
         if n_col and n_col in req.data.columns:
-            n_vals = req.data.groupby(subgroup_col)[n_col].first() if subgroup_col else req.data[n_col]
+            n_vals = req.data.groupby(subgroup_col)[n_col].first() if (subgroup_col and subgroup_col in req.data.columns) else req.data[n_col]
         else:
             n_vals = sizes
         if (n_vals == 0).any():
@@ -482,7 +482,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         # u-chart: 单位缺陷率 (变检验单位)
         n_col = req.params.get("n_col")
         if n_col and n_col in req.data.columns:
-            n_vals = req.data.groupby(subgroup_col)[n_col].first() if subgroup_col else req.data[n_col]
+            n_vals = req.data.groupby(subgroup_col)[n_col].first() if (subgroup_col and subgroup_col in req.data.columns) else req.data[n_col]
         else:
             n_vals = sizes
         if (n_vals == 0).any():
@@ -726,14 +726,14 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     has_both = has_upper and has_lower
 
     # Cp/Cpk (短期/组内) — 单侧公差仅计算 Cpk
-    cp = float((usl - lsl) / (6 * within_sigma)) if has_both and within_sigma > 0 else None
+    cp = float((usl - lsl) / (6 * within_sigma)) if has_both and np.isfinite(within_sigma) and within_sigma > 0 else None
     if has_upper and has_lower:
         cpk_val = float(min((usl - mu) / (3 * within_sigma),
-                            (mu - lsl) / (3 * within_sigma))) if within_sigma > 0 else None
+                            (mu - lsl) / (3 * within_sigma))) if np.isfinite(within_sigma) and within_sigma > 0 else None
     elif has_upper:
-        cpk_val = float((usl - mu) / (3 * within_sigma)) if within_sigma > 0 else None
+        cpk_val = float((usl - mu) / (3 * within_sigma)) if np.isfinite(within_sigma) and within_sigma > 0 else None
     elif has_lower:
-        cpk_val = float((mu - lsl) / (3 * within_sigma)) if within_sigma > 0 else None
+        cpk_val = float((mu - lsl) / (3 * within_sigma)) if np.isfinite(within_sigma) and within_sigma > 0 else None
     else:
         cpk_val = None
 
@@ -1079,7 +1079,8 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # 右下：Actual vs Predicted
         ax4 = fig.add_subplot(2, 2, 4)
         ax4.scatter(y_pred_in, y, s=12, alpha=0.6, color=PALETTE["data"]["primary"])
-        ax4.plot([y.min(), y.max()], [y.min(), y.max()], "r--", linewidth=1)
+        ax4.plot([y.min(), y.max()], [y.min(), y.max()],
+                 color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
         ax4.set_xlabel("预测值", fontsize=9)
         ax4.set_ylabel("实际值", fontsize=9)
         ax4.set_title(f"Actual vs Predicted (R²={r2:.3f})", fontsize=10)
@@ -1163,6 +1164,13 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     z = (data.values - mu) / sigma
     k = req.params.get("k", 0.5)   # 默认检测 1σ 偏移
     h = req.params.get("h", 5.0)   # 默认决策区间
+    try:
+        k, h = float(k), float(h)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="spc_cusum", status="error",
+            messages=[f"参数 k/h 值无效: k={k}, h={h}，请输入数值"],
+        )
 
     # ── 参数有效性校验 (P3 fix: 防止 k≤0 或 h≤0 导致算法退化) ──
     if k <= 0:
@@ -1287,6 +1295,13 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
 
     lam = req.params.get("lam", 0.2)
     L = req.params.get("L", 2.7)
+    try:
+        lam, L = float(lam), float(L)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="spc_ewma", status="error",
+            messages=[f"参数 lam/L 值无效: lam={lam}, L={L}，请输入数值"],
+        )
     if not 0 < lam <= 1:
         return AnalysisResult(
             task="spc_ewma", status="error",
@@ -1482,6 +1497,12 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
 
     # Total Variation
     tv = np.sqrt(grr**2 + pv**2)
+    if tv < 1e-10:
+        return AnalysisResult(
+            task="gage_rr", status="error",
+            messages=["所有测量值完全一致（零变异），无法评估测量系统。"
+                      "请检查数据：可能量具精度不足、数据录入错误或过程变异为零。"],
+        )
     tv_pct = tv * sigma_mult
 
     # % contribution
@@ -1671,6 +1692,15 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
         else:
             return AnalysisResult(task="survival_analysis", status="error",
                 messages=[f"事件列「{event_col}」需要恰好2个不同值(0/1 或 是/否)，当前有{len(unique_vals)}个"])
+
+    # 零事件防护
+    n_events_total = int(events.sum())
+    if n_events_total == 0:
+        return AnalysisResult(
+            task="survival_analysis", status="error",
+            messages=["所有观测均为删失数据（无失效事件），无法估计生存函数。"
+                      "请检查事件列是否正确标记了失效事件 (1=失效)。"],
+        )
 
     # KM 估计 (全样本)
     unique_times = np.sort(np.unique(times[events == 1]))
