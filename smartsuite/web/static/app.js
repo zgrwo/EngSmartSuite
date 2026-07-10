@@ -168,6 +168,14 @@ const PARAM_META = {
       ['mad', 'MAD (中位数绝对偏差)'],
     ]
   },
+  'method@correlation': {
+    type: 'select', label: '相关方法',
+    options: [
+      ['pearson', 'Pearson (线性相关)'],
+      ['spearman', 'Spearman (秩相关)'],
+      ['kendall', 'Kendall (秩相关)'],
+    ]
+  },
   side: {
     type: 'select', label: '检验侧',
     options: [

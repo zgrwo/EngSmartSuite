@@ -73,9 +73,10 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
         unknown_cat_warnings: 未知类别警告列表，每个元素为 (col, unknown_categories, n_affected)，
                              调用方可据此决定是否中断分析或向用户展示警告
     """
-    if categorical_cols is None:
+    if not categorical_cols:
         categorical_cols = {c for c in features
-                           if str(df[c].dtype) in ('object', 'string', 'category')
+                           if (pd.api.types.is_string_dtype(df[c])
+                               or str(df[c].dtype) in ('object', 'category'))
                            and not pd.api.types.is_numeric_dtype(df[c])}
 
     df = df.copy()
@@ -141,9 +142,6 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                     logger.warning("列「%s」全部为非数值，填充为 0", col)
                     df[col] = df[col].fillna(0)
                     imputation_log[col] = n_missing
-                    unknown_cat_warnings.append(
-                        (col, {"<全列非数值，已强制填充为0>"}, n_missing)
-                    )
                 else:
                     median_val = valid_vals.median()
                     df.loc[total_na, col] = median_val
@@ -457,6 +455,6 @@ def preprocess_for_task(df: pd.DataFrame, features: list[str], task: str,
     """
     if raw_cat_tasks and task in raw_cat_tasks:
         return df.copy(), list(features), {}, []
-    cat_set = set(categoricals) if categoricals else set()
+    cat_set = set(categoricals) if categoricals else None  # None 触发 auto-detect
     df_enc, feat_enc, _, imputation_log, unknown_cat_warnings = preprocess_data(df, features, cat_set)
     return df_enc, feat_enc, imputation_log, unknown_cat_warnings

@@ -9,8 +9,8 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine.root_cause import _threshold_label
-from smartsuite.engine.spc_monitor import durbin_watson
+from smartsuite.engine.root_cause import threshold_label
+from smartsuite.engine.spc_monitor import durbin_watson  # 同包子模块引用，engine/__init__.py 公开导出供外部使用
 
 logger = logging.getLogger(__name__)
 
@@ -800,8 +800,8 @@ def _lenth_pse(effects):
 
 
 def _effect_label_doe(effect_ratio):
-    """DOE 效应量解读 — 委托 _threshold_label 统一实现。"""
-    return _threshold_label(effect_ratio, [0.05, 0.15, 0.30], ("可忽略", "小", "中", "大"))
+    """DOE 效应量解读 — 委托 threshold_label 统一实现。"""
+    return threshold_label(effect_ratio, [0.05, 0.15, 0.30], ("可忽略", "小", "中", "大"))
 
 
 def doe_analysis(req: AnalysisRequest) -> AnalysisResult:

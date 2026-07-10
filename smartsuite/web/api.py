@@ -69,7 +69,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         df, features, task, categoricals, RAW_CAT_TASKS)
     # 将数据预处理日志转换为用户可见的警告
     for col, n_coerced in imputation_log.items():
-        data_warnings.append(f"列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
+        data_warnings.append(f"列「{col}」中 {n_coerced} 个缺失值已自动填充")
     # 未知类别警告：提升为用户可见的 P0 级警告（可能影响分析准确性）
     for col, extra_cats, n_affected in unknown_cat_warnings:
         data_warnings.append(

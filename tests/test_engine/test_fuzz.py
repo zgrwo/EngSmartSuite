@@ -7,7 +7,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.doe_opt import grid_search, regression_analysis
@@ -26,63 +25,6 @@ from smartsuite.engine.spc_monitor import (
 )
 
 
-@pytest.fixture
-def tiny_df():
-    """2 行数据 — 最小可分析数据集。"""
-    return pd.DataFrame({"x": [1, 2], "y": [3, 4]})
-
-
-@pytest.fixture
-def constant_df():
-    """常量数据 — 所有值相同（标准差为 0）。"""
-    return pd.DataFrame({"x": [5.0] * 20, "y": [5.0] * 20,
-                         "group": ["A"] * 10 + ["B"] * 10})
-
-
-@pytest.fixture
-def nan_df():
-    """含 NaN 的数据。"""
-    np.random.seed(42)
-    df = pd.DataFrame({
-        "x": np.random.normal(0, 1, 30),
-        "y": np.random.normal(0, 1, 30),
-        "group": ["A"] * 15 + ["B"] * 15,
-    })
-    df.loc[0, "x"] = np.nan
-    df.loc[1, "y"] = np.nan
-    return df
-
-
-@pytest.fixture
-def single_row_df():
-    """单行数据。"""
-    return pd.DataFrame({"x": [1.0], "y": [2.0]})
-
-
-@pytest.fixture
-def large_df():
-    """大样本数据 (5000 行)。"""
-    np.random.seed(42)
-    n = 5000
-    return pd.DataFrame({
-        "x": np.random.normal(0, 1, n),
-        "y": np.random.normal(0, 1, n),
-        "group": ["A"] * (n // 2) + ["B"] * (n - n // 2),
-    })
-
-
-@pytest.fixture
-def wide_df():
-    """宽表数据 (30 列)。"""
-    np.random.seed(42)
-    n = 50
-    data = {}
-    for i in range(30):
-        data[f"col_{i}"] = np.random.normal(0, 1, n)
-    data["y"] = np.random.normal(0, 1, n)
-    return pd.DataFrame(data)
-
-
 # ═══════════════════════════════════════════════════════════
 # 通用崩溃测试: 任何输入都不能导致未处理异常
 # ═══════════════════════════════════════════════════════════
@@ -91,28 +33,6 @@ def _assert_no_crash(result, func_name, context=""):
     """分析结果必须 status in ('ok', 'error') — 不能抛出未处理异常。"""
     assert result.status in ("ok", "error"), \
         f"{func_name} ({context}): 未知状态 '{result.status}'"
-
-
-def _assert_valid_p_values(tables, metadata, func_name):
-    """如果存在 p 值，必须在 [0, 1] 范围。"""
-    for table_name, tbl in tables.items():
-        if isinstance(tbl, pd.DataFrame):
-            for col in tbl.columns:
-                if "p" in str(col).lower():
-                    for val in tbl[col].dropna():
-                        try:
-                            v = float(val)
-                            if not (0 <= v <= 1):
-                                print(f"  WARNING: {func_name}: p={v} in {table_name}.{col}")
-                        except (ValueError, TypeError):
-                            pass
-    for key, val in metadata.items():
-        if "p_value" in key.lower() and val is not None:
-            try:
-                v = float(val)
-                assert 0 <= v <= 1, f"{func_name}: {key}={v} 不在 [0,1]"
-            except (ValueError, TypeError):
-                pass
 
 
 # ── 相关性 ──

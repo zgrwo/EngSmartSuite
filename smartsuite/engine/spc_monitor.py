@@ -928,7 +928,7 @@ def _ljung_box(residuals, lags=None):
         r_k = np.corrcoef(residuals[k:], residuals[:-k])[0, 1]
         acf_sum += r_k**2 / (n - k)
     q_stat = n * (n + 2) * acf_sum
-    p_val = float(1 - sp_stats.chi2.cdf(q_stat, lags))
+    p_val = float(sp_stats.chi2.sf(q_stat, lags))
     return float(q_stat), p_val, lags
 
 
@@ -1139,7 +1139,13 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     sigma = req.params.get("sigma")
     warn_msgs: list[str] = []
     if mu is not None and sigma is not None:
-        mu, sigma = float(mu), float(sigma)
+        try:
+            mu, sigma = float(mu), float(sigma)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="spc_cusum", status="error",
+                messages=[f"参数 mu/sigma 值无效: mu={mu}, sigma={sigma}，请输入数值"],
+            )
     else:
         mu = float(data.mean())
         sigma = float(data.std(ddof=1))
@@ -1259,7 +1265,13 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     mu = req.params.get("mu")
     sigma = req.params.get("sigma")
     if mu is not None and sigma is not None:
-        mu, sigma = float(mu), float(sigma)
+        try:
+            mu, sigma = float(mu), float(sigma)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="spc_ewma", status="error",
+                messages=[f"参数 mu/sigma 值无效: mu={mu}, sigma={sigma}，请输入数值"],
+            )
     else:
         mu = float(data.mean())
         sigma = float(data.std(ddof=1))
@@ -1680,6 +1692,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     # Weibull 拟合 (仅失效数据；注：scipy 不支持删失数据 MLE，结果有偏)
     fail_times = times[events == 1]
     weibull_shape, weibull_scale = None, None
+    warn_msgs: list[str] = []
     if len(fail_times) >= 5:
         try:
             shape, loc, scale = sp_stats.weibull_min.fit(fail_times, floc=0)
@@ -1687,6 +1700,13 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             weibull_scale = float(scale)
         except Exception:
             logger.debug("Weibull fit failed in survival_analysis", exc_info=True)
+    n_censored = int((events == 0).sum())
+    if n_censored > 0 and weibull_shape is not None:
+        warn_msgs.append(
+            f"⚠ Weibull 参数基于 {len(fail_times)} 个失效数据拟合，"
+            f"忽略了 {n_censored} 个删失观测，形状参数 β 可能被低估。"
+            f"建议使用支持删失数据的专业可靠性软件（如 Minitab、JMP、R/survival）进行精确分析。"
+        )
 
     # Log-rank 检验 (分组比较)
     logrank_result = None
@@ -1778,6 +1798,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
         tables=tables,
         figures=[fig],
         summary=summary,
+        messages=warn_msgs,
         metadata={
             "median_survival": median_survival,
             "n_total": n_total, "n_events": int(events.sum()),
@@ -2239,10 +2260,12 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         ax.scatter(anomaly_pos, data.values[mask], s=80, color=PALETTE["anomaly"]["primary"],
                    marker="x", linewidths=2.5, zorder=5, label=f"异常({mask.sum()}个)")
         if method == "iqr":
-            ax.axhline(Q1 - 1.5 * IQR, color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"下界={Q1-1.5*IQR:.3f}")
-            ax.axhline(Q3 + 1.5 * IQR, color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"上界={Q3+1.5*IQR:.3f}")
+            lower_bound = Q1 - IQR_OUTLIER_MULTIPLIER * IQR
+            upper_bound = Q3 + IQR_OUTLIER_MULTIPLIER * IQR
+            ax.axhline(lower_bound, color=PALETTE["spec"]["secondary"], linestyle="--",
+                      linewidth=1, alpha=0.6, label=f"下界={lower_bound:.3f}")
+            ax.axhline(upper_bound, color=PALETTE["spec"]["secondary"], linestyle="--",
+                      linewidth=1, alpha=0.6, label=f"上界={upper_bound:.3f}")
         elif method == "grubbs":
             # Grubbs 使用迭代临界值 (t 分布)，不画 ±3σ 线避免误导
             ax.axhline(data.mean(), color=PALETTE["spec"]["secondary"], linestyle=":",

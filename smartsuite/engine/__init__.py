@@ -124,6 +124,7 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 # ── 统一可视化样式 ──
 from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._palette import PALETTE  # noqa: F401 — 公开导出，供 services 层使用
+from smartsuite.engine._constants import DW_SAFE_LOWER, DW_SAFE_UPPER  # noqa: F401 — 公开导出
 from smartsuite.engine._palette import get_palette_style
 
 _palette_style = get_palette_style()
@@ -197,6 +198,7 @@ except ImportError as e:
     ) from e
 
 __all__ = [
+    "DW_SAFE_LOWER", "DW_SAFE_UPPER",  # 公开统计常量
     "GROUP_COLORS", "PALETTE",  # 公开配色常量，供 services/web 层使用
     "correlation_analysis", "anova_analysis", "contingency_analysis",
     "cohens_kappa", "cronbach_alpha",

@@ -401,7 +401,7 @@ def _eta_squared(aov_table):
     return effect_sizes
 
 
-def _threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")):
+def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")):
     """通用效应量阈值标签函数。
 
     Args:
@@ -419,12 +419,12 @@ def _threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大"
 
 def _effect_interpretation(eta2):
     """η² 效应量解读 (Cohen 准则)。"""
-    return _threshold_label(eta2, [0.01, 0.06, 0.14])
+    return threshold_label(eta2, [0.01, 0.06, 0.14])
 
 
 def _cramers_v_interpretation(v):
     """Cramér's V 效应量解读 (df≥1 通用阈值, Cohen 1988)。"""
-    return _threshold_label(v, [0.1, 0.3, 0.5])
+    return threshold_label(v, [0.1, 0.3, 0.5])
 
 
 def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -695,11 +695,11 @@ def _effect_size_label(d, test_type="cohens_d"):
     """效应量大小解读标签。"""
     ad = abs(d)
     if test_type == "cohens_d":
-        return _threshold_label(ad, [0.2, 0.5, 0.8])
+        return threshold_label(ad, [0.2, 0.5, 0.8])
     if test_type == "correlation":
-        return _threshold_label(ad, [0.1, 0.3, 0.5])
+        return threshold_label(ad, [0.1, 0.3, 0.5])
     # cliffs_delta
-    return _threshold_label(ad, [0.147, 0.33, 0.474])
+    return threshold_label(ad, [0.147, 0.33, 0.474])
 
 
 # ── 假设检验分支调度 ── 新增检验类型只需在此注册 + 实现私有函数
