@@ -171,6 +171,12 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 - 跨会话工作通过 **git commit** 衔接，不依赖对话历史传递上下文
 - 每个 commit 应自包含、可追溯：`git log --oneline` 应能独立理解改动意图
 
+## 源码修改前置条件
+
+- **修改任何源码前**，必须加载本项目开发的技能文件：`/smartsuite-dev`
+- 该技能包含 7 大高发陷阱（PALETTE 键、列约束、颜色约定、float()防护、异常翻译、参数标签、statsmodels 兼容）+ 5 套修复模板
+- 违反此约束的修改大概率引入已修复过的同一类 bug
+
 ## 常用命令
 
 ```bash
