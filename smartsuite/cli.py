@@ -15,7 +15,13 @@ from smartsuite.services.data_io import (
     preprocess_for_task,
     validate_data,
 )
-from smartsuite.services.orchestrator import RAW_CAT_TASKS, TASK_LABELS, TASK_REGISTRY, orchestrate
+from smartsuite.services.orchestrator import (
+    NO_TARGET_TASKS,
+    RAW_CAT_TASKS,
+    TASK_LABELS,
+    TASK_REGISTRY,
+    orchestrate,
+)
 
 
 def main():
@@ -55,8 +61,10 @@ def main():
             print(f"错误: YAML 模板解析失败: {e}", file=sys.stderr)
             sys.exit(1)
 
-        # 验证必需字段
-        required = ["task", "target_col"]
+        # 验证必需字段 (NO_TARGET_TASKS 方法无需 target_col)
+        required = ["task"]
+        if config["task"] not in NO_TARGET_TASKS:
+            required.append("target_col")
         missing = [k for k in required if k not in config]
         if missing:
             print(f"错误: YAML 模板缺少必需字段: {missing}", file=sys.stderr)
@@ -67,19 +75,24 @@ def main():
                   file=sys.stderr)
             sys.exit(1)
 
-        raw = pd.read_excel(args.input, sheet_name=args.sheet)
+        try:
+            raw = pd.read_excel(args.input, sheet_name=args.sheet)
+        except FileNotFoundError:
+            print(f"错误: 找不到输入文件「{args.input}」，请检查文件路径是否正确", file=sys.stderr)
+            sys.exit(1)
         features = config.get("feature_cols", [])
         categoricals = config.get("categoricals", [])
         params = config.get("params", {})
         task = config["task"]
         # 数据校验：提前发现列存在性、类型、缺失值问题
-        try:
-            validate_warnings = validate_data(raw, config["target_col"], features)
-            for w in validate_warnings:
-                print(f"  ⚠ {w}")
-        except Exception as e:
-            logger.warning("数据校验异常: %s", e)
-            print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
+        if task not in NO_TARGET_TASKS:
+            try:
+                validate_warnings = validate_data(raw, config["target_col"], features)
+                for w in validate_warnings:
+                    print(f"  ⚠ {w}")
+            except Exception as e:
+                logger.warning("数据校验异常: %s", e)
+                print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
         # SPC 缺子组列时自动生成（与 Web 路径保持一致）
         if task == "spc_xbar" and "subgroup_col" not in params:
             raw, params = auto_generate_subgroup_col(raw, params)
@@ -101,7 +114,7 @@ def main():
                 params = {**params, **extra}
         req = AnalysisRequest(
             task=task, data=df,
-            target_col=config["target_col"],
+            target_col=config.get("target_col", ""),
             feature_cols=feature_cols,
             params=params,
         )

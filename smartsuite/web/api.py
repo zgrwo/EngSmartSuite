@@ -55,7 +55,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     # 数据校验：检测列存在性、类型问题、缺失值
     data_warnings: list[str] = []
     all_validate_cols = list(targets) + list(features)
-    if all_validate_cols:
+    if all_validate_cols and task not in NO_TARGET_TASKS:
         try:
             data_warnings = validate_data(df, targets[0] if targets else "", features)
         except ValidationError as e:

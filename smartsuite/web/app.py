@@ -26,7 +26,13 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
-from smartsuite.services.orchestrator import GROUP_COLORS, TASK_GROUPS, TASK_LABELS, TASK_REGISTRY
+from smartsuite.services.orchestrator import (
+    GROUP_COLORS,
+    NO_TARGET_TASKS,
+    TASK_GROUPS,
+    TASK_LABELS,
+    TASK_REGISTRY,
+)
 from smartsuite.web.api import column_info, run_analysis
 
 logger = logging.getLogger(__name__)
@@ -252,7 +258,7 @@ def analyze():
         features = body.get("features", [])
         categoricals = body.get("categoricals", [])
         params = body.get("params", {})
-        if not task or not targets:
+        if not task or (not targets and task not in NO_TARGET_TASKS):
             return jsonify({"error": "缺少分析任务或目标列"}), 400
         if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
             return jsonify({"error": "targets 必须是字符串列表"}), 400

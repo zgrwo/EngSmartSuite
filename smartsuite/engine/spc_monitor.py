@@ -863,7 +863,7 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax.axvline(usl, color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2,
                    label=f"USL={usl}")
     if target is not None:
-        ax.axvline(target, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=1.5,
+        ax.axvline(target, color=PALETTE["direction"]["zero"], linestyle=":", linewidth=1.5,
                    label=f"目标={target}")
 
     # 规格限区域着色
@@ -1495,7 +1495,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                 r, d2_r
             )
 
-    sigma_mult = req.params.get("sigma_multiplier", 5.15)
+    sigma_mult = float(req.params.get("sigma_multiplier", 5.15))
 
     # Repeatability (EV)
     ev = r_double_bar / d2_r
@@ -1622,6 +1622,11 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
     side = req.params.get("side", "two-sided")
     mu = float(data.mean())
     sigma = float(data.std(ddof=1))
+    if sigma < EPSILON:
+        return AnalysisResult(
+            task="tolerance_interval", status="error",
+            messages=["数据标准差为零，无法计算容许区间"],
+        )
 
     from math import sqrt
 
@@ -2820,7 +2825,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         ax.axhline(ucl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                    label=f"UCL (P99.865)={ucl:.4f}")
         if ucl_2s:
-            ax.axhline(ucl_2s, color=PALETTE["target"]["primary"], linestyle=":", linewidth=0.8, alpha=0.6)
+            ax.axhline(ucl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6)
         if ucl_1s:
             ax.axhline(ucl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
         ax.fill_between(pos, cl, ucl, alpha=0.04, color=PALETTE["center"]["primary"])
@@ -2829,7 +2834,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         ax.axhline(lcl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                    label=f"LCL (P0.135)={lcl:.4f}")
         if lcl_2s:
-            ax.axhline(lcl_2s, color=PALETTE["target"]["primary"], linestyle=":", linewidth=0.8, alpha=0.6)
+            ax.axhline(lcl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6)
         if lcl_1s:
             ax.axhline(lcl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
         ax.fill_between(pos, lcl, cl, alpha=0.04, color=PALETTE["center"]["primary"])

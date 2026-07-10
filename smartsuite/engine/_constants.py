@@ -36,6 +36,21 @@ COHENS_D_SMALL = 0.2   # |d| < 0.2: 可忽略
 COHENS_D_MEDIUM = 0.5  # |d| >= 0.5: 中等
 COHENS_D_LARGE = 0.8   # |d| >= 0.8: 大效应
 
+# ── 相关性效应量阈值 ──
+CORRELATION_SMALL = 0.1   # |r| < 0.1: 可忽略
+CORRELATION_MEDIUM = 0.3  # |r| >= 0.3: 中等
+CORRELATION_LARGE = 0.5   # |r| >= 0.5: 大效应
+
+# ── Cramér's V 效应量阈值 (df* >= 1, Cohen 1988) ──
+CRAMERS_V_SMALL = 0.1   # V < 0.1: 可忽略
+CRAMERS_V_MEDIUM = 0.3  # V >= 0.3: 中等
+CRAMERS_V_LARGE = 0.5   # V >= 0.5: 大效应
+
+# ── Cliff's Delta 效应量阈值 (Romano 2006) ──
+CLIFFS_DELTA_SMALL = 0.147   # |δ| < 0.147: 可忽略
+CLIFFS_DELTA_MEDIUM = 0.33   # |δ| >= 0.33: 中等
+CLIFFS_DELTA_LARGE = 0.474   # |δ| >= 0.474: 大效应
+
 # ── 过程能力判定 ──
 CPK_EXCELLENT = 1.67  # Cpk >= 1.67: 优秀
 CPK_GOOD = 1.33       # Cpk >= 1.33: 合格

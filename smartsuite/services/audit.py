@@ -29,7 +29,6 @@ def process_audit(
     lsl: float | None = None,
     target: float | None = None,
     time_order: bool = False,
-    categorical_cols: list[str] | None = None,
 ) -> dict:
     """过程综合审计 — 运行全套分析并生成健康评分报告。
 

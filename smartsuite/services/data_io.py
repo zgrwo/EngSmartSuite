@@ -239,7 +239,7 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
                 if str(df[c].dtype) in ("object", "string", "category")
                 and not pd.api.types.is_datetime64_any_dtype(df[c])]
     binary_cols = [c for c in df.columns
-                   if c != target_col and df[c].nunique(dropna=True) <= 2]
+                   if c != target_col and 1 <= df[c].nunique(dropna=True) <= 2]
     date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
     # 启发式检测隐式日期列（object/string 类型但内容可解析为日期）
     for c in [c for c in df.columns if str(df[c].dtype) in ("object", "string")]:

@@ -252,8 +252,8 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             metadata={
                 "r_squared": model.rsquared,
                 "r_squared_adj": model.rsquared_adj,
-                "f_statistic": float(model.fvalue),
-                "f_pvalue": float(model.f_pvalue),
+                "f_statistic": float(model.fvalue) if np.isfinite(model.fvalue) else None,
+                "f_pvalue": float(model.f_pvalue) if np.isfinite(model.f_pvalue) else None,
                 "durbin_watson": dw,
                 "breusch_pagan_lm": bp_lm,
                 "breusch_pagan_p": bp_p,

@@ -7,7 +7,10 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.engine._constants import (
+    CLIFFS_DELTA_LARGE, CLIFFS_DELTA_MEDIUM, CLIFFS_DELTA_SMALL,
     COHENS_D_LARGE, COHENS_D_MEDIUM, COHENS_D_SMALL,
+    CORRELATION_LARGE, CORRELATION_MEDIUM, CORRELATION_SMALL,
+    CRAMERS_V_LARGE, CRAMERS_V_MEDIUM, CRAMERS_V_SMALL,
     EPSILON, ETA_SQ_LARGE, ETA_SQ_MEDIUM, ETA_SQ_SMALL,
     SIG_EXTREME, SIG_HIGH, SIG_MODERATE, VIF_THRESHOLD,
 )
@@ -78,6 +81,10 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="correlation", status="error",
             messages=[f"以下列非数值型，无法计算相关性: {non_numeric}。"
                       "请使用数据预处理将类别列转换为数值型。"])
+
+    if len(cols) < 2:
+        return AnalysisResult(task="correlation", status="error",
+            messages=["至少需要 1 个因子列与目标列进行相关性分析，当前无有效因子列"])
 
     method = req.params.get("method", "pearson")  # "pearson" | "spearman" | "kendall"
     if method == "spearman":
@@ -428,7 +435,7 @@ def _effect_interpretation(eta2):
 
 def _cramers_v_interpretation(v):
     """Cramér's V 效应量解读 (df≥1 通用阈值, Cohen 1988)。"""
-    return threshold_label(v, [0.1, 0.3, 0.5])
+    return threshold_label(v, [CRAMERS_V_SMALL, CRAMERS_V_MEDIUM, CRAMERS_V_LARGE])
 
 
 def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -536,6 +543,9 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                         alpha=alpha
                     )
                     # 使用公开 API 遍历所有成对比较
+                    # NOTE: combinations(groups, 2) 与 tukey.meandiffs 的顺序相同
+                    #       (两者都基于 np.triu_indices / lexicographic row-major order)
+                    #       statsmodels 未文档化此约定，但 pair_idx < len() guard 提供安全网
                     groups = list(tukey.groupsunique)
                     for pair_idx, (g1, g2) in enumerate(combinations(groups, 2)):
                         if pair_idx < len(tukey.pvalues):
@@ -707,9 +717,9 @@ def _effect_size_label(d, test_type="cohens_d"):
     if test_type == "cohens_d":
         return threshold_label(ad, [COHENS_D_SMALL, COHENS_D_MEDIUM, COHENS_D_LARGE])
     if test_type == "correlation":
-        return threshold_label(ad, [0.1, 0.3, 0.5])
+        return threshold_label(ad, [CORRELATION_SMALL, CORRELATION_MEDIUM, CORRELATION_LARGE])
     # cliffs_delta
-    return threshold_label(ad, [0.147, 0.33, 0.474])
+    return threshold_label(ad, [CLIFFS_DELTA_SMALL, CLIFFS_DELTA_MEDIUM, CLIFFS_DELTA_LARGE])
 
 
 # ── 假设检验分支调度 ── 新增检验类型只需在此注册 + 实现私有函数
