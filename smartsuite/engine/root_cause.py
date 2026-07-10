@@ -196,16 +196,16 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 初始化图表列表 ──
     figures = [fig]
 
-    # ── 散点矩阵：目标 vs Top-N 相关性变量 ──
-    top_n_scatter = min(6, len(target_corr))
+    # ── 散点矩阵：目标 vs Top-N 相关性变量（最多 4×4 确保可读性）──
+    top_n_scatter = min(4, len(target_corr))
     if top_n_scatter >= 2:
         top_vars = list(target_corr.index[:top_n_scatter])
         scatter_cols = [req.target_col] + [c for c in top_vars if c != req.target_col]
-        scatter_cols = scatter_cols[:5]  # 最多 5x5
+        scatter_cols = scatter_cols[:4]  # 最多 4×4
         if len(scatter_cols) >= 2:
             try:
                 n_s = len(scatter_cols)
-                fig_scatter = Figure(figsize=(n_s * 2.5, n_s * 2.2))
+                fig_scatter = Figure(figsize=(n_s * 2.8, n_s * 2.5))
                 for ri, cv1 in enumerate(scatter_cols):
                     for ci, cv2 in enumerate(scatter_cols):
                         ax = fig_scatter.add_subplot(n_s, n_s, ri * n_s + ci + 1)
@@ -216,7 +216,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                             vals = sub[cv1].values
                             ax.hist(vals, bins=min(15, len(vals)//2), color=PALETTE["data"]["secondary"],
                                    edgecolor="white", alpha=0.8)
-                            ax.set_title(cv1, fontsize=8)
+                            ax.set_title(cv1, fontsize=9)
                         else:
                             ax.scatter(sub[cv1].values, sub[cv2].values, s=8,
                                       alpha=0.5, color=PALETTE["data"]["primary"])
@@ -233,13 +233,13 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                             r_val = corr.loc[cv1, cv2] if cv1 in corr.index and cv2 in corr.columns else 0
                             ax.annotate(f"r={r_val:.2f}", xy=(0.95, 0.05),
                                        xycoords="axes fraction",
-                                       ha="right", fontsize=7, color=PALETTE["target"]["primary"],
+                                       ha="right", fontsize=7.5, color=PALETTE["target"]["primary"],
                                        bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.7))
                         if ri == n_s - 1:
-                            ax.set_xlabel(cv2, fontsize=7)
+                            ax.set_xlabel(cv2, fontsize=8)
                         if ci == 0:
-                            ax.set_ylabel(cv1, fontsize=7)
-                        ax.tick_params(labelsize=6)
+                            ax.set_ylabel(cv1, fontsize=8)
+                        ax.tick_params(labelsize=7.5)
                 fig_scatter.suptitle(
                     f"散点矩阵 — {req.target_col} vs Top{top_n_scatter} 相关变量",
                     fontsize=10,
@@ -591,6 +591,12 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     bp = ax_box.boxplot(group_data, tick_labels=[
         f"{g}\n(n={len(d)})" for g, d in zip(group_names, group_data)
     ], patch_artist=True, widths=0.5)
+    # 根据分组数量自适应标签旋转
+    if len(group_names) > 6:
+        for label in ax_box.get_xticklabels():
+            label.set_rotation(30)
+            label.set_ha("right")
+    ax_box.tick_params(labelsize=9)
     for patch in bp['boxes']:
         patch.set_facecolor(PALETTE["data"]["secondary"])
     # 叠加散点
@@ -1064,6 +1070,11 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         ax = fig.add_subplot(111)
         bp = ax.boxplot(group_data, tick_labels=[str(g) for g in groups],
                        patch_artist=True, widths=0.5)
+        if len(groups) > 6:
+            for label in ax.get_xticklabels():
+                label.set_rotation(30)
+                label.set_ha("right")
+        ax.tick_params(labelsize=9)
         for patch in bp["boxes"]:
             patch.set_facecolor(PALETTE["data"]["secondary"])
         ax.set_xlabel(group_col, fontsize=10)
@@ -1968,7 +1979,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         fontsize=10,
     )
     ax.legend(title=col2, fontsize=8, title_fontsize=8)
-    ax.tick_params(axis="x", rotation=45)
+    ax.tick_params(axis="x", rotation=45, labelsize=9)
     fig.tight_layout()
 
     summary = (

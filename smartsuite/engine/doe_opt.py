@@ -192,7 +192,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             ax4.set_xlabel("观测序号", fontsize=9)
             ax4.set_ylabel("Cook's D", fontsize=9)
             ax4.set_title("Cook's Distance (影响点诊断)", fontsize=10)
-            ax4.legend(fontsize=7)
+            ax4.legend(fontsize=7.5)
         else:
             ax4.text(0.5, 0.5, "Cook's D 计算失败\n(数据可能共线性)", ha="center", va="center",
                     transform=ax4.transAxes, fontsize=9, color=PALETTE["judge"]["warn"])
@@ -221,7 +221,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax6.set_xlabel("预测值", fontsize=9)
         ax6.set_ylabel("实际值", fontsize=9)
         ax6.set_title(f"Actual vs Predicted (R²={model.rsquared:.3f})", fontsize=10)
-        ax6.legend(fontsize=7)
+        ax6.legend(fontsize=7.5)
 
         fig_res.tight_layout()
 
@@ -380,7 +380,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax_3d.set_ylabel(c2, fontsize=9)
         ax_3d.set_zlabel(req.target_col, fontsize=9)
         ax_3d.set_title(f"3D 响应面 — {req.target_col}\n(R²={r2:.3f})", fontsize=10)
-        ax_3d.legend(fontsize=7, loc="upper left")
+        ax_3d.legend(fontsize=7.5, loc="upper left")
         fig.colorbar(surf, ax=ax_3d, shrink=0.5, label=req.target_col)
 
     # 右 (或全幅): 2D 填充等高线
@@ -388,7 +388,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     levels = 20
     cf = ax_contour.contourf(XI, YI, ZI, levels=levels, cmap=_rsm_cmap, alpha=0.9)
     cs = ax_contour.contour(XI, YI, ZI, levels=8, colors="black", linewidths=0.5, alpha=0.3)
-    ax_contour.clabel(cs, inline=True, fontsize=7, fmt="%.2f")
+    ax_contour.clabel(cs, inline=True, fontsize=7.5, fmt="%.2f")
     ax_contour.scatter(X1, X2, color=PALETTE["data"]["primary"], s=20, alpha=0.6, label="观测数据")
     ax_contour.scatter([opt_x1], [opt_x2], color=PALETTE["anomaly"]["primary"], s=150,
                        marker="*", edgecolors="white", linewidths=2,
@@ -727,7 +727,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         ax_pareto.set_xlabel(xlabel, fontsize=9)
         ax_pareto.set_ylabel(ylabel, fontsize=9)
         ax_pareto.set_title("Pareto 前沿 — 双目标权衡", fontsize=10)
-        ax_pareto.legend(fontsize=7)
+        ax_pareto.legend(fontsize=7.5)
         plt_label = "综合得分 (加权)"
         fig.colorbar(ax_pareto.collections[0], ax=ax_pareto, label=plt_label)
 
@@ -762,7 +762,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     ax_score.set_xlabel("加权期望值", fontsize=9)
     ax_score.set_ylabel("排名", fontsize=9)
     ax_score.set_title(f"多目标优化 — Top{top_n} 方案分解", fontsize=10)
-    ax_score.legend(fontsize=7, loc="lower right")
+    ax_score.legend(fontsize=7.5, loc="lower right")
 
     fig.tight_layout()
 

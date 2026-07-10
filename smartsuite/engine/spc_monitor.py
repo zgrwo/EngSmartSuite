@@ -231,10 +231,33 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(12, 9))
     indices = np.arange(len(xbar))
 
+    # ── X-bar 子组标签格式（自适应截断 + 日期识别 + 间隔显示）──
+    def _fmt_subgroup_labels(series_index):
+        """自适应格式化子组标签：日期截断、长文本省略、过多时刻间隔显示。"""
+        labels = []
+        for val in series_index:
+            if hasattr(val, "strftime"):
+                s = val.strftime("%m-%d")
+            else:
+                s = str(val)
+            if len(s) > 15:
+                s = s[:14] + "…"
+            labels.append(s)
+        n_lbl = len(labels)
+        if n_lbl > 20:
+            # 间隔显示，但保留首尾
+            step = max(1, n_lbl // 20)
+            for i in range(n_lbl):
+                if i % step != 0 and i != n_lbl - 1:
+                    labels[i] = ""
+        return labels
+
+    xbar_labels = _fmt_subgroup_labels(xbar.index)
+
     # X-bar 控制图
     ax1 = fig.add_subplot(211)
-    # 区域着色
-    ax1.fill_between(indices, lcl_x, ucl_x, alpha=0.06, color=PALETTE["center"]["primary"], label="±3σ 区域")
+    # 区域着色（无图例 — 颜色已自说明）
+    ax1.fill_between(indices, lcl_x, ucl_x, alpha=0.06, color=PALETTE["center"]["primary"])
     ax1.fill_between(indices, xbar_bar - 2*sigma_xbar, xbar_bar + 2*sigma_xbar,
                      alpha=0.06, color=PALETTE["judge"]["warn"])
     ax1.fill_between(indices, xbar_bar - 1*sigma_xbar, xbar_bar + 1*sigma_xbar,
@@ -304,9 +327,9 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     ax1.set_ylabel(req.target_col, fontsize=10)
     ax1.set_title(f"X-bar 控制图 — {req.target_col} ({len(xbar)}子组×{n}样本{warn_unequal})",
                   fontsize=12)
-    ax1.legend(fontsize=7, loc="upper right")
+    ax1.legend(fontsize=8, loc="upper right", ncol=2)
     ax1.set_xticks(indices)
-    ax1.set_xticklabels([str(i) for i in xbar.index], fontsize=7, rotation=45)
+    ax1.set_xticklabels(xbar_labels, fontsize=7.5, rotation=45)
 
     # R 控制图
     ax2 = fig.add_subplot(212)
@@ -339,9 +362,10 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     ax2.set_xlabel("子组", fontsize=10)
     ax2.set_ylabel("R (极差)", fontsize=10)
     ax2.set_title("R 控制图", fontsize=12)
-    ax2.legend(fontsize=7, loc="upper right")
+    # R 图使用相同的间隔标签策略
+    ax2.legend(fontsize=8, loc="upper right")
     ax2.set_xticks(indices)
-    ax2.set_xticklabels([str(i) for i in r.index], fontsize=7, rotation=45)
+    ax2.set_xticklabels(xbar_labels, fontsize=7.5, rotation=45)
     fig.tight_layout()
 
     # ── 违规汇总表 ──
@@ -544,7 +568,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         f"{chart_type.upper()}-控制图 — {req.target_col} (m={m}子组)",
         fontsize=11,
     )
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     # ── 汇总 ──
@@ -846,20 +870,19 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     if lsl is not None and usl is not None:
         ax.axvspan(lsl, usl, alpha=0.08, color=PALETTE["center"]["primary"], label="规格范围")
 
-    ax.set_xlabel(req.target_col, fontsize=10)
-    ax.set_ylabel("密度", fontsize=10)
-
-    # 构建标题
-    title_parts = [f"过程能力分析 — {req.target_col}"]
+    # 构建标题：主标题显示判定结论，副标题显示关键指数
+    ax.set_title(f"过程能力分析 — {req.target_col}", fontsize=11, fontweight="bold")
+    sub_parts = []
     if boxcox_lambda is not None:
-        title_parts.append(f"(Box-Cox λ={boxcox_lambda:.3f})")
+        sub_parts.append(f"Box-Cox λ={boxcox_lambda:.3f}")
     if cpk_val is not None:
-        title_parts.append(f"Cpk={cpk_val:.3f}")
+        sub_parts.append(f"Cpk={cpk_val:.3f}")
     if ppk_val is not None:
-        title_parts.append(f"Ppk={ppk_val:.3f}")
-    title_parts.append(f"判定: {judge}")
-    ax.set_title(" | ".join(title_parts), fontsize=11)
-    ax.legend(fontsize=8, loc="upper right")
+        sub_parts.append(f"Ppk={ppk_val:.3f}")
+    sub_parts.append(judge)
+    ax.set_xlabel(f"{req.target_col}  |  {'  |  '.join(sub_parts)}", fontsize=9)
+    ax.set_ylabel("密度", fontsize=10)
+    ax.legend(fontsize=8, loc="upper right", ncol=2)
     fig.tight_layout()
 
     # ── 汇总 ──
@@ -1058,7 +1081,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         ax1.set_xlabel("时间点", fontsize=9)
         ax1.set_ylabel(req.target_col, fontsize=9)
         ax1.set_title(f"趋势预测 — {req.target_col} ({trend_dir})", fontsize=10)
-        ax1.legend(fontsize=7)
+        ax1.legend(fontsize=8, ncol=2)
 
         # 右上：残差图
         ax2 = fig.add_subplot(2, 2, 2)
@@ -1226,7 +1249,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
                    marker="x", linewidths=2, zorder=5, label=f"下偏移报警({len(alarm_minus)})")
     ax2.set_xlabel("序号", fontsize=10)
     ax2.set_ylabel("CUSUM", fontsize=10)
-    ax2.legend(fontsize=8)
+    ax2.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     total_alarms = len(alarm_plus) + len(alarm_minus)
@@ -1362,7 +1385,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         f"EWMA 控制图 — {req.target_col} (λ={lam}, L={L})",
         fontsize=11,
     )
-    ax.legend(fontsize=7, loc="upper left", ncol=2)
+    ax.legend(fontsize=7.5, loc="upper left", ncol=2)
     fig.tight_layout()
 
     summary = (
@@ -1807,7 +1830,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
         + (f" | {logrank_result['分组']} p={logrank_result['p值']}" if logrank_result else ""),
         fontsize=10,
     )
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2)
     ax.grid(True, alpha=0.2)
     fig.tight_layout()
 
@@ -1980,7 +2003,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
         f"{len(changepoints)} 个变点, {len(segment_stats)} 段",
         fontsize=11,
     )
-    ax.legend(fontsize=7, loc="upper left", ncol=2)
+    ax.legend(fontsize=7.5, loc="upper left", ncol=2)
     fig.tight_layout()
 
     return AnalysisResult(
@@ -2092,7 +2115,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
         f"高置信={int(high_conf.sum())}, 总标记={int(any_flag.sum())}",
         fontsize=11,
     )
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     summary = (
@@ -2191,7 +2214,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         ax2.set_xlabel("异常分数 (越低越异常)", fontsize=9)
         ax2.set_ylabel("频数", fontsize=9)
         ax2.set_title("异常分数分布", fontsize=10)
-        ax2.legend(fontsize=8)
+        ax2.legend(fontsize=8, ncol=2)
         fig.tight_layout()
 
         # 异常详情表（含异常分数）
@@ -2312,7 +2335,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
     ax.set_title(f"异常检测 — {req.target_col} (方法: {method})", fontsize=11)
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     return AnalysisResult(
@@ -2362,7 +2385,7 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_ylabel("频数", fontsize=10)
     ax.set_title(f"中位数 {ci_level*100:.0f}% CI — {req.target_col} (n={n})", fontsize=11)
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     return AnalysisResult(
@@ -2448,7 +2471,7 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
         f"({ci_level*100:.0f}%, {n_boot}次重抽样, n={n})",
         fontsize=10,
     )
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     ci_width = ci_upper_pct - ci_lower_pct
@@ -2508,7 +2531,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             ax.axhline(val, color=color, linestyle=style, linewidth=1.0,
                       alpha=0.8, label=label)
         if _ref_lines:
-            ax.legend(fontsize=6, loc="upper right")
+            ax.legend(fontsize=7.5, loc="upper right")
 
     _ref_lines: list[tuple[float, str, str, str]] = []
     for key, color, style in [
@@ -2615,7 +2638,12 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             ax.set_title(f"{sub_col}={sg} (n={len(sg_data)})", fontsize=9)
             ax.set_xlabel(group_col, fontsize=8)
             ax.set_ylabel(req.target_col, fontsize=8)
-            ax.tick_params(labelsize=7)
+            n_valid = len(valid_groups)
+            rot_angle = 45 if n_valid > 8 else (30 if n_valid > 4 else 0)
+            ax.tick_params(labelsize=8, rotation=rot_angle)
+            if rot_angle > 0:
+                for label in ax.get_xticklabels():
+                    label.set_ha("right")
             _draw_ref_lines(ax)
     else:
         fig = Figure(figsize=(max(len(groups)*1.2, 6), 5))
@@ -2818,7 +2846,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         f"CL={cl:.4f} | {limit_label}",
         fontsize=10,
     )
-    ax.legend(fontsize=7, loc="upper right", ncol=2)
+    ax.legend(fontsize=7.5, loc="upper right", ncol=2)
     fig.tight_layout()
 
     # ── 汇总 ──
