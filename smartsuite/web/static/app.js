@@ -141,7 +141,7 @@ const TASK_PARAMS = {
   change_point:      { min_segment: 10, n_changepoints: 5 },
   doe_analysis:      { alpha: 0.05 },
   variance_test:     { group_col: '', alpha: 0.05 },
-  box_chart:         { mode: 'facet' },
+  box_chart:         { mode: 'facet', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
   correlation:       { method: 'pearson' },
   contingency:       { alpha: 0.05 },
 };
@@ -171,7 +171,17 @@ const PARAM_META = {
   side: {
     type: 'select', label: '检验侧',
     options: [
-      ['two-sided', '双侧'], ['upper', '上侧 (越大越好)'], ['lower', '下侧 (越小越好)']
+      ['two-sided', '双侧'], ['upper', '单侧上限'], ['lower', '单侧下限']
+    ]
+  },
+
+  // spc_nonparametric: side 参数含义与 tolerance_interval 不同 — 单侧上限=越小越好
+  'side@spc_nonparametric': {
+    type: 'select', label: '控制限方向',
+    options: [
+      ['two-sided', '双侧 (通用品质指标)'],
+      ['upper', '单侧上限 (越小越好: 颗粒度、缺陷率)'],
+      ['lower', '单侧下限 (越大越好: 得率、强度)']
     ]
   },
   chart_type: {
@@ -325,13 +335,20 @@ let _running = false;     // 防抖标志
 
 async function runAnalysis(task) {
   if (_running) return;  // 防抖：上一次分析尚未完成
-  if (!selectedY.size) { alert('请至少选择一个 Y 列'); return; }
+  // 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
+  const _noTargetNeeded = new Set([
+    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis',
+  ]);
+  if (!_noTargetNeeded.has(task) && !selectedY.size) {
+    alert('请至少选择一个 Y 列'); return;
+  }
   // 仅需 Y 列即可运行的任务（无需选择 X 列）
   const _yOnlyTasks = new Set([
     'process_capability', 'trend_forecast', 'anomaly_detect',
     'power_analysis', 'spc_nonparametric',
     'distribution_summary', 'normality_check', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
+    'spc_xbar', 'spc_cusum', 'spc_ewma', 'spc_attribute',
   ]);
   if (!_yOnlyTasks.has(task) && !selectedX.size) {
     alert('请至少选择一个 X 列'); return;

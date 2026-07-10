@@ -40,6 +40,12 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
     """执行分析并返回 JSON 可序列化的结果列表。"""
     if params is None:
         params = {}
+
+    # 无需目标列的任务：VIF/一致性/信度/功效分析仅依赖 X 列或参数
+    _no_target_tasks = {'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis'}
+    if not targets and task in _no_target_tasks:
+        targets = ['']  # 占位触发一次迭代，引擎不使用 target_col
+
     results = []
 
     # 预处理：为 SPC 缺子组列时自动生成（委托至 services 层，CLI/Web 共享）

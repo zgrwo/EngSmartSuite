@@ -235,11 +235,11 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                      alpha=0.06, color=PALETTE["judge"]["warn"])
     ax1.fill_between(indices, xbar_bar - 1*sigma_xbar, xbar_bar + 1*sigma_xbar,
                      alpha=0.06, color=PALETTE["center"]["primary"])
-    ax1.axhline(xbar_bar, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1.5,
+    ax1.axhline(xbar_bar, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                 label=f"CL={xbar_bar:.4f}")
-    ax1.axhline(ucl_x, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
+    ax1.axhline(ucl_x, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"UCL={ucl_x:.4f}")
-    ax1.axhline(lcl_x, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
+    ax1.axhline(lcl_x, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"LCL={lcl_x:.4f}")
     ax1.axhline(xbar_bar + 2*sigma_xbar, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.7, alpha=0.6)
     ax1.axhline(xbar_bar - 2*sigma_xbar, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.7, alpha=0.6)
@@ -273,14 +273,29 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     lsl = req.params.get("lsl")
     target_spec = req.params.get("target")
     if usl is not None:
-        ax1.axhline(float(usl), color=PALETTE["anomaly"]["primary"], linestyle="-.",
-                   linewidth=1.0, alpha=0.7, label=f"USL={usl}")
+        try:
+            usl_val = float(usl)
+        except (ValueError, TypeError):
+            usl_val = None
+        if usl_val is not None:
+            ax1.axhline(usl_val, color=PALETTE["anomaly"]["primary"], linestyle="-",
+                       linewidth=1.2, alpha=0.9, label=f"USL={usl_val}")
     if lsl is not None:
-        ax1.axhline(float(lsl), color=PALETTE["anomaly"]["secondary"], linestyle="-.",
-                   linewidth=1.0, alpha=0.7, label=f"LSL={lsl}")
+        try:
+            lsl_val = float(lsl)
+        except (ValueError, TypeError):
+            lsl_val = None
+        if lsl_val is not None:
+            ax1.axhline(lsl_val, color=PALETTE["anomaly"]["primary"], linestyle="-",
+                       linewidth=1.2, alpha=0.9, label=f"LSL={lsl_val}")
     if target_spec is not None:
-        ax1.axhline(float(target_spec), color=PALETTE["center"]["primary"], linestyle=":",
-                   linewidth=1.0, alpha=0.6, label=f"Target={target_spec}")
+        try:
+            target_val = float(target_spec)
+        except (ValueError, TypeError):
+            target_val = None
+        if target_val is not None:
+            ax1.axhline(target_val, color=PALETTE["direction"]["zero"], linestyle=":",
+                       linewidth=1.0, alpha=0.6, label=f"Target={target_val}")
 
     ax1.set_ylabel(req.target_col, fontsize=10)
     ax1.set_title(f"X-bar 控制图 — {req.target_col} ({len(xbar)}子组×{n}样本{warn_unequal})",
@@ -291,11 +306,11 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # R 控制图
     ax2 = fig.add_subplot(212)
-    ax2.axhline(r_bar, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1.5,
+    ax2.axhline(r_bar, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                 label=f"CL={r_bar:.4f}")
-    ax2.axhline(ucl_r, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
+    ax2.axhline(ucl_r, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"UCL={ucl_r:.4f}")
-    ax2.axhline(lcl_r, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
+    ax2.axhline(lcl_r, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
                 label=f"LCL={lcl_r:.4f}")
     # R 图子组颜色 (与 X-bar 图一致)
     for i, idx in enumerate(indices):
@@ -501,18 +516,18 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     ax = fig.add_subplot(111)
     pos = np.arange(m)
     ax.plot(pos, stat.values, "o-", markersize=5, color=PALETTE["data"]["primary"], linewidth=1.2)
-    ax.axhline(cl, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1.5,
+    ax.axhline(cl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                label=f"CL={cl:.4f}")
 
     if ucl_const is not None:
-        ax.axhline(ucl_const, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
+        ax.axhline(ucl_const, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"UCL={ucl_const:.4f}")
         lcl_val = float(lcl)
-        ax.axhline(lcl_val, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2,
+        ax.axhline(lcl_val, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"LCL={lcl_val:.4f}")
     else:
-        ax.plot(pos, ucl, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.6, label="UCL")
-        ax.plot(pos, lcl, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.6, label="LCL")
+        ax.plot(pos, ucl, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.6, label="UCL")
+        ax.plot(pos, lcl, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.6, label="LCL")
 
     if len(violations) > 0:
         ax.scatter(violations, stat.values[violations], s=80, color=PALETTE["anomaly"]["primary"],
@@ -638,6 +653,29 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     lsl = req.params.get("lsl")
     target = req.params.get("target")  # Cpm 目标值
     transform = req.params.get("transform")  # None | "boxcox"
+
+    # 统一转换为 float（Web UI 端发送数字，CLI/直接调用可能为字符串）
+    if usl is not None:
+        try:
+            usl = float(usl)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="process_capability", status="error",
+                messages=[f"规格上限 USL 值无效: {usl}，请输入数值"],
+            )
+    if lsl is not None:
+        try:
+            lsl = float(lsl)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="process_capability", status="error",
+                messages=[f"规格下限 LSL 值无效: {lsl}，请输入数值"],
+            )
+    if target is not None:
+        try:
+            target = float(target)
+        except (ValueError, TypeError):
+            target = None  # 目标值无效时静默忽略
 
     # ── 规格限有效性校验 (P2 fix: 防止 USL ≤ LSL 导致负 Cp) ──
     if usl is not None and lsl is not None and usl <= lsl:
@@ -791,10 +829,10 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     ax.axvline(mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=2,
                label=f"均值={mu:.4f}")
     if lsl is not None:
-        ax.axvline(lsl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=2,
+        ax.axvline(lsl, color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2,
                    label=f"LSL={lsl}")
     if usl is not None:
-        ax.axvline(usl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=2,
+        ax.axvline(usl, color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2,
                    label=f"USL={usl}")
     if target is not None:
         ax.axvline(target, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=1.5,
@@ -1152,7 +1190,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
 
     ax1 = fig.add_subplot(211)
     ax1.plot(pos, data.values, "o-", markersize=3, color=PALETTE["data"]["secondary"], linewidth=1, label="数据")
-    ax1.axhline(mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1, label=f"均值={mu:.3f}")
+    ax1.axhline(mu, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1, label=f"CL={mu:.3f}")
     ax1.set_ylabel(req.target_col, fontsize=10)
     ax1.set_title(f"CUSUM 控制图 — {req.target_col} (k={k}, h={h})", fontsize=11)
     ax1.legend(fontsize=8)
@@ -1160,7 +1198,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     ax2 = fig.add_subplot(212)
     ax2.plot(pos, c_plus, "-", color=PALETTE["target"]["primary"], linewidth=1.5, label="C+ (上偏移)")
     ax2.plot(pos, c_minus, "-", color=PALETTE["data"]["primary"], linewidth=1.5, label="C- (下偏移)")
-    ax2.axhline(h, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.2, label=f"决策区间 h={h}")
+    ax2.axhline(h, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2, label=f"决策区间 h={h}")
     ax2.fill_between(pos, 0, h, alpha=0.05, color=PALETTE["center"]["primary"])
     if alarm_plus:
         ax2.scatter(alarm_plus, c_plus[alarm_plus], s=60, color=PALETTE["anomaly"]["primary"],
@@ -1276,9 +1314,9 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     ax.plot(pos, data.values, "o-", markersize=3, alpha=0.35,
             color=PALETTE["data"]["tertiary"], linewidth=0.8, label="原始数据")
     ax.plot(pos, ewma, "-", color=PALETTE["data"]["primary"], linewidth=2, label=f"EWMA (λ={lam})")
-    ax.axhline(mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=1, label=f"CL={mu:.3f}")
-    ax.plot(pos, ucl_t, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.7, label="UCL(t)")
-    ax.plot(pos, lcl_t, "--", color=PALETTE["anomaly"]["primary"], linewidth=1, alpha=0.7, label="LCL(t)")
+    ax.axhline(mu, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1, label=f"CL={mu:.3f}")
+    ax.plot(pos, ucl_t, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.7, label="UCL(t)")
+    ax.plot(pos, lcl_t, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.7, label="LCL(t)")
     ax.axhline(ucl_asym, color=PALETTE["anomaly"]["primary"], linestyle=":", linewidth=1, alpha=0.4)
     ax.axhline(lcl_asym, color=PALETTE["anomaly"]["primary"], linestyle=":", linewidth=1, alpha=0.4)
 
@@ -2394,6 +2432,9 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     feature_cols[1] (可选): 次分类列
     params:
         mode: "facet"(默认,分面) | "nested"(嵌套,组合标签如 ABS/否)
+        usl/lsl: 规格上限/下限 (红色实线)
+        ucl/lcl/cl: 控制上限/下限/中心线 (黄色虚线)
+        target: 目标值 (灰色点线)
     """
     if len(req.feature_cols) < 1:
         return AnalysisResult(task="box_chart", status="error",
@@ -2402,6 +2443,37 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     group_col = req.feature_cols[0]
     sub_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
     mode = req.params.get("mode", "facet")  # "facet" | "nested"
+
+    # ── 规格限与控制限（可选参考线）──
+    def _draw_ref_lines(ax):
+        """在箱线图上叠加规格限/控制限参考线。"""
+        for val, color, style, label in _ref_lines:
+            ax.axhline(val, color=color, linestyle=style, linewidth=1.0,
+                      alpha=0.8, label=label)
+        if _ref_lines:
+            ax.legend(fontsize=6, loc="upper right")
+
+    _ref_lines: list[tuple[float, str, str, str]] = []
+    for key, color, style in [
+        ("usl", PALETTE["anomaly"]["primary"], "-"),
+        ("lsl", PALETTE["anomaly"]["primary"], "-"),
+        ("ucl", PALETTE["control"]["primary"], "--"),
+        ("lcl", PALETTE["control"]["primary"], "--"),
+        ("cl",  PALETTE["control"]["primary"], "--"),
+    ]:
+        val = req.params.get(key)
+        if val is not None:
+            try:
+                _ref_lines.append((float(val), color, style, key.upper()))
+            except (ValueError, TypeError):
+                pass
+    target_val = req.params.get("target")
+    if target_val is not None:
+        try:
+            _ref_lines.append((float(target_val), PALETTE["direction"]["zero"],
+                              ":", "Target"))
+        except (ValueError, TypeError):
+            pass
 
     sub = req.data[[req.target_col, group_col] + ([sub_col] if sub_col else [])].dropna()
     if len(sub) < 5:
@@ -2487,6 +2559,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             ax.set_xlabel(group_col, fontsize=8)
             ax.set_ylabel(req.target_col, fontsize=8)
             ax.tick_params(labelsize=7)
+            _draw_ref_lines(ax)
     else:
         fig = Figure(figsize=(max(len(groups)*1.2, 6), 5))
         ax = fig.add_subplot(111)
@@ -2507,6 +2580,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         if sub_col and not has_sub:
             title += f" (次分类「{sub_col}」水平过多，未分面)"
         ax.set_title(title, fontsize=11)
+        _draw_ref_lines(ax)
     fig.tight_layout()
 
     n_total = len(sub)
@@ -2655,10 +2729,10 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     ax = fig.add_subplot(111)
 
     ax.plot(pos, values, "o-", markersize=3, color=PALETTE["data"]["primary"], linewidth=1, alpha=0.6, label="数据")
-    ax.axhline(cl, color=PALETTE["center"]["primary"], linestyle="-", linewidth=2, label=f"CL (中位数)={cl:.4f}")
+    ax.axhline(cl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=2, label=f"CL (中位数)={cl:.4f}")
 
     if ucl is not None:
-        ax.axhline(ucl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
+        ax.axhline(ucl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                    label=f"UCL (P99.865)={ucl:.4f}")
         if ucl_2s:
             ax.axhline(ucl_2s, color=PALETTE["target"]["primary"], linestyle=":", linewidth=0.8, alpha=0.6)
@@ -2667,7 +2741,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         ax.fill_between(pos, cl, ucl, alpha=0.04, color=PALETTE["center"]["primary"])
 
     if lcl is not None:
-        ax.axhline(lcl, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
+        ax.axhline(lcl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                    label=f"LCL (P0.135)={lcl:.4f}")
         if lcl_2s:
             ax.axhline(lcl_2s, color=PALETTE["target"]["primary"], linestyle=":", linewidth=0.8, alpha=0.6)

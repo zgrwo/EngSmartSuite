@@ -33,6 +33,11 @@ PALETTE = {
         "line": "#e31a1c",          # 异常阈值线
     },
 
+    # ── 控制限 (UCL/LCL/CL) ──
+    "control": {
+        "primary": "#d4a017",       # 金黄色 — 控制限 (UCL/LCL/CL)，虚线
+    },
+
     # ── 规格/控制/显著性 ──
     "spec": {
         "primary": "#e31a1c",       # 红色 — 规格限、控制限 (UCL/LCL)
