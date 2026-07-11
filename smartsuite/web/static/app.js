@@ -343,6 +343,7 @@ let _pendingTask = null;  // 当前等待用户确认参数的任务
 let _running = false;     // 防抖标志
 let _lastRequest = null;  // 最近一次分析请求体（用于分组筛选重取）
 let _activeGroups = new Set();  // 当前激活的分组
+let _allGroups = [];       // 全量分组列表（常驻，不受筛选影响）
 let _pendingGroupFilter = false;  // 是否有待筛选的分组
 
 async function runAnalysis(task) {
@@ -396,7 +397,7 @@ async function executeRequest(task) {
     const params = getParams(task);
     _lastRequest = { task, targets: [...selectedY], features: [...selectedX], categoricals: [...selectedCat], params };
     _pendingGroupFilter = !!(params.group_col);  // 有分组依据时启用筛选栏
-    _activeGroups.clear();  // 新请求重置筛选
+    if (!_pendingGroupFilter) { _allGroups = []; _activeGroups.clear(); }  // 无分组时重置
     const r = await fetch('/api/analyze', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await getCsrfToken() },
       body: JSON.stringify(_lastRequest)
@@ -431,7 +432,7 @@ async function refetchWithFilter() {
   if (!_lastRequest) return;
   const req = { ..._lastRequest, params: { ..._lastRequest.params } };
   const filtered = [..._activeGroups];
-  if (filtered.length > 0 && filtered.length < _activeGroups.size + 1) {
+  if (filtered.length > 0 && filtered.length < _allGroups.length) {
     req.params.filter_groups = filtered;
   } else {
     delete req.params.filter_groups;
@@ -450,14 +451,18 @@ async function refetchWithFilter() {
 function renderResults(results) {
   if (!results.length) { document.getElementById('results').innerHTML = '<div class="empty-hint">无结果</div>'; return; }
 
-  // ── 分组筛选栏（前置构建，避免被 innerHTML 覆盖）──
+  // ── 分组筛选栏（常驻，用 _allGroups 避免过滤后消失）──
   let filterHtml = '';
   const meta0 = results[0]?.metadata || {};
   const groups0 = meta0.groups;
-  if (groups0 && groups0.length > 1 && _pendingGroupFilter) {
-    if (_activeGroups.size === 0) groups0.forEach(g => _activeGroups.add(String(g)));
+  // 首次出现分组时初始化全量列表
+  if (groups0 && groups0.length > 0 && _pendingGroupFilter && _allGroups.length === 0) {
+    _allGroups = groups0.map(g => String(g));
+    _allGroups.forEach(g => _activeGroups.add(g));
+  }
+  if (_pendingGroupFilter && _allGroups.length >= 1) {
     filterHtml = '<div class="filter-bar"><span class="filter-label">筛选分组: </span>';
-    groups0.forEach(g => {
+    _allGroups.forEach(g => {
       const gs = String(g);
       const ck = _activeGroups.has(gs) ? 'checked' : '';
       filterHtml += `<label class="filter-chip"><input type="checkbox" value="${escHtml(gs)}" ${ck} onchange="toggleGroupFilter('${escHtml(gs)}', this.checked)"> ${escHtml(gs)}</label>`;
