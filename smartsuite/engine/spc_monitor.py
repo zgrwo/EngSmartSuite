@@ -308,13 +308,16 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     lower_cl = lower_ucl = lower_lcl = None
     lower_label = lower_title = ""
     chart_subtype = ""
-    _r_bar = None  # 仅在 R 图路径定义
-    _s_bar = None  # 仅在 S 图路径定义
+    _r_bar = None
+    _s_bar = None
+    _disp_key = "r"  # 散度统计量的列名
+
+    # 分组独立控制限（has_groups 时每组独立计算）
+    group_limits: dict = {}  # group_name → {xbar_bar, sigma, ucl_x, lcl_x, ...}
 
     if len(multi_data) > 0:
-        # 仅用 n≥2 的子组估计控制限
+        # ── 全局控制限（pooled，用于图表背景参考线）──
         if n_common in _XBR_CONSTANTS:
-            # n ≤ 25: 标准 R 图
             A2, D3, D4 = _XBR_CONSTANTS[n_common]
             _r_bar = float(multi_data["r"].mean())
             xbar_bar = float(multi_data["xbar"].mean())
@@ -327,11 +330,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             lower_label = "R (极差)"
             lower_title = "R 控制图"
             chart_subtype = "xbar_r"
-            # Western Electric 规则（多点子组）
-            xbar_violations = _we_rules_xbar(multi_data["xbar"].values, xbar_bar, sigma_xbar)
-            r_violations = _we_rules_r(multi_data["r"].values, _r_bar, lower_ucl, lower_lcl)
+            _disp_key = "r"
         else:
-            # n > 25: 自动切换 x-bar/S 图
             use_s_chart = True
             c4, A3, B3, B4 = _xbar_s_constants(n_common)
             _s_bar = float(multi_data["s"].mean())
@@ -345,18 +345,66 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             lower_label = "S (标准差)"
             lower_title = "S 控制图"
             chart_subtype = "xbar_s"
-            # WE 规则
-            xbar_violations = _we_rules_xbar(multi_data["xbar"].values, xbar_bar, sigma_xbar)
-            r_violations = _we_rules_s(multi_data["s"].values, _s_bar, lower_ucl, lower_lcl)
+            _disp_key = "s"
+
+        # ── 分组独立违规检测 ──
+        if has_groups:
+            for gname in group_names:
+                g_multi = multi_data[multi_data["group_val"] == gname]
+                if len(g_multi) < 2:
+                    continue
+                if n_common in _XBR_CONSTANTS:
+                    A2g, D3g, D4g = _XBR_CONSTANTS[n_common]
+                    _rg = float(g_multi["r"].mean())
+                    _xbg = float(g_multi["xbar"].mean())
+                    _sg = A2g * _rg / 3.0
+                    group_limits[gname] = {
+                        "xbar_bar": _xbg, "sigma_xbar": _sg,
+                        "ucl_x": _xbg + 3.0 * _sg, "lcl_x": _xbg - 3.0 * _sg,
+                        "lower_cl": _rg, "lower_ucl": D4g * _rg, "lower_lcl": D3g * _rg,
+                    }
+                else:
+                    _sg_bar = float(g_multi["s"].mean())
+                    _xbg = float(g_multi["xbar"].mean())
+                    _sg2 = A3 * _sg_bar / 3.0
+                    group_limits[gname] = {
+                        "xbar_bar": _xbg, "sigma_xbar": _sg2,
+                        "ucl_x": _xbg + 3.0 * _sg2, "lcl_x": _xbg - 3.0 * _sg2,
+                        "lower_cl": _sg_bar, "lower_ucl": B4 * _sg_bar, "lower_lcl": B3 * _sg_bar,
+                    }
+
+        # ── 全局违规检测（无分组时直接用 pooled 限）──
+        if n_common in _XBR_CONSTANTS:
+            xbar_violations = _we_rules_xbar(
+                multi_data["xbar"].values, xbar_bar, sigma_xbar)
+            r_violations = _we_rules_r(
+                multi_data["r"].values, _r_bar, lower_ucl, lower_lcl)
+        else:
+            xbar_violations = _we_rules_xbar(
+                multi_data["xbar"].values, xbar_bar, sigma_xbar)
+            r_violations = _we_rules_s(
+                multi_data["s"].values, _s_bar, lower_ucl, lower_lcl)
+
+        # ── 分组违规检测 ──
+        per_group_violations: dict = {}
+        if has_groups:
+            for gname, glim in group_limits.items():
+                g_multi = multi_data[multi_data["group_val"] == gname]
+                gv_x = _we_rules_xbar(
+                    g_multi["xbar"].values, glim["xbar_bar"], glim["sigma_xbar"])
+                if n_common in _XBR_CONSTANTS:
+                    gv_disp = _we_rules_r(
+                        g_multi["r"].values, glim["lower_cl"], glim["lower_ucl"], glim["lower_lcl"])
+                else:
+                    gv_disp = _we_rules_s(
+                        g_multi["s"].values, glim["lower_cl"], glim["lower_ucl"], glim["lower_lcl"])
+                per_group_violations[gname] = {"xbar": gv_x, "disp": gv_disp}
     else:
-        # 全部 n=1: I 图风格（无 R/S 图）
+        # 全部 n=1: I 图风格
         xbar_bar = float(agg["xbar"].mean())
-        # 用移动极差估计 sigma
         mr_vals = np.abs(np.diff(agg["xbar"].values))
         if len(mr_vals) > 0:
-            mr_bar = float(np.mean(mr_vals))
-            d2_mr = 1.128  # n=2 的 d2
-            sigma_xbar = mr_bar / d2_mr
+            sigma_xbar = float(np.mean(mr_vals)) / 1.128
         else:
             sigma_xbar = float(agg["xbar"].std())
         ucl_x = xbar_bar + 3.0 * sigma_xbar
@@ -432,6 +480,13 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             ax1.axhline(tv, color=PALETTE["direction"]["zero"], linestyle=":",
                        linewidth=1.0, alpha=0.6, label=f"Target={tv}")
 
+    # ── 分组独立控制限线（有分组时每组画自己的限）──
+    if has_groups and group_limits:
+        for gname, glim in group_limits.items():
+            color = group_colors[gname]
+            ax1.axhline(glim["ucl_x"], color=color, linestyle="--", linewidth=0.6, alpha=0.35)
+            ax1.axhline(glim["lcl_x"], color=color, linestyle="--", linewidth=0.6, alpha=0.35)
+
     # 按分组绘制系列线
     all_xbar_violated: set[int] = set()
     for rule_name, idxs in xbar_violations.items():
@@ -461,8 +516,25 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                        marker="s", edgecolors="white", linewidth=0.5, zorder=4,
                        label=f"{label} (n=1)" if has_groups else "n=1")
 
-    # 违规点标记
-    if all_xbar_violated:
+        # ── 分组独立违规点 ──
+        if has_groups and gname in per_group_violations:
+            gv = per_group_violations[gname]["xbar"]
+            g_vio_set: set[int] = set()
+            for idxs in gv.values():
+                for idx in idxs:
+                    g_vio_set.add(idx)
+            if g_vio_set:
+                g_vio_idx = sorted(g_vio_set)
+                g_multi_sorted = gdata[gdata["multi"]]
+                viol_data = g_multi_sorted.iloc[
+                    [i for i in g_vio_idx if i < len(g_multi_sorted)]]
+                if len(viol_data) > 0:
+                    ax1.scatter(viol_data["_idx"], viol_data["xbar"], s=60,
+                               color=color, marker="o", facecolors="none",
+                               linewidths=1.5, zorder=5)
+
+    # 违规点标记（无分组时用全局检测）
+    if not has_groups and all_xbar_violated:
         multi_only = agg[agg["multi"]]
         vio_idx_list = [i for i in all_xbar_violated if i < len(multi_only)]
         if vio_idx_list:
@@ -506,6 +578,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     # ── R/S 控制图 (下方子图) ──
     ax2 = None
     lower_disp_values = None
+    disp_key = _disp_key
     if lower_title != "—":
         ax2 = fig.add_subplot(212)
         ax2.axhline(lower_cl, color=PALETTE["control"]["primary"], linestyle="--",
@@ -515,8 +588,14 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         ax2.axhline(lower_lcl, color=PALETTE["control"]["primary"], linestyle="--",
                     linewidth=1.2, label=f"LCL={lower_lcl:.4f}")
 
+        # ── 分组独立散度控制限 ──
+        if has_groups and group_limits:
+            for gname, glim in group_limits.items():
+                color = group_colors[gname]
+                ax2.axhline(glim["lower_ucl"], color=color, linestyle="--", linewidth=0.6, alpha=0.35)
+                ax2.axhline(glim["lower_lcl"], color=color, linestyle="--", linewidth=0.6, alpha=0.35)
+
         # 系列线
-        disp_key = "r" if not use_s_chart else "s"
         for gi, gname in enumerate(group_names):
             gdata = agg[agg["group_val"] == gname].sort_values("_idx")
             g_multi = gdata[gdata["multi"]]
@@ -529,20 +608,38 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             ax2.scatter(g_idx, g_disp, s=20, color=color, marker="o",
                        edgecolors="white", linewidth=0.5, zorder=4)
 
-        # R/S 违规点
-        all_lower_violated: set[int] = set()
-        for idxs in r_violations.values():
-            for idx in idxs:
-                all_lower_violated.add(idx)
-        if all_lower_violated:
-            multi_only = agg[agg["multi"]]
-            lvio_idx_list = [i for i in all_lower_violated if i < len(multi_only)]
-            if lvio_idx_list:
-                lvio_subset = multi_only.iloc[lvio_idx_list]
-                ax2.scatter(lvio_subset["_idx"], lvio_subset[disp_key], s=80,
-                           color=PALETTE["anomaly"]["primary"], marker="o",
-                           facecolors="none", linewidths=2, zorder=5,
-                           label=f"违规点 ({len(lvio_idx_list)}个)")
+            # ── 分组独立散度违规点 ──
+            if has_groups and gname in per_group_violations:
+                gv_disp = per_group_violations[gname]["disp"]
+                g_disp_vio: set[int] = set()
+                for idxs in gv_disp.values():
+                    for idx in idxs:
+                        g_disp_vio.add(idx)
+                if g_disp_vio:
+                    g_disp_vio_idx = sorted(g_disp_vio)
+                    g_multi_sorted = gdata[gdata["multi"]]
+                    viol_disp = g_multi_sorted.iloc[
+                        [i for i in g_disp_vio_idx if i < len(g_multi_sorted)]]
+                    if len(viol_disp) > 0:
+                        ax2.scatter(viol_disp["_idx"], viol_disp[disp_key], s=50,
+                                   color=color, marker="o", facecolors="none",
+                                   linewidths=1.5, zorder=5)
+
+        # R/S 违规点（无分组时用全局检测）
+        if not has_groups:
+            all_lower_violated: set[int] = set()
+            for idxs in r_violations.values():
+                for idx in idxs:
+                    all_lower_violated.add(idx)
+            if all_lower_violated:
+                multi_only = agg[agg["multi"]]
+                lvio_idx_list = [i for i in all_lower_violated if i < len(multi_only)]
+                if lvio_idx_list:
+                    lvio_subset = multi_only.iloc[lvio_idx_list]
+                    ax2.scatter(lvio_subset["_idx"], lvio_subset[disp_key], s=80,
+                               color=PALETTE["anomaly"]["primary"], marker="o",
+                               facecolors="none", linewidths=2, zorder=5,
+                               label=f"违规点 ({len(lvio_idx_list)}个)")
 
         lower_disp_values = agg[agg["multi"]][disp_key].values if len(agg[agg["multi"]]) > 0 else np.array([])
 
@@ -557,28 +654,53 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 8. 违规汇总表 ──
     violation_rows: list[dict] = []
-    for rule_name, idxs in xbar_violations.items():
-        v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
-                    if i < len(agg[agg["multi"]])]
-        violation_rows.append({
-            "图表": "X-bar",
-            "规则": rule_name,
-            "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
-            "违规点数": len(idxs),
-        })
-    if r_violations:
-        lower_chart_label = "S" if use_s_chart else "R"
-        for rule_name, idxs in r_violations.items():
+    if has_groups and per_group_violations:
+        for gname, gv in per_group_violations.items():
+            for rule_name, idxs in gv["xbar"].items():
+                v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
+                            if i < len(agg[agg["multi"]])]
+                violation_rows.append({
+                    "分组": str(gname),
+                    "图表": "X-bar",
+                    "规则": rule_name,
+                    "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
+                    "违规点数": len(idxs),
+                })
+            lower_chart_label = "S" if use_s_chart else "R"
+            for rule_name, idxs in gv["disp"].items():
+                v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
+                            if i < len(agg[agg["multi"]])]
+                violation_rows.append({
+                    "分组": str(gname),
+                    "图表": lower_chart_label,
+                    "规则": rule_name,
+                    "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
+                    "违规点数": len(idxs),
+                })
+        total_violations = sum(
+            len(gv["xbar"]) + len(gv["disp"]) for gv in per_group_violations.values())
+    else:
+        for rule_name, idxs in xbar_violations.items():
             v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
                         if i < len(agg[agg["multi"]])]
             violation_rows.append({
-                "图表": lower_chart_label,
+                "图表": "X-bar",
                 "规则": rule_name,
                 "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
                 "违规点数": len(idxs),
             })
-
-    total_violations = len(xbar_violations) + len(r_violations)
+        if r_violations:
+            lower_chart_label = "S" if use_s_chart else "R"
+            for rule_name, idxs in r_violations.items():
+                v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
+                            if i < len(agg[agg["multi"]])]
+                violation_rows.append({
+                    "图表": lower_chart_label,
+                    "规则": rule_name,
+                    "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
+                    "违规点数": len(idxs),
+                })
+        total_violations = len(xbar_violations) + len(r_violations)
     is_stable = total_violations == 0
 
     # ── 9. 控制限表 ──

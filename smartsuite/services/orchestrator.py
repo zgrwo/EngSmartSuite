@@ -121,8 +121,8 @@ DEFAULT_PARAMS = {
     # 过程监控
     "spc_xbar": {"group_col": None, "usl": None, "lsl": None, "target": None},
     "spc_attribute": {"chart_type": "p", "group_col": None},
-    "spc_cusum": {"k": 0.5, "h": 5.0},
-    "spc_ewma": {"lam": 0.2, "L": 2.7},
+    "spc_cusum": {"k": 0.5, "h": 5.0, "group_col": None},
+    "spc_ewma": {"lam": 0.2, "L": 2.7, "group_col": None},
     "spc_nonparametric": {"side": "two-sided"},
     "process_capability": {"usl": None, "lsl": None},
     "trend_forecast": {"forecast_steps": 5},

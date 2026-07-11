@@ -125,9 +125,9 @@ const TASK_PARAMS = {
   decision_tree:     { max_depth: 5 },
   anova:             { alpha: 0.05, interactions: 0 },
   spc_nonparametric: { side: 'two-sided' },
-  spc_cusum:         { k: 0.5, h: 5.0 },
-  spc_ewma:          { lam: 0.2, L: 2.7 },
-  spc_attribute:     { chart_type: 'p' },
+  spc_cusum:         { k: 0.5, h: 5.0, group_col: '' },
+  spc_ewma:          { lam: 0.2, L: 2.7, group_col: '' },
+  spc_attribute:     { chart_type: 'p', group_col: '' },
   power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5, alpha: 0.05, target_power: 0.80 },
   bootstrap_ci:      { statistic: 'mean', n_bootstrap: 2000, ci_level: 0.95 },
   median_ci:         { ci_level: 0.95 },
@@ -429,12 +429,17 @@ function toggleGroupFilter(groupName, active) {
 }
 async function refetchWithFilter() {
   if (!_lastRequest) return;
-  const req = _lastRequest;
+  const req = { ..._lastRequest, params: { ..._lastRequest.params } };
   const filtered = [..._activeGroups];
-  req.params = { ...req.params, filter_groups: filtered.length ? filtered : undefined };
+  if (filtered.length > 0 && filtered.length < _activeGroups.size + 1) {
+    req.params.filter_groups = filtered;
+  } else {
+    delete req.params.filter_groups;
+  }
   _pendingGroupFilter = true;
+  const token = await getCsrfToken();
   const r = await fetch('/api/analyze', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await getCsrfToken() },
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
     body: JSON.stringify(req)
   });
   const d = await r.json();
