@@ -218,10 +218,11 @@ class AnalysisResult:
 
 ### xbar_r_chart
 - **Task Key**: `spc_xbar`
-- **描述**: X-bar 和 R 控制图，含 Western Electric 6 规则检测和 σ 区域着色
-- **params**: `subgroup_col` (默认 "子组")
+- **描述**: X-bar 控制图，含 Western Electric 规则检测和 σ 区域着色。n>25 自动切换为 X-bar/S 图
+- **feature_cols[0]**: 横坐标列 — 类别/日期/数字。空→按数据出现顺序
+- **params**: `group_col` (分组依据，空→单一序列), `usl`, `lsl`, `target` (可选规格限)
 - **返回**: `control_limits`, `violations` (违规汇总表)
-- **图**: X-bar 图 (上) + R 图 (下) — 含区域着色和违规点标记
+- **图**: X-bar 图 (上) + R 或 S 图 (下) — 含区域着色和违规点标记
 
 ### attribute_chart
 - **Task Key**: `spc_attribute`

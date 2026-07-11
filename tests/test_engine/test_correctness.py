@@ -264,7 +264,7 @@ def test_attribute_chart_types():
         "defect": np.random.binomial(1, 0.05, 1000),
     })
     req = AnalysisRequest(task="spc_attribute", data=df_p, target_col="defect",
-                          params={"chart_type": "p", "subgroup_col": "batch"})
+                          feature_cols=["batch"], params={"chart_type": "p"})
     r = attribute_chart(req)
     assert r.status == "ok"
     assert r.metadata["chart_type"] == "p"
@@ -292,7 +292,7 @@ def test_attribute_chart_types():
         "defects": np.random.poisson(2, 30),
     })
     req = AnalysisRequest(task="spc_attribute", data=df_u, target_col="defects",
-                          params={"chart_type": "u", "subgroup_col": "batch"})
+                          feature_cols=["batch"], params={"chart_type": "u"})
     r = attribute_chart(req)
     assert r.status == "ok"
     assert r.metadata["chart_type"] == "u"
@@ -303,11 +303,11 @@ def test_attribute_chart_types():
         "defect": np.random.binomial(1, 0.05, 1000),
     })
     req = AnalysisRequest(task="spc_attribute", data=df_np, target_col="defect",
-                          params={"chart_type": "np", "subgroup_col": "batch"})
+                          feature_cols=["batch"], params={"chart_type": "np"})
     r = attribute_chart(req)
     assert r.status == "ok"
     assert r.metadata["chart_type"] == "np"
-    assert 1 <= r.metadata["n_subgroups"] <= 30
+    assert 1 <= r.metadata["n_points"] <= 30
 
 
 # ── SPC X-bar/R 控制图正确性 ──
@@ -323,7 +323,7 @@ def test_xbar_r_known_limits():
             data.append({"子组": sg, "val": np.random.normal(10, 1)})
     df = pd.DataFrame(data)
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
-                          params={"subgroup_col": "子组"})
+                          feature_cols=["子组"], params={})
     r = xbar_r_chart(req)
     assert r.status == "ok"
     # 控制限应在合理范围 (CL≈10, UCL>10, LCL<10)

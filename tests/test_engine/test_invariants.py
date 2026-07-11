@@ -197,7 +197,7 @@ def test_xbar_control_limits_order():
             data.append({"子组": sg, "val": np.random.normal(10, 1)})
     df = pd.DataFrame(data)
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
-                          params={"subgroup_col": "子组"})
+                          feature_cols=["子组"], params={})
     result = xbar_r_chart(req)
     if result.status == "ok":
         cl = result.metadata["xbar_mean"]
@@ -215,7 +215,7 @@ def test_r_chart_control_limits_non_negative():
             data.append({"子组": sg, "val": np.random.normal(10, 1)})
     df = pd.DataFrame(data)
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
-                          params={"subgroup_col": "子组"})
+                          feature_cols=["子组"], params={})
     result = xbar_r_chart(req)
     if result.status == "ok":
         assert result.metadata["lcl_r"] >= 0, \

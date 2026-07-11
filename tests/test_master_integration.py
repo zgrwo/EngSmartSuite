@@ -53,7 +53,7 @@ TASKS_TO_TEST = [
     ("lasso_regression", "y", ["x1", "x2", "x3"]),
     ("response_surface", "y", ["x1", "x2"]),
     ("doe_analysis", "y", ["x1", "x2", "x3"]),
-    ("spc_xbar", "y", [], {"subgroup_col": "group"}),
+    ("spc_xbar", "y", ["group"], {}),
     ("spc_cusum", "y", [], {}),
     ("spc_ewma", "y", [], {}),
     ("process_capability", "y", [], {"usl": 70, "lsl": 30}),

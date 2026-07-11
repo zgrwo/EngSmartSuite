@@ -17,7 +17,7 @@ def test_xbar_r_chart(sample_spc_data):
         data=sample_spc_data,
         target_col="测量值",
         feature_cols=["子组"],
-        params={"subgroup_col": "子组"},
+        params={},
     )
     result = xbar_r_chart(req)
     assert result.status == "ok"
@@ -82,7 +82,7 @@ def test_xbar_constants_correct_limits():
         data=df,
         target_col="测量值",
         feature_cols=["子组"],
-        params={"subgroup_col": "子组"},
+        params={},
     )
     result = xbar_r_chart(req)
     assert result.status == "ok"

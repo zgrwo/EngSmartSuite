@@ -134,7 +134,7 @@ const TASK_PARAMS = {
   quantile_regression:{ quantile: 0.5 },
   tolerance_interval:{ coverage: 0.99, confidence: 0.95, side: 'two-sided' },
   gage_rr:           { part_col: '', operator_col: '', sigma_multiplier: 5.15, tolerance: '' },
-  spc_xbar:          { subgroup_col: '子组', usl: '', lsl: '', target: '' },
+  spc_xbar:          { group_col: '', usl: '', lsl: '', target: '' },
   logistic_regression:{ threshold: 0.5 },
   lasso_regression:  { alpha_lasso: '', l1_ratio: 1.0 },
   regression:        { model_type: 'linear' },
@@ -234,7 +234,7 @@ const PARAM_META = {
     type: 'select', label: '分位数',
     options: [['0.1','0.1'], ['0.25','0.25'], ['0.5','0.5 (中位数)'], ['0.75','0.75'], ['0.9','0.9']]
   },
-  subgroup_col:   { type: 'column', label: '子组列', hint: '选择用于分组的列' },
+  group_col:      { type: 'column', label: '分组依据', hint: '按此列分系列，不同值=不同颜色的线' },
   part_col:       { type: 'column', label: '部件列', hint: '选择部件标识列' },
   operator_col:   { type: 'column', label: '操作员列', hint: '选择操作员标识列' },
   group_col:      { type: 'column', label: '分组列', hint: '选择分组标识列' },
@@ -251,7 +251,7 @@ const PARAM_LABELS = {
   test_type: '检验类型', effect_size: '效应量', statistic: '统计量',
   n_bootstrap: 'Bootstrap 次数', ci_level: '置信水平', quantile: '分位数',
   coverage: '覆盖比例', confidence: '置信度', part_col: '部件列',
-  operator_col: '操作员列', subgroup_col: '子组列', alpha_lasso: 'α (正则化强度)',
+  operator_col: '操作员列', group_col: '分组依据', alpha_lasso: 'α (正则化强度)',
   model_type: '模型类型', min_segment: '最小段长', n_changepoints: '变点数',
   group_col: '分组列', max_depth: '最大深度',
   sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
@@ -341,6 +341,9 @@ function getParams(task) {
 // Analysis — 两步流程: 有参数→先显示面板, 无参数→直接运行
 let _pendingTask = null;  // 当前等待用户确认参数的任务
 let _running = false;     // 防抖标志
+let _lastRequest = null;  // 最近一次分析请求体（用于分组筛选重取）
+let _activeGroups = new Set();  // 当前激活的分组
+let _pendingGroupFilter = false;  // 是否有待筛选的分组
 
 async function runAnalysis(task) {
   if (_running) return;  // 防抖：上一次分析尚未完成
@@ -390,10 +393,13 @@ async function executeRequest(task) {
   document.getElementById('results').innerHTML =
     '<div class="empty-hint"><div class="spinner"></div> 分析中...</div>';
   try {
+    const params = getParams(task);
+    _lastRequest = { task, targets: [...selectedY], features: [...selectedX], categoricals: [...selectedCat], params };
+    _pendingGroupFilter = !!(params.group_col);  // 有分组依据时启用筛选栏
+    _activeGroups.clear();  // 新请求重置筛选
     const r = await fetch('/api/analyze', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await getCsrfToken() },
-      body: JSON.stringify({ task, targets: [...selectedY], features: [...selectedX],
-        categoricals: [...selectedCat], params: getParams(task) })
+      body: JSON.stringify(_lastRequest)
     });
     const d = await r.json();
     if (!r.ok) {
@@ -416,9 +422,44 @@ function executeAnalysis() {
   executeRequest(_pendingTask);
 }
 
+// ── 分组筛选（SPC 多系列）──
+function toggleGroupFilter(groupName, active) {
+  if (active) { _activeGroups.add(groupName); }
+  else { _activeGroups.delete(groupName); }
+}
+async function refetchWithFilter() {
+  if (!_lastRequest) return;
+  const req = _lastRequest;
+  const filtered = [..._activeGroups];
+  req.params = { ...req.params, filter_groups: filtered.length ? filtered : undefined };
+  _pendingGroupFilter = true;
+  const r = await fetch('/api/analyze', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await getCsrfToken() },
+    body: JSON.stringify(req)
+  });
+  const d = await r.json();
+  if (r.ok) { renderResults(d.results || []); }
+}
+
 // Result rendering
 function renderResults(results) {
   if (!results.length) { document.getElementById('results').innerHTML = '<div class="empty-hint">无结果</div>'; return; }
+
+  // ── 分组筛选栏（前置构建，避免被 innerHTML 覆盖）──
+  let filterHtml = '';
+  const meta0 = results[0]?.metadata || {};
+  const groups0 = meta0.groups;
+  if (groups0 && groups0.length > 1 && _pendingGroupFilter) {
+    if (_activeGroups.size === 0) groups0.forEach(g => _activeGroups.add(String(g)));
+    filterHtml = '<div class="filter-bar"><span class="filter-label">筛选分组: </span>';
+    groups0.forEach(g => {
+      const gs = String(g);
+      const ck = _activeGroups.has(gs) ? 'checked' : '';
+      filterHtml += `<label class="filter-chip"><input type="checkbox" value="${escHtml(gs)}" ${ck} onchange="toggleGroupFilter('${escHtml(gs)}', this.checked)"> ${escHtml(gs)}</label>`;
+    });
+    filterHtml += '<button class="btn-sm" onclick="refetchWithFilter()">应用</button></div>';
+  }
+
   // 排序
   results.sort((a, b) => {
     const getScore = (r) => {
@@ -475,5 +516,5 @@ function renderResults(results) {
       <div class="card-body"><div class="summary">${escHtml(String(r.summary))}</div>${mHtml}${cHtml}${tHtml}</div></div>`;
   });
 
-  document.getElementById('results').innerHTML = html;
+  document.getElementById('results').innerHTML = filterHtml + html;
 }

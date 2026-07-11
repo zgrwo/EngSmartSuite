@@ -119,8 +119,8 @@ DEFAULT_PARAMS = {
     "robust_regression": {},
     "quantile_regression": {"quantile": 0.5},
     # 过程监控
-    "spc_xbar": {"subgroup_col": "子组"},
-    "spc_attribute": {"chart_type": "p"},
+    "spc_xbar": {"group_col": None, "usl": None, "lsl": None, "target": None},
+    "spc_attribute": {"chart_type": "p", "group_col": None},
     "spc_cusum": {"k": 0.5, "h": 5.0},
     "spc_ewma": {"lam": 0.2, "L": 2.7},
     "spc_nonparametric": {"side": "two-sided"},
@@ -251,7 +251,8 @@ TASK_GROUPS = {
 # ── 需要保留原始类别列的任务（不做 One-Hot 编码）──
 # 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
 RAW_CAT_TASKS: set[str] = {"box_chart", "anova", "variance_test", "contingency",
-                            "cohens_kappa", "hypothesis_test", "survival_analysis"}
+                            "cohens_kappa", "hypothesis_test", "survival_analysis",
+                            "spc_xbar", "spc_attribute"}
 
 # ── 不需要目标列 (Y 列) 的任务 ──
 # 这些引擎函数不使用 req.target_col，Web 层通过此常量判断是否允许不选 Y 列

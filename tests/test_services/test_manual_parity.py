@@ -453,8 +453,8 @@ def test_manual_spc_xbar(raw_df):
     spc_df["_子组"] = spc_df.groupby("班次").ngroup() + 1
 
     r_py, _, r_web, py_st, _, web_st = _compare_3paths(
-        "spc_xbar", spc_df, "不良率", [],
-        {"subgroup_col": "_子组"}, [], raw_cat=False)
+        "spc_xbar", spc_df, "不良率", ["_子组"],
+        {}, [], raw_cat=False)
 
     assert py_st == "ok"
     assert web_st == "ok"

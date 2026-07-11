@@ -10,7 +10,6 @@ import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import (
-    auto_generate_subgroup_col,
     infer_group_col,
     preprocess_for_task,
     validate_data,
@@ -93,9 +92,6 @@ def main():
             except Exception as e:
                 logger.warning("数据校验异常: %s", e)
                 print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
-        # SPC 缺子组列时自动生成（与 Web 路径保持一致）
-        if task == "spc_xbar" and "subgroup_col" not in params:
-            raw, params = auto_generate_subgroup_col(raw, params)
         # 任务感知的数据预处理（与 Web 路径保持一致）
         df, feature_cols, imputation_log, unknown_cat_warnings = preprocess_for_task(
             raw, features, task, categoricals=categoricals, raw_cat_tasks=RAW_CAT_TASKS)

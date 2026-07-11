@@ -42,6 +42,25 @@ _XBR_CONSTANTS: dict[int, tuple[float, float, float]] = {
 }
 
 
+def _xbar_s_constants(n: int) -> tuple[float, float, float, float]:
+    """计算 x-bar/S 控制图常数 (c4, A3, B3, B4)，支持任意 n ≥ 2。
+
+    用于 n > 25 时替代 R 图（S 图在大子组时比 R 图更高效）。
+    使用 math.gamma 精确计算 c4 无偏常量。
+
+    Returns:
+        (c4, A3, B3, B4)
+    """
+    import math
+    c4 = math.sqrt(2.0 / (n - 1)) * math.gamma(n / 2.0) / math.gamma((n - 1) / 2.0)
+    c4 = max(c4, 1e-10)
+    A3 = 3.0 / (c4 * math.sqrt(n))
+    common = 3.0 * math.sqrt(max(0.0, 1.0 - c4 ** 2)) / c4
+    B3 = max(0.0, 1.0 - common)
+    B4 = 1.0 + common
+    return c4, A3, B3, B4
+
+
 def _we_rules_xbar(values, cl, sigma):
     """Western Electric 规则检测 X-bar 图。返回违规子组索引字典。"""
     violations: dict[str, list[int]] = {}
@@ -154,113 +173,232 @@ def _we_rules_r(values, cl, ucl, lcl=0):
     return {k: sorted(set(v)) for k, v in violations.items()}
 
 
+def _we_rules_s(values, cl, ucl, lcl=0):
+    """S 控制图的模式检测规则（与 R 图规则一致，使用 S 命名）。"""
+    violations: dict[str, list[int]] = {}
+    vals = np.asarray(values)
+    n = len(vals)
+
+    # Rule S1a: 超出 UCL
+    r1 = np.where(vals > ucl)[0]
+    if len(r1):
+        violations["S1a: 超出UCL"] = [int(i) for i in r1]
+
+    # Rule S1b: 低于 LCL (仅当 LCL>0 时)
+    if lcl > 0:
+        r1b = np.where(vals < lcl)[0]
+        if len(r1b):
+            violations["S1b: 低于LCL"] = [int(i) for i in r1b]
+
+    # Rule S2: 连续 7 点在中心线同侧
+    s2_seen: set[int] = set()
+    for i in range(n - 6):
+        if all(vals[i:i+7] > cl):
+            s2_seen.update(range(i, i+7))
+        if all(vals[i:i+7] < cl):
+            s2_seen.update(range(i, i+7))
+    if s2_seen:
+        violations["S2: 连续7点同侧"] = sorted(s2_seen)
+
+    # Rule S3: 连续 7 点上升 (变异性恶化)
+    s3_seen: set[int] = set()
+    for i in range(n - 6):
+        if all(vals[i+k+1] > vals[i+k] for k in range(6)):
+            s3_seen.update(range(i, i+7))
+    if s3_seen:
+        violations["S3: 连续7点上升 (变异增大)"] = sorted(s3_seen)
+
+    # Rule S4: 连续 7 点下降 (变异性改善)
+    s4_seen: set[int] = set()
+    for i in range(n - 6):
+        if all(vals[i+k+1] < vals[i+k] for k in range(6)):
+            s4_seen.update(range(i, i+7))
+    if s4_seen:
+        violations["S4: 连续7点下降 (变异减小)"] = sorted(s4_seen)
+
+    return {k: sorted(set(v)) for k, v in violations.items()}
+
+
 def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
-    """X-bar 和 R 控制图，含 Western Electric 规则和区域着色。"""
-    subgroup_col = req.params.get("subgroup_col", "子组")
-    if subgroup_col not in req.data.columns:
-        return AnalysisResult(
-            task="spc_xbar",
-            status="error",
-            messages=[f"子组列「{subgroup_col}」不存在"],
-        )
+    """X-bar 控制图，含 Western Electric 规则和区域着色。
 
-    subgroups = req.data.groupby(subgroup_col)[req.target_col]
-    xbar = subgroups.mean()
-    r = subgroups.max() - subgroups.min()
+    参数模型:
+        X 列 (feature_cols[0]): 横坐标 — 类别/日期/数字。空→顺序索引
+        group_col (params): 分组依据 — 空→单系列。不同值=不同线，共享坐标轴
+        usl/lsl/target (params): 规格限/目标值（可选）
 
-    if len(xbar) < 2:
-        return AnalysisResult(
-            task="spc_xbar", status="error", messages=["子组数量不足"]
-        )
+    子组: 同一 (X值, 分组值) 下的多行自然形成。n = 该组合的行数。
+    """
+    data = req.data.copy()
+    y_col = req.target_col
 
-    # 校验子组大小一致性 — 不等时自动修剪到最小子组大小
-    subgroup_sizes = subgroups.count()
-    warn_unequal = ""
-    if subgroup_sizes.nunique() > 1:
-        min_n = int(subgroup_sizes.min())
-        # 修剪每组到 min_n
-        trimmed_data = []
-        for name, group in subgroups:
-            group_vals = group.dropna().values[:min_n]
-            if len(group_vals) == min_n:
-                trimmed_data.append({"subgroup": name, "values": group_vals})
-        if len(trimmed_data) < 2:
-            return AnalysisResult(task="spc_xbar", status="error",
-                messages=["修剪后子组数量不足"])
-        xbar = pd.Series([np.mean(d["values"]) for d in trimmed_data],
-                         index=[d["subgroup"] for d in trimmed_data])
-        r = pd.Series([np.max(d["values"]) - np.min(d["values"]) for d in trimmed_data],
-                      index=[d["subgroup"] for d in trimmed_data])
-        n = min_n
-        warn_unequal = f" (子组大小不一致，已取每组前{min_n}个值修剪为n={min_n})"
+    # ── 1. 提取 X 列（横坐标）──
+    x_col = req.feature_cols[0] if req.feature_cols else None
+    if x_col and x_col in data.columns:
+        x_vals = data[x_col]
     else:
-        n = int(subgroup_sizes.iloc[0]) if len(subgroups) > 0 else 5
+        x_vals = pd.Series(range(len(data)), index=data.index, name="_seq")
 
-    # 在修剪后计算 xbar_bar 和 r_bar，确保控制限与图表数据一致
-    xbar_bar = float(xbar.mean())
-    r_bar = float(r.mean())
+    # ── 2. 提取分组依据 ──
+    group_col = req.params.get("group_col")
+    has_groups = bool(group_col and group_col in data.columns)
+    if has_groups:
+        group_vals = data[group_col]
+        group_names = sorted(group_vals.dropna().unique())
+        # 支持前端筛选：仅显示指定分组
+        filter_groups = req.params.get("filter_groups")
+        if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
+            filter_set = set(str(f) for f in filter_groups)
+            group_names = [g for g in group_names if str(g) in filter_set]
+            if not group_names:
+                group_names = sorted(group_vals.dropna().unique())  # 全空则回退
+    else:
+        group_vals = pd.Series("_default", index=data.index)
+        group_names = ["_default"]
 
-    # ── NaN 校验：全 NaN 目标列产生 NaN 均值/极差 (P2 fix) ──
-    if np.isnan(xbar_bar) or np.isnan(r_bar):
+    # ── 3. 构建子组统计 ──
+    data["_x"] = x_vals.values
+    data["_group"] = group_vals.values
+    data["_y"] = data[y_col].values
+
+    # 过滤有效数据
+    valid = data["_y"].notna()
+    data_valid = data[valid].copy()
+    if len(data_valid) < 2:
         return AnalysisResult(
             task="spc_xbar", status="error",
-            messages=[f"目标列「{req.target_col}」的所有值均为缺失值或不可计算，"
-                      f"无法估计控制限。请检查数据是否包含有效数值。"],
+            messages=[f"目标列「{y_col}」有效数据不足（至少需要2个数据点）"],
         )
 
-    if n not in _XBR_CONSTANTS:
+    # 按 (X值, 分组值) 聚合
+    agg = data_valid.groupby(["_x", "_group"], dropna=False)["_y"].agg(
+        xbar="mean", r=lambda x: x.max() - x.min(), s="std", n="count"
+    ).reset_index()
+    agg.rename(columns={"_x": "x_val", "_group": "group_val"}, inplace=True)
+
+    # ── 4. 分类子组: n≥2 参与控制限估计, n=1 仅显示 ──
+    agg["multi"] = agg["n"] >= 2
+    multi_data = agg[agg["multi"]].copy()
+    single_data = agg[~agg["multi"]].copy()
+
+    if len(multi_data) < 1 and len(single_data) < 2:
         return AnalysisResult(
             task="spc_xbar", status="error",
-            messages=[f"子组大小 n={n} 不在支持范围 (2-25)"],
+            messages=["X 列有效分组数不足（至少需要2个点）"],
         )
-    A2, D3, D4 = _XBR_CONSTANTS[n]
 
-    sigma_xbar = A2 * r_bar / 3  # X-bar σ 估计
-    ucl_x = xbar_bar + 3 * sigma_xbar
-    lcl_x = xbar_bar - 3 * sigma_xbar
-    ucl_r = D4 * r_bar
-    lcl_r = D3 * r_bar
+    # ── 5. 确定统一 n（用于图表标题）──
+    if len(multi_data) > 0:
+        n_sizes = multi_data["n"]
+        if n_sizes.nunique() == 1:
+            n_common = int(n_sizes.iloc[0])
+            warn_unequal = ""
+        else:
+            n_common = int(n_sizes.min())
+            warn_unequal = f" (子组大小不一致，最小n={n_common})"
+    else:
+        n_common = 1
+        warn_unequal = " (无多点子组，仅显示单值)"
 
-    # ── Western Electric 规则检测 ──
-    xbar_violations = _we_rules_xbar(xbar.values, xbar_bar, sigma_xbar)
+    # ── 6. 控制限计算 ──
+    use_s_chart = False
+    xbar_bar = None
+    sigma_xbar = None
+    ucl_x = lcl_x = None
+    lower_cl = lower_ucl = lower_lcl = None
+    lower_label = lower_title = ""
+    chart_subtype = ""
+    _r_bar = None  # 仅在 R 图路径定义
+    _s_bar = None  # 仅在 S 图路径定义
 
-    # R 图规则检测
-    r_violations = _we_rules_r(r.values, r_bar, ucl_r, lcl_r)
+    if len(multi_data) > 0:
+        # 仅用 n≥2 的子组估计控制限
+        if n_common in _XBR_CONSTANTS:
+            # n ≤ 25: 标准 R 图
+            A2, D3, D4 = _XBR_CONSTANTS[n_common]
+            _r_bar = float(multi_data["r"].mean())
+            xbar_bar = float(multi_data["xbar"].mean())
+            sigma_xbar = A2 * _r_bar / 3.0
+            ucl_x = xbar_bar + 3.0 * sigma_xbar
+            lcl_x = xbar_bar - 3.0 * sigma_xbar
+            lower_cl = _r_bar
+            lower_ucl = D4 * _r_bar
+            lower_lcl = D3 * _r_bar
+            lower_label = "R (极差)"
+            lower_title = "R 控制图"
+            chart_subtype = "xbar_r"
+            # Western Electric 规则（多点子组）
+            xbar_violations = _we_rules_xbar(multi_data["xbar"].values, xbar_bar, sigma_xbar)
+            r_violations = _we_rules_r(multi_data["r"].values, _r_bar, lower_ucl, lower_lcl)
+        else:
+            # n > 25: 自动切换 x-bar/S 图
+            use_s_chart = True
+            c4, A3, B3, B4 = _xbar_s_constants(n_common)
+            _s_bar = float(multi_data["s"].mean())
+            xbar_bar = float(multi_data["xbar"].mean())
+            sigma_xbar = A3 * _s_bar / 3.0
+            ucl_x = xbar_bar + 3.0 * sigma_xbar
+            lcl_x = xbar_bar - 3.0 * sigma_xbar
+            lower_cl = _s_bar
+            lower_ucl = B4 * _s_bar
+            lower_lcl = B3 * _s_bar
+            lower_label = "S (标准差)"
+            lower_title = "S 控制图"
+            chart_subtype = "xbar_s"
+            # WE 规则
+            xbar_violations = _we_rules_xbar(multi_data["xbar"].values, xbar_bar, sigma_xbar)
+            r_violations = _we_rules_s(multi_data["s"].values, _s_bar, lower_ucl, lower_lcl)
+    else:
+        # 全部 n=1: I 图风格（无 R/S 图）
+        xbar_bar = float(agg["xbar"].mean())
+        # 用移动极差估计 sigma
+        mr_vals = np.abs(np.diff(agg["xbar"].values))
+        if len(mr_vals) > 0:
+            mr_bar = float(np.mean(mr_vals))
+            d2_mr = 1.128  # n=2 的 d2
+            sigma_xbar = mr_bar / d2_mr
+        else:
+            sigma_xbar = float(agg["xbar"].std())
+        ucl_x = xbar_bar + 3.0 * sigma_xbar
+        lcl_x = xbar_bar - 3.0 * sigma_xbar
+        lower_label = "—"
+        lower_title = "—"
+        chart_subtype = "i_chart"
+        xbar_violations = _we_rules_xbar(agg["xbar"].values, xbar_bar, sigma_xbar)
+        r_violations = {}
 
-    # ── 增强控制图 ──
-    fig = Figure(figsize=(12, 9))
-    indices = np.arange(len(xbar))
+    # NaN 校验
+    if np.isnan(xbar_bar) or np.isnan(sigma_xbar):
+        return AnalysisResult(
+            task="spc_xbar", status="error",
+            messages=[f"目标列「{y_col}」的所有值均为缺失值或不可计算，无法估计控制限。"],
+        )
 
-    # ── X-bar 子组标签格式（自适应截断 + 日期识别 + 间隔显示）──
-    def _fmt_subgroup_labels(series_index):
-        """自适应格式化子组标签：日期截断、长文本省略、过多时刻间隔显示。"""
-        labels = []
-        for val in series_index:
-            if hasattr(val, "strftime"):
-                s = val.strftime("%m-%d")
-            else:
-                s = str(val)
-            if len(s) > 15:
-                s = s[:14] + "…"
-            labels.append(s)
-        n_lbl = len(labels)
-        if n_lbl > 20:
-            # 间隔显示，但保留首尾
-            step = max(1, n_lbl // 20)
-            for i in range(n_lbl):
-                if i % step != 0 and i != n_lbl - 1:
-                    labels[i] = ""
-        return labels
-
-    xbar_labels = _fmt_subgroup_labels(xbar.index)
+    # ── 7. 图表渲染 ──
+    n_series = len(group_names) if has_groups else 1
+    fig_height = 9 if (lower_title != "—") else 6
+    fig = Figure(figsize=(12, fig_height))
+    n_subplots = 2 if lower_title != "—" else 1
 
     # X-bar 控制图
-    ax1 = fig.add_subplot(211)
-    # 区域着色（无图例 — 颜色已自说明）
-    ax1.fill_between(indices, lcl_x, ucl_x, alpha=0.06, color=PALETTE["center"]["primary"])
-    ax1.fill_between(indices, xbar_bar - 2*sigma_xbar, xbar_bar + 2*sigma_xbar,
+    ax1 = fig.add_subplot(n_subplots * 100 + 11) if n_subplots == 2 else fig.add_subplot(111)
+
+    # 构建统一索引 — 按 X 值排序，同一 X 值下按分组排
+    x_unique = sorted(agg["x_val"].unique(), key=lambda v: (isinstance(v, (int, float)), str(v)))
+    x_to_idx = {v: i for i, v in enumerate(x_unique)}
+    agg["_idx"] = agg["x_val"].map(x_to_idx)
+
+    # 分组颜色
+    group_colors = {}
+    for gi, gname in enumerate(group_names):
+        group_colors[gname] = cm.tab10(gi % 10)
+
+    # 区域着色（基于整体控制限）
+    all_idx = np.arange(len(x_unique))
+    ax1.fill_between(all_idx, lcl_x, ucl_x, alpha=0.06, color=PALETTE["center"]["primary"])
+    ax1.fill_between(all_idx, xbar_bar - 2*sigma_xbar, xbar_bar + 2*sigma_xbar,
                      alpha=0.06, color=PALETTE["judge"]["warn"])
-    ax1.fill_between(indices, xbar_bar - 1*sigma_xbar, xbar_bar + 1*sigma_xbar,
+    ax1.fill_between(all_idx, xbar_bar - 1*sigma_xbar, xbar_bar + 1*sigma_xbar,
                      alpha=0.06, color=PALETTE["center"]["primary"])
     ax1.axhline(xbar_bar, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                 label=f"CL={xbar_bar:.4f}")
@@ -273,141 +411,257 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     ax1.axhline(xbar_bar + 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
     ax1.axhline(xbar_bar - 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
 
-    # 子组颜色区分 — 使用 tab10 色表 + 连线保持统一色调
-    subgroup_colors = cm.tab10(np.linspace(0, 1, min(len(xbar), 10)))
-    subgroup_color_map = {i: subgroup_colors[i % 10] for i in range(len(xbar))}
-    for i, idx in enumerate(indices):
-        ax1.plot([idx], [xbar.values[i]], "o", markersize=6,
-                color=subgroup_color_map[i], markeredgewidth=0.5,
-                markeredgecolor="white", zorder=4)
-    ax1.plot(indices, xbar.values, "-", color=PALETTE["data"]["primary"],
-            linewidth=1.0, alpha=0.4, zorder=2)
-
-    # 标记所有违规点
-    all_xbar_violated = set()
-    for rule_name, idxs in xbar_violations.items():
-        for idx in idxs:
-            if idx < len(xbar):
-                all_xbar_violated.add(idx)
-    if all_xbar_violated:
-        vio_idx = sorted(all_xbar_violated)
-        ax1.scatter(vio_idx, xbar.values[list(vio_idx)], s=80, color=PALETTE["anomaly"]["primary"],
-                   marker="o", facecolors="none", linewidths=2, zorder=5,
-                   label=f"违规点 ({len(vio_idx)}个)")
-
-    # USL/LSL/Target 规格线 (来自 params, 可选)
-    usl = req.params.get("usl")
-    lsl = req.params.get("lsl")
+    # 规格限
+    for spec_key, spec_label in [("usl", "USL"), ("lsl", "LSL")]:
+        spec_val = req.params.get(spec_key)
+        if spec_val is not None:
+            try:
+                sv = float(spec_val)
+            except (ValueError, TypeError):
+                sv = None
+            if sv is not None:
+                ax1.axhline(sv, color=PALETTE["anomaly"]["primary"], linestyle="-",
+                           linewidth=1.2, alpha=0.9, label=f"{spec_label}={sv}")
     target_spec = req.params.get("target")
-    if usl is not None:
-        try:
-            usl_val = float(usl)
-        except (ValueError, TypeError):
-            usl_val = None
-        if usl_val is not None:
-            ax1.axhline(usl_val, color=PALETTE["anomaly"]["primary"], linestyle="-",
-                       linewidth=1.2, alpha=0.9, label=f"USL={usl_val}")
-    if lsl is not None:
-        try:
-            lsl_val = float(lsl)
-        except (ValueError, TypeError):
-            lsl_val = None
-        if lsl_val is not None:
-            ax1.axhline(lsl_val, color=PALETTE["anomaly"]["primary"], linestyle="-",
-                       linewidth=1.2, alpha=0.9, label=f"LSL={lsl_val}")
     if target_spec is not None:
         try:
-            target_val = float(target_spec)
+            tv = float(target_spec)
         except (ValueError, TypeError):
-            target_val = None
-        if target_val is not None:
-            ax1.axhline(target_val, color=PALETTE["direction"]["zero"], linestyle=":",
-                       linewidth=1.0, alpha=0.6, label=f"Target={target_val}")
+            tv = None
+        if tv is not None:
+            ax1.axhline(tv, color=PALETTE["direction"]["zero"], linestyle=":",
+                       linewidth=1.0, alpha=0.6, label=f"Target={tv}")
 
-    ax1.set_ylabel(req.target_col, fontsize=10)
-    ax1.set_title(f"X-bar 控制图 — {req.target_col} ({len(xbar)}子组×{n}样本{warn_unequal})",
-                  fontsize=12)
-    ax1.legend(fontsize=8, loc="upper right", ncol=2)
-    ax1.set_xticks(indices)
-    ax1.set_xticklabels(xbar_labels, fontsize=7.5, rotation=45)
-
-    # R 控制图
-    ax2 = fig.add_subplot(212)
-    ax2.axhline(r_bar, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
-                label=f"CL={r_bar:.4f}")
-    ax2.axhline(ucl_r, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                label=f"UCL={ucl_r:.4f}")
-    ax2.axhline(lcl_r, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                label=f"LCL={lcl_r:.4f}")
-    # R 图子组颜色 (与 X-bar 图一致)
-    for i, idx in enumerate(indices):
-        ax2.plot([idx], [r.values[i]], "o", markersize=6,
-                color=subgroup_color_map[i], markeredgewidth=0.5,
-                markeredgecolor="white", zorder=4)
-    ax2.plot(indices, r.values, "-", color=PALETTE["target"]["primary"],
-            linewidth=1.0, alpha=0.4, zorder=2)
-
-    # 标记 R 图违规（所有规则）
-    all_r_violated: set[int] = set()
-    for idxs in r_violations.values():
+    # 按分组绘制系列线
+    all_xbar_violated: set[int] = set()
+    for rule_name, idxs in xbar_violations.items():
         for idx in idxs:
-            if idx < len(r):
-                all_r_violated.add(idx)
-    if all_r_violated:
-        r_vio_idx = sorted(all_r_violated)
-        ax2.scatter(r_vio_idx, r.values[list(r_vio_idx)], s=80, color=PALETTE["anomaly"]["primary"],
-                   marker="o", facecolors="none", linewidths=2, zorder=5,
-                   label=f"违规点 ({len(r_vio_idx)}个)")
+            all_xbar_violated.add(idx)
 
-    ax2.set_xlabel("子组", fontsize=10)
-    ax2.set_ylabel("R (极差)", fontsize=10)
-    ax2.set_title("R 控制图", fontsize=12)
-    # R 图使用相同的间隔标签策略
-    ax2.legend(fontsize=8, loc="upper right")
-    ax2.set_xticks(indices)
-    ax2.set_xticklabels(xbar_labels, fontsize=7.5, rotation=45)
+    for gi, gname in enumerate(group_names):
+        gdata = agg[agg["group_val"] == gname].sort_values("_idx")
+        if len(gdata) == 0:
+            continue
+        g_idx = gdata["_idx"].values
+        g_xbar = gdata["xbar"].values
+        color = group_colors[gname]
+        label = str(gname) if has_groups else None
+
+        # 线
+        ax1.plot(g_idx, g_xbar, "-", color=color, linewidth=1.2, alpha=0.6,
+                label=label, zorder=2)
+        # 点多点 / 单点 标记区分
+        g_multi = gdata[gdata["multi"]]
+        g_single = gdata[~gdata["multi"]]
+        if len(g_multi) > 0:
+            ax1.scatter(g_multi["_idx"], g_multi["xbar"], s=30, color=color,
+                       marker="o", edgecolors="white", linewidth=0.5, zorder=4)
+        if len(g_single) > 0:
+            ax1.scatter(g_single["_idx"], g_single["xbar"], s=25, color=color,
+                       marker="s", edgecolors="white", linewidth=0.5, zorder=4,
+                       label=f"{label} (n=1)" if has_groups else "n=1")
+
+    # 违规点标记
+    if all_xbar_violated:
+        multi_only = agg[agg["multi"]]
+        vio_idx_list = [i for i in all_xbar_violated if i < len(multi_only)]
+        if vio_idx_list:
+            vio_subset = multi_only.iloc[vio_idx_list]
+            ax1.scatter(vio_subset["_idx"], vio_subset["xbar"], s=80,
+                       color=PALETTE["anomaly"]["primary"], marker="o",
+                       facecolors="none", linewidths=2, zorder=5,
+                       label=f"违规点 ({len(vio_idx_list)}个)")
+
+    # X 轴标签
+    def _fmt_labels(vals):
+        labels = []
+        for v in vals:
+            if hasattr(v, "strftime"):
+                s = v.strftime("%m-%d")
+            else:
+                s = str(v)
+            if len(s) > 15:
+                s = s[:14] + "…"
+            labels.append(s)
+        n_lbl = len(labels)
+        if n_lbl > 20:
+            step = max(1, n_lbl // 20)
+            for i in range(n_lbl):
+                if i % step != 0 and i != n_lbl - 1:
+                    labels[i] = ""
+        return labels
+
+    x_labels = _fmt_labels(x_unique)
+    ax1.set_xticks(all_idx)
+    ax1.set_xticklabels(x_labels, fontsize=7.5, rotation=45)
+    ax1.set_ylabel(y_col, fontsize=10)
+    title_n = n_common if n_common > 1 else 1
+    title_info = f"{chart_subtype.upper()}控制图 — {y_col} ({len(agg)}点{'×'+str(title_n)+'样本' if title_n>1 else ''}{warn_unequal})"
+    ax1.set_title(title_info, fontsize=12)
+    if has_groups:
+        ax1.legend(fontsize=7, loc="upper right", ncol=max(1, n_series // 3 + 1))
+    else:
+        ax1.legend(fontsize=8, loc="upper right", ncol=2)
+
+    # ── R/S 控制图 (下方子图) ──
+    ax2 = None
+    lower_disp_values = None
+    if lower_title != "—":
+        ax2 = fig.add_subplot(212)
+        ax2.axhline(lower_cl, color=PALETTE["control"]["primary"], linestyle="--",
+                    linewidth=1.5, label=f"CL={lower_cl:.4f}")
+        ax2.axhline(lower_ucl, color=PALETTE["control"]["primary"], linestyle="--",
+                    linewidth=1.2, label=f"UCL={lower_ucl:.4f}")
+        ax2.axhline(lower_lcl, color=PALETTE["control"]["primary"], linestyle="--",
+                    linewidth=1.2, label=f"LCL={lower_lcl:.4f}")
+
+        # 系列线
+        disp_key = "r" if not use_s_chart else "s"
+        for gi, gname in enumerate(group_names):
+            gdata = agg[agg["group_val"] == gname].sort_values("_idx")
+            g_multi = gdata[gdata["multi"]]
+            if len(g_multi) == 0:
+                continue
+            g_idx = g_multi["_idx"].values
+            g_disp = g_multi[disp_key].values
+            color = group_colors[gname]
+            ax2.plot(g_idx, g_disp, "-", color=color, linewidth=1.2, alpha=0.6)
+            ax2.scatter(g_idx, g_disp, s=20, color=color, marker="o",
+                       edgecolors="white", linewidth=0.5, zorder=4)
+
+        # R/S 违规点
+        all_lower_violated: set[int] = set()
+        for idxs in r_violations.values():
+            for idx in idxs:
+                all_lower_violated.add(idx)
+        if all_lower_violated:
+            multi_only = agg[agg["multi"]]
+            lvio_idx_list = [i for i in all_lower_violated if i < len(multi_only)]
+            if lvio_idx_list:
+                lvio_subset = multi_only.iloc[lvio_idx_list]
+                ax2.scatter(lvio_subset["_idx"], lvio_subset[disp_key], s=80,
+                           color=PALETTE["anomaly"]["primary"], marker="o",
+                           facecolors="none", linewidths=2, zorder=5,
+                           label=f"违规点 ({len(lvio_idx_list)}个)")
+
+        lower_disp_values = agg[agg["multi"]][disp_key].values if len(agg[agg["multi"]]) > 0 else np.array([])
+
+        ax2.set_xlabel("X", fontsize=10)
+        ax2.set_ylabel(lower_label, fontsize=10)
+        ax2.set_title(lower_title, fontsize=12)
+        ax2.legend(fontsize=8, loc="upper right")
+        ax2.set_xticks(all_idx)
+        ax2.set_xticklabels(x_labels, fontsize=7.5, rotation=45)
+
     fig.tight_layout()
 
-    # ── 违规汇总表 ──
+    # ── 8. 违规汇总表 ──
     violation_rows: list[dict] = []
     for rule_name, idxs in xbar_violations.items():
+        v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
+                    if i < len(agg[agg["multi"]])]
         violation_rows.append({
             "图表": "X-bar",
             "规则": rule_name,
-            "违规子组": ", ".join(str(xbar.index[i]) for i in idxs if i < len(xbar.index)),
+            "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
             "违规点数": len(idxs),
         })
-    for rule_name, idxs in r_violations.items():
-        violation_rows.append({
-            "图表": "R",
-            "规则": rule_name,
-            "违规子组": ", ".join(str(r.index[i]) for i in idxs if i < len(r.index)),
-            "违规点数": len(idxs),
+    if r_violations:
+        lower_chart_label = "S" if use_s_chart else "R"
+        for rule_name, idxs in r_violations.items():
+            v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
+                        if i < len(agg[agg["multi"]])]
+            violation_rows.append({
+                "图表": lower_chart_label,
+                "规则": rule_name,
+                "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
+                "违规点数": len(idxs),
+            })
+
+    total_violations = len(xbar_violations) + len(r_violations)
+    is_stable = total_violations == 0
+
+    # ── 9. 控制限表 ──
+    lower_stats_name = "—"
+    if use_s_chart:
+        lower_stats_name = "S"
+    elif len(multi_data) > 0:
+        lower_stats_name = "R"
+
+    limits_rows = [{
+        "统计量": "X-bar",
+        "CL": f"{xbar_bar:.4f}",
+        "UCL": f"{ucl_x:.4f}",
+        "LCL": f"{lcl_x:.4f}",
+        "1σ上限": f"{xbar_bar + sigma_xbar:.4f}",
+        "1σ下限": f"{xbar_bar - sigma_xbar:.4f}",
+    }]
+    if lower_stats_name != "—":
+        limits_rows.append({
+            "统计量": lower_stats_name,
+            "CL": f"{lower_cl:.4f}",
+            "UCL": f"{lower_ucl:.4f}",
+            "LCL": f"{lower_lcl:.4f}",
+            "1σ上限": "—",
+            "1σ下限": "—",
         })
+    limits = pd.DataFrame(limits_rows)
 
-    is_stable = len(xbar_violations) == 0 and len(r_violations) == 0
-
-    # ── 控制限表 ──
-    limits = pd.DataFrame({
-        "统计量": ["X-bar", "R"],
-        "CL": [f"{xbar_bar:.4f}", f"{r_bar:.4f}"],
-        "UCL": [f"{ucl_x:.4f}", f"{ucl_r:.4f}"],
-        "LCL": [f"{lcl_x:.4f}", f"{lcl_r:.4f}"],
-        "1σ上限": [f"{xbar_bar + sigma_xbar:.4f}", "—"],
-        "1σ下限": [f"{xbar_bar - sigma_xbar:.4f}", "—"],
-    })
-
+    # ── 10. 摘要 ──
     stability_summary = (
         "过程稳定 ✓" if is_stable
-        else f"过程存在异常，共触发 {len(xbar_violations) + len(r_violations)} 条规则"
+        else f"过程存在异常，共触发 {total_violations} 条规则"
     )
 
     messages: list[str] = []
-    if warn_unequal:
+    if use_s_chart:
+        messages.append(
+            f"⚠ 子组大小 n={n_common} > 25，已自动切换为 X-bar/S 控制图。"
+            "S 图（标准差）在大子组时比 R 图（极差）更高效。"
+        )
+    if warn_unequal and n_common > 1:
         messages.append(
             f"⚠ 子组大小不一致: {warn_unequal.strip(' ()')}。"
-            "注：取每组前N个值，后续值被丢弃。如需完整分析，建议使用等大子组。"
+            "控制限基于最小子组大小估计。"
         )
+    single_count = len(single_data)
+    if single_count > 0:
+        messages.append(
+            f"ℹ 检测到 {single_count} 个单值点（n=1），已在 X-bar 图中显示为方块标记，不参与极差/标准差计算。"
+        )
+
+    # ── 11. 元数据 ──
+    metadata: dict = {
+        "xbar_mean": xbar_bar,
+        "sigma_xbar": sigma_xbar,
+        "ucl_x": ucl_x, "lcl_x": lcl_x,
+        "subgroup_size": n_common,
+        "chart_type": chart_subtype,
+        "n_series": n_series,
+        "n_points": len(agg),
+        "multi_points": len(multi_data),
+        "single_points": single_count,
+        "xbar_violations": {k: v for k, v in xbar_violations.items()},
+        "is_stable": is_stable,
+    }
+    if use_s_chart:
+        metadata["s_bar"] = float(_s_bar)
+        metadata["ucl_s"] = float(lower_ucl)
+        metadata["lcl_s"] = float(lower_lcl)
+        metadata["r_violations"] = {}
+        metadata["s_violations"] = {k: v for k, v in r_violations.items()}
+    else:
+        if _r_bar is not None:
+            metadata["r_mean"] = float(_r_bar)
+            metadata["ucl_r"] = float(lower_ucl) if lower_ucl is not None else 0.0
+            metadata["lcl_r"] = float(lower_lcl) if lower_lcl is not None else 0.0
+            metadata["r_violations"] = {k: v for k, v in r_violations.items()}
+        else:
+            metadata["r_violations"] = {}
+
+    # 分组信息（用于前端筛选按钮）
+    if has_groups:
+        metadata["groups"] = [str(g) for g in group_names if g != "_default"]
 
     return AnalysisResult(
         task="spc_xbar",
@@ -419,17 +673,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig],
         summary=f"{stability_summary}。X-bar CL={xbar_bar:.4f}, UCL={ucl_x:.4f}, LCL={lcl_x:.4f}",
         messages=messages,
-        metadata={
-            "xbar_mean": xbar_bar,
-            "r_mean": r_bar,
-            "ucl_x": ucl_x, "lcl_x": lcl_x,
-            "ucl_r": ucl_r, "lcl_r": lcl_r,
-            "sigma_xbar": sigma_xbar,
-            "subgroup_size": n,
-            "xbar_violations": {k: v for k, v in xbar_violations.items()},
-            "r_violations": {k: v for k, v in r_violations.items()},
-            "is_stable": is_stable,
-        },
+        metadata=metadata,
     )
 
 
@@ -438,162 +682,223 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
 
     参数:
         chart_type: "p" | "np" | "c" | "u"
-        subgroup_col: 分组列 (p/np 的检验批次, c/u 的样本单元)
+        X 列 (feature_cols[0]): 横坐标 — 类别/日期/数字。空→顺序索引
+        group_col: 分组依据 (可选，不同值=不同颜色的线)
         n_col: 样本量列名 (p/u 图需要，变样本量时使用)
     """
     chart_type = req.params.get("chart_type", "p")
-    subgroup_col = req.params.get("subgroup_col")
+    data = req.data.copy()
+    y_col = req.target_col
 
-    if subgroup_col and subgroup_col in req.data.columns:
-        subgroups = req.data.groupby(subgroup_col)[req.target_col]
-        counts = subgroups.sum()
-        sizes = subgroups.count()
+    # X 列
+    x_col = req.feature_cols[0] if req.feature_cols else None
+    if x_col and x_col in data.columns:
+        data["_x"] = data[x_col].values
     else:
-        counts = req.data[req.target_col].dropna()
-        sizes = pd.Series(1, index=counts.index)
+        data["_x"] = range(len(data))
 
-    m = len(counts)
+    # 分组依据
+    group_col = req.params.get("group_col")
+    has_groups = bool(group_col and group_col in data.columns)
+    if has_groups:
+        data["_g"] = data[group_col].values
+        group_names = sorted(data["_g"].dropna().unique())
+    else:
+        data["_g"] = "_default"
+        group_names = ["_default"]
+
+    # 按 (X, group) 聚合
+    valid = data[y_col].notna()
+    dv = data[valid]
+    agg = dv.groupby(["_x", "_g"], dropna=False)[y_col].agg(
+        count="sum", size="count"
+    ).reset_index()
+    agg.rename(columns={"_x": "x_val", "_g": "group_val"}, inplace=True)
+
+    m = len(agg)
     if m < 5:
-        return AnalysisResult(
-            task="spc_attribute", status="error",
-            messages=["子组数量不足(至少5个)"],
-        )
+        return AnalysisResult(task="spc_attribute", status="error",
+            messages=["分组数量不足(至少5个)"])
 
-    # ── 按图表类型计算统计量 ──
+    # 按图表类型计算
+    n_col = req.params.get("n_col")
+    if n_col and n_col in data.columns:
+        if has_groups:
+            n_map = data.groupby(["_x", "_g"], dropna=False)[n_col].first()
+        else:
+            n_map = data.groupby("_x", dropna=False)[n_col].first()
+        agg["n_vals"] = agg.apply(
+            lambda r: float(n_map.get((r["x_val"], r["group_val"]), agg["size"].mean())),
+            axis=1)
+    else:
+        agg["n_vals"] = agg["size"].astype(float)
+
     if chart_type == "p":
-        # p-chart: 不良率 = 不良数 / 检验数
-        n_col = req.params.get("n_col")
-        if n_col and n_col in req.data.columns:
-            n_vals = req.data.groupby(subgroup_col)[n_col].first() if (subgroup_col and subgroup_col in req.data.columns) else req.data[n_col]
-        else:
-            n_vals = sizes
-        if (n_vals == 0).any():
+        if (agg["n_vals"] == 0).any():
             return AnalysisResult(task="spc_attribute", status="error",
                 messages=["子组样本量包含0值，无法计算比率控制图"])
-        stat = counts / n_vals
+        agg["stat"] = agg["count"] / agg["n_vals"]
         stat_name = "不良率(p)"
-        p_bar = float(counts.sum() / n_vals.sum())
+        p_bar = float(agg["count"].sum() / agg["n_vals"].sum())
         cl = p_bar
-        # 控制限随样本量变化
-        ucl = p_bar + 3 * np.sqrt(p_bar * (1 - p_bar) / n_vals.values)
-        lcl = np.maximum(0, p_bar - 3 * np.sqrt(p_bar * (1 - p_bar) / n_vals.values))
-        ucl_const = None  # 非恒定
-
-    elif chart_type == "np":
-        # np-chart: 不良数（要求等样本量）
-        stat = counts
-        stat_name = "不良数(np)"
-        if sizes.nunique() > 1:
-            logger.warning(
-                "np-chart 要求等样本量，当前子组大小范围为 %.0f-%.0f，将使用均值 %.1f 近似计算控制限",
-                sizes.min(), sizes.max(), sizes.mean()
-            )
-        n_bar = float(sizes.mean())
-        np_bar = float(counts.mean())
-        p_bar = np_bar / n_bar
-        cl = np_bar
-        ucl = np_bar + 3 * np.sqrt(np_bar * (1 - p_bar))
-        lcl = np.maximum(0, np_bar - 3 * np.sqrt(np_bar * (1 - p_bar)))
-        ucl_const = float(ucl)
-
-    elif chart_type == "c":
-        # c-chart: 缺陷数 (Poisson, 固定检验单位)
-        stat = counts
-        stat_name = "缺陷数(c)"
-        c_bar = float(counts.mean())
-        cl = c_bar
-        ucl = c_bar + 3 * np.sqrt(c_bar)
-        lcl = np.maximum(0, c_bar - 3 * np.sqrt(c_bar))
-        ucl_const = float(ucl)
-
-    elif chart_type == "u":
-        # u-chart: 单位缺陷率 (变检验单位)
-        n_col = req.params.get("n_col")
-        if n_col and n_col in req.data.columns:
-            n_vals = req.data.groupby(subgroup_col)[n_col].first() if (subgroup_col and subgroup_col in req.data.columns) else req.data[n_col]
-        else:
-            n_vals = sizes
-        if (n_vals == 0).any():
-            return AnalysisResult(task="spc_attribute", status="error",
-                messages=["子组样本量包含0值，无法计算比率控制图"])
-        stat = counts / n_vals
-        stat_name = "单位缺陷率(u)"
-        u_bar = float(counts.sum() / n_vals.sum())
-        cl = u_bar
-        ucl = u_bar + 3 * np.sqrt(u_bar / n_vals.values)
-        lcl = np.maximum(0, u_bar - 3 * np.sqrt(u_bar / n_vals.values))
         ucl_const = None
 
-    else:
-        return AnalysisResult(
-            task="spc_attribute", status="error",
-            messages=[f"不支持的图表类型: {chart_type}，支持 p/np/c/u"],
-        )
+    elif chart_type == "np":
+        agg["stat"] = agg["count"].astype(float)
+        stat_name = "不良数(np)"
+        np_bar = float(agg["count"].mean())
+        n_bar = float(agg["size"].mean())
+        p_bar = np_bar / max(n_bar, 1)
+        cl = np_bar
+        ucl_const = float(np_bar + 3 * np.sqrt(np_bar * (1 - p_bar)))
 
-    # ── 违规检测 ──
+    elif chart_type == "c":
+        agg["stat"] = agg["count"].astype(float)
+        stat_name = "缺陷数(c)"
+        c_bar = float(agg["count"].mean())
+        cl = c_bar
+        ucl_const = float(c_bar + 3 * np.sqrt(c_bar))
+
+    elif chart_type == "u":
+        if (agg["n_vals"] == 0).any():
+            return AnalysisResult(task="spc_attribute", status="error",
+                messages=["子组样本量包含0值，无法计算比率控制图"])
+        agg["stat"] = agg["count"] / agg["n_vals"]
+        stat_name = "单位缺陷率(u)"
+        u_bar = float(agg["count"].sum() / agg["n_vals"].sum())
+        cl = u_bar
+        ucl_const = None
+    else:
+        return AnalysisResult(task="spc_attribute", status="error",
+            messages=[f"不支持的图表类型: {chart_type}，支持 p/np/c/u"])
+
+    # 控制限
     if ucl_const is not None:
-        above = stat > ucl_const
-        below = stat < float(lcl)
+        lcl_const = max(0, 2*cl - ucl_const)
+        agg["ucl"] = ucl_const
+        agg["lcl"] = lcl_const
+    elif chart_type == "p":
+        agg["ucl"] = cl + 3 * np.sqrt(cl * (1 - cl) / agg["n_vals"].values)
+        agg["lcl"] = np.maximum(0, cl - 3 * np.sqrt(cl * (1 - cl) / agg["n_vals"].values))
     else:
-        above = stat.values > ucl
-        below = stat.values < lcl
-    violations = np.where(above | below)[0]
+        agg["ucl"] = cl + 3 * np.sqrt(cl / agg["n_vals"].values)
+        agg["lcl"] = np.maximum(0, cl - 3 * np.sqrt(cl / agg["n_vals"].values))
 
-    # ── 控制图 ──
+    # 违规检测
+    agg_viol = agg[agg["stat"].notna()]
+    above = agg_viol["stat"].values > agg_viol["ucl"].values
+    below = agg_viol["stat"].values < agg_viol["lcl"].values
+    violations = int((above | below).sum())
+
+    # 图表
+    x_unique = sorted(agg["x_val"].unique(), key=lambda v: (isinstance(v, (int, float)), str(v)))
+    x_to_idx = {v: i for i, v in enumerate(x_unique)}
+    agg["_idx"] = agg["x_val"].map(x_to_idx)
+
     fig = Figure(figsize=(10, 5))
     ax = fig.add_subplot(111)
-    pos = np.arange(m)
-    ax.plot(pos, stat.values, "o-", markersize=5, color=PALETTE["data"]["primary"], linewidth=1.2)
+
+    group_colors = {}
+    for gi, gname in enumerate(group_names):
+        group_colors[gname] = cm.tab10(gi % 10)
+
+    for gi, gname in enumerate(group_names):
+        gdata = agg[agg["group_val"] == gname].sort_values("_idx")
+        if len(gdata) == 0:
+            continue
+        color = group_colors[gname]
+        label = str(gname) if has_groups else None
+        g_idx = gdata["_idx"].values
+        g_stat = gdata["stat"].values
+
+        ax.plot(g_idx, g_stat, "o-", markersize=5, color=color, linewidth=1.2,
+                label=label, alpha=0.8)
+
+    # 控制限
     ax.axhline(cl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
                label=f"CL={cl:.4f}")
-
     if ucl_const is not None:
         ax.axhline(ucl_const, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
                    label=f"UCL={ucl_const:.4f}")
-        lcl_val = float(lcl)
-        ax.axhline(lcl_val, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                   label=f"LCL={lcl_val:.4f}")
+        ax.axhline(lcl_const, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
+                   label=f"LCL={lcl_const:.4f}")
     else:
-        ax.plot(pos, ucl, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.6, label="UCL")
-        ax.plot(pos, lcl, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.6, label="LCL")
+        all_idx = np.arange(len(x_unique))
+        ax.plot(all_idx, agg.groupby("_idx")["ucl"].first().values, "--",
+                color=PALETTE["control"]["primary"], linewidth=1, alpha=0.5, label="UCL")
+        ax.plot(all_idx, agg.groupby("_idx")["lcl"].first().values, "--",
+                color=PALETTE["control"]["primary"], linewidth=1, alpha=0.5, label="LCL")
 
-    if len(violations) > 0:
-        ax.scatter(violations, stat.values[violations], s=80, color=PALETTE["anomaly"]["primary"],
-                   marker="x", linewidths=2.5, zorder=5,
-                   label=f"超出控制限 ({len(violations)}个)")
+    # 违规标记
+    viol_mask = agg["stat"].notna()
+    viol_idx = agg.loc[viol_mask, "_idx"].values
+    viol_stat = agg.loc[viol_mask, "stat"].values
+    viol_ucl = agg.loc[viol_mask, "ucl"].values
+    viol_lcl = agg.loc[viol_mask, "lcl"].values
+    viol_pts = np.where((viol_stat > viol_ucl) | (viol_stat < viol_lcl))[0]
+    if len(viol_pts) > 0:
+        ax.scatter(viol_idx[viol_pts], viol_stat[viol_pts], s=80,
+                   color=PALETTE["anomaly"]["primary"], marker="x", linewidths=2.5,
+                   zorder=5, label=f"超出控制限 ({len(viol_pts)}个)")
 
-    ax.set_xlabel("子组序号", fontsize=10)
+    # 标签
+    def _fmt_attr_labels(vals):
+        labels = []
+        for v in vals:
+            if hasattr(v, "strftime"):
+                s = v.strftime("%m-%d")
+            else:
+                s = str(v)
+            if len(s) > 15:
+                s = s[:14] + "…"
+            labels.append(s)
+        n_lbl = len(labels)
+        if n_lbl > 20:
+            step = max(1, n_lbl // 20)
+            for i in range(n_lbl):
+                if i % step != 0 and i != n_lbl - 1:
+                    labels[i] = ""
+        return labels
+
+    x_labels = _fmt_attr_labels(x_unique)
+    ax.set_xticks(np.arange(len(x_unique)))
+    ax.set_xticklabels(x_labels, fontsize=7.5, rotation=45)
+    ax.set_xlabel("X", fontsize=10)
     ax.set_ylabel(stat_name, fontsize=10)
-    ax.set_title(
-        f"{chart_type.upper()}-控制图 — {req.target_col} (m={m}子组)",
-        fontsize=11,
-    )
-    ax.legend(fontsize=8, ncol=2)
+    ax.set_title(f"{chart_type.upper()}-控制图 — {y_col} (m={m}点)", fontsize=11)
+    if has_groups:
+        ax.legend(fontsize=7, ncol=max(1, len(group_names) // 3 + 1))
+    else:
+        ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
-    # ── 汇总 ──
     summary = (
         f"{chart_type.upper()} 控制图: CL={cl:.4f}, "
-        f"超出控制限 {len(violations)}/{m} 个子组"
+        f"超出控制限 {violations}/{m} 个点"
     )
+
+    # 控制限表
+    table_rows = []
+    for _, row in agg.iterrows():
+        table_rows.append({
+            "X": row["x_val"],
+            "分组": row["group_val"] if has_groups else "—",
+            stat_name: round(float(row["stat"]), 4),
+            "UCL": round(float(row["ucl"]), 4),
+            "LCL": round(float(row["lcl"]), 4),
+        })
 
     return AnalysisResult(
         task="spc_attribute",
-        tables={
-            "control_stats": pd.DataFrame({
-                "子组": range(1, m + 1),
-                stat_name: stat.values.round(4),
-                "UCL": ucl.round(4) if ucl_const is None else [f"{ucl_const:.4f}"] * m,
-                "LCL": lcl.round(4) if ucl_const is None else [f"{lcl_val:.4f}"] * m,
-            }),
-        },
+        tables={"control_stats": pd.DataFrame(table_rows)},
         figures=[fig],
         summary=summary,
         metadata={
             "chart_type": chart_type,
             "cl": float(cl),
-            "n_subgroups": m,
-            "n_violations": len(violations),
+            "n_points": m,
+            "n_violations": violations,
+            "groups": [str(g) for g in group_names if g != "_default"],
         },
     )
 
@@ -1155,42 +1460,22 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         h: 决策区间 (通常取 4~5)
         mu: 过程均值 (如未提供，从数据估计；建议使用已知受控状态的 μ)
         sigma: 过程标准差 (如未提供，从数据估计；建议使用已知受控状态的 σ)
+        group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
     """
-    data = req.data[req.target_col].dropna()
-    if len(data) < 5:
-        return AnalysisResult(
-            task="spc_cusum", status="error",
-            messages=["有效数据不足(至少5个点)"],
-        )
+    y_col = req.target_col
+    group_col = req.params.get("group_col")
+    has_groups = bool(group_col and group_col in req.data.columns)
 
-    mu = req.params.get("mu")
-    sigma = req.params.get("sigma")
-    warn_msgs: list[str] = []
-    if mu is not None and sigma is not None:
-        try:
-            mu, sigma = float(mu), float(sigma)
-        except (ValueError, TypeError):
-            return AnalysisResult(
-                task="spc_cusum", status="error",
-                messages=[f"参数 mu/sigma 值无效: mu={mu}, sigma={sigma}，请输入数值"],
-            )
+    if has_groups:
+        group_vals = req.data[group_col]
+        group_names = sorted(group_vals.dropna().unique())
     else:
-        mu = float(data.mean())
-        sigma = float(data.std(ddof=1))
-        warn_msgs.append(
-            "⚠ μ/σ 从全部数据估计，若数据包含过程偏移会导致 CUSUM 灵敏度下降。"
-            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
-        )
-    if sigma < EPSILON:
-        return AnalysisResult(
-            task="spc_cusum", status="error",
-            messages=["数据标准差接近零，无法计算 CUSUM"],
-        )
+        group_vals = pd.Series("_default", index=req.data.index)
+        group_names = ["_default"]
 
-    # 标准化
-    z = (data.values - mu) / sigma
-    k = req.params.get("k", 0.5)   # 默认检测 1σ 偏移
-    h = req.params.get("h", 5.0)   # 默认决策区间
+    # 公共参数
+    k = req.params.get("k", 0.5)
+    h = req.params.get("h", 5.0)
     try:
         k, h = float(k), float(h)
     except (ValueError, TypeError):
@@ -1198,8 +1483,6 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             task="spc_cusum", status="error",
             messages=[f"参数 k/h 值无效: k={k}, h={h}，请输入数值"],
         )
-
-    # ── 参数有效性校验 (P3 fix: 防止 k≤0 或 h≤0 导致算法退化) ──
     if k <= 0:
         return AnalysisResult(task="spc_cusum", status="error",
             messages=[f"参数 k ({k}) 无效：参考值必须为正数，建议 k=0.5"])
@@ -1207,75 +1490,156 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="spc_cusum", status="error",
             messages=[f"参数 h ({h}) 无效：决策区间必须为正数，建议 h=4~5"])
 
-    # 双侧 CUSUM
-    c_plus = np.zeros(len(z))
-    c_minus = np.zeros(len(z))
-    alarm_plus: list[int] = []
-    alarm_minus: list[int] = []
+    user_mu = req.params.get("mu")
+    user_sigma = req.params.get("sigma")
+    if user_mu is not None and user_sigma is not None:
+        try:
+            user_mu, user_sigma = float(user_mu), float(user_sigma)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="spc_cusum", status="error",
+                messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
+            )
 
-    for i in range(len(z)):
-        if i == 0:
-            c_plus[i] = max(0, z[i] - k)
-            c_minus[i] = max(0, -z[i] - k)
+    # 分组处理
+    group_results = []
+    all_group_names = []
+    max_n = 0
+    for gname in group_names:
+        mask = group_vals == gname if has_groups else pd.Series(True, index=req.data.index)
+        gdata = req.data.loc[mask, y_col].dropna()
+        if len(gdata) < 5:
+            continue
+        all_group_names.append(gname)
+        max_n = max(max_n, len(gdata))
+
+        if user_mu is not None and user_sigma is not None:
+            mu, sigma = user_mu, user_sigma
         else:
-            c_plus[i] = max(0, c_plus[i-1] + z[i] - k)
-            c_minus[i] = max(0, c_minus[i-1] - z[i] - k)
-        if c_plus[i] > h:
-            alarm_plus.append(i)
-        if c_minus[i] > h:
-            alarm_minus.append(i)
+            mu = float(gdata.mean())
+            sigma = float(gdata.std(ddof=1))
+        if sigma < EPSILON:
+            continue
+
+        z = (gdata.values - mu) / sigma
+        c_plus = np.zeros(len(z))
+        c_minus = np.zeros(len(z))
+        alarm_plus: list[int] = []
+        alarm_minus: list[int] = []
+        for i in range(len(z)):
+            if i == 0:
+                c_plus[i] = max(0, z[i] - k)
+                c_minus[i] = max(0, -z[i] - k)
+            else:
+                c_plus[i] = max(0, c_plus[i-1] + z[i] - k)
+                c_minus[i] = max(0, c_minus[i-1] - z[i] - k)
+            if c_plus[i] > h:
+                alarm_plus.append(i)
+            if c_minus[i] > h:
+                alarm_minus.append(i)
+
+        group_results.append({
+            "name": gname, "data": gdata.values, "mu": mu, "sigma": sigma,
+            "c_plus": c_plus, "c_minus": c_minus,
+            "alarm_plus": alarm_plus, "alarm_minus": alarm_minus,
+        })
+
+    if len(group_results) < 1:
+        return AnalysisResult(
+            task="spc_cusum", status="error",
+            messages=["有效数据不足(每组至少5个点)"],
+        )
 
     # 图表
-    fig = Figure(figsize=(10, 6))
-    pos = np.arange(len(data))
-
+    fig = Figure(figsize=(12, 8 if has_groups else 6))
     ax1 = fig.add_subplot(211)
-    ax1.plot(pos, data.values, "o-", markersize=3, color=PALETTE["data"]["secondary"], linewidth=1, label="数据")
-    ax1.axhline(mu, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1, label=f"CL={mu:.3f}")
-    ax1.set_ylabel(req.target_col, fontsize=10)
-    ax1.set_title(f"CUSUM 控制图 — {req.target_col} (k={k}, h={h})", fontsize=11)
-    ax1.legend(fontsize=8)
-
     ax2 = fig.add_subplot(212)
-    ax2.plot(pos, c_plus, "-", color=PALETTE["target"]["primary"], linewidth=1.5, label="C+ (上偏移)")
-    ax2.plot(pos, c_minus, "-", color=PALETTE["data"]["primary"], linewidth=1.5, label="C- (下偏移)")
-    ax2.axhline(h, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2, label=f"决策区间 h={h}")
-    ax2.fill_between(pos, 0, h, alpha=0.05, color=PALETTE["center"]["primary"])
-    if alarm_plus:
-        ax2.scatter(alarm_plus, c_plus[alarm_plus], s=60, color=PALETTE["anomaly"]["primary"],
-                   marker="x", linewidths=2, zorder=5, label=f"上偏移报警({len(alarm_plus)})")
-    if alarm_minus:
-        ax2.scatter(alarm_minus, c_minus[alarm_minus], s=60, color=PALETTE["anomaly"]["primary"],
-                   marker="x", linewidths=2, zorder=5, label=f"下偏移报警({len(alarm_minus)})")
+
+    group_colors = {}
+    for gi, gname in enumerate(all_group_names):
+        group_colors[gname] = cm.tab10(gi % 10)
+
+    total_alarms = 0
+    warn_msgs: list[str] = []
+    if user_mu is None:
+        warn_msgs.append(
+            "⚠ μ/σ 从各组数据独立估计。"
+            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
+        )
+
+    for gr in group_results:
+        gname = gr["name"]
+        color = group_colors[gname]
+        label = str(gname) if has_groups else None
+        pos = np.arange(len(gr["data"]))
+        total_alarms += len(gr["alarm_plus"]) + len(gr["alarm_minus"])
+
+        # 数据子图
+        ax1.plot(pos, gr["data"], "o-", markersize=2, color=color, linewidth=0.8,
+                alpha=0.7, label=label)
+        ax1.axhline(gr["mu"], color=color, linestyle="--", linewidth=0.8, alpha=0.4)
+
+        # CUSUM 子图
+        ax2.plot(pos, gr["c_plus"], "-", color=color, linewidth=1.2,
+                alpha=0.8, label=f"{label} C+" if has_groups else "C+ (上偏移)")
+        ax2.plot(pos, gr["c_minus"], "--", color=color, linewidth=1.2,
+                alpha=0.8, label=f"{label} C-" if has_groups else "C- (下偏移)")
+        if gr["alarm_plus"]:
+            ax2.scatter(gr["alarm_plus"], gr["c_plus"][gr["alarm_plus"]], s=50,
+                       color=color, marker="x", linewidths=2, zorder=5)
+        if gr["alarm_minus"]:
+            ax2.scatter(gr["alarm_minus"], gr["c_minus"][gr["alarm_minus"]], s=50,
+                       color=color, marker="x", linewidths=2, zorder=5)
+
+    ax2.axhline(h, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
+                label=f"决策区间 h={h}")
+    ax2.fill_between(np.arange(max_n), 0, h, alpha=0.05, color=PALETTE["center"]["primary"])
+
+    ax1.set_ylabel(y_col, fontsize=10)
+    ax1.set_title(f"CUSUM 控制图 — {y_col} (k={k}, h={h})", fontsize=11)
+    if has_groups:
+        ax1.legend(fontsize=7, ncol=max(1, len(all_group_names) // 3 + 1))
+
     ax2.set_xlabel("序号", fontsize=10)
     ax2.set_ylabel("CUSUM", fontsize=10)
-    ax2.legend(fontsize=8, ncol=2)
+    ax2.legend(fontsize=7, ncol=2)
+
     fig.tight_layout()
 
-    total_alarms = len(alarm_plus) + len(alarm_minus)
-    summary = (
-        f"CUSUM 检测到 {total_alarms} 次偏移报警 "
-        f"(k={k}σ, h={h})。"
-        f"上偏移: {len(alarm_plus)} 次，下偏移: {len(alarm_minus)} 次。"
-    )
+    # 汇总
+    summary_parts = [f"CUSUM 检测到 {total_alarms} 次偏移报警 (k={k}σ, h={h})。"]
+    for gr in group_results:
+        gname = gr["name"]
+        ap, am = len(gr["alarm_plus"]), len(gr["alarm_minus"])
+        label = f"{gname}: " if has_groups else ""
+        summary_parts.append(f"{label}上偏移 {ap} 次，下偏移 {am} 次；")
+
+    # 控制限表
+    stats_rows = []
+    for gr in group_results:
+        gname = gr["name"]
+        label = str(gname) if has_groups else "全部"
+        stats_rows.append({
+            "分组": label,
+            "均值(μ)": f"{gr['mu']:.4f}",
+            "标准差(σ)": f"{gr['sigma']:.4f}",
+            "上偏移报警": str(len(gr["alarm_plus"])),
+            "下偏移报警": str(len(gr["alarm_minus"])),
+        })
 
     return AnalysisResult(
         task="spc_cusum",
         tables={
-            "cusum_stats": pd.DataFrame({
-                "指标": ["均值(μ)", "标准差(σ)", "k (松弛因子)", "h (决策区间)",
-                       "上偏移报警", "下偏移报警", "总报警"],
-                "值": [f"{mu:.4f}", f"{sigma:.4f}", str(k), str(h),
-                      str(len(alarm_plus)), str(len(alarm_minus)), str(total_alarms)],
-            }),
+            "cusum_stats": pd.DataFrame(stats_rows),
         },
         figures=[fig],
-        summary=summary,
+        summary="".join(summary_parts),
         messages=warn_msgs,
         metadata={
-            "mu": mu, "sigma": sigma, "k": k, "h": h,
-            "alarm_plus": alarm_plus, "alarm_minus": alarm_minus,
+            "k": k, "h": h,
             "total_alarms": total_alarms,
+            "n_groups": len(group_results),
+            "groups": [str(g) for g in all_group_names if g != "_default"],
         },
     )
 
@@ -1288,38 +1652,20 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         L: 控制限宽度 (常用 2.7~3.0)
         mu: 过程均值 (如未提供，从数据估计)
         sigma: 过程标准差 (如未提供，从数据估计)
+        group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
     """
-    data = req.data[req.target_col].dropna()
-    if len(data) < 3:
-        return AnalysisResult(
-            task="spc_ewma", status="error",
-            messages=["有效数据不足(至少3个点)"],
-        )
+    y_col = req.target_col
+    group_col = req.params.get("group_col")
+    has_groups = bool(group_col and group_col in req.data.columns)
 
-    warn_msgs: list[str] = []
-    mu = req.params.get("mu")
-    sigma = req.params.get("sigma")
-    if mu is not None and sigma is not None:
-        try:
-            mu, sigma = float(mu), float(sigma)
-        except (ValueError, TypeError):
-            return AnalysisResult(
-                task="spc_ewma", status="error",
-                messages=[f"参数 mu/sigma 值无效: mu={mu}, sigma={sigma}，请输入数值"],
-            )
+    if has_groups:
+        group_vals = req.data[group_col]
+        group_names = sorted(group_vals.dropna().unique())
     else:
-        mu = float(data.mean())
-        sigma = float(data.std(ddof=1))
-        warn_msgs.append(
-            "⚠ μ/σ 从全部数据估计，若数据包含过程偏移会导致 EWMA 控制限偏大。"
-            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
-        )
-    if sigma < EPSILON:
-        return AnalysisResult(
-            task="spc_ewma", status="error",
-            messages=["数据标准差接近零，无法计算 EWMA"],
-        )
+        group_vals = pd.Series("_default", index=req.data.index)
+        group_names = ["_default"]
 
+    # 公共参数
     lam = req.params.get("lam", 0.2)
     L = req.params.get("L", 2.7)
     try:
@@ -1334,84 +1680,156 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             task="spc_ewma", status="error",
             messages=[f"λ (平滑参数) 必须在 (0, 1] 范围内，当前值: {lam}"])
 
-    n = len(data)
-    ewma = np.zeros(n)
-    # Montgomery 标准: z₁ = λ·x₁ + (1-λ)·μ, z₀ = μ 为初始值
-    ewma[0] = lam * data.values[0] + (1 - lam) * mu
+    user_mu = req.params.get("mu")
+    user_sigma = req.params.get("sigma")
+    if user_mu is not None and user_sigma is not None:
+        try:
+            user_mu, user_sigma = float(user_mu), float(user_sigma)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="spc_ewma", status="error",
+                messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
+            )
 
-    for i in range(1, n):
-        ewma[i] = lam * data.values[i] + (1 - lam) * ewma[i-1]
+    # 分组处理
+    group_results = []
+    all_group_names = []
+    for gname in group_names:
+        mask = group_vals == gname if has_groups else pd.Series(True, index=req.data.index)
+        gdata = req.data.loc[mask, y_col].dropna()
+        if len(gdata) < 3:
+            continue
+        all_group_names.append(gname)
 
-    # 控制限（随时间变化，但渐近稳定）
-    # 渐近 σ_ewma = σ * sqrt(λ/(2-λ))
-    sigma_ewma_asym = sigma * np.sqrt(lam / (2 - lam))
-    # 时变 σ_ewma = σ * sqrt(λ/(2-λ) * [1 - (1-λ)^(2i)])
-    t = np.arange(1, n + 1)
-    corr = 1 - (1 - lam) ** (2 * t)
-    sigma_ewma_t = sigma * np.sqrt(lam / (2 - lam) * corr)
+        if user_mu is not None and user_sigma is not None:
+            mu, sigma = user_mu, user_sigma
+        else:
+            mu = float(gdata.mean())
+            sigma = float(gdata.std(ddof=1))
+        if sigma < EPSILON:
+            continue
 
-    ucl_t = mu + L * sigma_ewma_t
-    lcl_t = mu - L * sigma_ewma_t
-    ucl_asym = mu + L * sigma_ewma_asym
-    lcl_asym = mu - L * sigma_ewma_asym
+        n = len(gdata)
+        ewma_vals = np.zeros(n)
+        ewma_vals[0] = lam * gdata.values[0] + (1 - lam) * mu
+        for i in range(1, n):
+            ewma_vals[i] = lam * gdata.values[i] + (1 - lam) * ewma_vals[i-1]
 
-    # 违规检测
-    above = ewma > ucl_t
-    below = ewma < lcl_t
-    violations = above | below
+        sigma_ewma_asym = sigma * np.sqrt(lam / (2 - lam))
+        t = np.arange(1, n + 1)
+        corr = 1 - (1 - lam) ** (2 * t)
+        sigma_ewma_t = sigma * np.sqrt(lam / (2 - lam) * corr)
+
+        ucl_t = mu + L * sigma_ewma_t
+        lcl_t = mu - L * sigma_ewma_t
+        above = ewma_vals > ucl_t
+        below = ewma_vals < lcl_t
+        violations = above | below
+
+        group_results.append({
+            "name": gname, "data": gdata.values, "mu": mu, "sigma": sigma,
+            "ewma": ewma_vals, "ucl_t": ucl_t, "lcl_t": lcl_t,
+            "ucl_asym": float(mu + L * sigma_ewma_asym),
+            "lcl_asym": float(mu - L * sigma_ewma_asym),
+            "violations": violations, "n": n,
+        })
+
+    if len(group_results) < 1:
+        return AnalysisResult(
+            task="spc_ewma", status="error",
+            messages=["有效数据不足(每组至少3个点)"],
+        )
 
     # 图表
     fig = Figure(figsize=(10, 6))
     ax = fig.add_subplot(111)
-    pos = np.arange(n)
+    group_colors = {}
+    for gi, gname in enumerate(all_group_names):
+        group_colors[gname] = cm.tab10(gi % 10)
 
-    ax.plot(pos, data.values, "o-", markersize=3, alpha=0.35,
-            color=PALETTE["data"]["tertiary"], linewidth=0.8, label="原始数据")
-    ax.plot(pos, ewma, "-", color=PALETTE["data"]["primary"], linewidth=2, label=f"EWMA (λ={lam})")
-    ax.axhline(mu, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1, label=f"CL={mu:.3f}")
-    ax.plot(pos, ucl_t, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.7, label="UCL(t)")
-    ax.plot(pos, lcl_t, "--", color=PALETTE["control"]["primary"], linewidth=1, alpha=0.7, label="LCL(t)")
-    ax.axhline(ucl_asym, color=PALETTE["anomaly"]["primary"], linestyle=":", linewidth=1, alpha=0.4)
-    ax.axhline(lcl_asym, color=PALETTE["anomaly"]["primary"], linestyle=":", linewidth=1, alpha=0.4)
+    total_violations = 0
+    warn_msgs: list[str] = []
+    if user_mu is None:
+        warn_msgs.append(
+            "⚠ μ/σ 从各组数据独立估计。"
+            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
+        )
 
-    if violations.sum() > 0:
-        vpos = np.where(violations)[0]
-        ax.scatter(vpos, ewma[vpos], s=80, color=PALETTE["anomaly"]["primary"], marker="x",
-                  linewidths=2, zorder=5, label=f"违规({violations.sum()}个)")
+    for gr in group_results:
+        gname = gr["name"]
+        color = group_colors[gname]
+        label = str(gname) if has_groups else None
+        pos = np.arange(gr["n"])
+        total_violations += int(gr["violations"].sum())
+
+        ax.plot(pos, gr["data"], "o-", markersize=2, alpha=0.3,
+                color=color, linewidth=0.6, label=f"{label} 原始" if has_groups else "原始数据")
+        ax.plot(pos, gr["ewma"], "-", color=color, linewidth=2,
+                label=label if has_groups else f"EWMA (λ={lam})")
+        ax.axhline(gr["mu"], color=color, linestyle="--", linewidth=0.8, alpha=0.4)
+        ax.plot(pos, gr["ucl_t"], "--", color=color, linewidth=0.8, alpha=0.5)
+        ax.plot(pos, gr["lcl_t"], "--", color=color, linewidth=0.8, alpha=0.5)
+
+        if gr["violations"].sum() > 0:
+            vpos = np.where(gr["violations"])[0]
+            ax.scatter(vpos, gr["ewma"][vpos], s=60, color=color, marker="x",
+                      linewidths=2, zorder=5)
+
+    # 全局参考线
+    ax.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5, alpha=0.3)
 
     ax.set_xlabel("序号", fontsize=10)
-    ax.set_ylabel(req.target_col, fontsize=10)
-    ax.set_title(
-        f"EWMA 控制图 — {req.target_col} (λ={lam}, L={L})",
-        fontsize=11,
-    )
-    ax.legend(fontsize=7.5, loc="upper left", ncol=2)
+    ax.set_ylabel(y_col, fontsize=10)
+    ax.set_title(f"EWMA 控制图 — {y_col} (λ={lam}, L={L})", fontsize=11)
+    if has_groups:
+        ax.legend(fontsize=7, ncol=max(1, len(all_group_names) // 3 + 1))
+    else:
+        ax.legend(fontsize=7.5, loc="upper left", ncol=2)
     fig.tight_layout()
 
-    summary = (
-        f"EWMA (λ={lam}, L={L}) 检测到 {int(violations.sum())} 个违规点。"
-        f"渐近控制限: UCL={ucl_asym:.4f}, LCL={lcl_asym:.4f}"
-    )
+    # 汇总
+    summary_parts = [f"EWMA (λ={lam}, L={L}) 检测到 {total_violations} 个违规点。"]
+    for gr in group_results:
+        gname = gr["name"]
+        label = f"{gname}: " if has_groups else ""
+        summary_parts.append(
+            f"{label}渐近UCL={gr['ucl_asym']:.4f}, LCL={gr['lcl_asym']:.4f}；"
+        )
+
+    # 统计表
+    stats_rows = []
+    for gr in group_results:
+        gname = gr["name"]
+        label = str(gname) if has_groups else "全部"
+        stats_rows.append({
+            "分组": label,
+            "均值(μ)": f"{gr['mu']:.4f}",
+            "标准差(σ)": f"{gr['sigma']:.4f}",
+            "渐近UCL": f"{gr['ucl_asym']:.4f}",
+            "渐近LCL": f"{gr['lcl_asym']:.4f}",
+            "违规点数": str(int(gr["violations"].sum())),
+        })
+
+    meta: dict = {
+        "lam": lam, "L": L,
+        "total_violations": total_violations,
+        "n_groups": len(group_results),
+        "groups": [str(g) for g in all_group_names if g != "_default"],
+    }
+    if len(group_results) == 1:
+        meta["mu"] = group_results[0]["mu"]
+        meta["sigma"] = group_results[0]["sigma"]
+        meta["ucl_asym"] = group_results[0]["ucl_asym"]
+        meta["lcl_asym"] = group_results[0]["lcl_asym"]
+        meta["violations"] = int(group_results[0]["violations"].sum())
 
     return AnalysisResult(
         task="spc_ewma",
-        tables={
-            "ewma_stats": pd.DataFrame({
-                "指标": ["均值(μ)", "标准差(σ)", "λ (平滑参数)", "L (控制限宽度)",
-                       "渐近UCL", "渐近LCL", "违规点数"],
-                "值": [f"{mu:.4f}", f"{sigma:.4f}", str(lam), str(L),
-                      f"{ucl_asym:.4f}", f"{lcl_asym:.4f}",
-                      str(int(violations.sum()))],
-            }),
-        },
+        tables={"ewma_stats": pd.DataFrame(stats_rows)},
         figures=[fig],
-        summary=summary,
+        summary="".join(summary_parts),
         messages=warn_msgs,
-        metadata={
-            "mu": mu, "sigma": sigma, "lam": lam, "L": L,
-            "ucl_asym": float(ucl_asym), "lcl_asym": float(lcl_asym),
-            "violations": int(violations.sum()),
-        },
+        metadata=meta,
     )
 
 

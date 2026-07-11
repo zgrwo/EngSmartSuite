@@ -9,7 +9,6 @@ import pandas as pd
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import ValidationError
 from smartsuite.services.data_io import (
-    auto_generate_subgroup_col,
     infer_group_col,
     preprocess_for_task,
     validate_data,
@@ -46,10 +45,6 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         targets = ['']  # 占位触发一次迭代，引擎不使用 target_col
 
     results = []
-
-    # 预处理：为 SPC 缺子组列时自动生成（委托至 services 层，CLI/Web 共享）
-    if task == "spc_xbar" and "subgroup_col" not in params:
-        df, params = auto_generate_subgroup_col(df, params)
 
     # ── 预处理只执行一次，避免每个目标列重复编码 ──
     # 数据校验：检测列存在性、类型问题、缺失值

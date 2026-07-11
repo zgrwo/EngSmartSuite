@@ -160,7 +160,7 @@ def test_xbar_single_subgroup():
         data.append({"子组": 1, "val": np.random.normal(10, 1)})
     df = pd.DataFrame(data)
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
-                          params={"subgroup_col": "子组"})
+                          feature_cols=["子组"], params={})
     result = xbar_r_chart(req)
     _assert_no_crash(result, "xbar_r", "1 subgroup")
 
@@ -175,7 +175,7 @@ def test_xbar_unequal_subgroups():
             data.append({"子组": sg, "val": np.random.normal(10, 1)})
     df = pd.DataFrame(data)
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
-                          params={"subgroup_col": "子组"})
+                          feature_cols=["子组"], params={})
     result = xbar_r_chart(req)
     _assert_no_crash(result, "xbar_r", "unequal subgroups")
 

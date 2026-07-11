@@ -1,6 +1,12 @@
-# SPC 控制图模板 — X-bar/R 控制图监控过程稳定性
+# SPC X-bar 控制图 — 监控过程稳定性
+# X 列 (feature_cols[0]): 横坐标 — 类别/日期/数字列。空→按数据顺序
+# 分组依据 (group_col): 分系列 — 不同值=不同颜色的线。空→单一序列
 task: spc_xbar
 target_col: "拉伸强度"
-feature_cols: []
+feature_cols:
+  - "批次"      # 横坐标 (日期/类别/批次号，空则用顺序)
 params:
-  subgroup_col: "子组"
+  group_col:    # 分组依据 (可选，按此列分系列线)
+  usl:          # 规格上限 (可选)
+  lsl:          # 规格下限 (可选)
+  target:       # 目标值 (可选)

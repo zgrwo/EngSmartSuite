@@ -136,11 +136,7 @@ def compare_one(label, task, target_col_str, features, categoricals, params):
         feat_a = list(features)
         params_a = dict(params)
 
-        # (1) auto_generate_subgroup_col for spc_xbar
-        if task == "spc_xbar" and "subgroup_col" not in params_a:
-            df_a, params_a = auto_generate_subgroup_col(df_a, params_a)
-
-        # (2) preprocess
+        # (1) preprocess
         df_enc, feat_enc, _, _ = preprocess_for_task(
             df_a, feat_a, task, categoricals, RAW_CAT_TASKS,
         )

@@ -95,7 +95,7 @@ ok, fail, total = 0, 0, 0
 for task, targets, features, cats in ALL_TASKS:
     total += 1
     params = {}
-    if task == "spc_xbar": params = {"subgroup_col": "车间"}
+    if task == "spc_xbar": features = ["车间"]
     if task == "spc_attribute": params = {"chart_type": "p"}
     if task == "power_analysis": params = {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5}
     if task == "grid_search": params = {"ranges": {"熔体温度": [180, 220]}, "n_points": 5}

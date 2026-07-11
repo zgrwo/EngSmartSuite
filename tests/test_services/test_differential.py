@@ -169,9 +169,7 @@ def _params_for(task: str):
     params = {}
     extras = {}
 
-    if task == "spc_xbar":
-        params["subgroup_col"] = "子组"
-    elif task == "spc_cusum":
+    if task == "spc_cusum":
         params["k"] = 0.5
         params["h"] = 5.0
     elif task == "spc_ewma":
@@ -179,7 +177,6 @@ def _params_for(task: str):
         params["L"] = 2.7
     elif task == "spc_attribute":
         params["chart_type"] = "p"
-        params["subgroup_col"] = "子组"
     elif task == "spc_nonparametric":
         params["side"] = "two-sided"
     elif task == "process_capability":
@@ -276,7 +273,7 @@ def test_cli_web_numerical_parity_all(task):
     elif task in ("spc_attribute",):
         # 需要二分类目标
         target = "二分类"
-        features = []
+        features = ["子组"]
     elif task in ("box_chart",):
         target = "y"
         features = ["组别"]
@@ -305,7 +302,7 @@ def test_cli_web_numerical_parity_all(task):
         features = []
     elif task == "spc_xbar":
         target = "y"
-        features = []
+        features = ["子组"]
     elif task in ("hypothesis_test",):
         target = "y"
         features = ["x1", "组别"]
@@ -417,21 +414,21 @@ def test_cli_web_specific_parity():
     from smartsuite.services.data_io import preprocess_data
 
     # CLI 路径: 手动预处理
-    df_enc, feat_enc, _, _, _ = preprocess_data(df_spc, [])
+    df_enc, feat_enc, _, _, _ = preprocess_data(df_spc, ["子组"])
     req_cli = AnalysisRequest(task="spc_xbar", data=df_enc, target_col="val",
                               feature_cols=feat_enc,
-                              params={"subgroup_col": "子组"})
+                              params={})
     r_cli = orchestrate(req_cli)
 
-    # Web 路径: run_analysis (子组列已提供，不触发自动生成)
-    web_r = run_via_web("spc_xbar", df_spc, "val", [],
-                       params={"subgroup_col": "子组"})
+    # Web 路径: run_analysis (X 列为 "子组")
+    web_r = run_via_web("spc_xbar", df_spc, "val", ["子组"],
+                       params={})
 
     assert r_cli.status == web_r.get("status"), \
         f"spc_xbar status: CLI={r_cli.status}, Web={web_r.get('status')}"
-    assert abs(float(r_cli.metadata.get("grand_mean", 0)) -
-               float(web_r.get("metadata", {}).get("grand_mean", 0))) < 1e-4, \
-        "spc_xbar grand_mean 不一致"
+    assert abs(float(r_cli.metadata.get("xbar_mean", 0)) -
+               float(web_r.get("metadata", {}).get("xbar_mean", 0))) < 1e-4, \
+        "spc_xbar xbar_mean 不一致"
 
     # ── 回归 ──
     x1 = np.random.normal(10, 2, n)
