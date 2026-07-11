@@ -361,9 +361,13 @@ async function runAnalysis(task) {
     'power_analysis', 'spc_nonparametric',
     'distribution_summary', 'normality_check', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
-    'spc_xbar', 'spc_cusum', 'spc_ewma', 'spc_attribute',
+    'spc_cusum', 'spc_ewma',
   ]);
-  if (!_yOnlyTasks.has(task) && !selectedX.size) {
+  // X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
+  const _xOptionalTasks = new Set([
+    'spc_xbar', 'spc_attribute',
+  ]);
+  if (!_yOnlyTasks.has(task) && !_xOptionalTasks.has(task) && !selectedX.size) {
     alert('请至少选择一个 X 列'); return;
   }
   // 有参数配置 → 第一步: 显示参数面板, 等待用户编辑后点"运行"

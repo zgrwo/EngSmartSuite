@@ -1768,6 +1768,30 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
     test_type = req.params.get("test_type", "ttest")
     current_n = req.params.get("current_n")
 
+    # 参数 float() 防护 (CLI/YAML 传入字符串时安全转换)
+    for name, val, default in [
+        ("effect_size", effect_size, 0.5), ("alpha", alpha, 0.05),
+        ("target_power", target_power, 0.80),
+    ]:
+        try:
+            _ = float(val)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="power_analysis", status="error",
+                messages=[f"参数 {name} 值无效: {val}，请输入数值"],
+            )
+    effect_size = float(effect_size)
+    alpha = float(alpha)
+    target_power = float(target_power)
+    if current_n is not None:
+        try:
+            current_n = int(current_n)
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="power_analysis", status="error",
+                messages=[f"参数 current_n 值无效: {current_n}，请输入整数"],
+            )
+
     if mode == "required_n":
         # 计算所需样本量
         if test_type == "ttest":

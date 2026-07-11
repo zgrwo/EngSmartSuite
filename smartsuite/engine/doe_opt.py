@@ -1089,6 +1089,21 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     pos_label = _detect_positive_label(unique_y)
     y = (sub[req.target_col] == pos_label).astype(int).values
 
+    # 分类阈值 — 提前提取+防护，避免被模型拟合异常误翻译
+    threshold = req.params.get("threshold", 0.5)
+    try:
+        threshold = float(threshold)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="logistic_regression", status="error",
+            messages=[f"参数 threshold 值无效: {threshold}，请输入数值 (0~1)"],
+        )
+    if not 0 < threshold < 1:
+        return AnalysisResult(
+            task="logistic_regression", status="error",
+            messages=[f"阈值 threshold 必须在 (0, 1) 范围内，当前值: {threshold}"],
+        )
+
     try:
         X = sm.add_constant(sub[cols])
         model = sm.Logit(y, X).fit(disp=0)
@@ -1118,8 +1133,7 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
         "OR 95%CI上限": or_ci_upper.round(3),
     })
 
-    # 预测和分类表 — 支持自定义阈值 (fix: 类不平衡数据默认 0.5 导致 Sens=0%)
-    threshold = float(req.params.get("threshold", 0.5))
+    # 预测和分类表 — 使用前面已提取+校验的 threshold
     y_pred_prob = model.predict(X)
     y_pred = (y_pred_prob >= threshold).astype(int)
     accuracy = float(np.mean(y_pred == y))
@@ -1381,6 +1395,13 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效样本不足"])
 
     quantile = req.params.get("quantile", 0.5)
+    try:
+        quantile = float(quantile)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="quantile_regression", status="error",
+            messages=[f"参数 quantile 值无效: {quantile}，请输入数值 (0~1)"],
+        )
     if not 0 < quantile < 1:
         return AnalysisResult(task="quantile_regression", status="error",
             messages=[f"分位数 τ 必须在 (0, 1) 范围内，当前值: {quantile}"])

@@ -1,4 +1,5 @@
 import logging
+import re
 
 import numpy as np
 import pandas as pd
@@ -577,7 +578,6 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # ── R/S 控制图 (下方子图) ──
     ax2 = None
-    lower_disp_values = None
     disp_key = _disp_key
     if lower_title != "—":
         ax2 = fig.add_subplot(212)
@@ -640,8 +640,6 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                                color=PALETTE["anomaly"]["primary"], marker="o",
                                facecolors="none", linewidths=2, zorder=5,
                                label=f"违规点 ({len(lvio_idx_list)}个)")
-
-        lower_disp_values = agg[agg["multi"]][disp_key].values if len(agg[agg["multi"]]) > 0 else np.array([])
 
         ax2.set_xlabel("X", fontsize=10)
         ax2.set_ylabel(lower_label, fontsize=10)
@@ -828,6 +826,14 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     else:
         data["_g"] = "_default"
         group_names = ["_default"]
+
+    # ── 前端分组筛选支持 ──
+    filter_groups = req.params.get("filter_groups")
+    if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
+        filter_set = set(str(f) for f in filter_groups)
+        group_names = [g for g in group_names if str(g) in filter_set]
+        if not group_names:
+            group_names = sorted(data["_g"].dropna().unique()) if has_groups else ["_default"]
 
     # 按 (X, group) 聚合
     valid = data[y_col].notna()
@@ -1595,7 +1601,15 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         group_vals = pd.Series("_default", index=req.data.index)
         group_names = ["_default"]
 
-    # 公共参数
+    # ── 前端分组筛选支持 ──
+    filter_groups = req.params.get("filter_groups")
+    if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
+        filter_set = set(str(f) for f in filter_groups)
+        group_names = [g for g in group_names if str(g) in filter_set]
+        if not group_names:
+            group_names = sorted(group_vals.dropna().unique())
+
+    # 公共参数 (cusum)
     k = req.params.get("k", 0.5)
     h = req.params.get("h", 5.0)
     try:
@@ -1787,7 +1801,15 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         group_vals = pd.Series("_default", index=req.data.index)
         group_names = ["_default"]
 
-    # 公共参数
+    # ── 前端分组筛选支持 ──
+    filter_groups = req.params.get("filter_groups")
+    if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
+        filter_set = set(str(f) for f in filter_groups)
+        group_names = [g for g in group_names if str(g) in filter_set]
+        if not group_names:
+            group_names = sorted(group_vals.dropna().unique())
+
+    # 公共参数 (ewma)
     lam = req.params.get("lam", 0.2)
     L = req.params.get("L", 2.7)
     try:
@@ -2035,7 +2057,14 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                 r, d2_r
             )
 
-    sigma_mult = float(req.params.get("sigma_multiplier", 5.15))
+    try:
+        sigma_mult = float(req.params.get("sigma_multiplier", 5.15))
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="gage_rr", status="error",
+            messages=[f"参数 sigma_multiplier 值无效: "
+                      f"{req.params.get('sigma_multiplier')}，请输入数值"],
+        )
 
     # Repeatability (EV)
     ev = r_double_bar / d2_r
@@ -2431,6 +2460,18 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     min_segment = req.params.get("min_segment", max(10, n // 20))
     max_cp = req.params.get("n_changepoints", 5)
     min_peak_ratio = req.params.get("min_peak_ratio", 0.1)
+
+    # 参数类型安全转换 (CLI/YAML 传入字符串时防护)
+    try:
+        min_segment = int(min_segment)
+        max_cp = int(max_cp)
+        min_peak_ratio = float(min_peak_ratio)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="change_point", status="error",
+            messages=["变点检测参数格式错误：min_segment 和 n_changepoints 需为整数，"
+                      "min_peak_ratio 需为数值"],
+        )
 
     values = data.values
     changepoints: list[int] = []
@@ -3218,8 +3259,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     conclusion = ""
     if test_note:
         # 从 test_note 中提取 p 值判断显著性 (α=0.05)
-        import re as _re
-        p_vals = [float(m) for m in _re.findall(r"p=([\d.eE+-]+)", test_note)]
+        p_vals = [float(m) for m in re.findall(r"p=([\d.eE+-]+)", test_note)]
         any_sig = any(p < 0.05 for p in p_vals)
         if any_sig:
             conclusion = "各组之间存在显著差异（p<0.05），建议进一步做多重比较确认差异来源。"
