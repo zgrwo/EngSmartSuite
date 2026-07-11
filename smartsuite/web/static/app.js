@@ -237,7 +237,6 @@ const PARAM_META = {
   group_col:      { type: 'column', label: '分组依据', hint: '按此列分系列，不同值=不同颜色的线' },
   part_col:       { type: 'column', label: '部件列', hint: '选择部件标识列' },
   operator_col:   { type: 'column', label: '操作员列', hint: '选择操作员标识列' },
-  group_col:      { type: 'column', label: '分组列', hint: '选择分组标识列' },
 };
 
 // 参数标签（中文显示名）
@@ -253,7 +252,7 @@ const PARAM_LABELS = {
   coverage: '覆盖比例', confidence: '置信度', part_col: '部件列',
   operator_col: '操作员列', group_col: '分组依据', alpha_lasso: 'α (正则化强度)',
   model_type: '模型类型', min_segment: '最小段长', n_changepoints: '变点数',
-  group_col: '分组列', max_depth: '最大深度',
+  max_depth: '最大深度',
   sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',

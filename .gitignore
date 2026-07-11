@@ -78,6 +78,9 @@ logs/
 # 第三方 skills（本地参考，不推送）
 skills/Auto-Empirical-Research-Skills-main/
 
+# 验证脚本输出
+scripts/verify_manual_claims_output.txt
+
 # 历史残留
 .superpowers/
 docs/superpowers/
