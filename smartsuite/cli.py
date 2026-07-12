@@ -1,6 +1,7 @@
 """CLI 入口 — 命令行直接运行分析。"""
 import argparse
 import logging
+import os
 import sys
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,23 @@ from smartsuite.services.orchestrator import (
 )
 
 
+def _read_data_file(filepath: str, sheet=0) -> pd.DataFrame:
+    """根据文件扩展名自动选择读取方式。支持 .csv / .xlsx / .xlsm。"""
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == ".csv":
+        for encoding in ["utf-8-sig", "utf-8", "gbk", "latin-1"]:
+            try:
+                return pd.read_csv(filepath, encoding=encoding)
+            except UnicodeError:
+                continue
+            except Exception:
+                logger.exception("CSV 文件解析失败 (encoding=%s)", encoding)
+                raise
+        raise ValueError("无法识别 CSV 文件编码，请转换为 UTF-8 后重试")
+    else:
+        return pd.read_excel(filepath, sheet_name=sheet, engine="openpyxl")
+
+
 def main():
     from smartsuite import setup_logging
     setup_logging()
@@ -34,9 +52,9 @@ def main():
     run_parser = subparsers.add_parser("run", help="运行分析")
     run_parser.add_argument("template", help="YAML 分析模板路径")
     run_parser.add_argument("--input", "-i", required=True,
-                             help="输入 Excel 文件路径")
+                             help="输入数据文件路径 (.xlsx / .xlsm / .csv)")
     run_parser.add_argument("--sheet", "-s", default=0,
-                             help="Sheet 名或索引 (默认: 第一个)")
+                             help="Sheet 名或索引 (仅 Excel，默认: 第一个)")
 
     subparsers.add_parser("list", help="列出支持的分析方法")
 
@@ -75,9 +93,16 @@ def main():
             sys.exit(1)
 
         try:
-            raw = pd.read_excel(args.input, sheet_name=args.sheet)
+            raw = _read_data_file(args.input, sheet=args.sheet)
         except FileNotFoundError:
             print(f"错误: 找不到输入文件「{args.input}」，请检查文件路径是否正确", file=sys.stderr)
+            sys.exit(1)
+        except ValueError as e:
+            print(f"错误: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception:
+            logger.exception("文件解析失败")
+            print(f"错误: 无法解析文件「{args.input}」，请确认文件格式正确", file=sys.stderr)
             sys.exit(1)
         features = config.get("feature_cols", [])
         categoricals = config.get("categoricals", [])

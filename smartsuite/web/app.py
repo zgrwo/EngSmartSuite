@@ -182,28 +182,44 @@ def upload():
     # 服务端文件类型校验 (.xls 是 OLE2 二进制格式, openpyxl 不支持, 已移除)
     filename = f.filename or ""
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in (".xlsx", ".xlsm"):
-        return jsonify({"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xlsm 文件"}), 400
+    if ext not in (".xlsx", ".xlsm", ".csv"):
+        return jsonify({"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xlsm / .csv 文件"}), 400
 
-    # Zip bomb 防护：检查 ZIP 压缩包解压后大小
     import io
     import zipfile
     f_bytes = f.read()
-    try:
-        with zipfile.ZipFile(io.BytesIO(f_bytes)) as zf:
-            total_size = sum(info.file_size for info in zf.infolist())
-            if total_size > 200 * 1024 * 1024:
-                return jsonify({"error": "文件解压后过大（限制200MB），请减少数据量"}), 400
-            if len(zf.infolist()) > 1000:
-                return jsonify({"error": "文件包含过多条目，可能不是有效的 Excel 文件"}), 400
-    except zipfile.BadZipFile:
-        return jsonify({"error": "不是有效的 Excel 文件，请确认文件格式正确"}), 400
 
-    try:
-        df = pd.read_excel(io.BytesIO(f_bytes), engine="openpyxl")
-    except Exception:
-        logger.exception("Excel 文件解析失败")
-        return jsonify({"error": "无法解析 Excel 文件，请确认文件格式正确"}), 400
+    if ext == ".csv":
+        # CSV 文件：多编码尝试 (UTF-8 BOM → UTF-8 → GBK → Latin-1 兜底)
+        df = None
+        for encoding in ["utf-8-sig", "utf-8", "gbk", "latin-1"]:
+            try:
+                df = pd.read_csv(io.BytesIO(f_bytes), encoding=encoding)
+                break
+            except UnicodeError:
+                continue
+            except Exception:
+                logger.exception("CSV 文件解析失败 (encoding=%s)", encoding)
+                return jsonify({"error": "无法解析 CSV 文件，请确认文件格式正确"}), 400
+        if df is None:
+            return jsonify({"error": "无法识别 CSV 文件编码，请转换为 UTF-8 后重试"}), 400
+    else:
+        # Excel 文件：Zip bomb 防护
+        try:
+            with zipfile.ZipFile(io.BytesIO(f_bytes)) as zf:
+                total_size = sum(info.file_size for info in zf.infolist())
+                if total_size > 200 * 1024 * 1024:
+                    return jsonify({"error": "文件解压后过大（限制200MB），请减少数据量"}), 400
+                if len(zf.infolist()) > 1000:
+                    return jsonify({"error": "文件包含过多条目，可能不是有效的 Excel 文件"}), 400
+        except zipfile.BadZipFile:
+            return jsonify({"error": "不是有效的 Excel 文件，请确认文件格式正确"}), 400
+
+        try:
+            df = pd.read_excel(io.BytesIO(f_bytes), engine="openpyxl")
+        except Exception:
+            logger.exception("Excel 文件解析失败")
+            return jsonify({"error": "无法解析 Excel 文件，请确认文件格式正确"}), 400
 
     if df.empty:
         return jsonify({"error": "文件为空或无法读取数据"}), 400

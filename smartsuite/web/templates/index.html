@@ -12,8 +12,8 @@
   <span class="logo">SmartSuite</span>
   <span class="subtitle">工艺数据分析工具箱</span>
   <div class="header-right">
-    <input type="file" id="file-input" accept=".xlsx,.xlsm" hidden>
-    <button id="btn-upload" onclick="document.getElementById('file-input').click()">📂 打开 Excel 文件</button>
+    <input type="file" id="file-input" accept=".xlsx,.xlsm,.csv" hidden>
+    <button id="btn-upload" onclick="document.getElementById('file-input').click()">📂 打开数据文件</button>
     <span id="filename" class="filename">未选择文件</span>
     <span id="shape" class="shape"></span>
   </div>
@@ -29,7 +29,7 @@
       <button onclick="clearAll()" class="btn-sm">清空</button>
     </div>
     <div id="col-list" class="col-list">
-      <div class="empty-hint">请先加载 Excel 文件</div>
+      <div class="empty-hint">请先加载数据文件</div>
     </div>
     <div id="col-status" class="col-status">Y=0 X=0 类别=0</div>
     <!-- 参数面板（按需显示） -->
