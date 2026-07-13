@@ -141,7 +141,8 @@ const TASK_PARAMS = {
   change_point:      { min_segment: 10, n_changepoints: 5 },
   doe_analysis:      { alpha: 0.05 },
   variance_test:     { group_col: '', alpha: 0.05 },
-  box_chart:         { mode: 'facet', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
+  box_chart:         { mode: 'facet', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
+  scatter_plot:      { fit: 'none', show_ci: 'true', group_col: '' },
   correlation:       { method: 'pearson' },
   contingency:       { alpha: 0.05 },
 };
@@ -237,6 +238,16 @@ const PARAM_META = {
   group_col:      { type: 'column', label: '分组依据', hint: '按此列分系列，不同值=不同颜色的线' },
   part_col:       { type: 'column', label: '部件列', hint: '选择部件标识列' },
   operator_col:   { type: 'column', label: '操作员列', hint: '选择操作员标识列' },
+  fit: {
+    type: 'select', label: '拟合类型',
+    options: [
+      ['none', '无拟合'], ['linear', '线性回归 (OLS)'], ['lowess', 'LOWESS 平滑']
+    ]
+  },
+  show_ci: {
+    type: 'select', label: '置信带',
+    options: [['true', '显示 95% 置信带'], ['false', '隐藏']]
+  },
 };
 
 // 参数标签（中文显示名）
@@ -256,6 +267,7 @@ const PARAM_LABELS = {
   sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
+  fit: '拟合类型', show_ci: '显示置信带',
 };
 
 const PARAM_HINTS = {
@@ -399,7 +411,7 @@ async function executeRequest(task) {
   try {
     const params = getParams(task);
     _lastRequest = { task, targets: [...selectedY], features: [...selectedX], categoricals: [...selectedCat], params };
-    _pendingGroupFilter = !!(params.group_col);  // 有分组依据时启用筛选栏
+    _pendingGroupFilter = !!(params.group_col) || (task === 'box_chart');  // 有分组依据时启用筛选栏（box_chart 始终有分组）
     if (!_pendingGroupFilter) { _allGroups = []; _activeGroups.clear(); }  // 无分组时重置
     const r = await fetch('/api/analyze', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await getCsrfToken() },

@@ -39,6 +39,7 @@ from smartsuite.engine import (
     response_surface_analysis,
     robust_regression,
     roc_analysis,
+    scatter_plot,
     survival_analysis,
     tolerance_interval,
     trend_forecast,
@@ -89,6 +90,7 @@ TASK_REGISTRY = {
     "lasso_regression": lasso_regression,
     "robust_regression": robust_regression,
     "quantile_regression": quantile_regression,
+    "scatter_plot": scatter_plot,
 }
 
 DEFAULT_PARAMS = {
@@ -129,7 +131,9 @@ DEFAULT_PARAMS = {
     "anomaly_detect": {"method": "iqr"},
     "change_point": {"min_segment": 10, "n_changepoints": 5},
     "outlier_consensus": {},
-    "box_chart": {"mode": "facet"},
+    "box_chart": {"mode": "facet", "group_col": None, "usl": None, "lsl": None,
+                  "ucl": None, "lcl": None, "cl": None, "target": None},
+    "scatter_plot": {"fit": "none", "show_ci": "true", "group_col": None},
     "bootstrap_ci": {"statistic": "mean", "n_bootstrap": 2000, "ci_level": 0.95},
     "median_ci": {"ci_level": 0.95},
     "gage_rr": {"tolerance": None, "sigma_multiplier": 5.15},
@@ -229,6 +233,7 @@ TASK_LABELS = {
     "gage_rr": "量具R&R分析", "tolerance_interval": "统计容许区间",
     "survival_analysis": "生存分析(Kaplan-Meier)",
     "box_chart": "分组箱线图",
+    "scatter_plot": "散点图(含拟合)",
     "spc_nonparametric": "非参数控制图(分布拟合法)",
 }
 
@@ -243,7 +248,7 @@ TASK_GROUPS = {
     "过程监控": ["spc_xbar", "spc_attribute", "spc_cusum", "spc_ewma",
                  "process_capability", "trend_forecast", "anomaly_detect",
                  "change_point", "outlier_consensus", "box_chart",
-                 "spc_nonparametric"],
+                 "scatter_plot", "spc_nonparametric"],
     "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval",
                  "survival_analysis"],
 }
@@ -252,7 +257,7 @@ TASK_GROUPS = {
 # 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
 RAW_CAT_TASKS: set[str] = {"box_chart", "anova", "variance_test", "contingency",
                             "cohens_kappa", "hypothesis_test", "survival_analysis",
-                            "spc_xbar", "spc_attribute"}
+                            "spc_xbar", "spc_attribute", "scatter_plot"}
 
 # ── 不需要目标列 (Y 列) 的任务 ──
 # 这些引擎函数不使用 req.target_col，Web 层通过此常量判断是否允许不选 Y 列

@@ -1,4 +1,4 @@
-"""CLI (orchestrate) vs Web (run_analysis) numerical parity test — all 39 methods.
+"""CLI (orchestrate) vs Web (run_analysis) numerical parity test — all 40 methods.
 
 Path A: replicate run_analysis's internal preprocessing, then orchestrate().
 Path B: run_analysis() → list[dict] → compare status/summary/tables/metadata.
@@ -280,6 +280,7 @@ compare_one("survival_analysis",  "survival_analysis",  y_num,   [],            
 compare_one("gage_rr",            "gage_rr",            y_num,   [],                           ["模具编号", "检验员"],
             {"part_col": "模具编号", "operator_col": "检验员"})
 compare_one("contingency",        "contingency",        "",      [],                           ["原料类型", "保养日"], {})
+compare_one("scatter_plot",       "scatter_plot",       y_num,   x_num[:1],                   [],        {"fit": "linear"})
 
 # =====================================================================
 # report
@@ -294,7 +295,7 @@ total = len(results)
 bad = len(mismatches)
 print(f"\nTotal: {total} tasks tested, {bad} mismatches")
 
-assert total == 39, f"Expected 39 tasks, got {total}"
+assert total == 40, f"Expected 40 tasks, got {total}"
 
 if mismatches:
     print(f"\n--- MISMATCHES ({bad}) ---")
@@ -302,4 +303,4 @@ if mismatches:
         print(m)
     print("\n*** SOME MISMATCHES FOUND ***")
 else:
-    print("\nALL CLEAN — zero CLI/Web mismatches across all 39 methods")
+    print("\nALL CLEAN — zero CLI/Web mismatches across all 40 methods")

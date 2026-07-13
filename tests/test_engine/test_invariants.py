@@ -23,6 +23,7 @@ from smartsuite.engine.spc_monitor import (
     attribute_chart,
     gage_rr,
     process_capability_analysis,
+    scatter_plot,
     survival_analysis,
     xbar_r_chart,
 )
@@ -302,3 +303,50 @@ def test_attribute_chart_center_line_positive():
             cl = result.metadata.get("center_line")
             if cl is not None:
                 assert cl > 0, f"{chart_type}-chart CL={cl} ≤ 0"
+
+
+# ── 散点图不变量 ──
+
+def test_scatter_plot_r_squared_bounds():
+    """散点图线性拟合 R² 必须在 [0, 1] 范围内。"""
+    np.random.seed(42)
+    n = 50
+    x = np.random.uniform(0, 10, n)
+    y = 3.0 + 2.0 * x + np.random.normal(0, 1.0, n)
+    df = pd.DataFrame({"x": x, "y": y})
+
+    req = AnalysisRequest(task="scatter_plot", data=df,
+                          target_col="y", feature_cols=["x"],
+                          params={"fit": "linear"})
+    result = scatter_plot(req)
+    assert result.status == "ok"
+    r2 = result.metadata["r_squared"]
+    assert r2 is not None
+    assert 0.0 <= r2 <= 1.0, f"R² 应在 [0,1], 实际={r2:.4f}"
+
+
+def test_scatter_plot_no_fit_r_squared_none():
+    """散点图无拟合时 r_squared 必须为 None。"""
+    np.random.seed(42)
+    df = pd.DataFrame({"x": np.random.uniform(0, 10, 30),
+                       "y": np.random.normal(0, 1, 30)})
+
+    req = AnalysisRequest(task="scatter_plot", data=df,
+                          target_col="y", feature_cols=["x"],
+                          params={"fit": "none"})
+    result = scatter_plot(req)
+    assert result.status == "ok"
+    assert result.metadata["r_squared"] is None
+
+
+def test_scatter_plot_constant_x_column():
+    """散点图 X 列为常量时不崩溃，返回 ok。"""
+    np.random.seed(42)
+    df = pd.DataFrame({"x": [5.0] * 30,
+                       "y": np.random.normal(50, 5, 30)})
+
+    req = AnalysisRequest(task="scatter_plot", data=df,
+                          target_col="y", feature_cols=["x"],
+                          params={"fit": "linear", "show_ci": True})
+    result = scatter_plot(req)
+    assert result.status == "ok"

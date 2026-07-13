@@ -3163,6 +3163,15 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="box_chart", status="error",
             messages=[f"分组过多({len(groups)}个)，最多支持 30 个分组"])
 
+    # ── 前端筛选支持 ──
+    all_groups = list(groups)  # 保存完整列表用于 metadata
+    filter_groups = req.params.get("filter_groups")
+    if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
+        filter_set = set(str(f) for f in filter_groups)
+        groups = [g for g in groups if str(g) in filter_set]
+        if not groups:
+            groups = all_groups  # 全空则回退
+
     # ── 描述统计 ──
     stat_rows = []
     for g in groups:
@@ -3254,7 +3263,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         _draw_ref_lines(ax)
     fig.tight_layout()
 
-    n_total = len(sub)
+    n_total = sum(s["样本量"] for s in stat_rows)  # 按实际显示的分组汇总
     # 统计检验结论 — 明确告知组间是否存在显著差异
     conclusion = ""
     if test_note:
@@ -3280,6 +3289,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             "n_groups": len(groups), "n_total": n_total,
             "group_col": group_col, "sub_col": sub_col, "has_sub": has_sub,
             "mode": mode, "nested_label": nested_label,
+            "groups": [str(g) for g in all_groups],
         },
     )
 
@@ -3474,5 +3484,186 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             "cl": cl, "ucl": ucl, "lcl": lcl, "side": side,
             "ucl_2s": ucl_2s, "lcl_2s": lcl_2s,
             "n": n, "n_violations": n_violations, "is_stable": is_stable,
+        },
+    )
+
+
+def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
+    """散点图 — X-Y 散点图，可选线性/LOWESS 拟合线与置信带，支持分组着色。
+
+    参数 (params):
+        fit: 拟合类型 — "none"(默认) | "linear"(OLS回归) | "lowess"(局部加权)
+        show_ci: 是否显示 95% 置信带 (默认 true)
+        group_col: 分组着色依据 (可选，不同值=不同颜色)
+
+    数据要求:
+        target_col: Y 轴数值列
+        feature_cols[0]: X 轴数值列
+    """
+    if len(req.feature_cols) < 1:
+        return AnalysisResult(
+            task="scatter_plot", status="error",
+            messages=["需要至少 1 个 X 轴数值列"],
+        )
+
+    x_col = req.feature_cols[0]
+    y_col = req.target_col
+
+    # ── 提取有效数据 ──
+    cols_needed = [y_col, x_col]
+    group_col = req.params.get("group_col")
+    has_groups = bool(group_col and group_col in req.data.columns)
+    if has_groups:
+        cols_needed.append(group_col)
+
+    sub = req.data[cols_needed].dropna()
+    if len(sub) < 3:
+        return AnalysisResult(
+            task="scatter_plot", status="error",
+            messages=[f"有效数据不足(至少3个点, 当前{len(sub)}个)"],
+        )
+
+    # ── 参数提取 ──
+    fit_type = req.params.get("fit", "none")
+    show_ci = req.params.get("show_ci", True)
+    if isinstance(show_ci, str):
+        show_ci = show_ci.lower() not in ("false", "0", "no", "")
+
+    # ── 分组信息 ──
+    if has_groups:
+        group_vals = sub[group_col]
+        group_names = sorted(group_vals.dropna().unique())
+        # 支持前端筛选
+        filter_groups = req.params.get("filter_groups")
+        if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
+            filter_set = set(str(f) for f in filter_groups)
+            group_names = [g for g in group_names if str(g) in filter_set]
+            if not group_names:
+                group_names = sorted(group_vals.dropna().unique())
+    else:
+        group_vals = pd.Series("_default", index=sub.index)
+        group_names = ["_default"]
+
+    # ── 图表渲染 ──
+    fig = Figure(figsize=(10, 7))
+    ax = fig.add_subplot(111)
+
+    group_colors = {}
+    for gi, gname in enumerate(group_names):
+        group_colors[gname] = cm.tab10(gi % 10)
+
+    # ── 按分组绘制散点 ──
+    all_x_for_fit = []
+    all_y_for_fit = []
+    for gname in group_names:
+        mask = group_vals == gname if has_groups else pd.Series(True, index=sub.index)
+        gx = sub.loc[mask, x_col].values
+        gy = sub.loc[mask, y_col].values
+        if len(gx) == 0:
+            continue
+        color = group_colors[gname]
+        label = str(gname) if has_groups else None
+        ax.scatter(gx, gy, s=25, color=color, alpha=0.65, edgecolors="white",
+                   linewidth=0.3, label=label, zorder=3)
+        all_x_for_fit.extend(gx.tolist())
+        all_y_for_fit.extend(gy.tolist())
+
+    x_all = np.array(all_x_for_fit)
+    y_all = np.array(all_y_for_fit)
+
+    # ── 拟合线 ──
+    r_squared = None
+    eq_text = ""
+    if fit_type == "linear" and len(x_all) >= 3:
+        # OLS 线性回归
+        X_mat = x_all.reshape(-1, 1)
+        model = LinearRegression().fit(X_mat, y_all)
+        y_pred_all = model.predict(X_mat)
+        slope = float(model.coef_[0])
+        intercept = float(model.intercept_)
+        r_squared = float(model.score(X_mat, y_all))
+
+        # 排序后的 x 用于绘制平滑拟合线
+        x_sorted = np.linspace(x_all.min(), x_all.max(), 200)
+        y_fit = model.predict(x_sorted.reshape(-1, 1))
+
+        ax.plot(x_sorted, y_fit, "-", color=PALETTE["anomaly"]["primary"],
+                linewidth=2, alpha=0.85, zorder=5,
+                label=f"OLS (R²={r_squared:.3f})")
+
+        # 置信带
+        if show_ci and len(x_all) > 2:
+            n = len(x_all)
+            x_mean = float(np.mean(x_all))
+            ssx = float(np.sum((x_all - x_mean) ** 2))
+            if ssx < 1e-15:
+                # X 列为常量，拟合线为水平线，置信带退化（无意义）
+                pass
+            else:
+                resid_se = float(np.sqrt(np.sum((y_all - y_pred_all) ** 2) / max(n - 2, 1)))
+                t_crit = float(sp_stats.t.ppf(0.975, max(n - 2, 1)))
+                se_fit = resid_se * np.sqrt(1 / n + (x_sorted - x_mean) ** 2 / ssx)
+                ci_upper = y_fit + t_crit * se_fit
+                ci_lower = y_fit - t_crit * se_fit
+                ax.fill_between(x_sorted, ci_lower, ci_upper,
+                               color=PALETTE["anomaly"]["primary"], alpha=0.08, zorder=1,
+                               label="95% 置信带")
+
+        slope_sign = "+" if slope >= 0 else ""
+        eq_text = f"y = {intercept:.4f} {slope_sign} {slope:.4f}x"
+
+    elif fit_type == "lowess" and len(x_all) >= 5:
+        # LOWESS (局部加权散点平滑)
+        try:
+            from statsmodels.nonparametric.smoothers_lowess import lowess
+        except ImportError:
+            logger.info("statsmodels 未安装，LOWESS 拟合不可用。"
+                        "安装: pip install statsmodels")
+        else:
+            try:
+                lowess_result = lowess(y_all, x_all, frac=0.5, return_sorted=True)
+                ax.plot(lowess_result[:, 0], lowess_result[:, 1], "-",
+                        color=PALETTE["anomaly"]["primary"], linewidth=2, alpha=0.85, zorder=5,
+                        label="LOWESS (frac=0.5)")
+                # 计算伪 R²
+                y_lowess_interp = np.interp(x_all, lowess_result[:, 0], lowess_result[:, 1])
+                ss_res = np.sum((y_all - y_lowess_interp) ** 2)
+                ss_tot = np.sum((y_all - np.mean(y_all)) ** 2)
+                r_squared = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+            except (ValueError, np.linalg.LinAlgError, RuntimeError):
+                logger.debug("LOWESS fit failed in scatter_plot", exc_info=True)
+
+    # ── 标签与标题 ──
+    ax.set_xlabel(x_col, fontsize=10)
+    ax.set_ylabel(y_col, fontsize=10)
+    title = f"散点图 — {y_col} vs {x_col}"
+    if eq_text:
+        title += f"\n{eq_text}"
+    ax.set_title(title, fontsize=11)
+    if has_groups or fit_type != "none":
+        ax.legend(fontsize=8, loc="best")
+
+    fig.tight_layout()
+
+    # ── 汇总 ──
+    n_points = len(x_all)  # 仅统计实际绘制的点（含筛选后分组）
+    parts = [f"{y_col} vs {x_col} (n={n_points})"]
+    if has_groups:
+        parts.append(f"，{len(group_names)} 个分组")
+    if r_squared is not None:
+        parts.append(f"，R²={r_squared:.4f}")
+    if fit_type == "linear":
+        parts.append(f"，线性拟合: {eq_text}")
+    elif fit_type == "lowess":
+        parts.append("，LOWESS 平滑")
+
+    return AnalysisResult(
+        task="scatter_plot",
+        figures=[fig],
+        summary="".join(parts) + "。",
+        metadata={
+            "n_points": n_points, "x_col": x_col,
+            "fit_type": fit_type, "r_squared": r_squared,
+            "groups": [str(g) for g in group_names if g != "_default"],
         },
     )

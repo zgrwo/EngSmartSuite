@@ -11,12 +11,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGES_DIR="$SCRIPT_DIR/packages"
 
 download_deps() {
-    echo "[1/2] 创建 packages 目录..."
+    echo "[1/3] 创建 packages 目录..."
     mkdir -p "$PACKAGES_DIR"
 
-    echo "[2/2] 下载全部依赖到 packages/ ..."
+    echo "[2/3] 下载构建依赖 (setuptools, wheel)..."
+    echo "       这些是 pip 构建 smartsuite 包时必需的，"
+    echo "       但 pip download 不会自动包含它们。"
+    pip download 'setuptools>=68.0' wheel -d "$PACKAGES_DIR"
+
+    echo "[3/3] 下载全部运行时依赖到 packages/ ..."
     echo "       含核心依赖 + web + report + dev"
-    pip download .[web,report,dev] -d "$PACKAGES_DIR"
+    pip download '.[web,report,dev]' -d "$PACKAGES_DIR"
 
     echo ""
     echo "========================================"
@@ -35,17 +40,30 @@ install_offline() {
         exit 1
     fi
 
-    echo "[1/2] 从本地 packages/ 安装全部依赖..."
-    pip install --no-index --find-links="$PACKAGES_DIR" smartsuite[web,report,dev]
+    # 检查 Python
+    if ! command -v python3 &>/dev/null; then
+        echo "[错误] 找不到 python3，请先安装 Python >=3.10"
+        exit 1
+    fi
 
-    echo "[2/2] 安装 smartsuite 本身（开发模式）..."
+    # Step 1: 安装构建依赖（关键！）
+    echo "[1/3] 安装构建依赖 (setuptools, wheel)..."
+    echo "       这一步解决 'setuptools 找不到' 的错误"
+    pip install --no-index --find-links="$PACKAGES_DIR" setuptools wheel
+
+    # Step 2: 安装所有运行时依赖
+    echo "[2/3] 从本地 packages/ 安装全部运行时依赖..."
+    pip install --no-index --find-links="$PACKAGES_DIR" --no-build-isolation 'smartsuite[web,report,dev]'
+
+    # Step 3: 安装 smartsuite 本身（开发模式）
+    echo "[3/3] 安装 smartsuite 本身（开发模式）..."
     pip install --no-deps -e "$SCRIPT_DIR"
 
     echo ""
     echo "========================================"
     echo " 安装完成！"
     echo "========================================"
-    echo " 验证: python -c 'import smartsuite; print(\"OK\")'"
+    echo " 验证: python3 -c 'import smartsuite; print(\"OK\")'"
 }
 
 case "${1:-}" in

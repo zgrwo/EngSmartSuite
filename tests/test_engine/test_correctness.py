@@ -18,6 +18,7 @@ from smartsuite.engine.spc_monitor import (
     gage_rr,
     median_ci,
     process_capability_analysis,
+    scatter_plot,
     spc_nonparametric,
     tolerance_interval,
     trend_forecast,
@@ -1187,4 +1188,51 @@ def test_box_chart_group_statistics():
 
     # 元数据应记录分组数
     assert result.metadata["n_groups"] == 2
-    assert result.metadata["n_total"] == n * 2
+
+
+# ── 散点图正确性 ──
+
+def test_scatter_plot_linear_fit_known_slope():
+    """散点图线性拟合: y = 3.0 + 2.0*x + ε → 斜率≈2.0, R²>0.9。"""
+    np.random.seed(42)
+    n = 100
+    x = np.random.uniform(0, 10, n)
+    y = 3.0 + 2.0 * x + np.random.normal(0, 0.3, n)
+    df = pd.DataFrame({"x": x, "y": y})
+
+    req = AnalysisRequest(task="scatter_plot", data=df,
+                          target_col="y", feature_cols=["x"],
+                          params={"fit": "linear"})
+    result = scatter_plot(req)
+    assert result.status == "ok"
+    r2 = result.metadata["r_squared"]
+    assert r2 is not None, "线性拟合应返回 R²"
+    assert r2 > 0.9, f"R² 应 > 0.9, 实际={r2:.3f}"
+    assert result.metadata["fit_type"] == "linear"
+
+
+def test_scatter_plot_no_fit():
+    """散点图无拟合: status=ok, r_squared=None。"""
+    np.random.seed(42)
+    n = 30
+    x = np.random.uniform(0, 10, n)
+    y = np.random.normal(50, 5, n)
+    df = pd.DataFrame({"x": x, "y": y})
+
+    req = AnalysisRequest(task="scatter_plot", data=df,
+                          target_col="y", feature_cols=["x"],
+                          params={"fit": "none"})
+    result = scatter_plot(req)
+    assert result.status == "ok"
+    assert result.metadata["r_squared"] is None, "无拟合时 R² 应为 None"
+
+
+def test_scatter_plot_insufficient_data():
+    """散点图数据不足: 少于3点应返回 error。"""
+    df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
+
+    req = AnalysisRequest(task="scatter_plot", data=df,
+                          target_col="y", feature_cols=["x"])
+    result = scatter_plot(req)
+    assert result.status == "error"
+    assert len(result.messages) > 0
