@@ -112,4 +112,7 @@ def get_palette_style():
         "axes.spines.right": False,
         "figure.facecolor": "white",
         "axes.facecolor": "white",
+        # 全局刻度标签默认字号 — 各图表可单独覆盖
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
     }

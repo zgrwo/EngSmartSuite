@@ -102,7 +102,7 @@ DEFAULT_PARAMS = {
     "vif": {},
     "contingency": {"alpha": 0.05},
     "proportion_ci": {},
-    "variance_test": {"alpha": 0.05},
+    "variance_test": {"group_col": None, "alpha": 0.05},
     "cohens_kappa": {},
     "cronbach_alpha": {},
     "distribution_summary": {},
@@ -185,7 +185,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         err_cls = type(e).__name__
         detail_map = {
             "ValueError": "数据格式不符合分析要求，请检查目标列和因子列的数据类型",
-            "KeyError": "数据中缺少必要的列，请确认列名是否正确",
+            "KeyError": "数据处理异常，请检查数据列名和参数配置是否正确",
             "TypeError": "数据类型不匹配，请确保所有因子列为数值型或类别型",
             "IndexError": "数据索引异常，请检查数据是否包含空行或异常索引",
             "MemoryError": "数据量过大超出内存限制，请减少数据行数或列数",
@@ -261,4 +261,5 @@ RAW_CAT_TASKS: set[str] = {"box_chart", "anova", "variance_test", "contingency",
 
 # ── 不需要目标列 (Y 列) 的任务 ──
 # 这些引擎函数不使用 req.target_col，Web 层通过此常量判断是否允许不选 Y 列
-NO_TARGET_TASKS: set[str] = {"vif", "cohens_kappa", "cronbach_alpha", "power_analysis"}
+NO_TARGET_TASKS: set[str] = {"vif", "cohens_kappa", "cronbach_alpha", "power_analysis",
+                                "multi_objective"}

@@ -220,6 +220,35 @@ def _we_rules_s(values, cl, ucl, lcl=0):
     return {k: sorted(set(v)) for k, v in violations.items()}
 
 
+def _adjust_xlabels(ax, n_labels: int, fig=None):
+    """自适应调整 X 轴刻度标签：根据标签数量选择旋转角度和字号。
+
+    统一所有控制图、箱线图的 X 轴标签显示策略，消除硬编码 fontsize/rotation。
+    与 _fmt_labels / _fmt_attr_labels 配合使用（后者负责文字截断和稀疏化）。
+
+    Args:
+        ax: matplotlib Axes 对象
+        n_labels: 标签总数（含可能被 _fmt_labels 置空的标签）
+        fig: 可选，用于多标签时自动调整子图边距
+    """
+    if n_labels <= 4:
+        ax.tick_params(axis="x", labelsize=9)
+    elif n_labels <= 8:
+        ax.tick_params(axis="x", labelsize=9, rotation=30)
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+    elif n_labels <= 15:
+        ax.tick_params(axis="x", labelsize=8, rotation=45)
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+    else:
+        ax.tick_params(axis="x", labelsize=7.5, rotation=60)
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+        if fig:
+            fig.subplots_adjust(bottom=0.25)
+
+
 def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     """X-bar 控制图，含 Western Electric 规则和区域着色。
 
@@ -566,7 +595,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     x_labels = _fmt_labels(x_unique)
     ax1.set_xticks(all_idx)
-    ax1.set_xticklabels(x_labels, fontsize=7.5, rotation=45)
+    ax1.set_xticklabels(x_labels)
+    _adjust_xlabels(ax1, len(x_labels), fig)
     ax1.set_ylabel(y_col, fontsize=10)
     title_n = n_common if n_common > 1 else 1
     title_info = f"{chart_subtype.upper()}控制图 — {y_col} ({len(agg)}点{'×'+str(title_n)+'样本' if title_n>1 else ''}{warn_unequal})"
@@ -646,7 +676,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         ax2.set_title(lower_title, fontsize=12)
         ax2.legend(fontsize=8, loc="upper right")
         ax2.set_xticks(all_idx)
-        ax2.set_xticklabels(x_labels, fontsize=7.5, rotation=45)
+        ax2.set_xticklabels(x_labels)
+        _adjust_xlabels(ax2, len(x_labels), fig)
 
     fig.tight_layout()
 
@@ -990,7 +1021,8 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
 
     x_labels = _fmt_attr_labels(x_unique)
     ax.set_xticks(np.arange(len(x_unique)))
-    ax.set_xticklabels(x_labels, fontsize=7.5, rotation=45)
+    ax.set_xticklabels(x_labels)
+    _adjust_xlabels(ax, len(x_labels), fig)
     ax.set_xlabel("X", fontsize=10)
     ax.set_ylabel(stat_name, fontsize=10)
     ax.set_title(f"{chart_type.upper()}-控制图 — {y_col} (m={m}点)", fontsize=11)
@@ -2515,8 +2547,8 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
             changepoints.append(best_cp)
             old_start, old_end = segments_for_split[best_seg_idx]
             segments_for_split.pop(best_seg_idx)
-            segments_for_split.append((old_start, best_cp))
-            segments_for_split.append((best_cp, old_end))
+            segments_for_split.append((old_start, best_cp + 1))
+            segments_for_split.append((best_cp + 1, old_end))
         else:
             break
 
@@ -2762,10 +2794,11 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             scores = iso.decision_function(sub.values)
             # preds: 1=正常, -1=异常
             mask = preds == -1
-        except Exception:
+        except Exception as e:
+            logger.warning("Isolation Forest 拟合失败: %s", e, exc_info=True)
             return AnalysisResult(
                 task="anomaly_detect", status="error",
-                messages=["Isolation Forest 模型拟合失败"],
+                messages=[f"Isolation Forest 模型拟合失败: {e}"],
             )
 
         anomalies = req.data.loc[sub.index[mask]] if mask.sum() > 0 else pd.DataFrame()
@@ -3234,11 +3267,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             ax.set_xlabel(group_col, fontsize=8)
             ax.set_ylabel(req.target_col, fontsize=8)
             n_valid = len(valid_groups)
-            rot_angle = 45 if n_valid > 8 else (30 if n_valid > 4 else 0)
-            ax.tick_params(labelsize=8, rotation=rot_angle)
-            if rot_angle > 0:
-                for label in ax.get_xticklabels():
-                    label.set_ha("right")
+            _adjust_xlabels(ax, n_valid, fig)
             _draw_ref_lines(ax)
     else:
         fig = Figure(figsize=(max(len(groups)*1.2, 6), 5))
@@ -3260,6 +3289,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         if sub_col and not has_sub:
             title += f" (次分类「{sub_col}」水平过多，未分面)"
         ax.set_title(title, fontsize=11)
+        _adjust_xlabels(ax, len(groups), fig)
         _draw_ref_lines(ax)
     fig.tight_layout()
 

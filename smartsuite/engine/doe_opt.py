@@ -14,6 +14,17 @@ from smartsuite.engine.spc_monitor import durbin_watson  # 同包子模块引用
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_float(value, default: float) -> float:
+    """安全转换参数值为 float，防御 CLI/YAML 字符串参数导致的 TypeError。"""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
 # 阳性标签候选列表 — roc_analysis 和 logistic_regression 共享 (P2-12 fix)
 _POSITIVE_LABELS = ["不合格", "是", "1", 1, True, "fail", "异常"]
 
@@ -455,8 +466,12 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             messages=["参数搜索范围格式无效:"] + _invalid_ranges)
 
     n_points = req.params.get("n_points", 10)
+    try:
+        n_points = int(n_points)
+    except (ValueError, TypeError):
+        n_points = 10
     # 防止内存耗尽：限制搜索点数
-    n_points = min(n_points, 30)
+    n_points = max(2, min(n_points, 30))
     if len(ranges) > 4:
         return AnalysisResult(
             task="grid_search", status="error",
@@ -472,6 +487,10 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     mesh = np.meshgrid(*grids.values(), indexing="ij")
     points = np.column_stack([g.ravel() for g in mesh])
     col_names = list(ranges.keys())
+    missing_cols = [c for c in col_names if c not in req.data.columns]
+    if missing_cols:
+        return AnalysisResult(task="grid_search", status="error",
+            messages=[f"搜索参数列不存在于数据中: {missing_cols}"])
 
     df = req.data[col_names + [req.target_col]].dropna()
     if len(df) < 5:
@@ -874,7 +893,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             continue
 
         effect_ratio = abs(effect) / (abs(grand_mean) + EPSILON) if abs(grand_mean) > EPSILON else 0.0
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         effects.append({
             "因子": col,
             "主效应": round(effect, 4),
@@ -911,7 +930,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     ax.axvline(0, color=PALETTE["direction"]["zero"], linewidth=0.8)
     if me > 0:
         ax.axvline(me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6,
-                   label=f"Lenth ME={me:.3f} (≈α=0.05)")
+                   label=f"Lenth ME={me:.3f} (α={alpha})")
         ax.axvline(-me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6)
     # 标注效应值
     for i, (_, row) in enumerate(ef.iterrows()):
@@ -1222,7 +1241,9 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     X_scaled = scaler.fit_transform(X)
 
     alpha = req.params.get("alpha_lasso", None)
-    l1_ratio = req.params.get("l1_ratio", 1.0)  # 1.0 = pure Lasso, <1 = ElasticNet
+    if alpha is not None:
+        alpha = _safe_float(alpha, 1.0)
+    l1_ratio = _safe_float(req.params.get("l1_ratio", 1.0), 1.0)  # 1.0 = pure Lasso, <1 = ElasticNet
 
     _lasso_max_iter = 5000
     if alpha is not None:
@@ -1420,7 +1441,7 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
             "p值": np.asarray(model.pvalues).round(4),
         })
 
-        q_label = f"Q{int(quantile*100)} (中位数)" if quantile == 0.5 else f"Q{int(quantile*100)}"
+        q_label = f"Q{round(quantile*100)} (中位数)" if quantile == 0.5 else f"Q{round(quantile*100)}"
         summary = f"{q_label} 回归完成，{len(coef_df)-1} 个变量"
 
         return AnalysisResult(

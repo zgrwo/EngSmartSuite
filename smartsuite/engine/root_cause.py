@@ -26,6 +26,21 @@ from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
 
 
+def _safe_float(value, default: float) -> float:
+    """安全转换参数值为 float，防御 CLI/YAML 字符串参数导致的 TypeError。
+
+    所有从 req.params 提取数值参数的位置均应使用此函数，
+    避免 `"0.05" < 0.05` 之类的类型比较崩溃。
+    """
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        logger.debug("参数值转换失败: %r → 使用默认值 %s", value, default)
+        return default
+
+
 def _significance_stars(p):
     """显著性星号标记（使用 _constants.py 中的 SIG_* 阈值）。"""
     if p is None or np.isnan(p):
@@ -87,6 +102,9 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["至少需要 1 个因子列与目标列进行相关性分析，当前无有效因子列"])
 
     method = req.params.get("method", "pearson")  # "pearson" | "spearman" | "kendall"
+    if method not in ("pearson", "spearman", "kendall"):
+        return AnalysisResult(task="correlation", status="error",
+            messages=[f"不支持的相关性方法「{method}」，可选: pearson / spearman / kendall"])
     if method == "spearman":
         corr = req.data[cols].corr(method="spearman")
         corr_label = "Spearman ρ"
@@ -504,7 +522,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 效应量计算 ──
     effect_sizes = _eta_squared(anova_table)
 
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
     sig_factors: list[tuple[str, str]] = []  # (raw_col_name, formatted_display_str)
     for i, col in enumerate(cols):
         _esc_key = _escaped[i]
@@ -751,7 +769,7 @@ def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
     Q = Q / denom
     p = float(sp_stats.chi2.sf(max(Q, 0), k - 1))
     test_name = f"Cochran Q 检验 ({k} 条件)"
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
     conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
     return AnalysisResult(
         task="hypothesis_test",
@@ -778,7 +796,7 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
     stat, p = sp_stats.ks_2samp(g1, g2)
     test_name = f"Kolmogorov-Smirnov 检验 ({groups[0]} vs {groups[1]})"
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
     conclusion = "两样本分布存在显著差异" if p < alpha else "未发现分布差异"
     fig = Figure(figsize=(7, 4))
     ax = fig.add_subplot(111)
@@ -824,7 +842,7 @@ def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
         effect_label = "弱一致"
     else:
         effect_label = "可忽略"
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
     conclusion = "条件间存在显著差异" if p < alpha else "条件间未发现显著差异"
     fig = Figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
@@ -868,7 +886,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── 单样本检验 ──
     if test_type == "ttest_1samp":
         data = req.data[req.target_col].dropna()
-        popmean = req.params.get("popmean", 0)
+        popmean = _safe_float(req.params.get("popmean", 0), 0.0)
         if len(data) < 3:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少3个点)"])
@@ -885,7 +903,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                    f"{data.sem():.4f}", str(popmean)],
         })
 
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         conclusion = f"显著偏离 {popmean}" if p < alpha else f"未显著偏离 {popmean}"
 
         fig = Figure(figsize=(6, 4))
@@ -942,7 +960,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "Cohen's d (配对)"
         effect_label = _effect_size_label(abs(d_val), "cohens_d")
 
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         conclusion = "前后存在显著差异" if p < alpha else "前后未发现显著差异"
 
         desc_df = pd.DataFrame({
@@ -998,7 +1016,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── 单样本 Wilcoxon 符号秩检验 ──
     if test_type == "wilcoxon_1samp":
         data = req.data[req.target_col].dropna()
-        popmedian = req.params.get("popmedian", 0)
+        popmedian = _safe_float(req.params.get("popmedian", 0), 0.0)
         if len(data) < 5:
             return AnalysisResult(task="hypothesis_test", status="error",
                 messages=["有效数据不足(至少5个点)"])
@@ -1012,7 +1030,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "秩相关 r"
         effect_label = _effect_size_label(r_effect, "correlation")
 
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         conclusion = f"中位数显著偏离 {popmedian}" if p < alpha else f"中位数未显著偏离 {popmedian}"
 
         fig = Figure(figsize=(6, 4))
@@ -1073,7 +1091,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "η²_H"
         effect_label = _effect_interpretation(eta2_h)
 
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         conclusion = "组间存在显著差异" if p < alpha else "未发现组间显著差异"
 
         fig = Figure(figsize=(max(len(groups)*1.5, 5), 4))
@@ -1191,7 +1209,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         p = float(sp_stats.chi2.sf(stat, 1))
 
         test_name = f"McNemar 检验 ({col1} → {col2}){test_name_suffix}"
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         conclusion = "前后存在显著变化" if p < alpha else "前后未发现显著变化"
         # Odds Ratio = b/c（保留原始值，不做截断）
         or_val = b / (c + EPSILON)
@@ -1253,7 +1271,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         z_mk = float(sp_stats.norm.ppf(1 - p_safe / 2)) * np.sign(S) if p < 1.0 else 0.0
 
         test_name = "Mann-Kendall 趋势检验"
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         trend_dir = "上升趋势" if S > 0 else "下降趋势" if S < 0 else "无趋势"
         conclusion = f"存在显著{trend_dir}" if p < alpha else "未发现显著趋势"
 
@@ -1328,7 +1346,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         p = float(2 * sp_stats.norm.sf(abs(z_JT)))
 
         test_name = "Jonckheere-Terpstra 趋势检验"
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         trend_dir = "递增趋势" if z_JT > 0 else "递减趋势"
         conclusion = f"存在显著{trend_dir}" if p < alpha else "未发现显著趋势"
 
@@ -1371,7 +1389,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "匹配对秩相关 r"
         effect_label = _effect_size_label(r_effect, "correlation")
 
-        alpha = req.params.get("alpha", 0.05)
+        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         conclusion = "前后存在显著差异" if p < alpha else "前后未发现显著差异"
 
         # 配对差值分布图
@@ -1467,7 +1485,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "Cohen's d"
         effect_label = _effect_size_label(effect_size, "cohens_d")
 
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
     conclusion = "存在显著差异" if p < alpha else "未发现显著差异"
 
     # ── 统计功效估计 ──
@@ -1762,7 +1780,7 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
     from math import ceil
 
     effect_size = req.params.get("effect_size", 0.5)
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
     target_power = req.params.get("target_power", 0.80)
     mode = req.params.get("mode", "required_n")  # "required_n" | "achieved"
     test_type = req.params.get("test_type", "ttest")
@@ -1993,7 +2011,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "Cramér's V"
         effect_label = _cramers_v_interpretation(effect)
 
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
     conclusion = "两变量存在显著关联" if p_val < alpha else "两变量未发现显著关联"
 
     # 可视化：堆叠柱状图
@@ -2166,7 +2184,7 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         logger.debug("Bartlett 检验失败", exc_info=True)
         bart_stat, bart_p = None, None
 
-    alpha = req.params.get("alpha", 0.05)
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
 
     # 判定
     if lev_p is not None:

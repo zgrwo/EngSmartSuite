@@ -267,7 +267,7 @@ const PARAM_LABELS = {
   sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
-  fit: '拟合类型', show_ci: '显示置信带',
+  fit: '拟合类型', show_ci: '显示置信带', threshold: '分类阈值',
 };
 
 const PARAM_HINTS = {
@@ -361,22 +361,22 @@ async function runAnalysis(task) {
   if (_running) return;  // 防抖：上一次分析尚未完成
   // 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
   const _noTargetNeeded = new Set([
-    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis',
+    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective',
   ]);
   if (!_noTargetNeeded.has(task) && !selectedY.size) {
     alert('请至少选择一个 Y 列'); return;
   }
   // 仅需 Y 列即可运行的任务（无需选择 X 列）
   const _yOnlyTasks = new Set([
-    'process_capability', 'trend_forecast', 'anomaly_detect',
+    'process_capability', 'trend_forecast',
     'power_analysis', 'spc_nonparametric',
-    'distribution_summary', 'normality_check', 'proportion_ci',
+    'distribution_summary', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
     'spc_cusum', 'spc_ewma',
   ]);
   // X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
   const _xOptionalTasks = new Set([
-    'spc_xbar', 'spc_attribute',
+    'spc_xbar', 'spc_attribute', 'normality_check', 'anomaly_detect',
   ]);
   if (!_yOnlyTasks.has(task) && !_xOptionalTasks.has(task) && !selectedX.size) {
     alert('请至少选择一个 X 列'); return;
