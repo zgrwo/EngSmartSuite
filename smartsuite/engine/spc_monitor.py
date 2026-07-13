@@ -3352,13 +3352,13 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     fits = {}
     # Normal
     mu, sigma = sp_stats.norm.fit(values)
-    ks_n = sp_stats.kstest(values, "norm", args=(mu, sigma))
+    ks_n = sp_stats.kstest(values, sp_stats.norm(loc=mu, scale=sigma).cdf)
     fits["Normal"] = {"dist": sp_stats.norm, "args": (mu, sigma), "ks_p": ks_n.pvalue}
 
     # Lognormal
     if (values > 0).all():
         shape_ln, loc_ln, scale_ln = sp_stats.lognorm.fit(values, floc=0)
-        ks_ln = sp_stats.kstest(values, "lognorm", args=(shape_ln, 0, scale_ln))
+        ks_ln = sp_stats.kstest(values, sp_stats.lognorm(shape_ln, loc=0, scale=scale_ln).cdf)
         fits["Lognormal"] = {"dist": sp_stats.lognorm, "args": (shape_ln, 0, scale_ln),
                             "ks_p": ks_ln.pvalue}
 
@@ -3366,7 +3366,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     if (values > 0).all():
         try:
             shape_w, loc_w, scale_w = sp_stats.weibull_min.fit(values, floc=0)
-            ks_w = sp_stats.kstest(values, "weibull_min", args=(shape_w, 0, scale_w))
+            ks_w = sp_stats.kstest(values, sp_stats.weibull_min(shape_w, loc=0, scale=scale_w).cdf)
             fits["Weibull"] = {"dist": sp_stats.weibull_min, "args": (shape_w, 0, scale_w),
                               "ks_p": ks_w.pvalue}
         except Exception:

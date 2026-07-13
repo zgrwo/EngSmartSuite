@@ -2433,20 +2433,20 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     fits = {}
     # Normal
     mu, sigma = sp_stats.norm.fit(data)
-    ks_norm = float(sp_stats.kstest(data, "norm", args=(mu, sigma))[1])
+    ks_norm = float(sp_stats.kstest(data, sp_stats.norm(loc=mu, scale=sigma).cdf)[1])
     fits["Normal"] = {"params": f"μ={mu:.3f}, σ={sigma:.3f}", "KS p": round(ks_norm, 4)}
 
     # Lognormal (only if all positive)
     if (data > 0).all():
         shape, loc, scale = sp_stats.lognorm.fit(data, floc=0)
-        ks_ln = float(sp_stats.kstest(data, "lognorm", args=(shape, 0, scale))[1])
+        ks_ln = float(sp_stats.kstest(data, sp_stats.lognorm(shape, loc=0, scale=scale).cdf)[1])
         fits["Lognormal"] = {"params": f"σ={shape:.3f}, μ={np.log(scale):.3f}", "KS p": round(ks_ln, 4)}
 
     # Weibull (only if all positive)
     if (data > 0).all():
         try:
             shape_w, loc_w, scale_w = sp_stats.weibull_min.fit(data, floc=0)
-            ks_w = float(sp_stats.kstest(data, "weibull_min", args=(shape_w, 0, scale_w))[1])
+            ks_w = float(sp_stats.kstest(data, sp_stats.weibull_min(shape_w, loc=0, scale=scale_w).cdf)[1])
             fits["Weibull"] = {"params": f"β={shape_w:.3f}, η={scale_w:.3f}", "KS p": round(ks_w, 4)}
         except Exception:
             logger.debug("Weibull 拟合失败", exc_info=True)
