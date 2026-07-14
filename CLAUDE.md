@@ -198,4 +198,5 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 领域术语 | `CONTEXT.md` | 术语统一 |
 | 架构决策 | `docs/adr/` | 理解设计抉择 |
 | 已知问题豁免 | `.claude/known-issues.md` | 代码审查前 |
+| 深度自查 Prompt | `docs/contributing/comprehensive-review-prompt.md` | 发版前全量审查 |
 | 用户手册 | `docs/user-manual.md` | 用户操作指南 |

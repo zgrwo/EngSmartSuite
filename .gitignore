@@ -56,7 +56,7 @@ docs/code-review-report-*.md
 docs/known-issues.md
 
 # 开发者工具（本地保留，不推送）
-docs/contributing/
+# (docs/contributing/ — 已移除，comprehensive-review-prompt.md 应纳入版本控制)
 # 一次性数据生成脚本
 scripts/generate_assembly_data.py
 scripts/generate_chemical_data.py

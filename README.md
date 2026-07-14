@@ -85,6 +85,19 @@ pip install .[web]          # Web 界面（推荐）
 
 适用于内网、保密车间等无法连接 PyPI 的场景。一次下载，反复使用。
 
+提供两种离线安装方式：
+
+| 方式 | 命令 | 原理 | 适合 |
+|------|------|------|------|
+| **一键安装** | `setup_offline.bat install` | pip 自动解析 `pyproject.toml` 中的依赖，从 `packages/` 查找 | 快速、不关心依赖细节 |
+| **requirements.txt** | `setup_offline.bat install-reqs` | 扫描下载的 wheel 文件，生成 `requirements.txt`，再按清单安装 | 需要审计依赖清单、版本锁定、CI/CD 集成 |
+
+两种方式安装的包完全相同，只是依赖解析策略不同：
+- 一键安装：pip 读 `pyproject.toml` → 按 `[web,report,dev]` 解析依赖树 → 从 `packages/` 匹配
+- requirements.txt：`scripts/gen_requirements.py` 扫描 `packages/` 中所有 wheel → 生成精确版本的清单 → pip 逐包安装
+
+> 💡 **什么时候用 requirements.txt？** 当你需要把 `requirements.txt` 提交到 Git 做版本追踪、在 Dockerfile 中引用、或者给安全审计留痕时。日常使用选一键安装即可。
+
 **第 1 步：在有网机器上下载依赖**
 
 ```bash
@@ -95,7 +108,9 @@ setup_offline.bat download
 bash setup_offline.sh download
 ```
 
-执行后在项目根目录生成 `packages/` 文件夹，包含全部依赖的 `.whl` 文件。
+执行后生成：
+- `packages/` 文件夹 — 全部依赖的 `.whl` 文件
+- `packages/requirements.txt` — 精确版本的依赖清单（可提交 Git）
 
 **第 2 步：拷贝到离线机器**
 
@@ -104,16 +119,14 @@ bash setup_offline.sh download
 **第 3 步：离线安装**
 
 ```bash
-# Windows
-setup_offline.bat install
+# 方式 A：一键安装（推荐日常使用）
+setup_offline.bat install         # Windows
+bash setup_offline.sh install     # macOS / Linux
 
-# macOS / Linux
-bash setup_offline.sh install
+# 方式 B：requirements.txt 安装（推荐 CI/CD / 审计场景）
+setup_offline.bat install-reqs    # Windows
+bash setup_offline.sh install-reqs # macOS / Linux
 ```
-
-脚本自动执行：
-1. `pip install --no-index --find-links=./packages/ smartsuite[web,report,dev]` — 从本地安装全部依赖
-2. `pip install --no-deps -e .` — 注册 smartsuite 本身
 
 全程零网络请求，`packages/` 文件夹可重复用于多台机器。
 
@@ -131,7 +144,7 @@ bash setup_offline.sh install
 覆盖后重装 smartsuite 本身即可（秒级完成）：
 
 ```bash
-pip install --no-deps -e .
+pip install --no-deps --no-build-isolation -e .
 ```
 
 > 如果依赖也更新了（`pyproject.toml` 中新增了包），则需要重新走一遍 `setup_offline.bat download` → 拷贝 `packages/` → `install` 流程。
@@ -201,7 +214,7 @@ print(result.figures)   # matplotlib 图表
 | 文档 | 读者 | 内容 |
 |------|------|------|
 | **[架构决策记录](docs/adr/)** | 架构师 | 2 项架构决策（三层分离、Web UI 替代 Excel 层） |
-| **[代码审查模板](docs/contributing/code-review-prompt.md)** | 审查者 | 可复用的深度审查 prompt 模板 |
+| **[深度自查 Prompt](docs/contributing/comprehensive-review-prompt.md)** | 审查者 | 源码+测试+文档七遍深度审查，覆盖架构/算法/实现/数值/结论/一致性 |
 
 ---
 
@@ -209,7 +222,7 @@ print(result.figures)   # matplotlib 图表
 
 - 🧪 生成测试数据：`python scripts/generate_test_data.py`
 - ✅ 运行一致性验证：`python scripts/verify_consistency.py`
-- 📦 离线安装：`setup_offline.bat download` → 复制 → `setup_offline.bat install`
+- 📦 离线安装：`setup_offline.bat download` → 复制 → `setup_offline.bat install`（或 `install-reqs`）
 - 🔍 列出所有方法：`python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"`
 
 ---
