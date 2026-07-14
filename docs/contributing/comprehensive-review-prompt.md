@@ -380,7 +380,7 @@ for f in sorted(os.listdir('templates/')):
 ```
 
 - [ ] 42 模板全部可解析；task 字段有效；参数与 `DEFAULT_PARAMS` 兼容
-- [ ] `example_full_suite.yaml` 包含全部 39 方法；结构一致（task→params→target→features→output）
+- [ ] `example_workflow_guide.yaml` 工作流分步指南（含注释说明）结构正确
 
 ---
 

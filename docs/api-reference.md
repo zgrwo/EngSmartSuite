@@ -1,6 +1,6 @@
 # SmartSuite API Reference
 
-> 全部 39 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
+> 全部 40 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
 > 开发规范 → `CLAUDE.md` | 开发陷阱 → `skills/smartsuite-dev.md` | 场景选择 → `docs/skill.md` | 术语 → `CONTEXT.md`
 
 ## 数据契约
@@ -295,6 +295,14 @@ class AnalysisResult:
 - **返回**: `control_limits` (含 CL/UCL/LCL + 最佳拟合分布), `violations`
 - **图**: 原始数据 + 分布拟合控制限 + 违规点标记
 
+### scatter_plot
+- **Task Key**: `scatter_plot`
+- **描述**: X-Y 散点图 — 可选线性回归 (OLS) 或 LOWESS 拟合线、95% 置信带、分组着色
+- **params**: `fit` ("none"|"linear"|"lowess"), `show_ci` ("true"|"false"), `group_col` (分组列)
+- **feature_cols**: `[X 轴数值列]`
+- **返回**: 无表格 (图表为主)
+- **图**: 散点图 + 拟合线 + 置信带 + 分组图例；summary 含 R² 和拟合方程
+
 ### bootstrap_ci
 - **Task Key**: `bootstrap_ci`
 - **描述**: Bootstrap 置信区间 — 百分位法，不依赖分布假设
@@ -338,7 +346,7 @@ class AnalysisResult:
 路由分析请求到对应引擎函数，注入默认参数，统一异常处理。
 
 ### TASK_REGISTRY: dict[str, Callable]
-全部 39 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
+全部 40 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
 
 ### DEFAULT_PARAMS: dict[str, dict]
 各 task key 的默认参数。编排器会自动合并用户参数到默认参数之上。

@@ -48,6 +48,7 @@
     ├── 异常点(多方法投票) → outlier_consensus
     ├── 结构性变化 → change_point
     ├── 趋势预测 → trend_forecast
+    ├── 两变量关系可视化 → scatter_plot
     ├── 寿命/可靠度 → survival_analysis
     ├── 样本量规划 → power_analysis
     ├── 二分类区分力 → roc_analysis

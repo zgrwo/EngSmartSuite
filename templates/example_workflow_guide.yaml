@@ -1,5 +1,5 @@
-# 全流程综合分析模板 — 从要因筛选到过程监控的完整分析链
-# 使用方式: smartsuite run templates/example_full_suite.yaml -i data.xlsx
+# 全流程综合分析工作流指南 — 从要因筛选到过程监控的完整分析链
+# 使用方式: smartsuite run templates/example_workflow_guide.yaml -i data.xlsx
 #
 # 注意: 此模板需要分步运行，每次修改 task 字段:
 #   1. task: correlation  → 筛选关键因子

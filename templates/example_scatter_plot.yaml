@@ -1,0 +1,8 @@
+# 散点图 — X-Y 散点图，可选线性回归/LOWESS 拟合线与置信带，支持分组着色
+task: scatter_plot
+target_col: "不良率"
+feature_cols:
+  - "熔体温度"
+params:
+  fit: "linear"
+  show_ci: "true"

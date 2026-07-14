@@ -304,7 +304,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     agg = data_valid.groupby(["_x", "_group"], dropna=False)["_y"].agg(
         xbar="mean", r=lambda x: x.max() - x.min(), s="std", n="count"
     ).reset_index()
-    agg.rename(columns={"_x": "x_val", "_group": "group_val"}, inplace=True)
+    agg = agg.rename(columns={"_x": "x_val", "_group": "group_val"})
 
     # ── 4. 分类子组: n≥2 参与控制限估计, n=1 仅显示 ──
     agg["multi"] = agg["n"] >= 2
@@ -872,7 +872,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     agg = dv.groupby(["_x", "_g"], dropna=False)[y_col].agg(
         count="sum", size="count"
     ).reset_index()
-    agg.rename(columns={"_x": "x_val", "_g": "group_val"}, inplace=True)
+    agg = agg.rename(columns={"_x": "x_val", "_g": "group_val"})
 
     m = len(agg)
     if m < 5:

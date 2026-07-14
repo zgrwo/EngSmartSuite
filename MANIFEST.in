@@ -1,0 +1,8 @@
+graft templates
+graft docs
+include *.md
+include *.bat
+include *.sh
+include *.txt
+include *.yml
+include *.yaml
