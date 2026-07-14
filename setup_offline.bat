@@ -7,7 +7,9 @@ chcp 65001 > nul
 ::   离线安装:  setup_offline.bat install
 :: ============================================================
 setlocal enabledelayedexpansion
-set "PACKAGES_DIR=%~dp0packages"
+set "PROJECT_DIR=%~dp0"
+set "PROJECT_DIR=%PROJECT_DIR:\=/%"
+set "PACKAGES_DIR=%PROJECT_DIR%packages"
 
 if /I "%~1"=="download" (
     echo [1/3] 创建 packages 目录...
@@ -26,8 +28,8 @@ if /I "%~1"=="download" (
     echo ========================================
     echo  下载完成！文件列表:
     echo ========================================
-    dir /b "%PACKAGES_DIR%\*.whl" 2>nul
-    dir /b "%PACKAGES_DIR%\*.tar.gz" 2>nul
+    dir /b "%PACKAGES_DIR%/*.whl" 2>nul
+    dir /b "%PACKAGES_DIR%/*.tar.gz" 2>nul
     echo.
     echo 请将 packages/ 文件夹复制到离线机器的项目根目录,
     echo 然后在离线机器上运行: setup_offline.bat install
@@ -69,7 +71,7 @@ if /I "%~1"=="install" (
 
     :: Step 3: 安装 smartsuite 本身（开发模式）
     echo [3/3] 安装 smartsuite 本身（开发模式）...
-    pip install --no-deps -e "%~dp0."
+    pip install --no-deps --no-build-isolation -e "%PROJECT_DIR%."
     if errorlevel 1 (
         echo [错误] smartsuite 本体安装失败，请检查项目文件是否完整
         exit /b 1

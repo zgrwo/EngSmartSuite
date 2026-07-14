@@ -57,7 +57,7 @@ install_offline() {
 
     # Step 3: 安装 smartsuite 本身（开发模式）
     echo "[3/3] 安装 smartsuite 本身（开发模式）..."
-    pip install --no-deps -e "$SCRIPT_DIR"
+    pip install --no-deps --no-build-isolation -e "$SCRIPT_DIR"
 
     echo ""
     echo "========================================"
