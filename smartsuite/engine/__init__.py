@@ -5,9 +5,7 @@ import matplotlib as _mpl
 _mpl.use("Agg")
 matplotlib = _mpl  # 向后兼容别名
 
-# ── 启动时自动检查核心依赖 ──
-from smartsuite import check_core_deps
-check_core_deps()
+# 注：核心依赖检查已在 smartsuite/__init__.py:86 统一执行，此处不再重复调用
 
 import logging
 import os

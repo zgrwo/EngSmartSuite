@@ -75,23 +75,29 @@ color=PALETTE["anomaly"]["primary"]    # 红色异常线
 **检查清单**（每次修改引擎函数签名后必查）：
 1. 该函数使用 `req.target_col` 吗？→ 如果不使用，应加入 `_noTargetNeeded`
 2. 该函数使用 `req.feature_cols` 吗？→ 如果不使用，应加入 `_yOnlyTasks`
-3. 手册协同要求与 `_yOnlyTasks` / `_noTargetNeeded` 一致吗？
+3. 该函数 X 列可选吗？→ 如果是，应加入 `_xOptionalTasks`
+4. 手册协同要求与 `_yOnlyTasks` / `_noTargetNeeded` / `_xOptionalTasks` 一致吗？
 
-**关键代码位置**：`app.js` 第 328-348 行
+**关键代码位置**：`app.js` 第 360-382 行
 
 ```javascript
-// _noTargetNeeded: 不需要选择 Y 列
+// _noTargetNeeded: 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
 const _noTargetNeeded = new Set([
-    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis',
+    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective',
 ]);
 
-// _yOnlyTasks: 不需要选择 X 列（仅需 Y）
+// _yOnlyTasks: 仅需 Y 列即可运行的任务（无需选择 X 列）
 const _yOnlyTasks = new Set([
-    'process_capability', 'trend_forecast', 'anomaly_detect',
+    'process_capability', 'trend_forecast',
     'power_analysis', 'spc_nonparametric',
-    'distribution_summary', 'normality_check', 'proportion_ci',
+    'distribution_summary', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
-    'spc_xbar', 'spc_cusum', 'spc_ewma', 'spc_attribute',
+    'spc_cusum', 'spc_ewma',
+]);
+
+// _xOptionalTasks: X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
+const _xOptionalTasks = new Set([
+    'spc_xbar', 'spc_attribute', 'normality_check', 'anomaly_detect',
 ]);
 ```
 

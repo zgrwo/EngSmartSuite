@@ -1,6 +1,6 @@
 """Data I/O — Excel 数据读写与校验。"""
 import logging
-import random
+import uuid
 
 import pandas as pd
 
@@ -400,7 +400,7 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
 
 
 def auto_generate_subgroup_col(df: pd.DataFrame, params: dict) -> tuple[pd.DataFrame, dict]:
-    """SPC 缺子组列时自动生成（使用随机后缀避免列名冲突）。
+    """SPC 缺子组列时自动生成（使用 UUID 后缀避免列名冲突）。
 
     从 web/api.py 提取至 services/ 层，CLI 和 Web 路径共享。
 
@@ -411,9 +411,10 @@ def auto_generate_subgroup_col(df: pd.DataFrame, params: dict) -> tuple[pd.DataF
     target_size = 5
     n_subgroups = max(2, min(n // target_size, 50))
     df = df.copy()
-    subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
+    # 使用 UUID 生成确定性唯一的列名，避免 random.randint 的非确定性问题
+    subgroup_col_name = f"_自动子组_{uuid.uuid4().hex[:8]}"
     while subgroup_col_name in df.columns:
-        subgroup_col_name = f"_自动子组_{random.randint(10000, 99999)}"
+        subgroup_col_name = f"_自动子组_{uuid.uuid4().hex[:8]}"
     df[subgroup_col_name] = pd.cut(
         range(n), bins=n_subgroups,
         labels=[f"子组{i+1}" for i in range(n_subgroups)]

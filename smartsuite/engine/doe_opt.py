@@ -9,20 +9,9 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR, EPSILON
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine.root_cause import threshold_label  # 通用效应量标签（定义在 root_cause, 通过 engine/__init__.py 公开导出）
-from smartsuite.engine.spc_monitor import durbin_watson  # 同包子模块引用，engine/__init__.py 公开导出供外部使用
+from smartsuite.engine._utils import durbin_watson, safe_float as _safe_float, threshold_label  # 共享工具函数
 
 logger = logging.getLogger(__name__)
-
-
-def _safe_float(value, default: float) -> float:
-    """安全转换参数值为 float，防御 CLI/YAML 字符串参数导致的 TypeError。"""
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
 
 
 # 阳性标签候选列表 — roc_analysis 和 logistic_regression 共享 (P2-12 fix)

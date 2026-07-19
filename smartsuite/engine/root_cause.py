@@ -24,21 +24,8 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-
-
-def _safe_float(value, default: float) -> float:
-    """安全转换参数值为 float，防御 CLI/YAML 字符串参数导致的 TypeError。
-
-    所有从 req.params 提取数值参数的位置均应使用此函数，
-    避免 `"0.05" < 0.05` 之类的类型比较崩溃。
-    """
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        logger.debug("参数值转换失败: %r → 使用默认值 %s", value, default)
-        return default
+from smartsuite.engine._utils import safe_float as _safe_float  # 共享工具函数
+from smartsuite.engine._utils import threshold_label  # 共享工具函数
 
 
 def _significance_stars(p):
@@ -428,22 +415,6 @@ def _eta_squared(aov_table):
         omega2 = max(0, omega2)
         effect_sizes[idx] = {"η²": float(eta2), "ω²": float(omega2)}
     return effect_sizes
-
-
-def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")):
-    """通用效应量阈值标签函数。
-
-    Args:
-        value: 待判定的效应量值
-        thresholds: 升序阈值列表，如 [0.01, 0.06, 0.14]
-        labels: 对应标签元组，比 thresholds 多一个元素
-    """
-    if not np.isfinite(value):
-        return "N/A"
-    for t, label in zip(thresholds, labels):
-        if value < t:
-            return label
-    return labels[-1]
 
 
 def _effect_interpretation(eta2):

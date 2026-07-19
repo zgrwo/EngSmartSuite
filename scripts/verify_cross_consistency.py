@@ -1,5 +1,5 @@
 """
-全量 39 方法交叉验证: Web UI 路径 ↔ Python 直接路径 ↔ 用户手册记录值
+全量 40 方法交叉验证: Web UI 路径 ↔ Python 直接路径 ↔ 用户手册记录值
 
 验证维度:
 1. status 一致性 (ok/error)
@@ -115,9 +115,10 @@ TEST_CASES = [
     ("gage_rr", "不良率", ["模具编号","检验员"], ["模具编号","检验员"], {"part_col": "模具编号", "operator_col": "检验员"}),
     ("tolerance_interval", "不良率", [], [], {}),
     ("survival_analysis", "不良率", ["设备报警"], [], {}),  # 设备报警是0/1数值列，适合作事件指示
+    ("scatter_plot", "不良率", ["熔体温度"], [], {"fit": "linear"}),
 ]
 
-assert len(TEST_CASES) == 39, f"Expected 39 test cases, got {len(TEST_CASES)}"
+assert len(TEST_CASES) == 40, f"Expected 40 test cases, got {len(TEST_CASES)}"
 
 # ── 运行验证 ──
 results = []

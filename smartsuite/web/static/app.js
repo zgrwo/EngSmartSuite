@@ -480,9 +480,9 @@ function renderResults(results) {
     _allGroups.forEach(g => {
       const gs = String(g);
       const ck = _activeGroups.has(gs) ? 'checked' : '';
-      filterHtml += `<label class="filter-chip"><input type="checkbox" value="${escHtml(gs)}" ${ck} onchange="toggleGroupFilter('${escHtml(gs)}', this.checked)"> ${escHtml(gs)}</label>`;
+      filterHtml += `<label class="filter-chip"><input type="checkbox" class="group-filter-cb" data-group="${escHtml(gs)}" value="${escHtml(gs)}" ${ck}> ${escHtml(gs)}</label>`;
     });
-    filterHtml += '<button class="btn-sm" onclick="refetchWithFilter()">应用</button></div>';
+    filterHtml += '<button class="btn-sm" id="apply-filter-btn">应用</button></div>';
   }
 
   // 排序
@@ -542,4 +542,16 @@ function renderResults(results) {
   });
 
   document.getElementById('results').innerHTML = filterHtml + html;
+
+  // 事件委托：分组筛选复选框和应用按钮
+  const resultsEl = document.getElementById('results');
+  resultsEl.querySelectorAll('.group-filter-cb').forEach(cb => {
+    cb.addEventListener('change', function() {
+      toggleGroupFilter(this.dataset.group, this.checked);
+    });
+  });
+  const applyBtn = document.getElementById('apply-filter-btn');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', refetchWithFilter);
+  }
 }
