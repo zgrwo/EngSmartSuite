@@ -98,7 +98,7 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev]" pytest-cov vulture pip-audit
+        run: pip install -e ".[dev,report]" pytest-cov vulture pip-audit
 
       - name: 测试覆盖率
         run: pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html
