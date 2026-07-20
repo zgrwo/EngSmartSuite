@@ -125,7 +125,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
                     "残差诊断", "样本量", "预测步数", "斜率 (每步)", "截距"],
             "值": [
                 f"{r2:.4f}", f"{adj_r2:.4f}", f"{rmse:.4f}", f"{mae:.4f}",
-                f"{mape:.2f}%" if mape else "N/A",
+                f"{mape:.2f}%" if mape is not None else "N/A",
                 f"{dw:.4f}", f"{lb_q:.3f}", f"{lb_p:.4f}",
                 f"{dw_label}; {lb_label}",
                 str(n), str(steps),
@@ -195,7 +195,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         fig.tight_layout()
 
         # ── 汇总 ──
-        mape_str = f"{mape:.1f}%" if mape else "N/A"
+        mape_str = f"{mape:.1f}%" if mape is not None else "N/A"
         summary = (
             f"趋势{trend_dir} (斜率={float(model.coef_[0]):.4f}/步)，"
             f"预测{steps}步。R²={r2:.3f}, RMSE={rmse:.4f}, MAPE={mape_str}。"
@@ -331,7 +331,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
                     "结束": end - 1,
                     "样本数": end - start,
                     "均值": f"{float(np.mean(seg_vals)):.4f}",
-                    "标准差": f"{float(np.std(seg_vals, ddof=1)):.4f}",
+                    "标准差": f"{float(np.std(seg_vals, ddof=1)):.4f}" if len(seg_vals) >= 2 else "—",
                     "变化方向": (
                         "↑ 上升" if seg_i > 0 and float(np.mean(seg_vals)) >
                         float(np.mean(values[boundaries[seg_i-1]:boundaries[seg_i]]))

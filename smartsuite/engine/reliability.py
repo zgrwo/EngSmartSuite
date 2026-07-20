@@ -43,6 +43,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     operators = sub[operator_col].unique()
     k = len(operators)
     n_parts = len(parts)
+    if n_parts < 2:
+        return AnalysisResult(task="gage_rr", status="error",
+            messages=["至少需要 2 个不同部件才能评估部件间变异 (PV)"])
 
     # 每部件每操作员的重复次数
     rep_counts = sub.groupby([part_col, operator_col]).size()
@@ -223,6 +226,25 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
 
     coverage = req.params.get("coverage", 0.99)
     confidence = req.params.get("confidence", 0.95)
+    # 范围校验
+    try:
+        coverage = float(coverage)
+        confidence = float(confidence)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="tolerance_interval", status="error",
+            messages=["参数 coverage/confidence 须为数值"],
+        )
+    if not (0 < coverage < 1):
+        return AnalysisResult(
+            task="tolerance_interval", status="error",
+            messages=[f"覆盖比例 coverage 须在 (0, 1) 之间，当前值: {coverage}"],
+        )
+    if not (0 < confidence < 1):
+        return AnalysisResult(
+            task="tolerance_interval", status="error",
+            messages=[f"置信水平 confidence 须在 (0, 1) 之间，当前值: {confidence}"],
+        )
     side = req.params.get("side", "two-sided")
     mu = float(data.mean())
     sigma = float(data.std(ddof=1))
@@ -419,7 +441,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     ax.step(km_times, km_survival_val, where="post", color=PALETTE["data"]["primary"], linewidth=2.5,
             label=f"KM (n={n_total})")
     ax.axhline(0.5, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.8, alpha=0.5)
-    if median_survival:
+    if median_survival is not None:
         ax.axvline(median_survival, color=PALETTE["target"]["primary"], linestyle="--", linewidth=1,
                    label=f"中位寿命={median_survival:.0f}")
     # Weibull 拟合曲线

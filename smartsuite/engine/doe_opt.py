@@ -626,6 +626,13 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
 
     # 构建所有优化目标列的共同有效数据掩码
     obj_cols = [obj["col"] for obj in objectives]
+    # 校验列存在性
+    missing_cols = [c for c in obj_cols if c not in req.data.columns]
+    if missing_cols:
+        return AnalysisResult(
+            task="multi_objective", status="error",
+            messages=[f"优化目标列不存在于数据中: {', '.join(missing_cols)}"],
+        )
     valid_mask = req.data[obj_cols].notna().all(axis=1)
     if valid_mask.sum() == 0:
         return AnalysisResult(
@@ -782,13 +789,13 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=(
-            f"综合评分最优: {best_params}, 得分: {scores[best_idx]:.4f}。"
+            f"综合评分最优: {best_params}, 得分: {scores[best_row_iloc]:.4f}。"
             + (f"Pareto 前沿包含 {len(pareto_idx)} 个非支配解"
                if len(objectives) == 2 else "")
         ),
         metadata={
             "optimal_params": best_params,
-            "composite_score": float(scores[best_idx]),
+            "composite_score": float(scores[best_row_iloc]),
             "pareto_count": int(len(pareto_idx)) if len(objectives) == 2 else None,
         },
     )

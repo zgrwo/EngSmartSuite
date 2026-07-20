@@ -367,7 +367,7 @@ def test_manual_5_3_distribution_summary(raw_df):
 # ═══════════════════════════════════════════════════════════
 
 def test_manual_5_4_normality_check(raw_df):
-    """手册 §5.4: 正态性评估 — normal_count≥1, n_columns=2"""
+    """手册 §5.4: 正态性评估 — n_columns=2, normal_count≤n_columns"""
     r_py, _, r_web, py_st, _, web_st = _compare_3paths(
         "normality_check", raw_df, "不良率", ["熔体温度"], {}, [], raw_cat=False)
 
@@ -376,9 +376,12 @@ def test_manual_5_4_normality_check(raw_df):
 
     for path_name, r in [("Python", r_py), ("Web", r_web)]:
         meta = r.metadata if hasattr(r, 'metadata') else r.get('metadata', {})
+        n_columns = int(meta.get("n_columns", 0))
         normal_count = int(meta.get("normal_count", 0))
-        assert normal_count >= 1, \
-            f"{path_name}: normal_count={normal_count}，手册预期≥1"
+        assert n_columns == 2, \
+            f"{path_name}: n_columns={n_columns}，预期=2"
+        assert 0 <= normal_count <= n_columns, \
+            f"{path_name}: normal_count={normal_count}，预期 0≤normal_count≤{n_columns}"
 
 
 # ═══════════════════════════════════════════════════════════

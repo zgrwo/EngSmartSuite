@@ -66,7 +66,7 @@ MANUAL_EXPECTATIONS = {
     },
 }
 
-# ── 39 个方法的测试用例定义 ──
+# ── 40 个方法的测试用例定义 ──
 # (task, target_col, feature_cols, categoricals, params, skip_reason)
 TEST_CASES = [
     # === 要因筛选 ===

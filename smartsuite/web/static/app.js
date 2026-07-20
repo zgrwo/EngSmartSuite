@@ -93,7 +93,7 @@ function autoDetect() {
   columnData.forEach(c => {
     const lo = c.name.toLowerCase();
     const isCat = catKw.some(k => lo.includes(k.toLowerCase()))
-      || ['object','string'].includes(c.dtype);
+      || ['object','string','bool'].includes(c.dtype);
     if (isCat) selectedCat.add(c.name);
     if (yKw.some(k => lo.includes(k.toLowerCase()))) { selectedY.add(c.name); return; }
     if (['float64','int64'].includes(c.dtype) && !isCat) selectedX.add(c.name);

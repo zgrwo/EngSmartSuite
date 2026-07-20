@@ -5,14 +5,14 @@ description: SmartSuite 项目开发技能 — 工艺数据分析工具箱的代
 
 # SmartSuite 开发技能
 
-> **面向 AI 编程助手**：本项目是工艺数据分析工具箱（39 个分析方法，Flask Web UI + Python API），约 9,000 行 Python 代码 + 470 行 JavaScript。本文档提炼自 126 次 commit 中反复出现的 bug 模式和修复规范。
+> **面向 AI 编程助手**：本项目是工艺数据分析工具箱（40 个分析方法，Flask Web UI + Python API），约 9,000 行 Python 代码 + 470 行 JavaScript。本文档提炼自 126 次 commit 中反复出现的 bug 模式和修复规范。
 >
 > **协作文档**：开发规范 → `CLAUDE.md` | 术语 → `CONTEXT.md` | 决策树 → `docs/skill.md` | API → `docs/api-reference.md`
 
 ## 触发条件
 
 当任务涉及以下任一模块时，应加载本技能：
-- `smartsuite/engine/` — 引擎层（spc_monitor / root_cause / doe_opt）
+- `smartsuite/engine/` — 引擎层（root_cause / doe_opt / spc_monitor → spc_charts / capability / detection / reliability / exploratory）
 - `smartsuite/web/` — Web UI 层（app.js / api.py / app.py）
 - `smartsuite/services/` — 桥接层（orchestrator / data_io）
 - `smartsuite/engine/_palette.py` — 可视化配色
@@ -372,7 +372,7 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 开发规范 | `CLAUDE.md` | 架构约束、代码风格、测试策略 |
 | 领域术语 | `CONTEXT.md` | 中文术语定义 |
 | 决策知识 | `docs/skill.md` | 分析方法决策树 + 工作流 |
-| API 参考 | `docs/api-reference.md` | 39 个函数完整签名 |
+| API 参考 | `docs/api-reference.md` | 40 个函数完整签名 |
 | 用户手册 | `docs/user-manual.md` | 操作说明 + 六段式示例 |
 | 已知问题 | `.claude/known-issues.md` | 豁免清单（审查前必读） |
 | 架构决策 | `docs/adr/` | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel |

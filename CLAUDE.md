@@ -101,7 +101,7 @@ tests/
 ```
 run_smartsuite.bat / run_smartsuite.sh   # 一键启动脚本
 run_server.py                            # Web UI 启动入口
-templates/                               # YAML 分析模板 (42 个)
+templates/                               # YAML 分析模板 (43 个)
 scripts/                                 # 开发辅助脚本（非 pip 安装）
 docs/                                    # 项目文档 (adr/ contributing/ user-manual.md ...)
 skills/                                  # Claude Code 自定义技能
@@ -124,7 +124,7 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 - Python >= 3.10，类型注解使用 `list[str]` | `dict[str, pd.DataFrame]` 等 PEP 604 语法
 - 公开接口用 `@dataclass` 定义数据对象
-- 引擎模块按分析领域划分：`root_cause.py`, `doe_opt.py`, `spc_monitor.py`，不按算法拆分
+- 引擎模块按分析领域划分：`root_cause.py`, `doe_opt.py`, `spc_monitor.py`（再导出入口）→ `spc_charts.py`, `capability.py`, `detection.py`, `reliability.py`, `exploratory.py`，不按算法拆分
 - 每个公开分析函数必须返回 `AnalysisResult`，包含 `summary` 字段（中文工艺语言结论）
 - 错误信息使用中文工艺术语，不暴露 Python traceback 给最终用户
 - `from scipy import stats` 使用模块级别名 `sp_stats = stats`，不要在函数内重复导入

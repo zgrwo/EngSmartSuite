@@ -526,9 +526,10 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                             f"({_MAX_TUKEY_GROUPS})，跳过 Tukey HSD 以避免超时"
                         )
                         continue
+                    _pair = req.data[[req.target_col, col]].dropna()
                     tukey = pairwise_tukeyhsd(
-                        req.data[req.target_col].dropna(),
-                        req.data.loc[req.data[req.target_col].notna(), col],
+                        _pair[req.target_col],
+                        _pair[col],
                         alpha=alpha
                     )
                     # 使用公开 API 遍历所有成对比较
@@ -545,7 +546,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                                 "p值": float(tukey.pvalues[pair_idx]),
                                 "显著": "是" if tukey.reject[pair_idx] else "否",
                             })
-            except (KeyError, IndexError, ValueError) as e:
+            except (KeyError, IndexError, ValueError, TypeError) as e:
                 logger.debug("Tukey HSD 事后检验提取失败 (因子: %s): %s", col, e, exc_info=True)
 
     # ── 构建 ANOVA 增强表 (含效应量) ──
@@ -2183,10 +2184,10 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         tables={
             "variance_tests": pd.DataFrame({
                 "检验方法": ["Levene (中位数, 推荐)", "Bartlett (需正态)"],
-                "统计量": [f"{lev_stat:.4f}" if lev_stat else "N/A",
-                          f"{bart_stat:.4f}" if bart_stat else "N/A"],
-                "p值": [f"{lev_p:.4f}" if lev_p else "N/A",
-                       f"{bart_p:.4f}" if bart_p else "N/A"],
+                "统计量": [f"{lev_stat:.4f}" if lev_stat is not None else "N/A",
+                          f"{bart_stat:.4f}" if bart_stat is not None else "N/A"],
+                "p值": [f"{lev_p:.4f}" if lev_p is not None else "N/A",
+                       f"{bart_p:.4f}" if bart_p is not None else "N/A"],
                 "结论": [levene_result, bartlett_result],
             }),
             "group_statistics": pd.DataFrame(desc_rows),
@@ -2196,8 +2197,8 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
             + (f", Bartlett {bartlett_result}" if bart_p is not None else "")
         ),
         metadata={
-            "levene_p": float(lev_p) if lev_p else None,
-            "bartlett_p": float(bart_p) if bart_p else None,
+            "levene_p": float(lev_p) if lev_p is not None else None,
+            "bartlett_p": float(bart_p) if bart_p is not None else None,
             "n_groups": len(valid_groups),
         },
     )
@@ -2510,7 +2511,7 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             normality = "正态 ✓"
             recommendation = "无需变换"
         else:
-            normality = f"非正态 (S-W p={sw_p:.4f})" if sw_p else "—"
+            normality = f"非正态 (S-W p={sw_p:.4f})" if sw_p is not None else "—"
             if skew > 1.5:
                 if (d > 0).all():
                     recommendation = "Box-Cox (右偏严重)"
@@ -2534,7 +2535,7 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         ad_info = f"A-D stat={ad_stat:.3f}" if ad_stat else "N/A"
         results.append({
             "列名": col, "样本量": n,
-            "Shapiro-Wilk p": f"{sw_p:.4f}" if sw_p else "N/A",
+            "Shapiro-Wilk p": f"{sw_p:.4f}" if sw_p is not None else "N/A",
             "Anderson-Darling": ad_info,
             "偏度": f"{skew:.3f}", "峰度": f"{kurt:.3f}",
             "正态性": normality, "建议变换": recommendation,
@@ -2554,7 +2555,7 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
     fig.tight_layout()
 
     # 汇总
-    normal_count = sum(1 for r in results if "正态" in str(r.get("正态性", "")))
+    normal_count = sum(1 for r in results if str(r.get("正态性", "")).startswith("正态"))
     summary = (
         f"正态性评估: {normal_count}/{len(cols)} 列满足正态性。"
         + (f" 偏度最大列: {results_df.dropna(subset=['偏度']).sort_values('偏度', key=lambda x: x.str.replace('-','').astype(float)).iloc[-1]['列名']}"

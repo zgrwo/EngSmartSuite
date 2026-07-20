@@ -89,7 +89,11 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
         )
 
     statistic = req.params.get("statistic", "mean")
-    n_boot = min(req.params.get("n_bootstrap", 2000), 10000)
+    n_boot_raw = req.params.get("n_bootstrap", 2000)
+    try:
+        n_boot = max(100, min(int(n_boot_raw), 10000))
+    except (ValueError, TypeError):
+        n_boot = 2000
     ci_level = req.params.get("ci_level", 0.95)
     alpha = 1 - ci_level
     random_state = req.params.get("random_state", 42)

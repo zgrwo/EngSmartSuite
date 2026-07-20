@@ -4,7 +4,7 @@
 >
 > **协作定位**：`CLAUDE.md`（架构入口）→ `skills/smartsuite-dev.md`（陷阱+模板）→ **本文档**（审查清单）→ `.claude/known-issues.md`（误判豁免）
 >
-> 项目概况：`~9,000 Python + ~470 JS + 42 YAML` | `39 methods` | `web/ → services/ → engine/` | `4 层防线`
+> 项目概况：`~9,000 Python + ~470 JS + 42 YAML` | `40 methods` | `web/ → services/ → engine/` | `4 层防线`
 
 ---
 
@@ -24,7 +24,7 @@
 ```bash
 python --version                       # ≥ 3.10
 python -c "import smartsuite; print('OK')"
-python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"  # 预期 39
+python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"  # 预期 40
 python scripts/verify_consistency.py
 ruff check smartsuite/
 ```
@@ -120,7 +120,7 @@ grep -rn "^def _" smartsuite/engine/ | grep -v "__init__"
 
 ## 二、算法正确性
 
-### 2.1 39 方法公式审查（逐一核对）
+### 2.1 40 方法公式审查（逐一核对）
 
 ```bash
 pytest tests/test_engine/test_correctness.py -v --tb=short
@@ -216,7 +216,7 @@ grep -n "except\|KeyError\|ValueError\|TypeError" smartsuite/services/orchestrat
 
 ### 3.4 DRY 审查 `[NEW]`
 
-> 39 个函数共享参数提取→校验→计算→图表→返回 boilerplate，重复是 bug 温床。
+> 40 个函数共享参数提取→校验→计算→图表→返回 boilerplate，重复是 bug 温床。
 
 ```bash
 # 检测相似代码块（手工抽样比对各函数结构）
@@ -225,7 +225,7 @@ grep -c "req.params.get" smartsuite/engine/*.py
 grep -c "plt.close\|plt.clf" smartsuite/engine/*.py
 ```
 
-- [ ] `float()` 防护模式是否在 39 个函数中一致？是否应抽取为公共 `_safe_float()`？
+- [ ] `float()` 防护模式是否在 40 个函数中一致？是否应抽取为公共 `_safe_float()`？
 - [ ] 参考线绘制（USL/LSL/UCL/LCL/CL/Target）是否在每个 SPC 函数中重复实现？
 - [ ] `AnalysisResult` 错误返回模式是否一致？是否应抽取为 `_error_result(task, msg)`？
 - [ ] Figure 创建+关闭是否每个函数都手工管理？
@@ -253,7 +253,7 @@ grep -rn "^def [^_]" smartsuite/engine/ | grep -v "->"
 grep -rn ": Any\|-> Any" smartsuite/engine/ smartsuite/services/ | wc -l
 ```
 
-- [ ] 全部 39 个引擎公开函数是否有返回值类型注解 `-> AnalysisResult`？
+- [ ] 全部 40 个引擎公开函数是否有返回值类型注解 `-> AnalysisResult`？
 - [ ] `dict[str, Any]` 是否可用更精确的类型替代？
 - [ ] `req.params.get("key")` 的返回类型推断是否正确？
 
@@ -292,7 +292,7 @@ print('✅ 全部一致' if r==p==l and not (g-r) else '')
 ```
 
 - [ ] 11 步注册链逐条确认（详见 `CLAUDE.md` 新增方法清单）
-- [ ] `TASK_REGISTRY` = `DEFAULT_PARAMS` = `TASK_LABELS`（39/39）
+- [ ] `TASK_REGISTRY` = `DEFAULT_PARAMS` = `TASK_LABELS`（40/40）
 - [ ] `TASK_GROUPS` 无孤立任务；`TASK_PARAMS`(JS) ⊆ TASK_REGISTRY；`PARAM_META` 覆写 task_name 有效
 
 ### 4.2 参数通道（6 位置一致性）
@@ -360,7 +360,7 @@ grep -n "escHtml\|innerHTML\|document.write\|eval" smartsuite/web/static/app.js
 ### 6.3 CLI (`cli.py`)
 
 - [ ] `smartsuite run` 正确加载 YAML 模板；优先级：CLI > YAML > DEFAULT
-- [ ] `smartsuite list` 列出 39 方法；`matplotlib.use('Agg')` 在 import 前；CLI vs Web 输出一致
+- [ ] `smartsuite list` 列出 40 方法；`matplotlib.use('Agg')` 在 import 前；CLI vs Web 输出一致
 
 ### 6.4 YAML 模板 (`templates/`)
 
@@ -386,7 +386,7 @@ for f in sorted(os.listdir('templates/')):
 
 ## 七、测试防线
 
-### 7.1 39×4 覆盖率矩阵
+### 7.1 40×4 覆盖率矩阵
 
 ```bash
 pytest tests/ -v --tb=short 2>&1 | tail -40
@@ -469,9 +469,9 @@ for t, l in TASK_LABELS.items():
 "
 ```
 
-- [ ] `api-reference.md` 覆盖 39 方法（签名 + tables 键名 + 参数与 DEFAULT_PARAMS 一致）
-- [ ] `user-manual.md` 39 方法六段式完整；截图与 Web UI 一致；FAQ 覆盖常见问题
-- [ ] `skill.md` 决策树覆盖 39 方法入口路径；新增方法（如 scatter_plot）已更新
+- [ ] `api-reference.md` 覆盖 40 方法（签名 + tables 键名 + 参数与 DEFAULT_PARAMS 一致）
+- [ ] `user-manual.md` 40 方法六段式完整；截图与 Web UI 一致；FAQ 覆盖常见问题
+- [ ] `skill.md` 决策树覆盖 40 方法入口路径；新增方法（如 scatter_plot）已更新
 
 ### 8.3 CLAUDE.md 自洽
 
@@ -500,7 +500,7 @@ python -c "from smartsuite.engine._palette import PALETTE; print({k:list(v.keys(
 grep -rn "summary=" smartsuite/engine/ --include="*.py" | head -50
 ```
 
-- [ ] 39 方法 summary 均为中文；精度统一（p≤4位,R²≤3位,Cp/Cpk≤2位）
+- [ ] 40 方法 summary 均为中文；精度统一（p≤4位,R²≤3位,Cp/Cpk≤2位）
 - [ ] 效应量判定用语统一（强 η²>0.14 / 中>0.06 / 弱≤0.06）
 - [ ] SPC 判异描述一致（"超出控制限""连续上升/下降""链""周期"）
 - [ ] 无英文变量名混入中文句子
@@ -534,7 +534,7 @@ pip install --dry-run -e ".[all]" 2>&1 | grep -i "error\|conflict"
 
 ### 10.1 大样本 + 复杂性
 
-- [ ] n>5000, 39 方法均在 30s 内完成；`grid_search` 高分辨率不组合爆炸；`bootstrap_ci` n≥10000 可接受
+- [ ] n>5000, 40 方法均在 30s 内完成；`grid_search` 高分辨率不组合爆炸；`bootstrap_ci` n≥10000 可接受
 
 ### 10.2 内存管理
 
@@ -639,8 +639,8 @@ pytest tests/ -v -k "<related_pattern>" --tb=short
 第二遍 §4 注册链全量比对（最易发现遗漏）
 第三遍 §1 架构 + §4.2 前后端参数 + §1.4 基础设施 + §1.5 死代码
 第四遍 §3 实现质量（7 陷阱 + DRY + 魔法数字 + 类型注解 + 废弃 API）
-第五遍 §2 算法正确性（39 方法公式审查）+ §5 数据管道 + §6 Web/CLI/模板
-第六遍 §7 测试防线（39×4 矩阵 + 不变量 + 边界/集成/E2E）+ §10 性能 + §11 安全 + §12 可观测
+第五遍 §2 算法正确性（40 方法公式审查）+ §5 数据管道 + §6 Web/CLI/模板
+第六遍 §7 测试防线（40×4 矩阵 + 不变量 + 边界/集成/E2E）+ §10 性能 + §11 安全 + §12 可观测
 第七遍 §8 文档 + §9 跨切面一致性（PALETTE+结论+跨平台+依赖+已知问题）+ §13 发布
 ```
 

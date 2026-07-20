@@ -224,21 +224,21 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 能力汇总表 ──
     capability_rows = [
-        {"指标": "Cp (短期能力)", "值": f"{cp:.3f}" if cp else "N/A",
-         "95%CI下限": f"{cp_ci[0]:.3f}" if cp_ci[0] else "N/A",
-         "95%CI上限": f"{cp_ci[1]:.3f}" if cp_ci[1] else "N/A"},
-        {"指标": "Cpk (短期+偏倚)", "值": f"{cpk_val:.3f}" if cpk_val else "N/A",
-         "95%CI下限": f"{cpk_ci[0]:.3f}" if cpk_ci[0] else "N/A",
-         "95%CI上限": f"{cpk_ci[1]:.3f}" if cpk_ci[1] else "N/A"},
-        {"指标": "Pp (长期能力)", "值": f"{pp:.3f}" if pp else "N/A",
+        {"指标": "Cp (短期能力)", "值": f"{cp:.3f}" if cp is not None else "N/A",
+         "95%CI下限": f"{cp_ci[0]:.3f}" if cp_ci[0] is not None else "N/A",
+         "95%CI上限": f"{cp_ci[1]:.3f}" if cp_ci[1] is not None else "N/A"},
+        {"指标": "Cpk (短期+偏倚)", "值": f"{cpk_val:.3f}" if cpk_val is not None else "N/A",
+         "95%CI下限": f"{cpk_ci[0]:.3f}" if cpk_ci[0] is not None else "N/A",
+         "95%CI上限": f"{cpk_ci[1]:.3f}" if cpk_ci[1] is not None else "N/A"},
+        {"指标": "Pp (长期能力)", "值": f"{pp:.3f}" if pp is not None else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Ppk (长期+偏倚)", "值": f"{ppk_val:.3f}" if ppk_val else "N/A",
+        {"指标": "Ppk (长期+偏倚)", "值": f"{ppk_val:.3f}" if ppk_val is not None else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Cpm (田口能力)", "值": f"{cpm:.3f}" if cpm else "N/A",
+        {"指标": "Cpm (田口能力)", "值": f"{cpm:.3f}" if cpm is not None else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Sigma Level (无偏移理论值)", "值": f"{sigma_lvl:.2f}" if sigma_lvl else "N/A",
+        {"指标": "Sigma Level (无偏移理论值)", "值": f"{sigma_lvl:.2f}" if sigma_lvl is not None else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "DPMO (无偏移假设)", "值": f"{dpmo:,}" if dpmo else "N/A",
+        {"指标": "DPMO (无偏移假设)", "值": f"{dpmo:,}" if dpmo is not None else "N/A",
          "95%CI下限": "N/A", "95%CI上限": "N/A"},
     ]
     capability_df = pd.DataFrame(capability_rows)
@@ -250,8 +250,8 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         "值": [
             str(n), f"{mu:.4f}", f"{sigma_overall:.4f}", f"{within_sigma:.4f}",
             f"{float(data.skew()):.4f}", f"{float(data.kurtosis()):.4f}",
-            str(usl) if usl else "未指定", str(lsl) if lsl else "未指定",
-            str(target) if target else "未指定",
+            str(usl) if usl is not None else "未指定", str(lsl) if lsl is not None else "未指定",
+            str(target) if target is not None else "未指定",
         ],
     })
 
@@ -309,7 +309,7 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     if boxcox_lambda is not None:
         summary_parts.append(f"Box-Cox λ={boxcox_lambda:.3f}")
     if cpk_val is not None:
-        cpk_ci_str = f"[{cpk_ci[0]:.3f}, {cpk_ci[1]:.3f}]" if cpk_ci[0] else "N/A"
+        cpk_ci_str = f"[{cpk_ci[0]:.3f}, {cpk_ci[1]:.3f}]" if cpk_ci[0] is not None else "N/A"
         summary_parts.append(f"Cpk={cpk_val:.3f} (95%CI: {cpk_ci_str})")
     if ppk_val is not None:
         summary_parts.append(f"Ppk={ppk_val:.3f}")

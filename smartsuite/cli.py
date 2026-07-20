@@ -118,6 +118,9 @@ def main():
             except SmartSuiteError as e:
                 logger.warning("数据校验异常: %s", e)
                 print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
+            except Exception as e:
+                logger.warning("数据校验意外异常: %s", e, exc_info=True)
+                print(f"  ⚠ 数据校验跳过: {type(e).__name__}: {e}，分析将继续执行", file=sys.stderr)
         # 任务感知的数据预处理（与 Web 路径保持一致）
         df, feature_cols, imputation_log, unknown_cat_warnings = preprocess_for_task(
             raw, features, task, categoricals=categoricals, raw_cat_tasks=RAW_CAT_TASKS)

@@ -1,4 +1,4 @@
-"""End-to-end test of all 39 analysis tasks via Web API.
+"""End-to-end test of all 40 analysis tasks via Web API.
 
 Requires a running server: `python smartsuite/web/app.py`
 Run manually: pytest tests/test_web_e2e.py -v
@@ -48,7 +48,7 @@ r = opener.open(req)
 d = json.loads(r.read())
 print(f"  OK: {len(d['columns'])} cols, {d['shape']}")
 
-# ── Test all 39 tasks ──
+# ── Test all 40 tasks ──
 ALL_TASKS = [
     ("correlation", ["不良率"], ["熔体温度","模具温度","注射压力"], []),
     ("anova", ["不良率"], ["原料类型"], ["原料类型"]),

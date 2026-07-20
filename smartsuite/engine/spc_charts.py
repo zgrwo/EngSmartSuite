@@ -1193,7 +1193,6 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         group_colors[gname] = cm.tab10(gi % 10)
 
     total_alarms = 0
-    warn_msgs: list[str] = []
     if user_mu is None:
         warn_msgs.append(
             "⚠ μ/σ 从各组数据独立估计。"
@@ -1624,8 +1623,8 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     # ── 汇总 ──
     n_violations = len(violations)
     is_stable = n_violations == 0
-    ucl_str = f"{ucl:.4f}" if ucl else "N/A"
-    lcl_str = f"{lcl:.4f}" if lcl else "N/A"
+    ucl_str = f"{ucl:.4f}" if ucl is not None else "N/A"
+    lcl_str = f"{lcl:.4f}" if lcl is not None else "N/A"
     summary = (
         f"非参数控制图({side_note}): {'过程稳定 ✓' if is_stable else f'{n_violations} 个点违规'}。"
         f"CL(P50)={cl:.4f}, UCL={ucl_str}, LCL={lcl_str}。{asym_note}。"

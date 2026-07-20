@@ -115,7 +115,7 @@ def test_imputation_fills_missing():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 跨路径数值一致性 — 全量 39 方法
+# 跨路径数值一致性 — 全量 40 方法
 # ═══════════════════════════════════════════════════════════════
 
 # 为每种方法构建标准化测试数据
@@ -248,7 +248,7 @@ from smartsuite.services.orchestrator import RAW_CAT_TASKS
 
 @pytest.mark.parametrize("task", sorted(TASK_REGISTRY.keys()))
 def test_cli_web_numerical_parity_all(task):
-    """CLI 路径 与 Web 路径 对 39 个方法产生一致的数值结果。
+    """CLI 路径 与 Web 路径 对 40 个方法产生一致的数值结果。
 
     验证: status, summary, metadata 中的核心数值、tables 键名。
 
