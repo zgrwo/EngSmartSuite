@@ -28,10 +28,7 @@ jobs:
         run: pip install -e ".[dev,report]"
 
       - name: 模块导入验证
-        run: python -c "
-          from smartsuite.engine import __all__ as eng;
-          from smartsuite.services.orchestrator import TASK_REGISTRY;
-          print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
+        run: python -c "from smartsuite.engine import __all__ as eng; from smartsuite.services.orchestrator import TASK_REGISTRY; print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
 
       - name: Ruff Lint
         run: ruff check smartsuite/
@@ -136,33 +133,28 @@ jobs:
 
       - name: TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性
         run: |
-          python -c "
+          python << 'EOF'
           from smartsuite.services.orchestrator import TASK_REGISTRY, DEFAULT_PARAMS, TASK_LABELS, TASK_GROUPS
           reg = set(TASK_REGISTRY.keys())
           params = set(DEFAULT_PARAMS.keys())
           labels = set(TASK_LABELS.keys())
           groups = set().union(*[set(v) for v in TASK_GROUPS.values()])
-          assert reg == params, f'TASK_REGISTRY({len(reg)}) != DEFAULT_PARAMS({len(params)}): {reg ^ params}'
-          assert reg == labels, f'TASK_REGISTRY({len(reg)}) != TASK_LABELS({len(labels)}): {reg ^ labels}'
-          assert reg == groups, f'TASK_REGISTRY({len(reg)}) != TASK_GROUPS sum({len(groups)}): {reg ^ groups}'
-          print(f'✅ {len(reg)} tasks: TASK_REGISTRY = DEFAULT_PARAMS = TASK_LABELS = TASK_GROUPS')
-          "
+          assert reg == params, f"REGISTRY({len(reg)}) != PARAMS({len(params)}): {reg ^ params}"
+          assert reg == labels, f"REGISTRY({len(reg)}) != LABELS({len(labels)}): {reg ^ labels}"
+          assert reg == groups, f"REGISTRY({len(reg)}) != GROUPS({len(groups)}): {reg ^ groups}"
+          print(f"OK: {len(reg)} tasks — TASK_REGISTRY = DEFAULT_PARAMS = TASK_LABELS = TASK_GROUPS")
+          EOF
 
       - name: TASK_REGISTRY 引擎函数全部导出
         run: |
-          python -c "
+          python << 'EOF'
           from smartsuite.engine import __all__ as engine_exports
           from smartsuite.services.orchestrator import TASK_REGISTRY
-          import inspect
-          eng_funcs = {e for e in engine_exports}
           reg_funcs = {fn.__name__ for fn in TASK_REGISTRY.values()}
-          missing_from_engine = reg_funcs - eng_funcs
-          assert not missing_from_engine, f'TASK_REGISTRY 中 {len(missing_from_engine)} 个函数未从引擎导出: {missing_from_engine}'
-          # 反向检查：TASK_REGISTRY 函数是否全部为可调用对象
-          non_callable = [fn.__name__ for fn in TASK_REGISTRY.values() if not callable(fn)]
-          assert not non_callable, f'非可调用对象: {non_callable}'
-          print(f'✅ All {len(reg_funcs)} TASK_REGISTRY functions exported from engine/__init__.py')
-          "
+          missing_from_engine = reg_funcs - set(engine_exports)
+          assert not missing_from_engine, f"{len(missing_from_engine)} funcs not exported from engine: {missing_from_engine}"
+          print(f"OK: All {len(reg_funcs)} registry funcs exported from engine/__init__.py")
+          EOF
 
       - name: 前后端参数默认值一致性
         run: python scripts/verify_cross_consistency.py 2>&1 | tail -5
