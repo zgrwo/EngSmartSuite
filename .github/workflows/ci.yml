@@ -25,16 +25,16 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev]"
-
-      - name: Ruff Lint
-        run: ruff check smartsuite/
+        run: pip install -e ".[dev,report]"
 
       - name: 模块导入验证
         run: python -c "
           from smartsuite.engine import __all__ as eng;
           from smartsuite.services.orchestrator import TASK_REGISTRY;
           print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
+
+      - name: Ruff Lint
+        run: ruff check smartsuite/
 
       - name: 引擎层核心测试
         run: pytest tests/test_engine/ -x -q --tb=short
@@ -71,7 +71,7 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,report]"
 
       - name: Linux CJK 字体 (matplotlib 图表中文渲染)
         if: runner.os == 'Linux'
@@ -101,7 +101,7 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev]" pytest-cov vulture
+        run: pip install -e ".[dev]" pytest-cov vulture pip-audit
 
       - name: 测试覆盖率
         run: pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html
