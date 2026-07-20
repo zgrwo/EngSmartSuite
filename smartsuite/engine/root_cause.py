@@ -1109,7 +1109,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 z_num = abs(rank_sums[g1] / n1 - rank_sums[g2] / n2)
                 N = len(all_vals)
                 tie_corr = np.sum(tie_counts**3 - tie_counts) / (12 * (N - 1)) if N > 1 else 0
-                z_denom = np.sqrt(((N * (N + 1) / 12) - tie_corr) * (1/n1 + 1/n2))
+                # P2 fix: tie_corr 在大量结值时可能使方差估计变负，钳位到非负
+                z_denom = np.sqrt(max(0.0, (N * (N + 1) / 12) - tie_corr) * (1/n1 + 1/n2) + EPSILON)
                 z_stat_dunn = z_num / (z_denom + EPSILON)
                 p_dunn = float(2 * sp_stats.norm.sf(abs(z_stat_dunn)))
                 # Bonferroni 校正

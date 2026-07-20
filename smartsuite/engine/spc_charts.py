@@ -870,12 +870,18 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     # 按图表类型计算
     n_col = req.params.get("n_col")
     if n_col and n_col in data.columns:
-        if has_groups:
-            n_map = data.groupby(["_x", "_g"], dropna=False)[n_col].first()
-        else:
-            n_map = data.groupby("_x", dropna=False)[n_col].first()
+        # P1 fix: 始终用 ["_x", "_g"] 分组（非分组模式下 _g="_default"），
+        # 确保 n_map 键与 agg 行结构一致；同时 NaN 值回退到平均样本量
+        n_map_raw = data.groupby(["_x", "_g"], dropna=False)[n_col].first()
+        mean_size = float(agg["size"].mean())
+        n_map = {}
+        for idx, val in n_map_raw.items():
+            n_map[idx] = float(val) if (not pd.isna(val)) else None
         agg["n_vals"] = agg.apply(
-            lambda r: float(n_map.get((r["x_val"], r["group_val"]), agg["size"].mean())),
+            lambda r: float(
+                v if (v := n_map.get((r["x_val"], r["group_val"]))) is not None
+                else mean_size
+            ),
             axis=1)
     else:
         agg["n_vals"] = agg["size"].astype(float)
@@ -1111,11 +1117,15 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     # 分组处理
     group_results = []
     all_group_names = []
+    warn_msgs: list[str] = []
     max_n = 0
+    skipped_zero_var: list[str] = []
+    skipped_insufficient: list[str] = []
     for gname in group_names:
         mask = group_vals == gname if has_groups else pd.Series(True, index=req.data.index)
         gdata = req.data.loc[mask, y_col].dropna()
         if len(gdata) < 5:
+            skipped_insufficient.append(str(gname))
             continue
         all_group_names.append(gname)
         max_n = max(max_n, len(gdata))
@@ -1126,6 +1136,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             mu = float(gdata.mean())
             sigma = float(gdata.std(ddof=1))
         if sigma < EPSILON:
+            skipped_zero_var.append(str(gname))
             continue
 
         z = (gdata.values - mu) / sigma
@@ -1151,10 +1162,25 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             "alarm_plus": alarm_plus, "alarm_minus": alarm_minus,
         })
 
+    # 汇总跳过警告（P1 fix: 区分零方差和数据不足）
+    if skipped_zero_var:
+        warn_msgs.append(
+            f"⚠ 以下分组标准差为零（常量值），已跳过 CUSUM 计算: {', '.join(skipped_zero_var)}"
+        )
+    if skipped_insufficient:
+        warn_msgs.append(
+            f"⚠ 以下分组有效数据不足（<5 个点），已跳过: {', '.join(skipped_insufficient)}"
+        )
     if len(group_results) < 1:
+        if skipped_zero_var and not skipped_insufficient:
+            detail = "所有分组标准差均为零（常量数据），无法计算 CUSUM"
+        elif not skipped_zero_var and skipped_insufficient:
+            detail = "所有分组有效数据不足（每组至少需要 5 个点）"
+        else:
+            detail = "无有效分组：部分分组标准差为零，部分数据不足"
         return AnalysisResult(
             task="spc_cusum", status="error",
-            messages=["有效数据不足(每组至少5个点)"],
+            messages=[detail] + warn_msgs,
         )
 
     # 图表

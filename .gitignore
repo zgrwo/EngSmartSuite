@@ -84,3 +84,6 @@ scripts/verify_manual_claims_output.txt
 # 历史残留
 .superpowers/
 docs/superpowers/
+
+# IDE 工具（本地保留，不推送）
+.qoder/

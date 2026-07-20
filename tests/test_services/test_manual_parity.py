@@ -467,12 +467,12 @@ def test_manual_spc_xbar(raw_df):
 
 
 # ═══════════════════════════════════════════════════════════
-# 综合: 全量 39 方法三路径行为一致
+# 综合: 全量 40 方法三路径行为一致
 # ═══════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize("task", sorted(TASK_REGISTRY.keys()))
 def test_all_methods_3path_behavior(raw_df, task):
-    """所有 39 个方法在三条路径上行为一致（status + summary 非空）。
+    """所有 40 个方法在三条路径上行为一致（status + summary 非空）。
 
     不要求所有方法都成功（部分方法对测试数据不适用），
     但要求三条路径返回相同的行为模式（都 ok 或都 error）。
@@ -518,6 +518,7 @@ def test_all_methods_3path_behavior(raw_df, task):
         "lasso_regression": ("不良率", ["熔体温度", "注射压力"], False),
         "robust_regression":("不良率", ["熔体温度", "注射压力"], False),
         "quantile_regression": ("不良率", ["熔体温度", "注射压力"], False),
+        "scatter_plot":     ("不良率", ["熔体温度"], False),
     }
 
     if task not in param_map:

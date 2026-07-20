@@ -10,11 +10,11 @@
 > │ CLAUDE.md  ← 开发入口     │   │ README.md  ← 用户入口      │
 > │   ↓ 编码时加载             │   │   ↓ 操作时查阅             │
 > │ skills/smartsuite-dev.md  │   │ docs/user-manual.md       │
-> │   (陷阱+模板+快速修复)     │   │   (39 方法操作指南)        │
+> │   (陷阱+模板+快速修复)     │   │   (40 方法操作指南)        │
 > │ docs/skill.md             │   │                           │
 > │   (决策树→选分析方法)     │   │                           │
 > │ docs/api-reference.md     │   │                           │
-> │   (39 函数签名查阅)        │   │                           │
+> │   (40 函数签名查阅)        │   │                           │
 > └───────────────────────────┘   └───────────────────────────┘
 >               ↕ 共享: CONTEXT.md (领域术语·统一语言)
 > ```
@@ -40,20 +40,26 @@ smartsuite/                     # 主包
 │   ├── __init__.py             # matplotlib 全局配置 + 字体加载 + 公开 API 导出
 │   ├── _palette.py             # 统一可视化配色方案（PALETTE 字典）
 │   ├── _constants.py           # 统计分析常量（阈值/乘数/效应量判定）
+│   ├── _utils.py               # 共享工具函数 (safe_float, threshold_label, durbin_watson)
 │   ├── root_cause.py           # 要因分析 (correlation, anova, hypothesis_test, ...)
 │   ├── doe_opt.py              # DOE/优化 (regression, rsm, grid_search, ...)
-│   └── spc_monitor.py          # 过程监控 (xbar_r, cpk, cusum, survival, ...)
+│   ├── spc_charts.py           # SPC 控制图 (xbar_r, cusum, ewma, attribute, nonparametric)
+│   ├── spc_monitor.py          # SPC 统一入口（向后兼容，委托至子模块）
+│   ├── capability.py           # 过程能力 (Cp/Cpk, Sigma Level, Box-Cox)
+│   ├── detection.py            # 异常检测 (trend_forecast, changepoint, anomaly, outlier_consensus)
+│   ├── reliability.py          # 可靠性/MSA (gage_rr, tolerance, survival)
+│   └── exploratory.py          # 探索性分析 (box_chart, scatter_plot, bootstrap_ci, median_ci)
 │
 ├── services/                   # ② 应用服务层：唯一桥接层，engine 和 web 通过它通信
 │   ├── __init__.py
-│   ├── orchestrator.py         # 任务路由: TASK_REGISTRY (39 项) + DEFAULT_PARAMS + 异常翻译
+│   ├── orchestrator.py         # 任务路由: TASK_REGISTRY (40 项) + DEFAULT_PARAMS + 异常翻译
 │   ├── data_io.py              # Excel 读写 + 校验 + 预处理 (中位数填充/One-Hot) + 智能推荐
 │   ├── reporter.py             # 多格式输出: to_excel / to_pdf / to_ppt / to_html
 │   └── audit.py                # 综合审计: process_audit / batch_analyze / auto_report
 │
 └── web/                        # Web UI 层 (Flask)，依赖 services/，不直接依赖 engine/
     ├── __init__.py
-    ├── app.py                  # Flask 入口 + TASK_GROUPS (5 组) + TASK_LABELS (39 项)
+    ├── app.py                  # Flask 入口 + TASK_GROUPS (5 组) + TASK_LABELS (40 项)
     ├── api.py                  # REST API: run_analysis / column_info
     ├── templates/              # Jinja2 模板
     │   └── index.html          # 主页面
@@ -71,14 +77,14 @@ tests/
 ├── test_integration_chemical.py    # 化工场景
 ├── test_integration_reliability.py # 可靠性场景
 ├── test_integration_warranty.py    # 保修场景
-├── test_master_integration.py      # 39 方法全量集成
+├── test_master_integration.py      # 40 方法全量集成
 ├── test_web_e2e.py             # Web UI E2E (需服务器运行)
 ├── test_workflows.py           # 工作流串联测试
 ├── verify_all_modules.py       # 模块导入验证
 │
 ├── test_engine/                # 引擎层单元测试
 │   ├── test_root_cause.py / test_doe_opt.py / test_spc_monitor.py
-│   ├── test_correctness.py     # 数值正确性 — 39/39 全覆盖
+│   ├── test_correctness.py     # 数值正确性 — 40/40 全覆盖
 │   ├── test_edge_cases.py      # 边界情况
 │   ├── test_invariants.py      # 数学不变量 (p∈[0,1], Cpk≤Cp, R²≥0…)
 │   ├── test_fuzz.py            # 模糊测试 (NaN/空/常量/大样本)
@@ -131,7 +137,7 @@ smartsuite/web/       ← Web 层：依赖 services/，不可直接依赖 engine
 
 | 层 | 文件 | 验证内容 | 覆盖率 |
 |---|---|---|---|
-| ① 数值正确性 | `test_correctness.py` | 与 scipy/statsmodels 参考实现对比 | 39/39 (100%) |
+| ① 数值正确性 | `test_correctness.py` | 与 scipy/statsmodels 参考实现对比 | 40/40 (100%) |
 | ② 数学不变量 | `test_invariants.py` | p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减、R 图 LCL≥0 | 关键函数 |
 | ③ 边界模糊 | `test_fuzz.py` | 空数据/单行/全NaN/常量列/共线/n>5000/不等子组 | 全部 |
 | ④ 差分测试 | `test_differential.py` | CLI vs Web API 数值一致 + TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性 | 全部 |

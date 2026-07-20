@@ -182,6 +182,8 @@ def upload():
     # 服务端文件类型校验 (.xls 是 OLE2 二进制格式, openpyxl 不支持, 已移除)
     filename = f.filename or ""
     ext = os.path.splitext(filename)[1].lower()
+    if not ext:
+        return jsonify({"error": "无法识别文件类型（无扩展名），请上传 .xlsx / .xlsm / .csv 文件"}), 400
     if ext not in (".xlsx", ".xlsm", ".csv"):
         return jsonify({"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xlsm / .csv 文件"}), 400
 

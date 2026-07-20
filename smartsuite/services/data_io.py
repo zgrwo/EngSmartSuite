@@ -76,6 +76,7 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
     if not categorical_cols:
         categorical_cols = {c for c in features
                            if (pd.api.types.is_string_dtype(df[c])
+                               or pd.api.types.is_bool_dtype(df[c])
                                or str(df[c].dtype) in ('object', 'category'))
                            and not pd.api.types.is_numeric_dtype(df[c])}
 
@@ -132,7 +133,17 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                 [f"_(参照) {_ref_cat[0]}"] if _ref_cat else [])
         else:
             # 转为数值型，然后统一用中位数填充所有缺失值
+            n_before = int(df[col].notna().sum())
             df[col] = pd.to_numeric(df[col], errors='coerce')
+            n_after = int(df[col].notna().sum())
+            n_coerced = n_before - n_after
+            # P2 fix: 静默 coercion 警告 — 当非数值比例 >5% 时记录
+            if n_coerced > 0 and n_before > 0 and n_coerced / n_before > 0.05:
+                logger.warning(
+                    "列「%s」中 %d/%d (%.1f%%) 个值无法转为数值，已用中位数填充。"
+                    "请检查数据中是否包含非数值内容（如单位、文本等）。",
+                    col, n_coerced, n_before, n_coerced / n_before * 100
+                )
             total_na = df[col].isna()
             n_missing = int(total_na.sum())
             if n_missing > 0:

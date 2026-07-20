@@ -32,6 +32,8 @@ def _ljung_box(residuals, lags=None):
     acf_sum = 0.0
     for k in range(1, lags + 1):
         r_k = np.corrcoef(residuals[k:], residuals[:-k])[0, 1]
+        if np.isnan(r_k):  # P1 fix: 零方差子段导致 np.corrcoef 返回 NaN
+            r_k = 0.0
         acf_sum += r_k**2 / (n - k)
     q_stat = n * (n + 2) * acf_sum
     p_val = float(sp_stats.chi2.sf(q_stat, lags))

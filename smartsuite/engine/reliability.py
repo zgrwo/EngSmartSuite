@@ -328,6 +328,9 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
         else:
             return AnalysisResult(task="survival_analysis", status="error",
                 messages=[f"事件列「{event_col}」需要恰好2个不同值(0/1 或 是/否)，当前有{len(unique_vals)}个"])
+    # 将二值化结果写回 DataFrame，确保后续 Log-rank 等分组分析使用一致的事件编码
+    # (P0 fix: Log-rank 段使用 sub[event_col] 比较 int 1，含文本原始值时永为 False)
+    sub[event_col] = events
 
     # 零事件防护
     n_events_total = int(events.sum())

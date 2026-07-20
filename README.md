@@ -16,7 +16,7 @@ SmartSuite 将 Python 生态的统计分析能力（pandas、scipy、statsmodels
 |------|--------|---------|----|
 | **要因分析** | "不良率升高了，是料温？模温？还是注射压力？" | 相关性分析、ANOVA、假设检验、决策树、VIF 共线性、列联表… | 13 |
 | **DOE/优化** | "温度和压力调到多少，强度最高、不良率最低？" | 回归建模、响应面、网格搜索、多目标优化、DOE 效应分析… | 10 |
-| **过程监控** | "产线是不是稳定的？会不会快要出问题了？" | SPC 控制图、Cp/Cpk、趋势预测、异常检测、CUSUM/EWMA、生存分析… | 16 |
+| **过程监控** | "产线是不是稳定的？会不会快要出问题了？" | SPC 控制图、Cp/Cpk、趋势预测、异常检测、CUSUM/EWMA、生存分析… | 17 |
 
 ---
 
@@ -181,7 +181,7 @@ print(result.tables)    # 数据表格
 print(result.figures)   # matplotlib 图表
 ```
 
-> 📋 全部 39 个分析方法的参数和返回值见 **[API 参考文档](docs/api-reference.md)**
+> 📋 全部 40 个分析方法的参数和返回值见 **[API 参考文档](docs/api-reference.md)**
 
 ---
 
@@ -203,8 +203,8 @@ print(result.figures)   # matplotlib 图表
 
 | 文档 | 读者 | 内容 |
 |------|------|------|
-| **[用户操作手册](docs/user-manual.md)** | 工艺工程师 | Web UI 操作指南、39 个方法详解、结果解读、排错 FAQ |
-| **[API 参考](docs/api-reference.md)** | 开发者 / 高级用户 | 全部 39 个分析函数的参数、返回值、Task Key |
+| **[用户操作手册](docs/user-manual.md)** | 工艺工程师 | Web UI 操作指南、40 个方法详解、结果解读、排错 FAQ |
+| **[API 参考](docs/api-reference.md)** | 开发者 / 高级用户 | 全部 40 个分析函数的参数、返回值、Task Key |
 | **[领域术语](CONTEXT.md)** | 所有人 | 项目统一术语定义 |
 | **[开发者指南](CLAUDE.md)** | AI / 开发者 | 架构约束、代码风格、测试策略、常见陷阱 |
 | **[AI Agent 知识](docs/skill.md)** | AI 助手 | 分析决策树、工作流模式、问题诊断 |
@@ -228,13 +228,3 @@ print(result.figures)   # matplotlib 图表
 ---
 
 *SmartSuite — 让 Python 的统计分析能力服务于每一位工艺工程师。*
-
-## 文档导航
-
-| 文档 | 适合谁 | 什么时候看 |
-|------|--------|-----------|
-| [用户手册](docs/user-manual.md) | 工艺工程师 | 不知道怎么选参数、看不懂分析结果 |
-| [API 参考](docs/api-reference.md) | 开发者 | 需要查函数签名、调用方式 |
-| [领域术语](CONTEXT.md) | 所有人 | 术语看不懂时查阅 |
-
-> 开发者文档（架构、测试、开发规范）见 `CLAUDE.md` 和 `skills/smartsuite-dev.md`。

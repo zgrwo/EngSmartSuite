@@ -36,7 +36,8 @@ def _cpk_confidence_interval(cpk, n, alpha=0.05):
     z = sp_stats.norm.ppf(1 - alpha / 2)
     ci_lower = cpk - z * se
     ci_upper = cpk + z * se
-    return (float(ci_lower), float(ci_upper))
+    # P2 fix: Bissell 近似在小样本/小 Cpk 时可能产生负下限，Cpk 物理下限为 0
+    return (max(float(ci_lower), 0.0), float(ci_upper))
 
 
 def _sigma_level(cpk_val):

@@ -10,6 +10,7 @@ import pandas as pd
 import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.core.exceptions import SmartSuiteError
 from smartsuite.services.data_io import (
     infer_group_col,
     preprocess_for_task,
@@ -114,7 +115,7 @@ def main():
                 validate_warnings = validate_data(raw, config["target_col"], features)
                 for w in validate_warnings:
                     print(f"  ⚠ {w}")
-            except Exception as e:
+            except SmartSuiteError as e:
                 logger.warning("数据校验异常: %s", e)
                 print(f"  ⚠ 数据校验失败: {e}，分析将继续执行", file=sys.stderr)
         # 任务感知的数据预处理（与 Web 路径保持一致）
