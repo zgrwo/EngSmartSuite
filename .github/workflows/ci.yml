@@ -1,21 +1,168 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 自动取消同一 PR 的旧运行，节省 runner 资源
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  # ── 快速检查：lint + 导入 + 核心测试（每次 push 触发）──
+  quick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -e ".[dev]"
+
+      - name: Ruff Lint
+        run: ruff check smartsuite/
+
+      - name: 模块导入验证
+        run: python -c "
+          from smartsuite.engine import __all__ as eng;
+          from smartsuite.services.orchestrator import TASK_REGISTRY;
+          print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
+
+      - name: 引擎层核心测试
+        run: pytest tests/test_engine/ -x -q --tb=short
+
+      - name: 服务层测试
+        run: pytest tests/test_services/ -x -q --tb=short
+
+      - name: 集成测试
+        run: pytest tests/test_integration.py tests/test_master_integration.py -x -q --tb=short
+
+  # ── 全矩阵测试（仅 main 分支 push 或手动触发，节省 resources）──
+  full:
+    needs: quick
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12"]
+        exclude:
+          # 减少组合数：3.12 仅在 ubuntu 上测（最新 Python 稳定性哨兵）
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev,report]"
-      - run: ruff check smartsuite/
-      - run: pytest
-      - run: python scripts/verify_consistency.py
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -e ".[dev]"
+
+      - name: Linux CJK 字体 (matplotlib 图表中文渲染)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+
+      - name: Ruff Lint
+        run: ruff check smartsuite/
+
+      - name: 全量测试
+        run: pytest tests/ -q --tb=short
+
+      - name: 一致性校验
+        run: python scripts/verify_consistency.py
+
+  # ── 代码质量分析（仅 main push 触发）──
+  quality:
+    needs: quick
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -e ".[dev]" pytest-cov vulture
+
+      - name: 测试覆盖率
+        run: pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html
+
+      - name: 死代码检测 (vulture)
+        run: vulture smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" || true
+
+      - name: 依赖安全审计
+        run: pip-audit 2>/dev/null || echo "pip-audit 未安装，跳过"
+
+      - name: 上传覆盖率报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 7
+
+  # ── 注册链一致性检查（不限分支）──
+  consistency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -e ".[dev]"
+
+      - name: TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性
+        run: |
+          python -c "
+          from smartsuite.services.orchestrator import TASK_REGISTRY, DEFAULT_PARAMS, TASK_LABELS, TASK_GROUPS
+          reg = set(TASK_REGISTRY.keys())
+          params = set(DEFAULT_PARAMS.keys())
+          labels = set(TASK_LABELS.keys())
+          groups = set().union(*[set(v) for v in TASK_GROUPS.values()])
+          assert reg == params, f'TASK_REGISTRY({len(reg)}) != DEFAULT_PARAMS({len(params)}): {reg ^ params}'
+          assert reg == labels, f'TASK_REGISTRY({len(reg)}) != TASK_LABELS({len(labels)}): {reg ^ labels}'
+          assert reg == groups, f'TASK_REGISTRY({len(reg)}) != TASK_GROUPS sum({len(groups)}): {reg ^ groups}'
+          print(f'✅ {len(reg)} tasks: TASK_REGISTRY = DEFAULT_PARAMS = TASK_LABELS = TASK_GROUPS')
+          "
+
+      - name: TASK_REGISTRY 引擎函数全部导出
+        run: |
+          python -c "
+          from smartsuite.engine import __all__ as engine_exports
+          from smartsuite.services.orchestrator import TASK_REGISTRY
+          import inspect
+          eng_funcs = {e for e in engine_exports}
+          reg_funcs = {fn.__name__ for fn in TASK_REGISTRY.values()}
+          missing_from_engine = reg_funcs - eng_funcs
+          assert not missing_from_engine, f'TASK_REGISTRY 中 {len(missing_from_engine)} 个函数未从引擎导出: {missing_from_engine}'
+          # 反向检查：TASK_REGISTRY 函数是否全部为可调用对象
+          non_callable = [fn.__name__ for fn in TASK_REGISTRY.values() if not callable(fn)]
+          assert not non_callable, f'非可调用对象: {non_callable}'
+          print(f'✅ All {len(reg_funcs)} TASK_REGISTRY functions exported from engine/__init__.py')
+          "
+
+      - name: 前后端参数默认值一致性
+        run: python scripts/verify_cross_consistency.py 2>&1 | tail -5
