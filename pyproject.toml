@@ -75,7 +75,10 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B"]
-ignore = ["E501"]  # line-length handled by formatter
+ignore = ["E501", "N806", "B007"]
+# E501 — line length handled by formatter
+# N806 — uppercase vars are deliberate (SPC constants A2/D3/D4, stats symbols Q1/Q3/IQR, math notation X/G)
+# B007 — unused loop vars are harmless (enumerate index, dict key iteration)
 
 [tool.ruff.lint.per-file-ignores]
 "smartsuite/engine/__init__.py" = ["E402", "I001"]  # matplotlib config + core deps check must precede imports
