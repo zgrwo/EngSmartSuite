@@ -122,6 +122,7 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 # ── 统一可视化样式 ──
 from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._palette import PALETTE  # noqa: F401 — 公开导出，供 services 层使用
+from smartsuite.engine._palette import _to_argb  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._constants import CLIFFS_DELTA_LARGE, CLIFFS_DELTA_MEDIUM, CLIFFS_DELTA_SMALL, CORRELATION_LARGE, CORRELATION_MEDIUM, CORRELATION_SMALL, CRAMERS_V_LARGE, CRAMERS_V_MEDIUM, CRAMERS_V_SMALL  # noqa: F401 — 公开导出
 from smartsuite.engine._constants import CPK_GOOD, CPK_MINIMUM, DW_SAFE_LOWER, DW_SAFE_UPPER  # noqa: F401 — 公开导出
 from smartsuite.engine._palette import get_palette_style
@@ -199,7 +200,7 @@ except ImportError as e:
 
 __all__ = [
     "CPK_GOOD", "CPK_MINIMUM", "DW_SAFE_LOWER", "DW_SAFE_UPPER",  # 公开统计常量
-    "GROUP_COLORS", "PALETTE",  # 公开配色常量，供 services/web 层使用
+    "GROUP_COLORS", "PALETTE",  # 公开配色常量/工具，供 services/web 层使用
     "correlation_analysis", "anova_analysis", "contingency_analysis",
     "cohens_kappa", "cronbach_alpha",
     "hypothesis_test",

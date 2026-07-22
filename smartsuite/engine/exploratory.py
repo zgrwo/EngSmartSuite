@@ -11,7 +11,7 @@ from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine.spc_charts import _adjust_xlabels
+from smartsuite.engine._utils import _adjust_xlabels
 
 logger = logging.getLogger(__name__)
 

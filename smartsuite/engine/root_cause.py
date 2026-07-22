@@ -1,4 +1,5 @@
 import logging
+from math import sqrt
 
 import numpy as np
 import pandas as pd
@@ -1463,7 +1464,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 统计功效估计 ──
     n1, n2 = len(g1), len(g2)
-    from math import sqrt
     # 非中心参数近似
     ncp = abs(effect_size) * sqrt(n1 * n2 / (n1 + n2)) if (n1 + n2) > 0 else 0
     dof = n1 + n2 - 2
@@ -2062,8 +2062,6 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
             successes = int(data.value_counts().iloc[0])
 
     p_hat = successes / n
-
-    from math import sqrt
 
     # Wilson Score CI
     z = sp_stats.norm.ppf(0.975)

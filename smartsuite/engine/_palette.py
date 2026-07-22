@@ -101,6 +101,15 @@ GROUP_COLORS = {
 }
 
 
+def _to_argb(hex_color: str) -> str:
+    """将 CSS hex 颜色（如 "#2171b5"）转换为 openpyxl aRGB 格式（"FF2171B5"）。
+
+    openpyxl PatternFill 要求无 # 前缀的 aRGB hex 值（6 或 8 位），
+    PALETTE 中存储的是带 # 的 CSS hex，直接传入会导致 ValueError。
+    """
+    return "FF" + hex_color.lstrip("#").upper()
+
+
 def get_palette_style():
     """返回 matplotlib rcParams 样式字典，用于全局图表美化。"""
     return {

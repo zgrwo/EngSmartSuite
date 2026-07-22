@@ -1,6 +1,6 @@
 """引擎层共享工具函数。
 
-本模块存放被多个引擎子模块（root_cause, doe_opt, spc_monitor）共同使用的
+本模块存放被多个引擎子模块（root_cause, doe_opt, spc_monitor, exploratory）共同使用的
 通用工具函数，避免代码重复和跨子模块导入。
 """
 import logging
@@ -77,3 +77,32 @@ def durbin_watson(residuals):
     diff = np.diff(residuals)
     dw = np.sum(diff**2) / (np.sum(residuals**2) + EPSILON)
     return float(dw)
+
+
+def _adjust_xlabels(ax, n_labels: int, fig=None):
+    """自适应调整 X 轴刻度标签：根据标签数量选择旋转角度和字号。
+
+    统一所有控制图、箱线图的 X 轴标签显示策略，消除硬编码 fontsize/rotation。
+    与 _fmt_labels / _fmt_attr_labels 配合使用（后者负责文字截断和稀疏化）。
+
+    Args:
+        ax: matplotlib Axes 对象
+        n_labels: 标签总数（含可能被 _fmt_labels 置空的标签）
+        fig: 可选，用于多标签时自动调整子图边距
+    """
+    if n_labels <= 4:
+        ax.tick_params(axis="x", labelsize=9)
+    elif n_labels <= 8:
+        ax.tick_params(axis="x", labelsize=9, rotation=30)
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+    elif n_labels <= 15:
+        ax.tick_params(axis="x", labelsize=8, rotation=45)
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+    else:
+        ax.tick_params(axis="x", labelsize=7.5, rotation=60)
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+        if fig:
+            fig.subplots_adjust(bottom=0.25)

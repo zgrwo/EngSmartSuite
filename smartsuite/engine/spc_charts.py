@@ -10,6 +10,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import EPSILON
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import _adjust_xlabels  # 共享 X 轴标签自适应工具
 
 logger = logging.getLogger(__name__)
 
@@ -208,33 +209,6 @@ def _we_rules_s(values, cl, ucl, lcl=0):
     return {k: sorted(set(v)) for k, v in violations.items()}
 
 
-def _adjust_xlabels(ax, n_labels: int, fig=None):
-    """自适应调整 X 轴刻度标签：根据标签数量选择旋转角度和字号。
-
-    统一所有控制图、箱线图的 X 轴标签显示策略，消除硬编码 fontsize/rotation。
-    与 _fmt_labels / _fmt_attr_labels 配合使用（后者负责文字截断和稀疏化）。
-
-    Args:
-        ax: matplotlib Axes 对象
-        n_labels: 标签总数（含可能被 _fmt_labels 置空的标签）
-        fig: 可选，用于多标签时自动调整子图边距
-    """
-    if n_labels <= 4:
-        ax.tick_params(axis="x", labelsize=9)
-    elif n_labels <= 8:
-        ax.tick_params(axis="x", labelsize=9, rotation=30)
-        for label in ax.get_xticklabels():
-            label.set_ha("right")
-    elif n_labels <= 15:
-        ax.tick_params(axis="x", labelsize=8, rotation=45)
-        for label in ax.get_xticklabels():
-            label.set_ha("right")
-    else:
-        ax.tick_params(axis="x", labelsize=7.5, rotation=60)
-        for label in ax.get_xticklabels():
-            label.set_ha("right")
-        if fig:
-            fig.subplots_adjust(bottom=0.25)
 
 
 def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -1057,15 +1031,11 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     )
 
 
-def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
-    """CUSUM (累积和) 控制图 — 对小偏移 (±0.5σ~2σ) 比 X-bar 更敏感。
+def _resolve_groups(req: AnalysisRequest) -> tuple[pd.Series, list, bool, str]:
+    """解析分组参数，返回 (group_vals, group_names, has_groups, y_col)。
 
-    参数:
-        k: 参考值/松弛因子 (通常取 δ/2，其中 δ 是要检测的偏移量，以 σ 为单位)
-        h: 决策区间 (通常取 4~5)
-        mu: 过程均值 (如未提供，从数据估计；建议使用已知受控状态的 μ)
-        sigma: 过程标准差 (如未提供，从数据估计；建议使用已知受控状态的 σ)
-        group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
+    CUSUM 和 EWMA 共享的分组解析逻辑，消除 ~15 行重复代码。
+    处理 group_col 提取、has_groups 分支、filter_groups 筛选。
     """
     y_col = req.target_col
     group_col = req.params.get("group_col")
@@ -1085,6 +1055,21 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         group_names = [g for g in group_names if str(g) in filter_set]
         if not group_names:
             group_names = sorted(group_vals.dropna().unique())
+
+    return group_vals, group_names, has_groups, y_col
+
+
+def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
+    """CUSUM (累积和) 控制图 — 对小偏移 (±0.5σ~2σ) 比 X-bar 更敏感。
+
+    参数:
+        k: 参考值/松弛因子 (通常取 δ/2，其中 δ 是要检测的偏移量，以 σ 为单位)
+        h: 决策区间 (通常取 4~5)
+        mu: 过程均值 (如未提供，从数据估计；建议使用已知受控状态的 μ)
+        sigma: 过程标准差 (如未提供，从数据估计；建议使用已知受控状态的 σ)
+        group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
+    """
+    group_vals, group_names, has_groups, y_col = _resolve_groups(req)
 
     # 公共参数 (cusum)
     k = req.params.get("k", 0.5)
@@ -1286,24 +1271,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         sigma: 过程标准差 (如未提供，从数据估计)
         group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
     """
-    y_col = req.target_col
-    group_col = req.params.get("group_col")
-    has_groups = bool(group_col and group_col in req.data.columns)
-
-    if has_groups:
-        group_vals = req.data[group_col]
-        group_names = sorted(group_vals.dropna().unique())
-    else:
-        group_vals = pd.Series("_default", index=req.data.index)
-        group_names = ["_default"]
-
-    # ── 前端分组筛选支持 ──
-    filter_groups = req.params.get("filter_groups")
-    if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
-        filter_set = set(str(f) for f in filter_groups)
-        group_names = [g for g in group_names if str(g) in filter_set]
-        if not group_names:
-            group_names = sorted(group_vals.dropna().unique())
+    group_vals, group_names, has_groups, y_col = _resolve_groups(req)
 
     # 公共参数 (ewma)
     lam = req.params.get("lam", 0.2)
