@@ -15,13 +15,23 @@ def main() -> None:
     # Sdist:  {distribution}-{version}.tar.gz
     pattern = re.compile(r"^([a-zA-Z0-9_.-]+?)-(\d[^-]*)")
 
+    # 已知的归档/包后缀，需从版本号中剥离
+    _ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar", ".zip", ".tgz")
+
+    def _clean_version(raw: str) -> str:
+        """从原始匹配结果中剥离归档后缀，确保版本号为纯 semver。"""
+        for suffix in _ARCHIVE_SUFFIXES:
+            if raw.endswith(suffix):
+                return raw[:-len(suffix)]
+        return raw
+
     pkgs: dict[str, str] = {}
     for ext in ("*.whl", "*.tar.gz"):
         for f in sorted(packages_dir.glob(ext)):
             m = pattern.match(f.name)
             if m:
                 name = m.group(1).replace("_", "-").lower()
-                version = m.group(2)
+                version = _clean_version(m.group(2))
                 pkgs[name] = version
 
     output = packages_dir / "requirements.txt"
