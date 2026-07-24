@@ -71,6 +71,21 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 - ❌ engine/ 不导入 flask/xlwings
 - ❌ web/ 不直接导入 engine/
 
+## 仓库目录树
+
+> 路由地图：所有文件路径均以此为基准。详细结构见 [project-structure.md](rules/project-structure.md)。
+
+```
+EngSmartSuite/
+├── smartsuite/                       # 主包（core / engine / services / web）
+├── tests/                            # 测试
+├── rules/                            # 规范文档
+├── skills/                           # Skill 定义
+├── agents.md                         # 本文件
+├── readme.md                         # 用户向功能指南
+└── .gitignore
+```
+
 ## 红线规则
 
 ### 1. 架构隔离
@@ -160,6 +175,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 | **不靠记忆引用文档** | 先 Read/Grep 确认 |
 | **不确定 = 承认** | 去查 spec |
 | **写过的 = 读过的** | Read 它再改 |
+| **版本号是事实锚点** | 每个结论标注来源文档版本，防止误用过时信息 |
 
 ## 会话管理
 
@@ -178,7 +194,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 ### 基本原则
 
 - 新会话先读本文件 + `skills/smartsuite-dev.md`
-- 跨会话通过 git commit 衍接
+- 跨会话通过 git commit 衔接
 - 每个 commit 自包含、可追溯
 
 ## 参考
