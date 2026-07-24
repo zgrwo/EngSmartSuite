@@ -185,6 +185,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 | 文档 | 角色 |
 | :--- | :--- |
+| [readme.md](readme.md) | 用户入口、模块速览、使用模式 |
 | [api-reference.md](rules/api-reference.md) | 签名唯一信源 |
 | [user-manual.md](rules/user-manual.md) | 用户手册 |
 | [context.md](rules/context.md) | 术语表 |
