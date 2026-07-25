@@ -1,0 +1,8 @@
+# Huber稳健回归 — 对异常值不敏感的线性建模，输出与OLS系数对比
+task: robust_regression
+target_col: "不良率"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+  - "注射压力"
+params: {}

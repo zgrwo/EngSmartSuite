@@ -1,0 +1,98 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smartsuite"
+version = "0.2.0"
+description = "SmartSuite — 工艺数据分析工具箱 (Excel + Python)"
+readme = "readme.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "SmartSuite Team"}
+]
+keywords = ["excel", "analysis", "manufacturing", "doe", "spc", "anova"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "statsmodels>=0.14",
+    "scikit-learn>=1.3",
+    "matplotlib>=3.7",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+web = [
+    "flask>=3.0",
+    "pyarrow>=14.0",
+]
+report = [
+    "python-pptx>=0.6",
+    "reportlab>=4.0",
+    "openpyxl>=3.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1",
+]
+all = [
+    "flask>=3.0",
+    "pyarrow>=14.0",
+    "python-pptx>=0.6",
+    "reportlab>=4.0",
+    "openpyxl>=3.0",
+]
+
+[project.scripts]
+smartsuite = "smartsuite.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["smartsuite*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = [
+    "ignore:Glyph .* missing from font:UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+ignore = ["E501", "N806"]
+# E501 — line length handled by formatter
+# N806 — uppercase vars are deliberate (SPC constants A2/D3/D4, stats symbols Q1/Q3/IQR, math notation X/G)
+# B007 — 已从全局 ignore 移除，仅在 per-file-ignores 中保留必要文件
+
+[tool.ruff.lint.per-file-ignores]
+"src/smartsuite/engine/__init__.py" = ["E402", "I001", "SIM112"]  # matplotlib config + core deps check must precede imports
+"src/smartsuite/engine/doe_opt.py" = ["E402", "I001", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict + sorted imports
+"src/smartsuite/engine/root_cause.py" = ["E402", "I001", "N803", "N806", "B007", "B905", "SIM108"]  # sp_stats alias + math vars + zip strict + logger mid-imports
+"src/smartsuite/engine/spc_monitor.py" = ["N806", "B007", "B905"]  # math vars + zip strict
+"src/smartsuite/engine/spc_charts.py" = ["B007", "SIM108"]  # unused loop vars + ternary style
+"src/smartsuite/engine/detection.py" = ["SIM300"]  # yoda condition
+"src/smartsuite/engine/exploratory.py" = ["SIM105"]  # try-except-pass style
+"src/smartsuite/cli.py" = ["E402"]  # matplotlib.use before imports
+"src/smartsuite/web/*" = ["E402", "SIM105", "SIM115"]  # matplotlib config before imports
+"src/smartsuite/services/orchestrator.py" = ["I001"]  # sorted engine imports for readability
+"src/smartsuite/services/reporter.py" = ["N806", "B904"]  # txBox variable + raise from err (Python 3.10)
+"src/smartsuite/services/data_io.py" = ["SIM108", "SIM210"]  # ternary style
+"tests/*" = ["N806", "E501", "F841", "B007", "E701", "E402", "I001"]  # test fixtures + math vars + import order

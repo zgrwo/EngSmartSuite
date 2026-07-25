@@ -1,0 +1,13 @@
+# 决策树特征重要性 — 排列重要性 + 交叉验证
+task: decision_tree
+target_col: "不良率"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+  - "注射压力"
+  - "保压压力"
+  - "注射速度"
+  - "冷却时间"
+params:
+  max_depth: 5
+  random_state: 42

@@ -1,0 +1,11 @@
+# Gage R&R 测量系统分析 — 重复性与再现性评估
+task: gage_rr
+target_col: "测量值"
+feature_cols:
+  - "部件编号"
+  - "操作员"
+params:
+  part_col: "部件编号"
+  operator_col: "操作员"
+  tolerance: 0.5        # 可选: 公差范围
+  sigma_multiplier: 5.15  # 研究变异乘数

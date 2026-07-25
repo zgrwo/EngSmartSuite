@@ -1,0 +1,6 @@
+# 二项比例 CI — Wilson Score + Clopper-Pearson
+task: proportion_ci
+target_col: "合格判定"
+feature_cols: []
+params:
+  success_value: "合格"     # 可选: 指定"成功"标签

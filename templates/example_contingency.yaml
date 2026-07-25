@@ -1,0 +1,7 @@
+# 列联表分析 — Fisher 精确检验 / 卡方独立性检验
+task: contingency
+target_col: "外观检查"       # 行变量
+feature_cols:
+  - "催化剂类型"             # 列变量
+params:
+  alpha: 0.05

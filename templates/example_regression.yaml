@@ -1,0 +1,14 @@
+# 回归分析模板 — 找出影响质量指标的关键工艺参数
+task: regression
+target_col: "不良率"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+  - "注射压力"
+  - "保压压力"
+  - "注射速度"
+  - "冷却时间"
+  - "螺杆转速"
+  - "背压"
+params:
+  model_type: "linear"

@@ -1,0 +1,13 @@
+# Lasso 正则化回归 — 自动变量选择 + 交叉验证
+task: lasso_regression
+target_col: "硬度"
+feature_cols:
+  - "主压力"
+  - "转台速度"
+  - "填充深度"
+  - "预压力"
+  - "顶出力"
+  - "料斗湿度"
+params:
+  l1_ratio: 1.0           # 1.0=pure Lasso, <1.0=ElasticNet
+  # alpha_lasso: 0.1      # 可选: 固定正则化强度

@@ -1,0 +1,6 @@
+# 中位数置信区间 — 基于二项分布符号检验的非参数方法
+task: median_ci
+target_col: "观测时间"
+feature_cols: []
+params:
+  ci_level: 0.95            # 置信水平

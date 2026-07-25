@@ -1,0 +1,11 @@
+# 相关性分析 — Pearson/Spearman 相关矩阵 + Bonferroni校正 + 热力图
+task: correlation
+target_col: "不良率"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+  - "注射压力"
+  - "冷却时间"
+  - "保压压力"
+params:
+  method: "pearson"

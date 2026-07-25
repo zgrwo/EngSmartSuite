@@ -30,7 +30,7 @@ pip install -e ".[dev]"
 python -m smartsuite.cli normality --data test_data.csv
 
 # 或启动 Web UI
-python smartsuite/web/app.py
+python run_server.py
 # → 浏览器打开 http://localhost:5000
 ```
 
@@ -60,7 +60,7 @@ python smartsuite/web/app.py
 ### Web UI（图形化操作）
 
 ```bash
-python smartsuite/web/app.py
+python run_server.py
 ```
 
 1. 浏览器打开 → 选择分析方法 → 上传数据 → 填写参数 → 查看报表
@@ -152,10 +152,10 @@ pip install -e ".[dev]"
 pytest tests/ -x -q
 
 # 代码检查
-ruff check smartsuite/
+ruff check src/smartsuite/
 
 # 启动 Web UI
-python smartsuite/web/app.py
+python run_server.py
 ```
 
 ---

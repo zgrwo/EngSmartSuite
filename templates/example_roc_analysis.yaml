@@ -1,0 +1,6 @@
+# ROC/AUC 分析 — 评估预测变量对二分类结果的区分能力
+task: roc_analysis
+target_col: "合格判定"       # 二分类结果
+feature_cols:
+  - "焊接温度"               # 连续预测变量
+params: {}

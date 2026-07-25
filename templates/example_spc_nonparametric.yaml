@@ -1,0 +1,6 @@
+# 非参数控制图 — 基于最佳拟合分布的CDF逆推控制限，不假设正态
+task: spc_nonparametric
+target_col: "不良率"
+feature_cols: []
+params:
+  side: "two-sided"

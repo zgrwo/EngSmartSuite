@@ -1,0 +1,8 @@
+# 响应面分析 — 二次模型 + 3D曲面 + 2D等高线 + 最优点标记
+task: response_surface
+target_col: "拉伸强度"
+feature_cols:
+  - "熔体温度"
+  - "模具温度"
+params:
+  direction: "maximize"

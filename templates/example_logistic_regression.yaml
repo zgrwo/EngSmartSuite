@@ -1,0 +1,9 @@
+# Logistic 回归 — 二分类结果建模 + Odds Ratio
+task: logistic_regression
+target_col: "保修索赔"       # 二分类结果
+feature_cols:
+  - "环境温度"
+  - "湿度"
+  - "每日循环"
+  - "运行小时"
+params: {}

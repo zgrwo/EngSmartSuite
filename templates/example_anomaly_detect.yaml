@@ -1,0 +1,8 @@
+# Grubbs 异常检测 — 基于 t 分布的统计异常检验
+task: anomaly_detect
+target_col: "拉伸强度"
+feature_cols: []
+params:
+  method: grubbs          # grubbs | iqr | zscore
+  alpha: 0.05             # Grubbs 检验显著性水平
+  max_outliers: 5         # 最多检测异常点数

@@ -1,0 +1,9 @@
+# 假设检验模板 — 对比两组的质量指标差异
+task: hypothesis_test
+target_col: "拉伸强度"
+feature_cols:
+  - "原料类型"
+params:
+  alpha: 0.05
+  test: "ttest_ind"
+  group_col: "原料类型"

@@ -1,0 +1,7 @@
+# Kaplan-Meier 生存分析 — 右删失寿命数据的生存曲线 + Weibull 拟合
+task: survival_analysis
+target_col: "观测时间"        # 时间/寿命列
+feature_cols:
+  - "故障"                   # 事件指示 (1=失效, 0=删失)
+  - "产品型号"               # 可选: 分组列 (用于 Log-rank 检验)
+params: {}

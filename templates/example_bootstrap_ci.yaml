@@ -1,0 +1,8 @@
+# Bootstrap 置信区间 — 不依赖正态假设的稳健区间估计
+task: bootstrap_ci
+target_col: "收率"
+feature_cols: []
+params:
+  statistic: mean       # mean | median | std
+  n_bootstrap: 2000     # 重抽样次数
+  ci_level: 0.95        # 置信水平
