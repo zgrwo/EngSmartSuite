@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "smartsuite"
 version = "0.2.0"
 description = "SmartSuite — 工艺数据分析工具箱 (Excel + Python)"
-readme = "readme.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [

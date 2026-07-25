@@ -82,7 +82,7 @@ EngSmartSuite/
 ├── rules/                            # 规范文档
 ├── skills/                           # Skill 定义
 ├── agents.md                         # 本文件
-├── readme.md                         # 用户向功能指南
+├── README.md                         # 用户向功能指南
 └── .gitignore
 ```
 
@@ -201,7 +201,7 @@ EngSmartSuite/
 
 | 文档 | 角色 |
 | :--- | :--- |
-| [readme.md](readme.md) | 用户入口、模块速览、使用模式 |
+| [README.md](README.md) | 用户入口、模块速览、使用模式 |
 | [api-reference.md](rules/api-reference.md) | 签名唯一信源 |
 | [user-manual.md](rules/user-manual.md) | 用户手册 |
 | [context.md](rules/context.md) | 术语表 |
