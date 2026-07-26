@@ -2,7 +2,7 @@
 
 > **可复用审查 Prompt** — 覆盖 20 个维度：架构、算法、实现、注册链、数据管道、输出层、Web/CLI、模板、测试 4 防线、文档 5 文件、跨切面 5 类、DRY、死代码、可观测、发布。每次发版全量跑，日常 diff 模式。
 >
-> **协作定位**：`CLAUDE.md`（架构入口）→ `skills/smartsuite-dev.md`（陷阱+模板）→ **本文档**（审查清单）→ `.claude/known-issues.md`（误判豁免）
+> **协作定位**：`agents.md`（架构入口）→ `skills/smartsuite-dev.md`（陷阱+模板）→ **本文档**（审查清单）→ `.claude/known-issues.md`（误判豁免）
 >
 > 项目概况：`~9,000 Python + ~470 JS + 42 YAML` | `40 methods` | `web/ → services/ → engine/` | `4 层防线`
 
@@ -86,10 +86,10 @@ print(f'missing={m}, extra={x}') if m or x else print('✅ 一致')
 ### 1.3 模块清单同步
 
 ```bash
-ls -R smartsuite/ && ls -R tests/  # 对照 CLAUDE.md 源码树逐条核对
+ls -R smartsuite/ && ls -R tests/  # 对照 agents.md 源码树逐条核对
 ```
 
-- [ ] CLAUDE.md 源码树/测试树与实际目录一致；`CONTEXT.md` 术语与代码一致
+- [ ] agents.md 源码树/测试树与实际目录一致；`CONTEXT.md` 术语与代码一致
 
 ### 1.4 基础设施
 
@@ -244,7 +244,7 @@ grep -rn "= 0\.05\|= 1\.96\|= 1\.5\|= 3[^0-9.]\|= 10[^0-9.]" smartsuite/engine/ 
 
 ### 3.6 类型注解完整性 `[NEW]`
 
-> CLAUDE.md 声明使用 PEP 604 语法（`list[str]` | `dict[str, pd.DataFrame]`）。
+> agents.md 声明使用 PEP 604 语法（`list[str]` | `dict[str, pd.DataFrame]`）。
 
 ```bash
 # 检查公开函数是否有完整类型注解
@@ -291,7 +291,7 @@ print('✅ 全部一致' if r==p==l and not (g-r) else '')
 "
 ```
 
-- [ ] 11 步注册链逐条确认（详见 `CLAUDE.md` 新增方法清单）
+- [ ] 11 步注册链逐条确认（详见 `agents.md` 新增方法清单）
 - [ ] `TASK_REGISTRY` = `DEFAULT_PARAMS` = `TASK_LABELS`（40/40）
 - [ ] `TASK_GROUPS` 无孤立任务；`TASK_PARAMS`(JS) ⊆ TASK_REGISTRY；`PARAM_META` 覆写 task_name 有效
 
@@ -454,7 +454,7 @@ pytest tests/test_workflows.py -v
 
 ### 8.1 职责边界
 
-> `CLAUDE.md`(AI 入口) ≠ `README.md`(用户入口) ≠ `user-manual.md`(操作指南) ≠ `api-reference.md`(签名查阅) ≠ `skill.md`(决策树) ≠ `CONTEXT.md`(术语表)
+> `agents.md`(AI 入口) ≠ `README.md`(用户入口) ≠ `user-manual.md`(操作指南) ≠ `api-reference.md`(签名查阅) ≠ `skill.md`(决策树) ≠ `CONTEXT.md`(术语表)
 
 - [ ] 各文档不跨职责重复；交叉引用链接有效；`CONTEXT.md` 术语与代码一致
 
@@ -463,7 +463,7 @@ pytest tests/test_workflows.py -v
 ```bash
 python -c "
 from smartsuite.services.orchestrator import TASK_LABELS
-with open('docs/api-reference.md', encoding='utf-8') as f: c = f.read()
+with open('rules/api-reference.md', encoding='utf-8') as f: c = f.read()
 for t, l in TASK_LABELS.items():
     if t not in c: print(f'❌ api-reference 缺失: {t} ({l})')
 "
@@ -473,7 +473,7 @@ for t, l in TASK_LABELS.items():
 - [ ] `user-manual.md` 40 方法六段式完整；截图与 Web UI 一致；FAQ 覆盖常见问题
 - [ ] `skill.md` 决策树覆盖 40 方法入口路径；新增方法（如 scatter_plot）已更新
 
-### 8.3 CLAUDE.md 自洽
+### 8.3 agents.md 自洽
 
 - [ ] 参考文件索引指向实际存在的文档；常用命令全部可执行；ruff per-file-ignores 覆盖所有例外
 

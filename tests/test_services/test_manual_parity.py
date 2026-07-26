@@ -1,7 +1,7 @@
 """Web UI ≡ CLI ≡ Python ≡ 用户手册 四路一致性验证。
 
 使用 tests/test_data.xlsx (1000行×44列 注塑工艺数据)，
-逐条对照 docs/user-manual.md 中记录的预期数值，
+逐条对照 rules/user-manual.md 中记录的预期数值，
 验证所有 4 条路径（Python 直接调用 / CLI 模拟 / Web API / 手册文档）
 产生完全一致的数值结果。
 

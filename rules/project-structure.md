@@ -90,7 +90,7 @@ EngSmartSuite/
 ├── setup_offline.bat / .sh           # 离线安装脚本
 ├── pyproject.toml                    # 包配置 + ruff 规则
 ├── CONTEXT.md                        # 领域术语
-├── CLAUDE.md                         # 项目宪法
+├── agents.md                         # 项目宪法 / AI 行为准则
 ├── README.md                         # 用户入口
 ├── LICENSE                           # MIT
 └── .gitignore                        # 排除规则

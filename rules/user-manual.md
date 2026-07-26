@@ -2,7 +2,7 @@
 
 > 面向工艺工程师的 Web 界面操作指南。上传 Excel → 选列 → 点按钮 → 看结果。
 > 无需安装任何软件，浏览器打开即可使用。
-> 术语定义 → `../CONTEXT.md` | API 参考 → `docs/api-reference.md`
+> 术语定义 → `../CONTEXT.md` | API 参考 → `api-reference.md`
 
 ## 目录
 

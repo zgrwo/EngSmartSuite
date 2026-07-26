@@ -178,7 +178,7 @@ class AnalysisRequest(BaseModel):
 |------|------|----------|------|
 | 四路一致性脚本 | `scripts/verify_manual_parity.py` | 自动对比四路输出 | Phase 1-2 |
 | 图片自动生成脚本 | `scripts/generate_images.py` | 从 Python 运行生成图片 | — |
-| 修复手册数值 | `docs/user-manual.md` 更新 | 与 Python 实际输出一致 | 上一项 |
+| 修复手册数值 | `rules/user-manual.md` 更新 | 与 Python 实际输出一致 | 上一项 |
 | 集成到 CI | `.github/workflows/quality.yml` | PR 自动验证 | — |
 | Plotly 交互式图表（可选） | `engine/plotting.py` | HTML 交互式输出 | — |
 
