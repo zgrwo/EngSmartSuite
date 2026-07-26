@@ -93,6 +93,21 @@ print(result.summary)
 
 ---
 
+## 架构特点
+
+```
+smartsuite/core/       ← 数据契约层：零依赖，仅 dataclass
+smartsuite/engine/     ← 分析引擎层：纯 Python，零 flask/xlwings 依赖
+smartsuite/services/   ← 应用服务层：唯一桥接层
+smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
+```
+
+- ✅ 引擎函数签名统一：`(AnalysisRequest) → AnalysisResult`
+- ✅ services/ 是唯一桥接层，engine/ 零外部框架依赖
+- ❌ engine/ 不导入 flask/xlwings；web/ 不直接导入 engine/
+
+---
+
 ## 错误处理
 
 - **中文工艺术语**：错误信息使用用户可理解的工艺语言，不暴露 Python traceback
@@ -169,3 +184,19 @@ python run_server.py
 | [context.md](rules/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](rules/project-structure.md) | 结构地图 | 文件职责与层级关系 |
 | [agents.md](agents.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
+
+---
+
+## 治理体系说明
+
+本项目遵循 [Harmonization 治理规范](https://github.com/zgrwo/Harmonization) 模板体系：
+
+| 文件 | 面向 | 职责 |
+|------|------|------|
+| `agents.md` | AI 编程助手 | 项目宪法——架构、红线、编码准则、防幻觉铁律 |
+| `readme.md` | 人类用户 | 功能指南——安装、模块速览、使用模式（本文件） |
+| `rules/` | AI + 人类 | 规范文档——API 参考、用户手册、术语表、审查模板 |
+| `skills/` | AI 编码 | 技能定义——语言陷阱、编码模式、重构守则 |
+
+**核心原则**：SSOT（信息只在一处定义）、Skill-first（修改代码前加载技能）、四条核心准则。
+
