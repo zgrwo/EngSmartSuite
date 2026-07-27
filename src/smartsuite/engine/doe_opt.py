@@ -9,7 +9,11 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR, EPSILON
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import durbin_watson, safe_float as _safe_float, threshold_label  # 共享工具函数
+from smartsuite.engine._utils import (
+    durbin_watson,
+    safe_float as _safe_float,
+    threshold_label,
+)  # 共享工具函数
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +61,8 @@ def _breusch_pagan(model, X):
     # 回归残差平方对自变量
     try:
         aux_model = sm.OLS(resid_sq, X).fit()
-        ess = np.sum((aux_model.fittedvalues - resid_sq_mean)**2)
-        rss = np.sum((resid_sq - aux_model.fittedvalues)**2)
+        ess = np.sum((aux_model.fittedvalues - resid_sq_mean) ** 2)
+        rss = np.sum((resid_sq - aux_model.fittedvalues) ** 2)
         lm = n * ess / (ess + rss)
         k = X.shape[1] - 1
         p_val = float(sp_stats.chi2.sf(lm, max(k, 1)))
@@ -73,15 +77,17 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 1:
         return AnalysisResult(
-            task="regression", status="error",
+            task="regression",
+            status="error",
             messages=["需要至少 1 个因子列"],
         )
 
     df = req.data[[req.target_col] + cols].dropna()
     if len(df) < len(cols) + 2:
         return AnalysisResult(
-            task="regression", status="error",
-            messages=[f"有效样本量({len(df)})不足，需要至少{len(cols)+2}条"],
+            task="regression",
+            status="error",
+            messages=[f"有效样本量({len(df)})不足，需要至少{len(cols) + 2}条"],
         )
 
     try:
@@ -96,14 +102,16 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 标准化系数
         std_betas = _std_beta(model, X)
 
-        coef_df = pd.DataFrame({
-            "变量": X.columns,
-            "系数": np.asarray(model.params),
-            "标准误": np.asarray(model.bse),
-            "t值": np.asarray(model.tvalues),
-            "p值": np.asarray(model.pvalues),
-            "标准化系数(β)": std_betas,
-        })
+        coef_df = pd.DataFrame(
+            {
+                "变量": X.columns,
+                "系数": np.asarray(model.params),
+                "标准误": np.asarray(model.bse),
+                "t值": np.asarray(model.tvalues),
+                "p值": np.asarray(model.pvalues),
+                "标准化系数(β)": std_betas,
+            }
+        )
 
         # 警告消息列表（在整个诊断段之前初始化，供后续各节追加）
         warn_msgs: list[str] = []
@@ -130,16 +138,25 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
 
         # ── 诊断表 ──
         diagnostics_rows = [
-            {"指标": "R²", "值": f"{model.rsquared:.4f}",
-             "说明": "模型解释的变异比例"},
-            {"指标": "调整R²", "值": f"{model.rsquared_adj:.4f}",
-             "说明": "惩罚变量数后的拟合优度"},
-            {"指标": "F 统计量", "值": f"{model.fvalue:.4f}" if np.isfinite(model.fvalue) else "N/A (退化模型)",
-             "说明": f"p={model.f_pvalue:.4f}" if np.isfinite(model.f_pvalue) else "N/A"},
-            {"指标": "Durbin-Watson", "值": f"{dw:.4f}",
-             "说明": "接近2=无自相关, <1=正自相关, >3=负自相关"},
-            {"指标": "Breusch-Pagan", "值": f"LM={bp_lm:.4f}, p={bp_p:.4f}" if (bp_lm is not None and bp_p is not None) else "N/A",
-             "说明": "p<0.05=存在异方差"},
+            {"指标": "R²", "值": f"{model.rsquared:.4f}", "说明": "模型解释的变异比例"},
+            {"指标": "调整R²", "值": f"{model.rsquared_adj:.4f}", "说明": "惩罚变量数后的拟合优度"},
+            {
+                "指标": "F 统计量",
+                "值": f"{model.fvalue:.4f}" if np.isfinite(model.fvalue) else "N/A (退化模型)",
+                "说明": f"p={model.f_pvalue:.4f}" if np.isfinite(model.f_pvalue) else "N/A",
+            },
+            {
+                "指标": "Durbin-Watson",
+                "值": f"{dw:.4f}",
+                "说明": "接近2=无自相关, <1=正自相关, >3=负自相关",
+            },
+            {
+                "指标": "Breusch-Pagan",
+                "值": f"LM={bp_lm:.4f}, p={bp_p:.4f}"
+                if (bp_lm is not None and bp_p is not None)
+                else "N/A",
+                "说明": "p<0.05=存在异方差",
+            },
             {"指标": "AIC", "值": f"{model.aic:.1f}", "说明": "越小越好(模型比较用)"},
             {"指标": "BIC", "值": f"{model.bic:.1f}", "说明": "越小越好(惩罚更重)"},
         ]
@@ -150,8 +167,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 异方差警告（p<0.05 表示拒绝同方差，即存在异方差 == 有问题）
         if bp_p is not None and bp_p < 0.05:
             warn_msgs.append(
-                f"⚠ Breusch-Pagan 检验 p={bp_p:.4f}<0.05，残差存在异方差，"
-                "系数标准误可能不准确"
+                f"⚠ Breusch-Pagan 检验 p={bp_p:.4f}<0.05，残差存在异方差，系数标准误可能不准确"
             )
         if dw < DW_POSITIVE_AUTOCORR:
             warn_msgs.append(f"⚠ Durbin-Watson={dw:.3f}<{DW_POSITIVE_AUTOCORR}，残差存在正自相关")
@@ -185,17 +201,32 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 4. Cook's Distance (若计算失败则显示提示文本)
         ax4 = fig_res.add_subplot(2, 3, 4)
         if cooks_d is not None and len(cooks_d) > 0:
-            ax4.stem(range(n), cooks_d, linefmt=PALETTE["data"]["secondary"], markerfmt="o", basefmt=" ")
+            ax4.stem(
+                range(n), cooks_d, linefmt=PALETTE["data"]["secondary"], markerfmt="o", basefmt=" "
+            )
             threshold = 4 / n
-            ax4.axhline(threshold, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1,
-                        label=f"4/n={threshold:.4f}")
+            ax4.axhline(
+                threshold,
+                color=PALETTE["anomaly"]["primary"],
+                linestyle="--",
+                linewidth=1,
+                label=f"4/n={threshold:.4f}",
+            )
             ax4.set_xlabel("观测序号", fontsize=9)
             ax4.set_ylabel("Cook's D", fontsize=9)
             ax4.set_title("Cook's Distance (影响点诊断)", fontsize=10)
             ax4.legend(fontsize=7.5)
         else:
-            ax4.text(0.5, 0.5, "Cook's D 计算失败\n(数据可能共线性)", ha="center", va="center",
-                    transform=ax4.transAxes, fontsize=9, color=PALETTE["judge"]["warn"])
+            ax4.text(
+                0.5,
+                0.5,
+                "Cook's D 计算失败\n(数据可能共线性)",
+                ha="center",
+                va="center",
+                transform=ax4.transAxes,
+                fontsize=9,
+                color=PALETTE["judge"]["warn"],
+            )
             ax4.set_title("Cook's Distance (不可用)", fontsize=10)
 
         # 5. Residual vs Leverage
@@ -208,16 +239,29 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             ax5.set_ylabel("残差", fontsize=9)
             ax5.set_title("Residuals vs Leverage", fontsize=10)
         else:
-            ax5.text(0.5, 0.5, "杠杆值计算失败\n(数据可能共线性)", ha="center", va="center",
-                    transform=ax5.transAxes, fontsize=9, color=PALETTE["judge"]["warn"])
+            ax5.text(
+                0.5,
+                0.5,
+                "杠杆值计算失败\n(数据可能共线性)",
+                ha="center",
+                va="center",
+                transform=ax5.transAxes,
+                fontsize=9,
+                color=PALETTE["judge"]["warn"],
+            )
             ax5.set_title("Residuals vs Leverage (不可用)", fontsize=10)
 
         # 6. Actual vs Predicted
         ax6 = fig_res.add_subplot(2, 3, 6)
         ax6.scatter(fitted, y, alpha=0.5, s=15, color=PALETTE["data"]["primary"])
-        ax6.plot([y.min(), y.max()], [y.min(), y.max()],
-                 color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1,
-                 label="完美预测")
+        ax6.plot(
+            [y.min(), y.max()],
+            [y.min(), y.max()],
+            color=PALETTE["anomaly"]["primary"],
+            linestyle="--",
+            linewidth=1,
+            label="完美预测",
+        )
         ax6.set_xlabel("预测值", fontsize=9)
         ax6.set_ylabel("实际值", fontsize=9)
         ax6.set_title(f"Actual vs Predicted (R²={model.rsquared:.3f})", fontsize=10)
@@ -231,9 +275,9 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             f"显著变量: {len(sig_vars)}/{k}",
         ]
         if len(sig_vars) > 0:
-            top_beta_idx = np.argmax(np.abs(
-                [std_betas[list(X.columns).index(v)] for v in sig_vars["变量"]]
-            ))
+            top_beta_idx = np.argmax(
+                np.abs([std_betas[list(X.columns).index(v)] for v in sig_vars["变量"]])
+            )
             top_var = sig_vars.iloc[top_beta_idx]["变量"]
             summary_parts.append(f"最重要的变量: {top_var}")
         summary_parts.append(f"DW={dw:.3f}")
@@ -266,8 +310,11 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     except Exception:
         logger.debug("回归模型拟合失败", exc_info=True)
-        return AnalysisResult(task="regression", status="error",
-                              messages=["回归模型拟合失败，请检查数据是否存在缺失值或共线性"])
+        return AnalysisResult(
+            task="regression",
+            status="error",
+            messages=["回归模型拟合失败，请检查数据是否存在缺失值或共线性"],
+        )
 
 
 def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -275,7 +322,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 2:
         return AnalysisResult(
-            task="response_surface", status="error",
+            task="response_surface",
+            status="error",
             messages=["响应面分析需要至少 2 个因子"],
         )
 
@@ -290,9 +338,12 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     df = req.data[[req.target_col, c1, c2]].dropna()
     if len(df) < 7:
         return AnalysisResult(
-            task="response_surface", status="error",
-            messages=[f"有效样本不足：二次响应面模型含 6 个参数，至少需要 7 个数据点"
-                      f"（当前 {len(df)} 个，残差自由度为 0 会导致标准误为 NaN）"],
+            task="response_surface",
+            status="error",
+            messages=[
+                f"有效样本不足：二次响应面模型含 6 个参数，至少需要 7 个数据点"
+                f"（当前 {len(df)} 个，残差自由度为 0 会导致标准误为 NaN）"
+            ],
         )
 
     try:
@@ -300,14 +351,16 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         y = df[req.target_col].values
 
         # 构建设计矩阵 (使用 DataFrame 以便 OLS 输出含命名列)
-        X_design_df = pd.DataFrame({
-            "const": np.ones(len(df)),
-            c1: X1,
-            c2: X2,
-            f"{c1}²": X1**2,
-            f"{c2}²": X2**2,
-            f"{c1}×{c2}": X1 * X2,
-        })
+        X_design_df = pd.DataFrame(
+            {
+                "const": np.ones(len(df)),
+                c1: X1,
+                c2: X2,
+                f"{c1}²": X1**2,
+                f"{c2}²": X2**2,
+                f"{c1}×{c2}": X1 * X2,
+            }
+        )
         term_names = list(X_design_df.columns)
 
         # 使用 OLS 而非 lstsq，以获取 R²/p值/标准误
@@ -318,7 +371,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     except Exception:
         logger.debug("响应面模型未能求解", exc_info=True)
         return AnalysisResult(
-            task="response_surface", status="error",
+            task="response_surface",
+            status="error",
             messages=["响应面模型未能求解"],
         )
 
@@ -349,18 +403,21 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     opt_z = float(ZI[opt_idx])
 
     # ── 系数表含显著性 ──
-    coef_df = pd.DataFrame({
-        "项": term_names,
-        "系数": beta,
-        "标准误": np.asarray(model_rsm.bse),
-        "t值": np.asarray(model_rsm.tvalues),
-        "p值": np.asarray(model_rsm.pvalues),
-    })
+    coef_df = pd.DataFrame(
+        {
+            "项": term_names,
+            "系数": beta,
+            "标准误": np.asarray(model_rsm.bse),
+            "t值": np.asarray(model_rsm.tvalues),
+            "p值": np.asarray(model_rsm.pvalues),
+        }
+    )
 
     # ── 双图：3D 曲面 (左) + 2D 等高线 (右) ──
     # 检查 mplot3d 可用性（极简 matplotlib 安装可能不包含）
     try:
         from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
         _has_3d = True
     except ImportError:
         _has_3d = False
@@ -370,12 +427,24 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 左: 3D 曲面
     if _has_3d:
         ax_3d = fig.add_subplot(1, 2, 1, projection="3d")
-        surf = ax_3d.plot_surface(XI, YI, ZI, cmap=_rsm_cmap, alpha=0.85, linewidth=0, antialiased=True)
-        ax_3d.scatter(X1, X2, y, color=PALETTE["data"]["primary"], s=25, alpha=0.7, label="观测数据")
+        surf = ax_3d.plot_surface(
+            XI, YI, ZI, cmap=_rsm_cmap, alpha=0.85, linewidth=0, antialiased=True
+        )
+        ax_3d.scatter(
+            X1, X2, y, color=PALETTE["data"]["primary"], s=25, alpha=0.7, label="观测数据"
+        )
         # 标注最优点
-        ax_3d.scatter([opt_x1], [opt_x2], [opt_z], color=PALETTE["anomaly"]["primary"], s=120,
-                      marker="*", edgecolors="white", linewidths=1.5,
-                      label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f})")
+        ax_3d.scatter(
+            [opt_x1],
+            [opt_x2],
+            [opt_z],
+            color=PALETTE["anomaly"]["primary"],
+            s=120,
+            marker="*",
+            edgecolors="white",
+            linewidths=1.5,
+            label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f})",
+        )
         ax_3d.set_xlabel(c1, fontsize=9)
         ax_3d.set_ylabel(c2, fontsize=9)
         ax_3d.set_zlabel(req.target_col, fontsize=9)
@@ -390,9 +459,16 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     cs = ax_contour.contour(XI, YI, ZI, levels=8, colors="black", linewidths=0.5, alpha=0.3)
     ax_contour.clabel(cs, inline=True, fontsize=7.5, fmt="%.2f")
     ax_contour.scatter(X1, X2, color=PALETTE["data"]["primary"], s=20, alpha=0.6, label="观测数据")
-    ax_contour.scatter([opt_x1], [opt_x2], color=PALETTE["anomaly"]["primary"], s=150,
-                       marker="*", edgecolors="white", linewidths=2,
-                       label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f}, z={opt_z:.3f})")
+    ax_contour.scatter(
+        [opt_x1],
+        [opt_x2],
+        color=PALETTE["anomaly"]["primary"],
+        s=150,
+        marker="*",
+        edgecolors="white",
+        linewidths=2,
+        label=f"最优 ({opt_x1:.2f}, {opt_x2:.2f}, z={opt_z:.3f})",
+    )
     ax_contour.set_xlabel(c1, fontsize=10)
     ax_contour.set_ylabel(c2, fontsize=10)
     ax_contour.set_title(f"2D 等高线 — {req.target_col}", fontsize=10)
@@ -413,11 +489,19 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         messages=rsm_warn_msgs,
         tables={
             "coefficients": coef_df,
-            "model_fit": pd.DataFrame({
-                "指标": ["R²", "调整R²", "样本量", "最优X1", "最优X2", "最优预测值"],
-                "值": [f"{r2:.4f}", f"{r2_adj:.4f}", str(len(df)),
-                      f"{opt_x1:.4f}", f"{opt_x2:.4f}", f"{opt_z:.4f}"],
-            }),
+            "model_fit": pd.DataFrame(
+                {
+                    "指标": ["R²", "调整R²", "样本量", "最优X1", "最优X2", "最优预测值"],
+                    "值": [
+                        f"{r2:.4f}",
+                        f"{r2_adj:.4f}",
+                        str(len(df)),
+                        f"{opt_x1:.4f}",
+                        f"{opt_x2:.4f}",
+                        f"{opt_z:.4f}",
+                    ],
+                }
+            ),
         },
         figures=[fig],
         summary=summary,
@@ -437,7 +521,8 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     ranges = req.params.get("ranges", {})
     if not ranges:
         return AnalysisResult(
-            task="grid_search", status="error",
+            task="grid_search",
+            status="error",
             messages=["需要提供参数搜索范围 (ranges)"],
         )
 
@@ -451,8 +536,9 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         elif _r[0] >= _r[1]:
             _invalid_ranges.append(f"「{_col}」下限 ({_r[0]}) 必须小于上限 ({_r[1]})")
     if _invalid_ranges:
-        return AnalysisResult(task="grid_search", status="error",
-            messages=["参数搜索范围格式无效:"] + _invalid_ranges)
+        return AnalysisResult(
+            task="grid_search", status="error", messages=["参数搜索范围格式无效:"] + _invalid_ranges
+        )
 
     n_points = req.params.get("n_points", 10)
     try:
@@ -463,7 +549,8 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     n_points = max(2, min(n_points, 30))
     if len(ranges) > 4:
         return AnalysisResult(
-            task="grid_search", status="error",
+            task="grid_search",
+            status="error",
             messages=[f"搜索参数维度({len(ranges)})过高，最多支持 4 个参数"],
         )
     total_points = n_points ** len(ranges)
@@ -478,13 +565,17 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     col_names = list(ranges.keys())
     missing_cols = [c for c in col_names if c not in req.data.columns]
     if missing_cols:
-        return AnalysisResult(task="grid_search", status="error",
-            messages=[f"搜索参数列不存在于数据中: {missing_cols}"])
+        return AnalysisResult(
+            task="grid_search",
+            status="error",
+            messages=[f"搜索参数列不存在于数据中: {missing_cols}"],
+        )
 
     df = req.data[col_names + [req.target_col]].dropna()
     if len(df) < 5:
         return AnalysisResult(
-            task="grid_search", status="error",
+            task="grid_search",
+            status="error",
             messages=[f"有效样本({len(df)})不足"],
         )
 
@@ -502,21 +593,17 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         best_alpha = float(ridge_cv.alpha_)
 
         # 交叉验证 R²
-        cv_r2 = float(cross_val_score(ridge_cv, X_train, y_train, cv=max(2, min(5, len(df)//3)),
-                                       scoring="r2").mean())
+        cv_r2 = float(
+            cross_val_score(
+                ridge_cv, X_train, y_train, cv=max(2, min(5, len(df) // 3)), scoring="r2"
+            ).mean()
+        )
 
         predictions = ridge_cv.predict(points)
 
-        best_idx = (
-            np.argmax(predictions)
-            if direction == "maximize"
-            else np.argmin(predictions)
-        )
+        best_idx = np.argmax(predictions) if direction == "maximize" else np.argmin(predictions)
         pred_best = float(predictions[best_idx])
-        best = {
-            col_names[i]: round(float(points[best_idx, i]), 3)
-            for i in range(len(col_names))
-        }
+        best = {col_names[i]: round(float(points[best_idx, i]), 3) for i in range(len(col_names))}
 
         # Top-N 候选
         top_n = min(5, len(predictions))
@@ -537,11 +624,25 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             Z = predictions.reshape(n_points, n_points)
             X, Y = mesh
             cs = ax.contourf(X, Y, Z, levels=15, cmap=_gs_cmap)
-            ax.scatter(X_train[:, 0], X_train[:, 1], alpha=0.4, s=12,
-                      color=PALETTE["data"]["primary"], label="训练数据")
-            ax.scatter(points[best_idx, 0], points[best_idx, 1], marker="*",
-                       color=PALETTE["target"]["primary"], s=180, edgecolors="white", linewidths=1.5, zorder=5,
-                       label=f"最优 ({best[col_names[0]]}, {best[col_names[1]]})")
+            ax.scatter(
+                X_train[:, 0],
+                X_train[:, 1],
+                alpha=0.4,
+                s=12,
+                color=PALETTE["data"]["primary"],
+                label="训练数据",
+            )
+            ax.scatter(
+                points[best_idx, 0],
+                points[best_idx, 1],
+                marker="*",
+                color=PALETTE["target"]["primary"],
+                s=180,
+                edgecolors="white",
+                linewidths=1.5,
+                zorder=5,
+                label=f"最优 ({best[col_names[0]]}, {best[col_names[1]]})",
+            )
             ax.set_xlabel(col_names[0], fontsize=10)
             ax.set_ylabel(col_names[1], fontsize=10)
             ax.set_title(
@@ -578,8 +679,11 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         )
     except Exception:
         logger.debug("网格搜索失败", exc_info=True)
-        return AnalysisResult(task="grid_search", status="error",
-                              messages=["网格搜索失败，请检查参数范围和样本量是否合理"])
+        return AnalysisResult(
+            task="grid_search",
+            status="error",
+            messages=["网格搜索失败，请检查参数范围和样本量是否合理"],
+        )
 
 
 def _desirability(vals, direction):
@@ -599,30 +703,34 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     objectives = req.params.get("objectives", [])
     if not objectives:
         return AnalysisResult(
-            task="multi_objective", status="error",
+            task="multi_objective",
+            status="error",
             messages=["需要提供优化目标 (objectives)"],
         )
     # 校验每个 objective 包含必需的 "col" 键
     for i, obj in enumerate(objectives):
         if "col" not in obj:
             return AnalysisResult(
-                task="multi_objective", status="error",
-                messages=[f"第 {i+1} 个优化目标缺少 'col' 字段"],
+                task="multi_objective",
+                status="error",
+                messages=[f"第 {i + 1} 个优化目标缺少 'col' 字段"],
             )
 
     weights = req.params.get("weights", [1.0] * len(objectives))
     if len(weights) != len(objectives):
-        return AnalysisResult(task="multi_objective", status="error",
-            messages=[f"权重数量({len(weights)})与目标数量({len(objectives)})不匹配"])
+        return AnalysisResult(
+            task="multi_objective",
+            status="error",
+            messages=[f"权重数量({len(weights)})与目标数量({len(objectives)})不匹配"],
+        )
     if len(weights) == 0:
-        return AnalysisResult(task="multi_objective", status="error",
-            messages=["权重列表不能为空"])
+        return AnalysisResult(task="multi_objective", status="error", messages=["权重列表不能为空"])
     weight_sum = np.sum(weights)
     if weight_sum <= 0:
-        return AnalysisResult(task="multi_objective", status="error",
-            messages=["权重之和必须大于零"])
+        return AnalysisResult(
+            task="multi_objective", status="error", messages=["权重之和必须大于零"]
+        )
     weights = np.array(weights) / weight_sum
-
 
     # 构建所有优化目标列的共同有效数据掩码
     obj_cols = [obj["col"] for obj in objectives]
@@ -630,13 +738,15 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     missing_cols = [c for c in obj_cols if c not in req.data.columns]
     if missing_cols:
         return AnalysisResult(
-            task="multi_objective", status="error",
+            task="multi_objective",
+            status="error",
             messages=[f"优化目标列不存在于数据中: {', '.join(missing_cols)}"],
         )
     valid_mask = req.data[obj_cols].notna().all(axis=1)
     if valid_mask.sum() == 0:
         return AnalysisResult(
-            task="multi_objective", status="error",
+            task="multi_objective",
+            status="error",
             messages=["所有目标列均包含缺失值"],
         )
 
@@ -647,15 +757,18 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         vals = req.data.loc[valid_rows, col].values
         if len(vals) < 2:
             return AnalysisResult(
-                task="multi_objective", status="error",
+                task="multi_objective",
+                status="error",
                 messages=[f"列「{col}」有效数据不足"],
             )
         direction = obj.get("direction", "maximize")
         if direction not in ("maximize", "minimize"):
             return AnalysisResult(
-                task="multi_objective", status="error",
-                messages=[f"目标列「{col}」的优化方向「{direction}」无效，"
-                          "请使用 'maximize' 或 'minimize'"],
+                task="multi_objective",
+                status="error",
+                messages=[
+                    f"目标列「{col}」的优化方向「{direction}」无效，请使用 'maximize' 或 'minimize'"
+                ],
             )
         desirability = _desirability(vals, direction)
         scores[valid_rows] += w * desirability
@@ -666,12 +779,10 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     best_row_iloc = req.data.index.get_loc(best_idx)  # 转为位置索引（用于 iloc）
     if isinstance(best_row_iloc, slice):
         best_row_iloc = best_row_iloc.start
-    elif hasattr(best_row_iloc, '__iter__'):
+    elif hasattr(best_row_iloc, "__iter__"):
         best_row_iloc = list(best_row_iloc)[0]
     best_params = {
-        c: req.data.iloc[best_row_iloc][c]
-        for c in req.feature_cols
-        if c in req.data.columns
+        c: req.data.iloc[best_row_iloc][c] for c in req.feature_cols if c in req.data.columns
     }
 
     # ── 各目标单独期望值表 ──
@@ -682,13 +793,15 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         vals = req.data.loc[valid_rows, col].values
         d_i = _desirability(vals, direction)
         best_d = float(d_i[best_pos])
-        desirability_rows.append({
-            "目标列": col,
-            "方向": "最大化" if direction == "maximize" else "最小化",
-            "权重": round(float(weights[objectives.index(obj)]), 3),
-            "最优期望值": round(best_d, 4),
-            "均值期望值": round(float(np.mean(d_i)), 4),
-        })
+        desirability_rows.append(
+            {
+                "目标列": col,
+                "方向": "最大化" if direction == "maximize" else "最小化",
+                "权重": round(float(weights[objectives.index(obj)]), 3),
+                "最优期望值": round(best_d, 4),
+                "均值期望值": round(float(np.mean(d_i)), 4),
+            }
+        )
     desirability_df = pd.DataFrame(desirability_rows)
 
     # ── 增强图表 ──
@@ -715,8 +828,16 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             vals1_plot = vals1
             ylabel = objectives[1]["col"]
 
-        ax_pareto.scatter(vals0_plot, vals1_plot, c=score_valid, cmap="RdYlGn",
-                         alpha=0.6, s=30, edgecolors=PALETTE["spec"]["tertiary"], linewidths=0.3)
+        ax_pareto.scatter(
+            vals0_plot,
+            vals1_plot,
+            c=score_valid,
+            cmap="RdYlGn",
+            alpha=0.6,
+            s=30,
+            edgecolors=PALETTE["spec"]["tertiary"],
+            linewidths=0.3,
+        )
 
         # Pareto 前沿：O(n log n) 排序法（按 x 降序，跟踪 y 最大值）
         points = np.column_stack([vals0_plot, vals1_plot])
@@ -731,14 +852,28 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
                 max_y = sorted_pts[i, 1]
         pareto_idx = order[pareto_mask]
         pareto_sorted = pareto_idx[np.argsort(points[pareto_idx, 0])]
-        ax_pareto.plot(points[pareto_sorted, 0], points[pareto_sorted, 1],
-                      color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2, alpha=0.7,
-                      label=f"Pareto 前沿 ({len(pareto_sorted)}点)")
+        ax_pareto.plot(
+            points[pareto_sorted, 0],
+            points[pareto_sorted, 1],
+            color=PALETTE["anomaly"]["primary"],
+            linestyle="-",
+            linewidth=2,
+            alpha=0.7,
+            label=f"Pareto 前沿 ({len(pareto_sorted)}点)",
+        )
         # 标记最优
         best_pos_in_valid = best_pos
-        ax_pareto.scatter([vals0_plot[best_pos_in_valid]], [vals1_plot[best_pos_in_valid]],
-                         s=150, marker="*", color=PALETTE["anomaly"]["primary"], edgecolors="white",
-                         linewidths=1.5, zorder=5, label="加权最优")
+        ax_pareto.scatter(
+            [vals0_plot[best_pos_in_valid]],
+            [vals1_plot[best_pos_in_valid]],
+            s=150,
+            marker="*",
+            color=PALETTE["anomaly"]["primary"],
+            edgecolors="white",
+            linewidths=1.5,
+            zorder=5,
+            label="加权最优",
+        )
         ax_pareto.set_xlabel(xlabel, fontsize=9)
         ax_pareto.set_ylabel(ylabel, fontsize=9)
         ax_pareto.set_title("Pareto 前沿 — 双目标权衡", fontsize=10)
@@ -752,14 +887,14 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     top_idx = np.argsort(score_valid)[-top_n:]
     # 显示各目标分解（PALETTE 对比色 + 数据色，支持 ≥5 目标）
     bar_colors = [
-        PALETTE["data"]["primary"],    # 深蓝
+        PALETTE["data"]["primary"],  # 深蓝
         PALETTE["target"]["primary"],  # 深橙
         PALETTE["center"]["primary"],  # 绿色
-        PALETTE["contrast"]["d"],      # 紫色
-        PALETTE["contrast"]["a"],      # 浅蓝
-        PALETTE["contrast"]["b"],      # 橙色
+        PALETTE["contrast"]["d"],  # 紫色
+        PALETTE["contrast"]["a"],  # 浅蓝
+        PALETTE["contrast"]["b"],  # 橙色
         PALETTE["data"]["secondary"],  # 浅蓝灰
-        PALETTE["judge"]["warn"],      # 橙色警告
+        PALETTE["judge"]["warn"],  # 橙色警告
     ]
     bottom_vals = np.zeros(top_n)
     for oi, obj in enumerate(objectives):
@@ -769,9 +904,14 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         vals = req.data.loc[valid_rows, col].values
         d_i = _desirability(vals, direction)
         contrib = w * d_i[top_idx]
-        ax_score.barh(range(top_n), contrib, left=bottom_vals,
-                     color=bar_colors[oi % len(bar_colors)],
-                     label=f"{col} (w={w:.3f})", height=0.7)
+        ax_score.barh(
+            range(top_n),
+            contrib,
+            left=bottom_vals,
+            color=bar_colors[oi % len(bar_colors)],
+            label=f"{col} (w={w:.3f})",
+            height=0.7,
+        )
         bottom_vals += contrib
     ax_score.invert_yaxis()
     ax_score.set_xlabel("加权期望值", fontsize=9)
@@ -790,8 +930,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig],
         summary=(
             f"综合评分最优: {best_params}, 得分: {scores[best_row_iloc]:.4f}。"
-            + (f"Pareto 前沿包含 {len(pareto_idx)} 个非支配解"
-               if len(objectives) == 2 else "")
+            + (f"Pareto 前沿包含 {len(pareto_idx)} 个非支配解" if len(objectives) == 2 else "")
         ),
         metadata={
             "optimal_params": best_params,
@@ -824,14 +963,16 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 1:
         return AnalysisResult(
-            task="doe_analysis", status="error",
+            task="doe_analysis",
+            status="error",
             messages=["需要至少 1 个因子"],
         )
 
     df = req.data[[req.target_col] + cols].dropna()
     if len(df) < 3:
         return AnalysisResult(
-            task="doe_analysis", status="error",
+            task="doe_analysis",
+            status="error",
             messages=[f"有效样本({len(df)})不足"],
         )
 
@@ -844,10 +985,17 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         col_vals = df[col]
         unique_vals = col_vals.unique()
         if len(unique_vals) <= 1:
-            effects.append({
-                "因子": col, "主效应": 0.0, "效应占比": 0.0,
-                "t值": 0.0, "p值": 1.0, "显著": "否", "效应量": "可忽略",
-            })
+            effects.append(
+                {
+                    "因子": col,
+                    "主效应": 0.0,
+                    "效应占比": 0.0,
+                    "t值": 0.0,
+                    "p值": 1.0,
+                    "显著": "否",
+                    "效应量": "可忽略",
+                }
+            )
             continue
 
         if len(unique_vals) == 2:
@@ -869,7 +1017,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             effect = float(2 * beta[1])
             # t 检验
             resid_std = float(np.std(y - X @ beta, ddof=2)) if len(y) > 2 else 1.0
-            Sxx = np.sum((coded - np.mean(coded))**2)
+            Sxx = np.sum((coded - np.mean(coded)) ** 2)
             se = resid_std / np.sqrt(Sxx) if Sxx > EPSILON else 1.0
             t_val = float(beta[1] / se) if se > EPSILON else 0.0
             dof = len(y) - 2
@@ -877,33 +1025,45 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         except (ValueError, np.linalg.LinAlgError, TypeError) as e:
             logger.warning("DOE 效应估计失败 (因子: %s): %s", col, e)
             # 标记为计算失败而非静默赋零，避免伪造正常结果
-            effects.append({
-                "因子": col,
-                "主效应": None,
-                "效应占比": None,
-                "t值": None,
-                "p值": None,
-                "显著": "计算失败",
-                "效应量": f"计算异常: {str(e)[:60]}",
-            })
+            effects.append(
+                {
+                    "因子": col,
+                    "主效应": None,
+                    "效应占比": None,
+                    "t值": None,
+                    "p值": None,
+                    "显著": "计算失败",
+                    "效应量": f"计算异常: {str(e)[:60]}",
+                }
+            )
             continue
 
-        effect_ratio = abs(effect) / (abs(grand_mean) + EPSILON) if abs(grand_mean) > EPSILON else 0.0
+        effect_ratio = (
+            abs(effect) / (abs(grand_mean) + EPSILON) if abs(grand_mean) > EPSILON else 0.0
+        )
         alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
-        effects.append({
-            "因子": col,
-            "主效应": round(effect, 4),
-            "效应占比": round(effect_ratio, 4),
-            "t值": round(t_val, 3),
-            "p值": round(p_val, 4),
-            "显著": "是" if p_val < alpha else "否",
-            "效应量": threshold_label(effect_ratio, _DOE_EFFECT_THRESHOLDS, ("可忽略", "小", "中", "大")),
-        })
+        effects.append(
+            {
+                "因子": col,
+                "主效应": round(effect, 4),
+                "效应占比": round(effect_ratio, 4),
+                "t值": round(t_val, 3),
+                "p值": round(p_val, 4),
+                "显著": "是" if p_val < alpha else "否",
+                "效应量": threshold_label(
+                    effect_ratio, _DOE_EFFECT_THRESHOLDS, ("可忽略", "小", "中", "大")
+                ),
+            }
+        )
 
     effects_df = pd.DataFrame(effects)
     # 分离计算失败的因子（避免 None 值影响排序和统计）
-    failed_effects = effects_df[effects_df["主效应"].isna()] if "主效应" in effects_df else pd.DataFrame()
-    valid_effects = effects_df[effects_df["主效应"].notna()].sort_values("主效应", key=abs, ascending=False)
+    failed_effects = (
+        effects_df[effects_df["主效应"].isna()] if "主效应" in effects_df else pd.DataFrame()
+    )
+    valid_effects = effects_df[effects_df["主效应"].notna()].sort_values(
+        "主效应", key=abs, ascending=False
+    )
     top_name = str(valid_effects["因子"].iloc[0]) if len(valid_effects) > 0 else "N/A"
     top_val = float(valid_effects["主效应"].iloc[0]) if len(valid_effects) > 0 else 0
 
@@ -918,26 +1078,40 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── Pareto 图含显著性阈值 ──
     n_plot = max(len(valid_effects), 1)
-    fig = Figure(figsize=(max(n_plot*0.9, 6), 4))
+    fig = Figure(figsize=(max(n_plot * 0.9, 6), 4))
     ax = fig.add_subplot(111)
     ef = valid_effects.sort_values("主效应", key=abs)
-    colors = [PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in ef["主效应"]]
+    colors = [
+        PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in ef["主效应"]
+    ]
     ax.barh(ef["因子"], ef["主效应"], color=colors, height=0.6)
     ax.axvline(0, color=PALETTE["direction"]["zero"], linewidth=0.8)
     if me > 0:
-        ax.axvline(me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6,
-                   label=f"Lenth ME={me:.3f} (α={alpha})")
+        ax.axvline(
+            me,
+            color=PALETTE["anomaly"]["primary"],
+            linestyle="--",
+            linewidth=1,
+            alpha=0.6,
+            label=f"Lenth ME={me:.3f} (α={alpha})",
+        )
         ax.axvline(-me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6)
     # 标注效应值
     for i, (_, row) in enumerate(ef.iterrows()):
         v = row["主效应"]
         ha = "left" if v >= 0 else "right"
-        ax.text(v, i, f" {v:+.3f}", va="center", ha=ha, fontsize=8,
-                fontweight="bold" if abs(v) > me else "normal")
+        ax.text(
+            v,
+            i,
+            f" {v:+.3f}",
+            va="center",
+            ha=ha,
+            fontsize=8,
+            fontweight="bold" if abs(v) > me else "normal",
+        )
     ax.set_xlabel("主效应", fontsize=10)
     ax.set_title(
-        f"DOE主效应 — {req.target_col} | 均值={grand_mean:.3f}, σ={grand_std:.3f}",
-        fontsize=11
+        f"DOE主效应 — {req.target_col} | 均值={grand_mean:.3f}, σ={grand_std:.3f}", fontsize=11
     )
     if me > 0:
         ax.legend(fontsize=8)
@@ -956,7 +1130,11 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     summary = "。".join(summary_parts)
 
     # 合并有效结果和失败标记到输出表
-    output_table = pd.concat([valid_effects, failed_effects], ignore_index=True) if fail_count > 0 else valid_effects
+    output_table = (
+        pd.concat([valid_effects, failed_effects], ignore_index=True)
+        if fail_count > 0
+        else valid_effects
+    )
 
     return AnalysisResult(
         task="doe_analysis",
@@ -982,8 +1160,9 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     feature_cols[0]: 连续预测变量 (分数/概率)
     """
     if len(req.feature_cols) < 1:
-        return AnalysisResult(task="roc_analysis", status="error",
-            messages=["需要至少 1 个预测变量列"])
+        return AnalysisResult(
+            task="roc_analysis", status="error", messages=["需要至少 1 个预测变量列"]
+        )
 
     score_col = req.feature_cols[0]
     label_col = req.target_col
@@ -992,8 +1171,9 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 二值化标签
     unique_labels = sub[label_col].unique()
     if len(unique_labels) > 2:
-        return AnalysisResult(task="roc_analysis", status="error",
-            messages=["目标列需要恰好 2 个不同值"])
+        return AnalysisResult(
+            task="roc_analysis", status="error", messages=["目标列需要恰好 2 个不同值"]
+        )
 
     # 自动识别阳性标签
     pos_label = _detect_positive_label(unique_labels)
@@ -1002,13 +1182,13 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     scores = sub[score_col].values
 
     from sklearn.metrics import auc, roc_curve
+
     try:
         fpr, tpr, thresholds = roc_curve(y_true, scores)
         auc_val = float(auc(fpr, tpr))
     except Exception:
         logger.debug("ROC 曲线计算失败", exc_info=True)
-        return AnalysisResult(task="roc_analysis", status="error",
-            messages=["ROC 曲线计算失败"])
+        return AnalysisResult(task="roc_analysis", status="error", messages=["ROC 曲线计算失败"])
 
     # 最佳阈值 (Youden's J = TPR - FPR)
     j_scores = tpr - fpr
@@ -1030,14 +1210,33 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ROC 曲线图
     fig = Figure(figsize=(6, 5.5))
     ax = fig.add_subplot(111)
-    ax.plot(fpr, tpr, "-", color=PALETTE["data"]["primary"], linewidth=2.5,
-            label=f"ROC (AUC={auc_val:.3f}, {auc_label})")
-    ax.plot([0, 1], [0, 1], "--", color=PALETTE["spec"]["tertiary"], linewidth=1, alpha=0.6,
-            label="随机猜测 (AUC=0.5)")
+    ax.plot(
+        fpr,
+        tpr,
+        "-",
+        color=PALETTE["data"]["primary"],
+        linewidth=2.5,
+        label=f"ROC (AUC={auc_val:.3f}, {auc_label})",
+    )
+    ax.plot(
+        [0, 1],
+        [0, 1],
+        "--",
+        color=PALETTE["spec"]["tertiary"],
+        linewidth=1,
+        alpha=0.6,
+        label="随机猜测 (AUC=0.5)",
+    )
     ax.fill_between(fpr, tpr, alpha=0.1, color=PALETTE["data"]["primary"])
-    ax.scatter([fpr[best_idx]], [tpr[best_idx]], s=100, color=PALETTE["target"]["primary"],
-              marker="o", zorder=5,
-              label=f"最佳阈值={best_threshold:.3f} (J={j_scores[best_idx]:.3f})")
+    ax.scatter(
+        [fpr[best_idx]],
+        [tpr[best_idx]],
+        s=100,
+        color=PALETTE["target"]["primary"],
+        marker="o",
+        zorder=5,
+        label=f"最佳阈值={best_threshold:.3f} (J={j_scores[best_idx]:.3f})",
+    )
     ax.set_xlabel("假阳性率 (FPR)", fontsize=10)
     ax.set_ylabel("真阳性率 (TPR/召回率)", fontsize=10)
     ax.set_title(f"ROC 曲线 — {score_col} → {label_col} ({pos_label})", fontsize=11)
@@ -1057,24 +1256,34 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     return AnalysisResult(
         task="roc_analysis",
         tables={
-            "roc_points": pd.DataFrame({
-                "阈值": thresholds_clean.round(4),
-                "FPR": fpr.round(4),
-                "TPR": tpr.round(4),
-                "Youden_J": (tpr - fpr).round(4),
-            }),
-            "auc_summary": pd.DataFrame({
-                "指标": ["AUC", "判读", "最佳阈值", "最佳TPR", "最佳FPR",
-                        "阳性标签", "样本量"],
-                "值": [f"{auc_val:.4f}", auc_label, f"{best_threshold:.4f}",
-                      f"{tpr[best_idx]:.4f}", f"{fpr[best_idx]:.4f}",
-                      str(pos_label), str(len(sub))],
-            }),
+            "roc_points": pd.DataFrame(
+                {
+                    "阈值": thresholds_clean.round(4),
+                    "FPR": fpr.round(4),
+                    "TPR": tpr.round(4),
+                    "Youden_J": (tpr - fpr).round(4),
+                }
+            ),
+            "auc_summary": pd.DataFrame(
+                {
+                    "指标": ["AUC", "判读", "最佳阈值", "最佳TPR", "最佳FPR", "阳性标签", "样本量"],
+                    "值": [
+                        f"{auc_val:.4f}",
+                        auc_label,
+                        f"{best_threshold:.4f}",
+                        f"{tpr[best_idx]:.4f}",
+                        f"{fpr[best_idx]:.4f}",
+                        str(pos_label),
+                        str(len(sub)),
+                    ],
+                }
+            ),
         },
         figures=[fig],
         summary=summary,
         metadata={
-            "auc": auc_val, "auc_label": auc_label,
+            "auc": auc_val,
+            "auc_label": auc_label,
             "best_threshold": best_threshold,
             "best_tpr": float(tpr[best_idx]),
             "best_fpr": float(fpr[best_idx]),
@@ -1091,14 +1300,16 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     """
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 1:
-        return AnalysisResult(task="logistic_regression", status="error",
-            messages=["需要至少 1 个因子列"])
+        return AnalysisResult(
+            task="logistic_regression", status="error", messages=["需要至少 1 个因子列"]
+        )
 
     sub = req.data[[req.target_col] + cols].dropna()
     unique_y = sub[req.target_col].unique()
     if len(unique_y) != 2:
-        return AnalysisResult(task="logistic_regression", status="error",
-            messages=["目标列需要恰好 2 个不同值"])
+        return AnalysisResult(
+            task="logistic_regression", status="error", messages=["目标列需要恰好 2 个不同值"]
+        )
 
     # 二值化 — 使用与 roc_analysis 相同的阳性标签检测逻辑
     pos_label = _detect_positive_label(unique_y)
@@ -1110,24 +1321,27 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
         threshold = float(threshold)
     except (ValueError, TypeError):
         return AnalysisResult(
-            task="logistic_regression", status="error",
+            task="logistic_regression",
+            status="error",
             messages=[f"参数 threshold 值无效: {threshold}，请输入数值 (0~1)"],
         )
     if not 0 < threshold < 1:
         return AnalysisResult(
-            task="logistic_regression", status="error",
+            task="logistic_regression",
+            status="error",
             messages=[f"阈值 threshold 必须在 (0, 1) 范围内，当前值: {threshold}"],
         )
 
     try:
         X = sm.add_constant(sub[cols])
         model = sm.Logit(y, X).fit(disp=0)
-        if not getattr(model, 'mle_retvals', {}).get('converged', True):
+        if not getattr(model, "mle_retvals", {}).get("converged", True):
             logger.warning("Logistic 模型未收敛，结果可能不可靠")
     except Exception:
         logger.debug("Logistic 模型拟合失败", exc_info=True)
-        return AnalysisResult(task="logistic_regression", status="error",
-            messages=["Logistic 模型拟合失败"])
+        return AnalysisResult(
+            task="logistic_regression", status="error", messages=["Logistic 模型拟合失败"]
+        )
 
     # Odds Ratios — clamp coefficients to prevent exp overflow (>700 → inf)
     _EXP_MAX = 700.0
@@ -1137,16 +1351,18 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     or_ci_lower = np.exp(np.clip(ci.iloc[:, 0].values, -_EXP_MAX, _EXP_MAX))
     or_ci_upper = np.exp(np.clip(ci.iloc[:, 1].values, -_EXP_MAX, _EXP_MAX))
 
-    coef_df = pd.DataFrame({
-        "变量": X.columns,
-        "系数": params.round(4),
-        "标准误": np.asarray(model.bse).round(4),
-        "z值": np.asarray(model.tvalues).round(3),
-        "p值": np.asarray(model.pvalues).round(4),
-        "OR (Odds Ratio)": or_vals.round(3),
-        "OR 95%CI下限": or_ci_lower.round(3),
-        "OR 95%CI上限": or_ci_upper.round(3),
-    })
+    coef_df = pd.DataFrame(
+        {
+            "变量": X.columns,
+            "系数": params.round(4),
+            "标准误": np.asarray(model.bse).round(4),
+            "z值": np.asarray(model.tvalues).round(3),
+            "p值": np.asarray(model.pvalues).round(4),
+            "OR (Odds Ratio)": or_vals.round(3),
+            "OR 95%CI下限": or_ci_lower.round(3),
+            "OR 95%CI上限": or_ci_upper.round(3),
+        }
+    )
 
     # 预测和分类表 — 使用前面已提取+校验的 threshold
     y_pred_prob = model.predict(X)
@@ -1156,22 +1372,34 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     specificity = float(np.sum((y_pred == 0) & (y == 0)) / max(np.sum(y == 0), 1))
 
     # Pseudo R²
-    ll_null = model.llnull if hasattr(model, 'llnull') else 0
+    ll_null = model.llnull if hasattr(model, "llnull") else 0
     ll_model = model.llf
     mcfadden_r2 = float(1 - ll_model / ll_null) if ll_null != 0 else 0
 
     # 可视化：OR 森林图
     sig_vars = coef_df[coef_df["变量"] != "const"]
-    fig = Figure(figsize=(7, max(len(sig_vars)*0.6, 3.5)))
+    fig = Figure(figsize=(7, max(len(sig_vars) * 0.6, 3.5)))
     ax = fig.add_subplot(111)
     sig_vars_plot = sig_vars.sort_values("OR (Odds Ratio)")
     y_pos = range(len(sig_vars_plot))
-    ax.scatter(sig_vars_plot["OR (Odds Ratio)"].values, y_pos, s=60,
-              color=PALETTE["data"]["primary"], zorder=3)
+    ax.scatter(
+        sig_vars_plot["OR (Odds Ratio)"].values,
+        y_pos,
+        s=60,
+        color=PALETTE["data"]["primary"],
+        zorder=3,
+    )
     for i, (_, row) in enumerate(sig_vars_plot.iterrows()):
-        ax.plot([row["OR 95%CI下限"], row["OR 95%CI上限"]], [i, i],
-               "-", color=PALETTE["data"]["secondary"], linewidth=2)
-    ax.axvline(1, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6, label="OR=1")
+        ax.plot(
+            [row["OR 95%CI下限"], row["OR 95%CI上限"]],
+            [i, i],
+            "-",
+            color=PALETTE["data"]["secondary"],
+            linewidth=2,
+        )
+    ax.axvline(
+        1, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6, label="OR=1"
+    )
     ax.set_yticks(y_pos)
     ax.set_yticklabels(sig_vars_plot["变量"], fontsize=9)
     ax.set_xlabel("Odds Ratio (95% CI)", fontsize=10)
@@ -1185,30 +1413,41 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
 
     summary = (
         f"Logistic: Acc={accuracy:.1%}, Sens={sensitivity:.1%}, Spec={specificity:.1%}, "
-        f"McFadden R²={mcfadden_r2:.3f}"
-        + (f" (阈值={threshold:.2f})" if threshold != 0.5 else "")
+        f"McFadden R²={mcfadden_r2:.3f}" + (f" (阈值={threshold:.2f})" if threshold != 0.5 else "")
     )
 
     return AnalysisResult(
         task="logistic_regression",
         tables={
             "coefficients": coef_df,
-            "classification_metrics": pd.DataFrame({
-                "指标": ["准确率", "灵敏度 (召回)", "特异度", "McFadden R²", "AIC", "样本量"],
-                "值": [f"{accuracy:.4f}", f"{sensitivity:.4f}", f"{specificity:.4f}",
-                      f"{mcfadden_r2:.4f}", f"{model.aic:.1f}", str(len(sub))],
-            }),
+            "classification_metrics": pd.DataFrame(
+                {
+                    "指标": ["准确率", "灵敏度 (召回)", "特异度", "McFadden R²", "AIC", "样本量"],
+                    "值": [
+                        f"{accuracy:.4f}",
+                        f"{sensitivity:.4f}",
+                        f"{specificity:.4f}",
+                        f"{mcfadden_r2:.4f}",
+                        f"{model.aic:.1f}",
+                        str(len(sub)),
+                    ],
+                }
+            ),
         },
         figures=[fig],
         summary=summary,
         messages=[
             "⚠ Logistic 模型未收敛，系数和 OR 估计可能不可靠。请检查数据是否存在完美分离或共线性。"
-        ] if not getattr(model, 'mle_retvals', {}).get('converged', True) else [],
+        ]
+        if not getattr(model, "mle_retvals", {}).get("converged", True)
+        else [],
         metadata={
-            "accuracy": accuracy, "sensitivity": sensitivity,
-            "specificity": specificity, "mcfadden_r2": mcfadden_r2,
+            "accuracy": accuracy,
+            "sensitivity": sensitivity,
+            "specificity": specificity,
+            "mcfadden_r2": mcfadden_r2,
             "aic": float(model.aic),
-            "model_converged": getattr(model, 'mle_retvals', {}).get('converged', True),
+            "model_converged": getattr(model, "mle_retvals", {}).get("converged", True),
         },
     )
 
@@ -1220,13 +1459,13 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     """
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 2:
-        return AnalysisResult(task="lasso_regression", status="error",
-            messages=["至少需要 2 个因子列"])
+        return AnalysisResult(
+            task="lasso_regression", status="error", messages=["至少需要 2 个因子列"]
+        )
 
     sub = req.data[[req.target_col] + cols].dropna()
     if len(sub) < len(cols) + 2:
-        return AnalysisResult(task="lasso_regression", status="error",
-            messages=["有效样本不足"])
+        return AnalysisResult(task="lasso_regression", status="error", messages=["有效样本不足"])
 
     from sklearn.linear_model import ElasticNetCV, LassoCV
     from sklearn.preprocessing import StandardScaler
@@ -1239,28 +1478,35 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     alpha = req.params.get("alpha_lasso", None)
     if alpha is not None:
         alpha = _safe_float(alpha, 1.0)
-    l1_ratio = _safe_float(req.params.get("l1_ratio", 1.0), 1.0)  # 1.0 = pure Lasso, <1 = ElasticNet
+    l1_ratio = _safe_float(
+        req.params.get("l1_ratio", 1.0), 1.0
+    )  # 1.0 = pure Lasso, <1 = ElasticNet
 
     _lasso_max_iter = 5000
     if alpha is not None:
         if l1_ratio < 1.0:
             # 用户既指定了 alpha 又指定了 l1_ratio → 使用 ElasticNet
             from sklearn.linear_model import ElasticNet
-            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio,
-                              max_iter=_lasso_max_iter).fit(X_scaled, y)
+
+            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, max_iter=_lasso_max_iter).fit(
+                X_scaled, y
+            )
         else:
             from sklearn.linear_model import Lasso
+
             model = Lasso(alpha=alpha, max_iter=_lasso_max_iter).fit(X_scaled, y)
         best_alpha = alpha
         train_r2 = None
     elif l1_ratio < 1.0:
-        model = ElasticNetCV(l1_ratio=[l1_ratio], cv=min(5, len(sub)//3),
-                            max_iter=_lasso_max_iter, random_state=42).fit(X_scaled, y)
+        model = ElasticNetCV(
+            l1_ratio=[l1_ratio], cv=min(5, len(sub) // 3), max_iter=_lasso_max_iter, random_state=42
+        ).fit(X_scaled, y)
         best_alpha = float(model.alpha_)
         train_r2 = float(model.score(X_scaled, y))
     else:
-        model = LassoCV(cv=min(5, len(sub)//3), max_iter=_lasso_max_iter,
-                        random_state=42).fit(X_scaled, y)
+        model = LassoCV(cv=min(5, len(sub) // 3), max_iter=_lasso_max_iter, random_state=42).fit(
+            X_scaled, y
+        )
         best_alpha = float(model.alpha_)
         train_r2 = float(model.score(X_scaled, y))
 
@@ -1273,22 +1519,31 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     # 收敛性检查：max_iter 用尽且未收敛时警告用户
     convergence_warning = ""
     if hasattr(model, "n_iter_"):
-        n_iter_actual = int(model.n_iter_) if np.isscalar(model.n_iter_) else int(np.max(model.n_iter_))
+        n_iter_actual = (
+            int(model.n_iter_) if np.isscalar(model.n_iter_) else int(np.max(model.n_iter_))
+        )
         if n_iter_actual >= _lasso_max_iter:
-            convergence_warning = "⚠ Lasso 模型在最大迭代次数内未收敛，系数可能不准确，建议增大 max_iter 或调整 alpha"
+            convergence_warning = (
+                "⚠ Lasso 模型在最大迭代次数内未收敛，系数可能不准确，建议增大 max_iter 或调整 alpha"
+            )
 
-    coef_df = pd.DataFrame({
-        "变量": cols + ["(截距)"],
-        "标准化系数": list(coefs) + [float(model.intercept_)],
-        "选中": ["是" if abs(c) > 1e-6 else "否" for c in coefs] + ["—"],
-    }).sort_values("标准化系数", key=abs, ascending=False)
+    coef_df = pd.DataFrame(
+        {
+            "变量": cols + ["(截距)"],
+            "标准化系数": list(coefs) + [float(model.intercept_)],
+            "选中": ["是" if abs(c) > 1e-6 else "否" for c in coefs] + ["—"],
+        }
+    ).sort_values("标准化系数", key=abs, ascending=False)
 
     # 可视化
     fig = Figure(figsize=(7, 4))
     ax = fig.add_subplot(111)
     nonzero_coefs = coef_df[coef_df["选中"] == "是"]
     if len(nonzero_coefs) > 0:
-        colors = [PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"] for v in nonzero_coefs["标准化系数"]]
+        colors = [
+            PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"]
+            for v in nonzero_coefs["标准化系数"]
+        ]
         ax.barh(nonzero_coefs["变量"], nonzero_coefs["标准化系数"], color=colors)
     ax.axvline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
     ax.set_xlabel("标准化系数", fontsize=10)
@@ -1299,9 +1554,8 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     )
     fig.tight_layout()
 
-    summary = (
-        f"Lasso: 选中 {n_selected}/{len(cols)} 变量, R²={r2:.3f}, α={best_alpha:.4f}"
-        + (f", 训练 R²={train_r2:.3f}" if train_r2 else "")
+    summary = f"Lasso: 选中 {n_selected}/{len(cols)} 变量, R²={r2:.3f}, α={best_alpha:.4f}" + (
+        f", 训练 R²={train_r2:.3f}" if train_r2 else ""
     )
 
     messages = []
@@ -1315,8 +1569,10 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         summary=summary,
         messages=messages,
         metadata={
-            "r_squared": r2, "train_r2": train_r2,
-            "best_alpha": best_alpha, "n_selected": n_selected,
+            "r_squared": r2,
+            "train_r2": train_r2,
+            "best_alpha": best_alpha,
+            "n_selected": n_selected,
             "n_features": len(cols),
             "converged": not bool(convergence_warning),
         },
@@ -1330,15 +1586,16 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
     """
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 1:
-        return AnalysisResult(task="robust_regression", status="error",
-            messages=["需要至少 1 个因子列"])
+        return AnalysisResult(
+            task="robust_regression", status="error", messages=["需要至少 1 个因子列"]
+        )
 
     sub = req.data[[req.target_col] + cols].dropna()
     if len(sub) < len(cols) + 2:
-        return AnalysisResult(task="robust_regression", status="error",
-            messages=["有效样本不足"])
+        return AnalysisResult(task="robust_regression", status="error", messages=["有效样本不足"])
 
     from sklearn.linear_model import HuberRegressor
+
     try:
         X = sub[cols].values
         y = sub[req.target_col].values
@@ -1350,14 +1607,15 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         ols_model = sm.OLS(y, Xc).fit()
 
         # 对比表
-        coef_df = pd.DataFrame({
-            "变量": ["(截距)"] + cols,
-            "Huber系数": [huber.intercept_] + list(huber.coef_),
-            "OLS系数": list(ols_model.params),
-            "差异": [huber.intercept_ - ols_model.params[0]] + [
-                h - o for h, o in zip(huber.coef_, ols_model.params[1:])
-            ],
-        })
+        coef_df = pd.DataFrame(
+            {
+                "变量": ["(截距)"] + cols,
+                "Huber系数": [huber.intercept_] + list(huber.coef_),
+                "OLS系数": list(ols_model.params),
+                "差异": [huber.intercept_ - ols_model.params[0]]
+                + [h - o for h, o in zip(huber.coef_, ols_model.params[1:])],
+            }
+        )
 
         # 识别差异大的变量（OLS 受异常值影响严重）
         max_diff_idx = np.argmax(np.abs(coef_df["差异"].values[1:])) + 1
@@ -1367,8 +1625,21 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         ax = fig.add_subplot(111)
         x_pos = np.arange(len(coef_df))
         width = 0.35
-        ax.bar(x_pos - width/2, coef_df["Huber系数"], width, label="Huber 稳健", color=PALETTE["data"]["primary"])
-        ax.bar(x_pos + width/2, coef_df["OLS系数"], width, label="OLS", color=PALETTE["data"]["secondary"], alpha=0.7)
+        ax.bar(
+            x_pos - width / 2,
+            coef_df["Huber系数"],
+            width,
+            label="Huber 稳健",
+            color=PALETTE["data"]["primary"],
+        )
+        ax.bar(
+            x_pos + width / 2,
+            coef_df["OLS系数"],
+            width,
+            label="OLS",
+            color=PALETTE["data"]["secondary"],
+            alpha=0.7,
+        )
         ax.set_xticks(x_pos)
         ax.set_xticklabels(coef_df["变量"], rotation=45, ha="right", fontsize=8)
         ax.set_ylabel("系数", fontsize=10)
@@ -1377,9 +1648,8 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         ax.legend(fontsize=8)
         fig.tight_layout()
 
-        summary = (
-            "稳健回归完成。"
-            + (f"差异最大变量: {outlier_sensitive}" if outlier_sensitive else "")
+        summary = "稳健回归完成。" + (
+            f"差异最大变量: {outlier_sensitive}" if outlier_sensitive else ""
         )
 
         return AnalysisResult(
@@ -1391,8 +1661,9 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         )
     except Exception:
         logger.debug("稳健回归拟合失败", exc_info=True)
-        return AnalysisResult(task="robust_regression", status="error",
-            messages=["稳健回归拟合失败"])
+        return AnalysisResult(
+            task="robust_regression", status="error", messages=["稳健回归拟合失败"]
+        )
 
 
 def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
@@ -1403,42 +1674,49 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
     """
     cols = [c for c in req.feature_cols if c in req.data.columns]
     if len(cols) < 1:
-        return AnalysisResult(task="quantile_regression", status="error",
-            messages=["需要至少 1 个因子列"])
+        return AnalysisResult(
+            task="quantile_regression", status="error", messages=["需要至少 1 个因子列"]
+        )
 
     sub = req.data[[req.target_col] + cols].dropna()
     if len(sub) < len(cols) + 2:
-        return AnalysisResult(task="quantile_regression", status="error",
-            messages=["有效样本不足"])
+        return AnalysisResult(task="quantile_regression", status="error", messages=["有效样本不足"])
 
     quantile = req.params.get("quantile", 0.5)
     try:
         quantile = float(quantile)
     except (ValueError, TypeError):
         return AnalysisResult(
-            task="quantile_regression", status="error",
+            task="quantile_regression",
+            status="error",
             messages=[f"参数 quantile 值无效: {quantile}，请输入数值 (0~1)"],
         )
     if not 0 < quantile < 1:
-        return AnalysisResult(task="quantile_regression", status="error",
-            messages=[f"分位数 τ 必须在 (0, 1) 范围内，当前值: {quantile}"])
+        return AnalysisResult(
+            task="quantile_regression",
+            status="error",
+            messages=[f"分位数 τ 必须在 (0, 1) 范围内，当前值: {quantile}"],
+        )
     try:
-
         X_df = sub[cols]
         y = sub[req.target_col]
         Xc = sm.add_constant(X_df)
         model = sm.QuantReg(y, Xc).fit(q=quantile)
 
-        coef_df = pd.DataFrame({
-            "变量": Xc.columns,
-            "系数": np.asarray(model.params).round(4),
-            "标准误": np.asarray(model.bse).round(4),
-            "t值": np.asarray(model.tvalues).round(3),
-            "p值": np.asarray(model.pvalues).round(4),
-        })
+        coef_df = pd.DataFrame(
+            {
+                "变量": Xc.columns,
+                "系数": np.asarray(model.params).round(4),
+                "标准误": np.asarray(model.bse).round(4),
+                "t值": np.asarray(model.tvalues).round(3),
+                "p值": np.asarray(model.pvalues).round(4),
+            }
+        )
 
-        q_label = f"Q{round(quantile*100)} (中位数)" if quantile == 0.5 else f"Q{round(quantile*100)}"
-        summary = f"{q_label} 回归完成，{len(coef_df)-1} 个变量"
+        q_label = (
+            f"Q{round(quantile * 100)} (中位数)" if quantile == 0.5 else f"Q{round(quantile * 100)}"
+        )
+        summary = f"{q_label} 回归完成，{len(coef_df) - 1} 个变量"
 
         return AnalysisResult(
             task="quantile_regression",
@@ -1448,5 +1726,6 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
         )
     except Exception:
         logger.debug("分位数回归拟合失败", exc_info=True)
-        return AnalysisResult(task="quantile_regression", status="error",
-            messages=["分位数回归拟合失败"])
+        return AnalysisResult(
+            task="quantile_regression", status="error", messages=["分位数回归拟合失败"]
+        )

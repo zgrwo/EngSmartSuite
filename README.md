@@ -83,11 +83,13 @@ python -m smartsuite.cli weibull --data life.csv --output results.json
 ### Python API（编程调用）
 
 ```python
-from smartsuite.engine.normality import NormalityAnalyzer
-from smartsuite.core.models import AnalysisRequest
+import pandas as pd
+from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.services.orchestrator import orchestrate
 
-request = AnalysisRequest(data=[1.2, 2.3, 1.8, ...], params={"methods": ["ad", "sw"]})
-result = NormalityAnalyzer().analyze(request)
+df = pd.read_csv("life.csv")
+request = AnalysisRequest(task="normality", data=df, target_col="measure", params={"methods": ["ad", "sw"]})
+result = orchestrate(request)
 print(result.summary)
 ```
 

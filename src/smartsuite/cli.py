@@ -1,4 +1,5 @@
 """CLI 入口 — 命令行直接运行分析。"""
+
 import argparse
 import logging
 import os
@@ -44,18 +45,20 @@ def _read_data_file(filepath: str, sheet=0) -> pd.DataFrame:
 
 def main():
     from smartsuite import setup_logging
+
     setup_logging()
 
-    parser = argparse.ArgumentParser(
-        description="SmartSuite — 工艺数据分析工具箱")
+    parser = argparse.ArgumentParser(description="SmartSuite — 工艺数据分析工具箱")
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", help="运行分析")
     run_parser.add_argument("template", help="YAML 分析模板路径")
-    run_parser.add_argument("--input", "-i", required=True,
-                             help="输入数据文件路径 (.xlsx / .xlsm / .csv)")
-    run_parser.add_argument("--sheet", "-s", default=0,
-                             help="Sheet 名或索引 (仅 Excel，默认: 第一个)")
+    run_parser.add_argument(
+        "--input", "-i", required=True, help="输入数据文件路径 (.xlsx / .xlsm / .csv)"
+    )
+    run_parser.add_argument(
+        "--sheet", "-s", default=0, help="Sheet 名或索引 (仅 Excel，默认: 第一个)"
+    )
 
     subparsers.add_parser("list", help="列出支持的分析方法")
 
@@ -89,8 +92,10 @@ def main():
             sys.exit(1)
 
         if config["task"] not in TASK_REGISTRY:
-            print(f"错误: 未知的分析任务「{config['task']}」，支持: {list(TASK_REGISTRY.keys())}",
-                  file=sys.stderr)
+            print(
+                f"错误: 未知的分析任务「{config['task']}」，支持: {list(TASK_REGISTRY.keys())}",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         try:
@@ -123,12 +128,15 @@ def main():
                 print(f"  ⚠ 数据校验跳过: {type(e).__name__}: {e}，分析将继续执行", file=sys.stderr)
         # 任务感知的数据预处理（与 Web 路径保持一致）
         df, feature_cols, imputation_log, unknown_cat_warnings = preprocess_for_task(
-            raw, features, task, categoricals=categoricals, raw_cat_tasks=RAW_CAT_TASKS)
+            raw, features, task, categoricals=categoricals, raw_cat_tasks=RAW_CAT_TASKS
+        )
         # 输出数据预处理警告
         for col, n_coerced in imputation_log.items():
             print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
         for col, extra_cats, _n_affected in unknown_cat_warnings:
-            print(f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。")
+            print(
+                f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。"
+            )
         # 假设检验缺 group_col 时自动推断（与 Web 路径保持一致）
         if task == "hypothesis_test" and "group_col" not in params:
             extra = infer_group_col(raw, features, categoricals=categoricals)
@@ -138,7 +146,8 @@ def main():
                     feature_cols = list(feature_cols) + [extra_col]
                 params = {**params, **extra}
         req = AnalysisRequest(
-            task=task, data=df,
+            task=task,
+            data=df,
             target_col=config.get("target_col", ""),
             feature_cols=feature_cols,
             params=params,
@@ -146,6 +155,7 @@ def main():
         result = orchestrate(req)
         print(result.summary)
         import matplotlib.pyplot as _plt
+
         for fig in result.figures:
             _plt.close(fig)
         for msg in result.messages:

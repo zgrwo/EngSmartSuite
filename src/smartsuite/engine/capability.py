@@ -1,4 +1,5 @@
 """过程能力分析模块：Cp/Cpk、Sigma 水平、Box-Cox 变换。"""
+
 import logging
 
 import numpy as np
@@ -15,6 +16,7 @@ from smartsuite.engine._constants import (
 from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
+
 
 def _cp_confidence_interval(cp, n, alpha=0.05):
     """Cp/Cpk 95% 置信区间 (基于 χ² 分布)。"""
@@ -92,8 +94,10 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(
             task="process_capability",
             status="error",
-            messages=[f"有效数据不足：过程能力分析至少需要 3 个观测值"
-                      f"（当前 {len(data)} 个，无法可靠估计标准差）"],
+            messages=[
+                f"有效数据不足：过程能力分析至少需要 3 个观测值"
+                f"（当前 {len(data)} 个，无法可靠估计标准差）"
+            ],
         )
 
     usl = req.params.get("usl")
@@ -107,7 +111,8 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
             usl = float(usl)
         except (ValueError, TypeError):
             return AnalysisResult(
-                task="process_capability", status="error",
+                task="process_capability",
+                status="error",
                 messages=[f"规格上限 USL 值无效: {usl}，请输入数值"],
             )
     if lsl is not None:
@@ -115,7 +120,8 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
             lsl = float(lsl)
         except (ValueError, TypeError):
             return AnalysisResult(
-                task="process_capability", status="error",
+                task="process_capability",
+                status="error",
                 messages=[f"规格下限 LSL 值无效: {lsl}，请输入数值"],
             )
     if target is not None:
@@ -127,9 +133,9 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 规格限有效性校验 (P2 fix: 防止 USL ≤ LSL 导致负 Cp) ──
     if usl is not None and lsl is not None and usl <= lsl:
         return AnalysisResult(
-            task="process_capability", status="error",
-            messages=[f"规格限无效: USL ({usl}) ≤ LSL ({lsl})，"
-                      f"请确保 USL > LSL。"],
+            task="process_capability",
+            status="error",
+            messages=[f"规格限无效: USL ({usl}) ≤ LSL ({lsl})，请确保 USL > LSL。"],
         )
     n = len(data)
 
@@ -173,22 +179,40 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     has_both = has_upper and has_lower
 
     # Cp/Cpk (短期/组内) — 单侧公差仅计算 Cpk
-    cp = float((usl - lsl) / (6 * within_sigma)) if has_both and np.isfinite(within_sigma) and within_sigma > 0 else None
+    cp = (
+        float((usl - lsl) / (6 * within_sigma))
+        if has_both and np.isfinite(within_sigma) and within_sigma > 0
+        else None
+    )
     if has_upper and has_lower:
-        cpk_val = float(min((usl - mu) / (3 * within_sigma),
-                            (mu - lsl) / (3 * within_sigma))) if np.isfinite(within_sigma) and within_sigma > 0 else None
+        cpk_val = (
+            float(min((usl - mu) / (3 * within_sigma), (mu - lsl) / (3 * within_sigma)))
+            if np.isfinite(within_sigma) and within_sigma > 0
+            else None
+        )
     elif has_upper:
-        cpk_val = float((usl - mu) / (3 * within_sigma)) if np.isfinite(within_sigma) and within_sigma > 0 else None
+        cpk_val = (
+            float((usl - mu) / (3 * within_sigma))
+            if np.isfinite(within_sigma) and within_sigma > 0
+            else None
+        )
     elif has_lower:
-        cpk_val = float((mu - lsl) / (3 * within_sigma)) if np.isfinite(within_sigma) and within_sigma > 0 else None
+        cpk_val = (
+            float((mu - lsl) / (3 * within_sigma))
+            if np.isfinite(within_sigma) and within_sigma > 0
+            else None
+        )
     else:
         cpk_val = None
 
     # Pp/Ppk (长期/整体) — 单侧公差仅计算 Ppk
     pp = float((usl - lsl) / (6 * sigma_overall)) if has_both and sigma_overall > 0 else None
     if has_upper and has_lower:
-        ppk_val = float(min((usl - mu) / (3 * sigma_overall),
-                            (mu - lsl) / (3 * sigma_overall))) if sigma_overall > 0 else None
+        ppk_val = (
+            float(min((usl - mu) / (3 * sigma_overall), (mu - lsl) / (3 * sigma_overall)))
+            if sigma_overall > 0
+            else None
+        )
     elif has_upper:
         ppk_val = float((usl - mu) / (3 * sigma_overall)) if sigma_overall > 0 else None
     elif has_lower:
@@ -199,7 +223,7 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     # Cpm (Taguchi 能力指数, 需双侧公差)
     cpm = None
     if has_both and target is not None and sigma_overall > 0:
-        tau = np.sqrt(sigma_overall**2 + (mu - target)**2)
+        tau = np.sqrt(sigma_overall**2 + (mu - target) ** 2)
         cpm = float((usl - lsl) / (6 * tau)) if tau > 0 else None
 
     # 置信区间
@@ -224,36 +248,68 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 能力汇总表 ──
     capability_rows = [
-        {"指标": "Cp (短期能力)", "值": f"{cp:.3f}" if cp is not None else "N/A",
-         "95%CI下限": f"{cp_ci[0]:.3f}" if cp_ci[0] is not None else "N/A",
-         "95%CI上限": f"{cp_ci[1]:.3f}" if cp_ci[1] is not None else "N/A"},
-        {"指标": "Cpk (短期+偏倚)", "值": f"{cpk_val:.3f}" if cpk_val is not None else "N/A",
-         "95%CI下限": f"{cpk_ci[0]:.3f}" if cpk_ci[0] is not None else "N/A",
-         "95%CI上限": f"{cpk_ci[1]:.3f}" if cpk_ci[1] is not None else "N/A"},
-        {"指标": "Pp (长期能力)", "值": f"{pp:.3f}" if pp is not None else "N/A",
-         "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Ppk (长期+偏倚)", "值": f"{ppk_val:.3f}" if ppk_val is not None else "N/A",
-         "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Cpm (田口能力)", "值": f"{cpm:.3f}" if cpm is not None else "N/A",
-         "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "Sigma Level (无偏移理论值)", "值": f"{sigma_lvl:.2f}" if sigma_lvl is not None else "N/A",
-         "95%CI下限": "N/A", "95%CI上限": "N/A"},
-        {"指标": "DPMO (无偏移假设)", "值": f"{dpmo:,}" if dpmo is not None else "N/A",
-         "95%CI下限": "N/A", "95%CI上限": "N/A"},
+        {
+            "指标": "Cp (短期能力)",
+            "值": f"{cp:.3f}" if cp is not None else "N/A",
+            "95%CI下限": f"{cp_ci[0]:.3f}" if cp_ci[0] is not None else "N/A",
+            "95%CI上限": f"{cp_ci[1]:.3f}" if cp_ci[1] is not None else "N/A",
+        },
+        {
+            "指标": "Cpk (短期+偏倚)",
+            "值": f"{cpk_val:.3f}" if cpk_val is not None else "N/A",
+            "95%CI下限": f"{cpk_ci[0]:.3f}" if cpk_ci[0] is not None else "N/A",
+            "95%CI上限": f"{cpk_ci[1]:.3f}" if cpk_ci[1] is not None else "N/A",
+        },
+        {
+            "指标": "Pp (长期能力)",
+            "值": f"{pp:.3f}" if pp is not None else "N/A",
+            "95%CI下限": "N/A",
+            "95%CI上限": "N/A",
+        },
+        {
+            "指标": "Ppk (长期+偏倚)",
+            "值": f"{ppk_val:.3f}" if ppk_val is not None else "N/A",
+            "95%CI下限": "N/A",
+            "95%CI上限": "N/A",
+        },
+        {
+            "指标": "Cpm (田口能力)",
+            "值": f"{cpm:.3f}" if cpm is not None else "N/A",
+            "95%CI下限": "N/A",
+            "95%CI上限": "N/A",
+        },
+        {
+            "指标": "Sigma Level (无偏移理论值)",
+            "值": f"{sigma_lvl:.2f}" if sigma_lvl is not None else "N/A",
+            "95%CI下限": "N/A",
+            "95%CI上限": "N/A",
+        },
+        {
+            "指标": "DPMO (无偏移假设)",
+            "值": f"{dpmo:,}" if dpmo is not None else "N/A",
+            "95%CI下限": "N/A",
+            "95%CI上限": "N/A",
+        },
     ]
     capability_df = pd.DataFrame(capability_rows)
 
     # ── 描述统计表 ──
-    desc_df = pd.DataFrame({
-        "统计量": ["样本量", "均值", "整体σ", "组内σ", "偏度", "峰度",
-                  "USL", "LSL", "目标值"],
-        "值": [
-            str(n), f"{mu:.4f}", f"{sigma_overall:.4f}", f"{within_sigma:.4f}",
-            f"{float(data.skew()):.4f}", f"{float(data.kurtosis()):.4f}",
-            str(usl) if usl is not None else "未指定", str(lsl) if lsl is not None else "未指定",
-            str(target) if target is not None else "未指定",
-        ],
-    })
+    desc_df = pd.DataFrame(
+        {
+            "统计量": ["样本量", "均值", "整体σ", "组内σ", "偏度", "峰度", "USL", "LSL", "目标值"],
+            "值": [
+                str(n),
+                f"{mu:.4f}",
+                f"{sigma_overall:.4f}",
+                f"{within_sigma:.4f}",
+                f"{float(data.skew()):.4f}",
+                f"{float(data.kurtosis()):.4f}",
+                str(usl) if usl is not None else "未指定",
+                str(lsl) if lsl is not None else "未指定",
+                str(target) if target is not None else "未指定",
+            ],
+        }
+    )
 
     # ── 增强直方图 + 正态拟合曲线 + 规格限区域 ──
     fig = Figure(figsize=(10, 5))
@@ -262,28 +318,46 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 直方图
     n_bins = min(30, max(10, int(np.sqrt(n))))
     counts, bins, patches = ax.hist(
-        data, bins=n_bins, color=PALETTE["data"]["secondary"], edgecolor="white",
-        alpha=0.7, density=True, label="数据分布"
+        data,
+        bins=n_bins,
+        color=PALETTE["data"]["secondary"],
+        edgecolor="white",
+        alpha=0.7,
+        density=True,
+        label="数据分布",
     )
 
     # 正态拟合曲线
     x_fit = np.linspace(data.min(), data.max(), 200)
     pdf_fit = sp_stats.norm.pdf(x_fit, mu, sigma_overall)
-    ax.plot(x_fit, pdf_fit, color=PALETTE["data"]["primary"], linewidth=2,
-            label=f"正态拟合 (μ={mu:.3f}, σ={sigma_overall:.3f})")
+    ax.plot(
+        x_fit,
+        pdf_fit,
+        color=PALETTE["data"]["primary"],
+        linewidth=2,
+        label=f"正态拟合 (μ={mu:.3f}, σ={sigma_overall:.3f})",
+    )
 
     # 规格限
-    ax.axvline(mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=2,
-               label=f"均值={mu:.4f}")
+    ax.axvline(
+        mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=2, label=f"均值={mu:.4f}"
+    )
     if lsl is not None:
-        ax.axvline(lsl, color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2,
-                   label=f"LSL={lsl}")
+        ax.axvline(
+            lsl, color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2, label=f"LSL={lsl}"
+        )
     if usl is not None:
-        ax.axvline(usl, color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2,
-                   label=f"USL={usl}")
+        ax.axvline(
+            usl, color=PALETTE["anomaly"]["primary"], linestyle="-", linewidth=2, label=f"USL={usl}"
+        )
     if target is not None:
-        ax.axvline(target, color=PALETTE["direction"]["zero"], linestyle=":", linewidth=1.5,
-                   label=f"目标={target}")
+        ax.axvline(
+            target,
+            color=PALETTE["direction"]["zero"],
+            linestyle=":",
+            linewidth=1.5,
+            label=f"目标={target}",
+        )
 
     # 规格限区域着色
     if lsl is not None and usl is not None:
@@ -331,11 +405,19 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig],
         summary=summary,
         metadata={
-            "cp": cp, "cpk": cpk_val, "pp": pp, "ppk": ppk_val, "cpm": cpm,
-            "cp_ci": cp_ci, "cpk_ci": cpk_ci,
-            "sigma_level": sigma_lvl, "dpmo": dpmo,
-            "mean": mu, "sigma_overall": sigma_overall,
-            "sigma_within": within_sigma, "n": n,
+            "cp": cp,
+            "cpk": cpk_val,
+            "pp": pp,
+            "ppk": ppk_val,
+            "cpm": cpm,
+            "cp_ci": cp_ci,
+            "cpk_ci": cpk_ci,
+            "sigma_level": sigma_lvl,
+            "dpmo": dpmo,
+            "mean": mu,
+            "sigma_overall": sigma_overall,
+            "sigma_within": within_sigma,
+            "n": n,
             "judge": judge,
             "boxcox_lambda": boxcox_lambda,
         },

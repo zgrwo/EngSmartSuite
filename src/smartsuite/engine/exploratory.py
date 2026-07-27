@@ -1,4 +1,5 @@
 """探索性分析模块：箱线图、散点图、中位数 CI、Bootstrap CI。"""
+
 import logging
 import re
 
@@ -15,6 +16,7 @@ from smartsuite.engine._utils import _adjust_xlabels
 
 logger = logging.getLogger(__name__)
 
+
 def median_ci(req: AnalysisRequest) -> AnalysisResult:
     """中位数置信区间 — 基于二项分布符号检验的非参数方法。
 
@@ -23,12 +25,12 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
     data = req.data[req.target_col].dropna()
     n = len(data)
     if n < 5:
-        return AnalysisResult(task="median_ci", status="error",
-            messages=["有效数据不足(至少5个点)"])
+        return AnalysisResult(
+            task="median_ci", status="error", messages=["有效数据不足(至少5个点)"]
+        )
 
     ci_level = req.params.get("ci_level", 0.95)
     alpha = 1 - ci_level
-
 
     sorted_data = np.sort(data.values)
     # 二项分布法：找到最小的 k 使得 P(k ≤ B ≤ n-k) ≥ ci_level
@@ -43,30 +45,57 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
 
     fig = Figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
-    ax.hist(data, bins=min(30, int(np.sqrt(n))*2), color=PALETTE["data"]["secondary"],
-            edgecolor="white", alpha=0.7)
-    ax.axvline(median, color=PALETTE["center"]["primary"], linewidth=2, label=f"中位数={median:.4f}")
+    ax.hist(
+        data,
+        bins=min(30, int(np.sqrt(n)) * 2),
+        color=PALETTE["data"]["secondary"],
+        edgecolor="white",
+        alpha=0.7,
+    )
+    ax.axvline(
+        median, color=PALETTE["center"]["primary"], linewidth=2, label=f"中位数={median:.4f}"
+    )
     ax.axvline(lower, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5)
-    ax.axvline(upper, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
-               label=f"{ci_level*100:.0f}% CI: [{lower:.4f}, {upper:.4f}]")
+    ax.axvline(
+        upper,
+        color=PALETTE["anomaly"]["primary"],
+        linestyle="--",
+        linewidth=1.5,
+        label=f"{ci_level * 100:.0f}% CI: [{lower:.4f}, {upper:.4f}]",
+    )
     ax.axvspan(lower, upper, alpha=0.1, color=PALETTE["anomaly"]["primary"])
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_ylabel("频数", fontsize=10)
-    ax.set_title(f"中位数 {ci_level*100:.0f}% CI — {req.target_col} (n={n})", fontsize=11)
+    ax.set_title(f"中位数 {ci_level * 100:.0f}% CI — {req.target_col} (n={n})", fontsize=11)
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
     return AnalysisResult(
         task="median_ci",
-        tables={"median_ci": pd.DataFrame({
-            "指标": ["中位数", "CI下限", "CI上限", "置信水平", "样本量", "方法"],
-            "值": [f"{median:.4f}", f"{lower:.4f}", f"{upper:.4f}",
-                  f"{ci_level:.0%}", str(n), "二项分布符号检验"],
-        })},
+        tables={
+            "median_ci": pd.DataFrame(
+                {
+                    "指标": ["中位数", "CI下限", "CI上限", "置信水平", "样本量", "方法"],
+                    "值": [
+                        f"{median:.4f}",
+                        f"{lower:.4f}",
+                        f"{upper:.4f}",
+                        f"{ci_level:.0%}",
+                        str(n),
+                        "二项分布符号检验",
+                    ],
+                }
+            )
+        },
         figures=[fig],
-        summary=f"中位数={median:.4f}, {ci_level*100:.0f}% CI: [{lower:.4f}, {upper:.4f}]",
-        metadata={"median": median, "ci_lower": lower, "ci_upper": upper,
-                  "ci_level": ci_level, "n": n},
+        summary=f"中位数={median:.4f}, {ci_level * 100:.0f}% CI: [{lower:.4f}, {upper:.4f}]",
+        metadata={
+            "median": median,
+            "ci_lower": lower,
+            "ci_upper": upper,
+            "ci_level": ci_level,
+            "n": n,
+        },
     )
 
 
@@ -84,7 +113,8 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     n = len(data)
     if n < 5:
         return AnalysisResult(
-            task="bootstrap_ci", status="error",
+            task="bootstrap_ci",
+            status="error",
             messages=["有效数据不足(至少5个点)"],
         )
 
@@ -104,14 +134,17 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     # 原始估计
     if statistic == "median":
         orig_stat = float(np.median(values))
+
         def stat_fn(x):
             return np.median(x)
     elif statistic == "std":
         orig_stat = float(np.std(values, ddof=1))
+
         def stat_fn(x):
             return np.std(x, ddof=1)
     else:  # mean
         orig_stat = float(np.mean(values))
+
         def stat_fn(x):
             return np.mean(x)
 
@@ -129,18 +162,37 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     # 可视化：Bootstrap 分布 + CI
     fig = Figure(figsize=(8, 4))
     ax = fig.add_subplot(111)
-    ax.hist(boot_stats, bins=40, color=PALETTE["data"]["secondary"], edgecolor="white", alpha=0.8, density=True)
-    ax.axvline(orig_stat, color=PALETTE["center"]["primary"], linewidth=2, label=f"点估计={orig_stat:.4f}")
-    ax.axvline(ci_lower_pct, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
-               label=f"{ci_level*100:.0f}% CI下限={ci_lower_pct:.4f}")
-    ax.axvline(ci_upper_pct, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5,
-               label=f"{ci_level*100:.0f}% CI上限={ci_upper_pct:.4f}")
+    ax.hist(
+        boot_stats,
+        bins=40,
+        color=PALETTE["data"]["secondary"],
+        edgecolor="white",
+        alpha=0.8,
+        density=True,
+    )
+    ax.axvline(
+        orig_stat, color=PALETTE["center"]["primary"], linewidth=2, label=f"点估计={orig_stat:.4f}"
+    )
+    ax.axvline(
+        ci_lower_pct,
+        color=PALETTE["anomaly"]["primary"],
+        linestyle="--",
+        linewidth=1.5,
+        label=f"{ci_level * 100:.0f}% CI下限={ci_lower_pct:.4f}",
+    )
+    ax.axvline(
+        ci_upper_pct,
+        color=PALETTE["anomaly"]["primary"],
+        linestyle="--",
+        linewidth=1.5,
+        label=f"{ci_level * 100:.0f}% CI上限={ci_upper_pct:.4f}",
+    )
     ax.axvspan(ci_lower_pct, ci_upper_pct, alpha=0.1, color=PALETTE["anomaly"]["primary"])
     ax.set_xlabel(f"{statistic} ({req.target_col})", fontsize=10)
     ax.set_ylabel("Bootstrap 密度", fontsize=10)
     ax.set_title(
         f"Bootstrap {statistic.upper()} CI — {req.target_col} "
-        f"({ci_level*100:.0f}%, {n_boot}次重抽样, n={n})",
+        f"({ci_level * 100:.0f}%, {n_boot}次重抽样, n={n})",
         fontsize=10,
     )
     ax.legend(fontsize=8, ncol=2)
@@ -149,28 +201,45 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     ci_width = ci_upper_pct - ci_lower_pct
     summary = (
         f"{statistic} = {orig_stat:.4f}, "
-        f"{ci_level*100:.0f}% Bootstrap CI: "
+        f"{ci_level * 100:.0f}% Bootstrap CI: "
         f"[{ci_lower_pct:.4f}, {ci_upper_pct:.4f}] (宽度={ci_width:.4f})"
     )
 
     return AnalysisResult(
         task="bootstrap_ci",
         tables={
-            "bootstrap_ci": pd.DataFrame({
-                "统计量": [statistic, "点估计", f"CI下限 ({ci_level*100:.0f}%)",
-                        f"CI上限 ({ci_level*100:.0f}%)", "CI宽度",
-                        "重抽样次数", "样本量"],
-                "值": [statistic, f"{orig_stat:.4f}", f"{ci_lower_pct:.4f}",
-                      f"{ci_upper_pct:.4f}", f"{ci_width:.4f}",
-                      str(n_boot), str(n)],
-            }),
+            "bootstrap_ci": pd.DataFrame(
+                {
+                    "统计量": [
+                        statistic,
+                        "点估计",
+                        f"CI下限 ({ci_level * 100:.0f}%)",
+                        f"CI上限 ({ci_level * 100:.0f}%)",
+                        "CI宽度",
+                        "重抽样次数",
+                        "样本量",
+                    ],
+                    "值": [
+                        statistic,
+                        f"{orig_stat:.4f}",
+                        f"{ci_lower_pct:.4f}",
+                        f"{ci_upper_pct:.4f}",
+                        f"{ci_width:.4f}",
+                        str(n_boot),
+                        str(n),
+                    ],
+                }
+            ),
         },
         figures=[fig],
         summary=summary,
         metadata={
-            "statistic": statistic, "point_estimate": orig_stat,
-            "ci_lower": ci_lower_pct, "ci_upper": ci_upper_pct,
-            "ci_level": ci_level, "n_bootstrap": n_boot,
+            "statistic": statistic,
+            "point_estimate": orig_stat,
+            "ci_lower": ci_lower_pct,
+            "ci_upper": ci_upper_pct,
+            "ci_level": ci_level,
+            "n_bootstrap": n_boot,
             "n": n,
         },
     )
@@ -189,8 +258,9 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         target: 目标值 (灰色点线)
     """
     if len(req.feature_cols) < 1:
-        return AnalysisResult(task="box_chart", status="error",
-            messages=["需要至少 1 个分类列作为分组依据"])
+        return AnalysisResult(
+            task="box_chart", status="error", messages=["需要至少 1 个分类列作为分组依据"]
+        )
 
     group_col = req.feature_cols[0]
     sub_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
@@ -200,8 +270,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     def _draw_ref_lines(ax):
         """在箱线图上叠加规格限/控制限参考线。"""
         for val, color, style, label in _ref_lines:
-            ax.axhline(val, color=color, linestyle=style, linewidth=1.0,
-                      alpha=0.8, label=label)
+            ax.axhline(val, color=color, linestyle=style, linewidth=1.0, alpha=0.8, label=label)
         if _ref_lines:
             ax.legend(fontsize=7.5, loc="upper right")
 
@@ -211,7 +280,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         ("lsl", PALETTE["anomaly"]["primary"], "-"),
         ("ucl", PALETTE["control"]["primary"], "--"),
         ("lcl", PALETTE["control"]["primary"], "--"),
-        ("cl",  PALETTE["control"]["primary"], "--"),
+        ("cl", PALETTE["control"]["primary"], "--"),
     ]:
         val = req.params.get(key)
         if val is not None:
@@ -222,15 +291,15 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     target_val = req.params.get("target")
     if target_val is not None:
         try:
-            _ref_lines.append((float(target_val), PALETTE["direction"]["zero"],
-                              ":", "Target"))
+            _ref_lines.append((float(target_val), PALETTE["direction"]["zero"], ":", "Target"))
         except (ValueError, TypeError):
             pass
 
     sub = req.data[[req.target_col, group_col] + ([sub_col] if sub_col else [])].dropna()
     if len(sub) < 5:
-        return AnalysisResult(task="box_chart", status="error",
-            messages=["有效数据不足(至少5个点)"])
+        return AnalysisResult(
+            task="box_chart", status="error", messages=["有效数据不足(至少5个点)"]
+        )
 
     # ── 嵌套模式: 创建组合分组列 ──
     nested_label = None
@@ -243,11 +312,15 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
 
     groups = sorted(sub[group_col].unique(), key=str)
     if len(groups) < 2:
-        return AnalysisResult(task="box_chart", status="error",
-            messages=["分组列需要至少 2 个不同值"])
+        return AnalysisResult(
+            task="box_chart", status="error", messages=["分组列需要至少 2 个不同值"]
+        )
     if len(groups) > 30:
-        return AnalysisResult(task="box_chart", status="error",
-            messages=[f"分组过多({len(groups)}个)，最多支持 30 个分组"])
+        return AnalysisResult(
+            task="box_chart",
+            status="error",
+            messages=[f"分组过多({len(groups)}个)，最多支持 30 个分组"],
+        )
 
     # ── 前端筛选支持 ──
     all_groups = list(groups)  # 保存完整列表用于 metadata
@@ -262,16 +335,18 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     stat_rows = []
     for g in groups:
         gdata = sub[sub[group_col] == g][req.target_col]
-        stat_rows.append({
-            "分组": str(g),
-            "样本量": len(gdata),
-            "均值": round(float(gdata.mean()), 3),
-            "中位数": round(float(gdata.median()), 3),
-            "标准差": round(float(gdata.std(ddof=1)), 3),
-            "IQR": round(float(gdata.quantile(0.75) - gdata.quantile(0.25)), 3),
-            "最小值": round(float(gdata.min()), 3),
-            "最大值": round(float(gdata.max()), 3),
-        })
+        stat_rows.append(
+            {
+                "分组": str(g),
+                "样本量": len(gdata),
+                "均值": round(float(gdata.mean()), 3),
+                "中位数": round(float(gdata.median()), 3),
+                "标准差": round(float(gdata.std(ddof=1)), 3),
+                "IQR": round(float(gdata.quantile(0.75) - gdata.quantile(0.25)), 3),
+                "最小值": round(float(gdata.min()), 3),
+                "最大值": round(float(gdata.max()), 3),
+            }
+        )
 
     # ── ANOVA + Kruskal-Wallis (3+组) / t检验 + MWU (2组) ──
     group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
@@ -301,21 +376,27 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         for si, sg in enumerate(sub_groups):
             ax = fig.add_subplot(n_rows, n_cols, si + 1)
             sg_data = sub[sub[sub_col] == sg]
-            sg_groups = [sg_data[sg_data[group_col] == g][req.target_col].values
-                        for g in groups
-                        if len(sg_data[sg_data[group_col] == g]) > 0]
-            valid_groups = [g for g in groups
-                          if len(sg_data[sg_data[group_col] == g]) > 0]
+            sg_groups = [
+                sg_data[sg_data[group_col] == g][req.target_col].values
+                for g in groups
+                if len(sg_data[sg_data[group_col] == g]) > 0
+            ]
+            valid_groups = [g for g in groups if len(sg_data[sg_data[group_col] == g]) > 0]
             if len(valid_groups) >= 2:
-                bp = ax.boxplot(sg_groups, tick_labels=valid_groups,
-                               patch_artist=True, widths=0.5)
+                bp = ax.boxplot(sg_groups, tick_labels=valid_groups, patch_artist=True, widths=0.5)
                 cmap = cm.tab10
-                for pi, patch in enumerate(bp['boxes']):
+                for pi, patch in enumerate(bp["boxes"]):
                     patch.set_facecolor(cmap(pi % 10))
                 for i, gdata in enumerate(sg_groups, 1):
                     jitter = np.random.uniform(-0.12, 0.12, len(gdata))
-                    ax.scatter(np.full(len(gdata), i)+jitter, gdata,
-                             alpha=0.3, s=8, color=PALETTE["misc"]["grid"], zorder=3)
+                    ax.scatter(
+                        np.full(len(gdata), i) + jitter,
+                        gdata,
+                        alpha=0.3,
+                        s=8,
+                        color=PALETTE["misc"]["grid"],
+                        zorder=3,
+                    )
             ax.set_title(f"{sub_col}={sg} (n={len(sg_data)})", fontsize=9)
             ax.set_xlabel(group_col, fontsize=8)
             ax.set_ylabel(req.target_col, fontsize=8)
@@ -323,19 +404,27 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             _adjust_xlabels(ax, n_valid, fig)
             _draw_ref_lines(ax)
     else:
-        fig = Figure(figsize=(max(len(groups)*1.2, 6), 5))
+        fig = Figure(figsize=(max(len(groups) * 1.2, 6), 5))
         ax = fig.add_subplot(111)
-        bp = ax.boxplot(group_data,
-                       tick_labels=[f"{g}\n(n={len(d)})"
-                                   for g, d in zip(groups, group_data, strict=False)],
-                       patch_artist=True, widths=0.5)
+        bp = ax.boxplot(
+            group_data,
+            tick_labels=[f"{g}\n(n={len(d)})" for g, d in zip(groups, group_data, strict=False)],
+            patch_artist=True,
+            widths=0.5,
+        )
         cmap = cm.tab10
-        for pi, patch in enumerate(bp['boxes']):
+        for pi, patch in enumerate(bp["boxes"]):
             patch.set_facecolor(cmap(pi % 10))
         for i, gdata in enumerate(group_data, 1):
             jitter = np.random.uniform(-0.12, 0.12, len(gdata))
-            ax.scatter(np.full(len(gdata), i)+jitter, gdata,
-                     alpha=0.3, s=10, color=PALETTE["misc"]["grid"], zorder=3)
+            ax.scatter(
+                np.full(len(gdata), i) + jitter,
+                gdata,
+                alpha=0.3,
+                s=10,
+                color=PALETTE["misc"]["grid"],
+                zorder=3,
+            )
         ax.set_xlabel(group_col, fontsize=10)
         ax.set_ylabel(req.target_col, fontsize=10)
         title = f"分组箱线图 — {req.target_col} by {group_col}"
@@ -369,9 +458,13 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig],
         summary=summary,
         metadata={
-            "n_groups": len(groups), "n_total": n_total,
-            "group_col": group_col, "sub_col": sub_col, "has_sub": has_sub,
-            "mode": mode, "nested_label": nested_label,
+            "n_groups": len(groups),
+            "n_total": n_total,
+            "group_col": group_col,
+            "sub_col": sub_col,
+            "has_sub": has_sub,
+            "mode": mode,
+            "nested_label": nested_label,
             "groups": [str(g) for g in all_groups],
         },
     )
@@ -391,7 +484,8 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     """
     if len(req.feature_cols) < 1:
         return AnalysisResult(
-            task="scatter_plot", status="error",
+            task="scatter_plot",
+            status="error",
             messages=["需要至少 1 个 X 轴数值列"],
         )
 
@@ -408,7 +502,8 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     sub = req.data[cols_needed].dropna()
     if len(sub) < 3:
         return AnalysisResult(
-            task="scatter_plot", status="error",
+            task="scatter_plot",
+            status="error",
             messages=[f"有效数据不足(至少3个点, 当前{len(sub)}个)"],
         )
 
@@ -453,8 +548,17 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
             continue
         color = group_colors[gname]
         label = str(gname) if has_groups else None
-        ax.scatter(gx, gy, s=25, color=color, alpha=0.65, edgecolors="white",
-                   linewidth=0.3, label=label, zorder=3)
+        ax.scatter(
+            gx,
+            gy,
+            s=25,
+            color=color,
+            alpha=0.65,
+            edgecolors="white",
+            linewidth=0.3,
+            label=label,
+            zorder=3,
+        )
         all_x_for_fit.extend(gx.tolist())
         all_y_for_fit.extend(gy.tolist())
 
@@ -477,9 +581,16 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
         x_sorted = np.linspace(x_all.min(), x_all.max(), 200)
         y_fit = model.predict(x_sorted.reshape(-1, 1))
 
-        ax.plot(x_sorted, y_fit, "-", color=PALETTE["anomaly"]["primary"],
-                linewidth=2, alpha=0.85, zorder=5,
-                label=f"OLS (R²={r_squared:.3f})")
+        ax.plot(
+            x_sorted,
+            y_fit,
+            "-",
+            color=PALETTE["anomaly"]["primary"],
+            linewidth=2,
+            alpha=0.85,
+            zorder=5,
+            label=f"OLS (R²={r_squared:.3f})",
+        )
 
         # 置信带
         if show_ci and len(x_all) > 2:
@@ -495,9 +606,15 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
                 se_fit = resid_se * np.sqrt(1 / n + (x_sorted - x_mean) ** 2 / ssx)
                 ci_upper = y_fit + t_crit * se_fit
                 ci_lower = y_fit - t_crit * se_fit
-                ax.fill_between(x_sorted, ci_lower, ci_upper,
-                               color=PALETTE["anomaly"]["primary"], alpha=0.08, zorder=1,
-                               label="95% 置信带")
+                ax.fill_between(
+                    x_sorted,
+                    ci_lower,
+                    ci_upper,
+                    color=PALETTE["anomaly"]["primary"],
+                    alpha=0.08,
+                    zorder=1,
+                    label="95% 置信带",
+                )
 
         slope_sign = "+" if slope >= 0 else ""
         eq_text = f"y = {intercept:.4f} {slope_sign} {slope:.4f}x"
@@ -507,14 +624,20 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
         try:
             from statsmodels.nonparametric.smoothers_lowess import lowess
         except ImportError:
-            logger.info("statsmodels 未安装，LOWESS 拟合不可用。"
-                        "安装: pip install statsmodels")
+            logger.info("statsmodels 未安装，LOWESS 拟合不可用。安装: pip install statsmodels")
         else:
             try:
                 lowess_result = lowess(y_all, x_all, frac=0.5, return_sorted=True)
-                ax.plot(lowess_result[:, 0], lowess_result[:, 1], "-",
-                        color=PALETTE["anomaly"]["primary"], linewidth=2, alpha=0.85, zorder=5,
-                        label="LOWESS (frac=0.5)")
+                ax.plot(
+                    lowess_result[:, 0],
+                    lowess_result[:, 1],
+                    "-",
+                    color=PALETTE["anomaly"]["primary"],
+                    linewidth=2,
+                    alpha=0.85,
+                    zorder=5,
+                    label="LOWESS (frac=0.5)",
+                )
                 # 计算伪 R²
                 y_lowess_interp = np.interp(x_all, lowess_result[:, 0], lowess_result[:, 1])
                 ss_res = np.sum((y_all - y_lowess_interp) ** 2)
@@ -552,8 +675,10 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig],
         summary="".join(parts) + "。",
         metadata={
-            "n_points": n_points, "x_col": x_col,
-            "fit_type": fit_type, "r_squared": r_squared,
+            "n_points": n_points,
+            "x_col": x_col,
+            "fit_type": fit_type,
+            "r_squared": r_squared,
             "groups": [str(g) for g in group_names if g != "_default"],
         },
     )

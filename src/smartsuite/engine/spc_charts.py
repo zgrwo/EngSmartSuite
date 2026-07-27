@@ -1,4 +1,5 @@
 """SPC 控制图模块：X-bar/R、属性控制图、CUSUM、EWMA、非参数 SPC。"""
+
 import logging
 
 import numpy as np
@@ -17,18 +18,30 @@ logger = logging.getLogger(__name__)
 # ── X-bar/R 控制图常数表 (子组大小 n → A2, D3, D4) ──
 # 标准 ASTM/ISO Shewhart 控制图常数 (Montgomery, 9th ed.)
 _XBR_CONSTANTS: dict[int, tuple[float, float, float]] = {
-    2: (1.880, 0, 3.267),   3: (1.023, 0, 2.574),
-    4: (0.729, 0, 2.282),   5: (0.577, 0, 2.114),
-    6: (0.483, 0, 2.004),   7: (0.419, 0.076, 1.924),
-    8: (0.373, 0.136, 1.864),   9: (0.337, 0.184, 1.816),
-    10: (0.308, 0.223, 1.777),  11: (0.285, 0.256, 1.744),
-    12: (0.266, 0.283, 1.717),  13: (0.249, 0.307, 1.693),
-    14: (0.235, 0.328, 1.672),  15: (0.223, 0.347, 1.653),
-    16: (0.212, 0.363, 1.637),  17: (0.203, 0.378, 1.622),
-    18: (0.194, 0.391, 1.609),  19: (0.187, 0.404, 1.596),
-    20: (0.180, 0.415, 1.585),  21: (0.173, 0.425, 1.575),
-    22: (0.167, 0.435, 1.565),  23: (0.162, 0.443, 1.557),
-    24: (0.157, 0.452, 1.548),  25: (0.153, 0.459, 1.541),
+    2: (1.880, 0, 3.267),
+    3: (1.023, 0, 2.574),
+    4: (0.729, 0, 2.282),
+    5: (0.577, 0, 2.114),
+    6: (0.483, 0, 2.004),
+    7: (0.419, 0.076, 1.924),
+    8: (0.373, 0.136, 1.864),
+    9: (0.337, 0.184, 1.816),
+    10: (0.308, 0.223, 1.777),
+    11: (0.285, 0.256, 1.744),
+    12: (0.266, 0.283, 1.717),
+    13: (0.249, 0.307, 1.693),
+    14: (0.235, 0.328, 1.672),
+    15: (0.223, 0.347, 1.653),
+    16: (0.212, 0.363, 1.637),
+    17: (0.203, 0.378, 1.622),
+    18: (0.194, 0.391, 1.609),
+    19: (0.187, 0.404, 1.596),
+    20: (0.180, 0.415, 1.585),
+    21: (0.173, 0.425, 1.575),
+    22: (0.167, 0.435, 1.565),
+    23: (0.162, 0.443, 1.557),
+    24: (0.157, 0.452, 1.548),
+    25: (0.153, 0.459, 1.541),
 }
 
 
@@ -42,10 +55,11 @@ def _xbar_s_constants(n: int) -> tuple[float, float, float, float]:
         (c4, A3, B3, B4)
     """
     import math
+
     c4 = math.sqrt(2.0 / (n - 1)) * math.gamma(n / 2.0) / math.gamma((n - 1) / 2.0)
     c4 = max(c4, 1e-10)
     A3 = 3.0 / (c4 * math.sqrt(n))
-    common = 3.0 * math.sqrt(max(0.0, 1.0 - c4 ** 2)) / c4
+    common = 3.0 * math.sqrt(max(0.0, 1.0 - c4**2)) / c4
     B3 = max(0.0, 1.0 - common)
     B4 = 1.0 + common
     return c4, A3, B3, B4
@@ -59,57 +73,57 @@ def _we_rules_xbar(values, cl, sigma):
     n = len(vals)
 
     # Rule 1: 单点超出 ±3σ
-    r1 = np.where((vals > cl + 3*sigma) | (vals < cl - 3*sigma))[0]
+    r1 = np.where((vals > cl + 3 * sigma) | (vals < cl - 3 * sigma))[0]
     if len(r1):
         violations["规则1: 超出±3σ"] = [int(i) for i in r1]
 
     # Rule 2: 连续3点中≥2点超出 ±2σ (同侧)
     r2: set[int] = set()
     for i in range(n - 2):
-        above = np.sum(vals[i:i+3] > cl + 2*sigma)
-        below = np.sum(vals[i:i+3] < cl - 2*sigma)
+        above = np.sum(vals[i : i + 3] > cl + 2 * sigma)
+        below = np.sum(vals[i : i + 3] < cl - 2 * sigma)
         if above >= 2:
-            r2.update(j for j in range(i, i+3) if vals[j] > cl + 2*sigma)
+            r2.update(j for j in range(i, i + 3) if vals[j] > cl + 2 * sigma)
         if below >= 2:
-            r2.update(j for j in range(i, i+3) if vals[j] < cl - 2*sigma)
+            r2.update(j for j in range(i, i + 3) if vals[j] < cl - 2 * sigma)
     if r2:
         violations["规则2: 3点中≥2点超出±2σ"] = sorted(r2)
 
     # Rule 3: 连续5点中≥4点超出 ±1σ (同侧)
     r3: set[int] = set()
     for i in range(n - 4):
-        above = np.sum(vals[i:i+5] > cl + 1*sigma)
-        below = np.sum(vals[i:i+5] < cl - 1*sigma)
+        above = np.sum(vals[i : i + 5] > cl + 1 * sigma)
+        below = np.sum(vals[i : i + 5] < cl - 1 * sigma)
         if above >= 4:
-            r3.update(j for j in range(i, i+5) if vals[j] > cl + 1*sigma)
+            r3.update(j for j in range(i, i + 5) if vals[j] > cl + 1 * sigma)
         if below >= 4:
-            r3.update(j for j in range(i, i+5) if vals[j] < cl - 1*sigma)
+            r3.update(j for j in range(i, i + 5) if vals[j] < cl - 1 * sigma)
     if r3:
         violations["规则3: 5点中≥4点超出±1σ"] = sorted(r3)
 
     # Rule 4: 连续8点在同一侧
     r4: set[int] = set()
     for i in range(n - 7):
-        if all(vals[i:i+8] > cl) or all(vals[i:i+8] < cl):
-            r4.update(range(i, i+8))
+        if all(vals[i : i + 8] > cl) or all(vals[i : i + 8] < cl):
+            r4.update(range(i, i + 8))
     if r4:
         violations["规则4: 连续8点同侧"] = sorted(r4)
 
     # Rule 5: 连续6点单调上升或下降
     r5: set[int] = set()
     for i in range(n - 5):
-        if all(vals[i+k+1] > vals[i+k] for k in range(5)):
-            r5.update(range(i, i+6))
-        if all(vals[i+k+1] < vals[i+k] for k in range(5)):
-            r5.update(range(i, i+6))
+        if all(vals[i + k + 1] > vals[i + k] for k in range(5)):
+            r5.update(range(i, i + 6))
+        if all(vals[i + k + 1] < vals[i + k] for k in range(5)):
+            r5.update(range(i, i + 6))
     if r5:
         violations["规则5: 连续6点趋势"] = sorted(r5)
 
     # Rule 6: 连续15点在 ±1σ 内（分层/虚假受控）
     r6: set[int] = set()
     for i in range(n - 14):
-        if all(abs(vals[i:i+15] - cl) < 1*sigma):
-            r6.update(range(i, i+15))
+        if all(abs(vals[i : i + 15] - cl) < 1 * sigma):
+            r6.update(range(i, i + 15))
     if r6:
         violations["规则6: 连续15点在±1σ内"] = sorted(r6)
 
@@ -136,26 +150,26 @@ def _we_rules_r(values, cl, ucl, lcl=0):
     # Rule R2: 连续 7 点在中心线同侧
     r2_seen: set[int] = set()
     for i in range(n - 6):
-        if all(vals[i:i+7] > cl):
-            r2_seen.update(range(i, i+7))
-        if all(vals[i:i+7] < cl):
-            r2_seen.update(range(i, i+7))
+        if all(vals[i : i + 7] > cl):
+            r2_seen.update(range(i, i + 7))
+        if all(vals[i : i + 7] < cl):
+            r2_seen.update(range(i, i + 7))
     if r2_seen:
         violations["R2: 连续7点同侧"] = sorted(r2_seen)
 
     # Rule R3: 连续 7 点上升 (变异性恶化) — 严格单调，与 X-bar Rule 5 一致
     r3_seen: set[int] = set()
     for i in range(n - 6):
-        if all(vals[i+k+1] > vals[i+k] for k in range(6)):
-            r3_seen.update(range(i, i+7))
+        if all(vals[i + k + 1] > vals[i + k] for k in range(6)):
+            r3_seen.update(range(i, i + 7))
     if r3_seen:
         violations["R3: 连续7点上升 (变异增大)"] = sorted(r3_seen)
 
     # Rule R4: 连续 7 点下降 (变异性改善)
     r4_seen: set[int] = set()
     for i in range(n - 6):
-        if all(vals[i+k+1] < vals[i+k] for k in range(6)):
-            r4_seen.update(range(i, i+7))
+        if all(vals[i + k + 1] < vals[i + k] for k in range(6)):
+            r4_seen.update(range(i, i + 7))
     if r4_seen:
         violations["R4: 连续7点下降 (变异减小)"] = sorted(r4_seen)
 
@@ -183,32 +197,30 @@ def _we_rules_s(values, cl, ucl, lcl=0):
     # Rule S2: 连续 7 点在中心线同侧
     s2_seen: set[int] = set()
     for i in range(n - 6):
-        if all(vals[i:i+7] > cl):
-            s2_seen.update(range(i, i+7))
-        if all(vals[i:i+7] < cl):
-            s2_seen.update(range(i, i+7))
+        if all(vals[i : i + 7] > cl):
+            s2_seen.update(range(i, i + 7))
+        if all(vals[i : i + 7] < cl):
+            s2_seen.update(range(i, i + 7))
     if s2_seen:
         violations["S2: 连续7点同侧"] = sorted(s2_seen)
 
     # Rule S3: 连续 7 点上升 (变异性恶化)
     s3_seen: set[int] = set()
     for i in range(n - 6):
-        if all(vals[i+k+1] > vals[i+k] for k in range(6)):
-            s3_seen.update(range(i, i+7))
+        if all(vals[i + k + 1] > vals[i + k] for k in range(6)):
+            s3_seen.update(range(i, i + 7))
     if s3_seen:
         violations["S3: 连续7点上升 (变异增大)"] = sorted(s3_seen)
 
     # Rule S4: 连续 7 点下降 (变异性改善)
     s4_seen: set[int] = set()
     for i in range(n - 6):
-        if all(vals[i+k+1] < vals[i+k] for k in range(6)):
-            s4_seen.update(range(i, i+7))
+        if all(vals[i + k + 1] < vals[i + k] for k in range(6)):
+            s4_seen.update(range(i, i + 7))
     if s4_seen:
         violations["S4: 连续7点下降 (变异减小)"] = sorted(s4_seen)
 
     return {k: sorted(set(v)) for k, v in violations.items()}
-
-
 
 
 def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -258,14 +270,17 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     data_valid = data[valid].copy()
     if len(data_valid) < 2:
         return AnalysisResult(
-            task="spc_xbar", status="error",
+            task="spc_xbar",
+            status="error",
             messages=[f"目标列「{y_col}」有效数据不足（至少需要2个数据点）"],
         )
 
     # 按 (X值, 分组值) 聚合
-    agg = data_valid.groupby(["_x", "_group"], dropna=False)["_y"].agg(
-        xbar="mean", r=lambda x: x.max() - x.min(), s="std", n="count"
-    ).reset_index()
+    agg = (
+        data_valid.groupby(["_x", "_group"], dropna=False)["_y"]
+        .agg(xbar="mean", r=lambda x: x.max() - x.min(), s="std", n="count")
+        .reset_index()
+    )
     agg = agg.rename(columns={"_x": "x_val", "_group": "group_val"})
 
     # ── 4. 分类子组: n≥2 参与控制限估计, n=1 仅显示 ──
@@ -275,7 +290,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     if len(multi_data) < 1 and len(single_data) < 2:
         return AnalysisResult(
-            task="spc_xbar", status="error",
+            task="spc_xbar",
+            status="error",
             messages=["X 列有效分组数不足（至少需要2个点）"],
         )
 
@@ -352,44 +368,49 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                     _xbg = float(g_multi["xbar"].mean())
                     _sg = A2g * _rg / 3.0
                     group_limits[gname] = {
-                        "xbar_bar": _xbg, "sigma_xbar": _sg,
-                        "ucl_x": _xbg + 3.0 * _sg, "lcl_x": _xbg - 3.0 * _sg,
-                        "lower_cl": _rg, "lower_ucl": D4g * _rg, "lower_lcl": D3g * _rg,
+                        "xbar_bar": _xbg,
+                        "sigma_xbar": _sg,
+                        "ucl_x": _xbg + 3.0 * _sg,
+                        "lcl_x": _xbg - 3.0 * _sg,
+                        "lower_cl": _rg,
+                        "lower_ucl": D4g * _rg,
+                        "lower_lcl": D3g * _rg,
                     }
                 else:
                     _sg_bar = float(g_multi["s"].mean())
                     _xbg = float(g_multi["xbar"].mean())
                     _sg2 = A3 * _sg_bar / 3.0
                     group_limits[gname] = {
-                        "xbar_bar": _xbg, "sigma_xbar": _sg2,
-                        "ucl_x": _xbg + 3.0 * _sg2, "lcl_x": _xbg - 3.0 * _sg2,
-                        "lower_cl": _sg_bar, "lower_ucl": B4 * _sg_bar, "lower_lcl": B3 * _sg_bar,
+                        "xbar_bar": _xbg,
+                        "sigma_xbar": _sg2,
+                        "ucl_x": _xbg + 3.0 * _sg2,
+                        "lcl_x": _xbg - 3.0 * _sg2,
+                        "lower_cl": _sg_bar,
+                        "lower_ucl": B4 * _sg_bar,
+                        "lower_lcl": B3 * _sg_bar,
                     }
 
         # ── 全局违规检测（无分组时直接用 pooled 限）──
         if n_common in _XBR_CONSTANTS:
-            xbar_violations = _we_rules_xbar(
-                multi_data["xbar"].values, xbar_bar, sigma_xbar)
-            r_violations = _we_rules_r(
-                multi_data["r"].values, _r_bar, lower_ucl, lower_lcl)
+            xbar_violations = _we_rules_xbar(multi_data["xbar"].values, xbar_bar, sigma_xbar)
+            r_violations = _we_rules_r(multi_data["r"].values, _r_bar, lower_ucl, lower_lcl)
         else:
-            xbar_violations = _we_rules_xbar(
-                multi_data["xbar"].values, xbar_bar, sigma_xbar)
-            r_violations = _we_rules_s(
-                multi_data["s"].values, _s_bar, lower_ucl, lower_lcl)
+            xbar_violations = _we_rules_xbar(multi_data["xbar"].values, xbar_bar, sigma_xbar)
+            r_violations = _we_rules_s(multi_data["s"].values, _s_bar, lower_ucl, lower_lcl)
 
         # ── 分组违规检测 ──
         if has_groups:
             for gname, glim in group_limits.items():
                 g_multi = multi_data[multi_data["group_val"] == gname]
-                gv_x = _we_rules_xbar(
-                    g_multi["xbar"].values, glim["xbar_bar"], glim["sigma_xbar"])
+                gv_x = _we_rules_xbar(g_multi["xbar"].values, glim["xbar_bar"], glim["sigma_xbar"])
                 if n_common in _XBR_CONSTANTS:
                     gv_disp = _we_rules_r(
-                        g_multi["r"].values, glim["lower_cl"], glim["lower_ucl"], glim["lower_lcl"])
+                        g_multi["r"].values, glim["lower_cl"], glim["lower_ucl"], glim["lower_lcl"]
+                    )
                 else:
                     gv_disp = _we_rules_s(
-                        g_multi["s"].values, glim["lower_cl"], glim["lower_ucl"], glim["lower_lcl"])
+                        g_multi["s"].values, glim["lower_cl"], glim["lower_ucl"], glim["lower_lcl"]
+                    )
                 per_group_violations[gname] = {"xbar": gv_x, "disp": gv_disp}
     else:
         # 全部 n=1: I 图风格
@@ -410,7 +431,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     # NaN 校验
     if np.isnan(xbar_bar) or np.isnan(sigma_xbar):
         return AnalysisResult(
-            task="spc_xbar", status="error",
+            task="spc_xbar",
+            status="error",
             messages=[f"目标列「{y_col}」的所有值均为缺失值或不可计算，无法估计控制限。"],
         )
 
@@ -436,20 +458,69 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     # 区域着色（基于整体控制限）
     all_idx = np.arange(len(x_unique))
     ax1.fill_between(all_idx, lcl_x, ucl_x, alpha=0.06, color=PALETTE["center"]["primary"])
-    ax1.fill_between(all_idx, xbar_bar - 2*sigma_xbar, xbar_bar + 2*sigma_xbar,
-                     alpha=0.06, color=PALETTE["judge"]["warn"])
-    ax1.fill_between(all_idx, xbar_bar - 1*sigma_xbar, xbar_bar + 1*sigma_xbar,
-                     alpha=0.06, color=PALETTE["center"]["primary"])
-    ax1.axhline(xbar_bar, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
-                label=f"CL={xbar_bar:.4f}")
-    ax1.axhline(ucl_x, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                label=f"UCL={ucl_x:.4f}")
-    ax1.axhline(lcl_x, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                label=f"LCL={lcl_x:.4f}")
-    ax1.axhline(xbar_bar + 2*sigma_xbar, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.7, alpha=0.6)
-    ax1.axhline(xbar_bar - 2*sigma_xbar, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.7, alpha=0.6)
-    ax1.axhline(xbar_bar + 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
-    ax1.axhline(xbar_bar - 1*sigma_xbar, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
+    ax1.fill_between(
+        all_idx,
+        xbar_bar - 2 * sigma_xbar,
+        xbar_bar + 2 * sigma_xbar,
+        alpha=0.06,
+        color=PALETTE["judge"]["warn"],
+    )
+    ax1.fill_between(
+        all_idx,
+        xbar_bar - 1 * sigma_xbar,
+        xbar_bar + 1 * sigma_xbar,
+        alpha=0.06,
+        color=PALETTE["center"]["primary"],
+    )
+    ax1.axhline(
+        xbar_bar,
+        color=PALETTE["control"]["primary"],
+        linestyle="--",
+        linewidth=1.5,
+        label=f"CL={xbar_bar:.4f}",
+    )
+    ax1.axhline(
+        ucl_x,
+        color=PALETTE["control"]["primary"],
+        linestyle="--",
+        linewidth=1.2,
+        label=f"UCL={ucl_x:.4f}",
+    )
+    ax1.axhline(
+        lcl_x,
+        color=PALETTE["control"]["primary"],
+        linestyle="--",
+        linewidth=1.2,
+        label=f"LCL={lcl_x:.4f}",
+    )
+    ax1.axhline(
+        xbar_bar + 2 * sigma_xbar,
+        color=PALETTE["spec"]["secondary"],
+        linestyle=":",
+        linewidth=0.7,
+        alpha=0.6,
+    )
+    ax1.axhline(
+        xbar_bar - 2 * sigma_xbar,
+        color=PALETTE["spec"]["secondary"],
+        linestyle=":",
+        linewidth=0.7,
+        alpha=0.6,
+    )
+    ax1.axhline(
+        xbar_bar + 1 * sigma_xbar,
+        color=PALETTE["spec"]["tertiary"],
+        linestyle=":",
+        linewidth=0.5,
+        alpha=0.4,
+    )
+    ax1.axhline(
+        xbar_bar - 1 * sigma_xbar,
+        color=PALETTE["spec"]["tertiary"],
+        linestyle=":",
+        linewidth=0.5,
+        alpha=0.4,
+    )
 
     # 规格限
     for spec_key, spec_label in [("usl", "USL"), ("lsl", "LSL")]:
@@ -460,8 +531,14 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             except (ValueError, TypeError):
                 sv = None
             if sv is not None:
-                ax1.axhline(sv, color=PALETTE["anomaly"]["primary"], linestyle="-",
-                           linewidth=1.2, alpha=0.9, label=f"{spec_label}={sv}")
+                ax1.axhline(
+                    sv,
+                    color=PALETTE["anomaly"]["primary"],
+                    linestyle="-",
+                    linewidth=1.2,
+                    alpha=0.9,
+                    label=f"{spec_label}={sv}",
+                )
     target_spec = req.params.get("target")
     if target_spec is not None:
         try:
@@ -469,8 +546,14 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         except (ValueError, TypeError):
             tv = None
         if tv is not None:
-            ax1.axhline(tv, color=PALETTE["direction"]["zero"], linestyle=":",
-                       linewidth=1.0, alpha=0.6, label=f"Target={tv}")
+            ax1.axhline(
+                tv,
+                color=PALETTE["direction"]["zero"],
+                linestyle=":",
+                linewidth=1.0,
+                alpha=0.6,
+                label=f"Target={tv}",
+            )
 
     # ── 分组独立控制限线（有分组时每组画自己的限）──
     if has_groups and group_limits:
@@ -495,18 +578,33 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         label = str(gname) if has_groups else None
 
         # 线
-        ax1.plot(g_idx, g_xbar, "-", color=color, linewidth=1.2, alpha=0.6,
-                label=label, zorder=2)
+        ax1.plot(g_idx, g_xbar, "-", color=color, linewidth=1.2, alpha=0.6, label=label, zorder=2)
         # 点多点 / 单点 标记区分
         g_multi = gdata[gdata["multi"]]
         g_single = gdata[~gdata["multi"]]
         if len(g_multi) > 0:
-            ax1.scatter(g_multi["_idx"], g_multi["xbar"], s=30, color=color,
-                       marker="o", edgecolors="white", linewidth=0.5, zorder=4)
+            ax1.scatter(
+                g_multi["_idx"],
+                g_multi["xbar"],
+                s=30,
+                color=color,
+                marker="o",
+                edgecolors="white",
+                linewidth=0.5,
+                zorder=4,
+            )
         if len(g_single) > 0:
-            ax1.scatter(g_single["_idx"], g_single["xbar"], s=25, color=color,
-                       marker="s", edgecolors="white", linewidth=0.5, zorder=4,
-                       label=f"{label} (n=1)" if has_groups else "n=1")
+            ax1.scatter(
+                g_single["_idx"],
+                g_single["xbar"],
+                s=25,
+                color=color,
+                marker="s",
+                edgecolors="white",
+                linewidth=0.5,
+                zorder=4,
+                label=f"{label} (n=1)" if has_groups else "n=1",
+            )
 
         # ── 分组独立违规点 ──
         if has_groups and gname in per_group_violations:
@@ -518,12 +616,18 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             if g_vio_set:
                 g_vio_idx = sorted(g_vio_set)
                 g_multi_sorted = gdata[gdata["multi"]]
-                viol_data = g_multi_sorted.iloc[
-                    [i for i in g_vio_idx if i < len(g_multi_sorted)]]
+                viol_data = g_multi_sorted.iloc[[i for i in g_vio_idx if i < len(g_multi_sorted)]]
                 if len(viol_data) > 0:
-                    ax1.scatter(viol_data["_idx"], viol_data["xbar"], s=60,
-                               color=color, marker="o", facecolors="none",
-                               linewidths=1.5, zorder=5)
+                    ax1.scatter(
+                        viol_data["_idx"],
+                        viol_data["xbar"],
+                        s=60,
+                        color=color,
+                        marker="o",
+                        facecolors="none",
+                        linewidths=1.5,
+                        zorder=5,
+                    )
 
     # 违规点标记（无分组时用全局检测）
     if not has_groups and all_xbar_violated:
@@ -531,10 +635,17 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         vio_idx_list = [i for i in all_xbar_violated if i < len(multi_only)]
         if vio_idx_list:
             vio_subset = multi_only.iloc[vio_idx_list]
-            ax1.scatter(vio_subset["_idx"], vio_subset["xbar"], s=80,
-                       color=PALETTE["anomaly"]["primary"], marker="o",
-                       facecolors="none", linewidths=2, zorder=5,
-                       label=f"违规点 ({len(vio_idx_list)}个)")
+            ax1.scatter(
+                vio_subset["_idx"],
+                vio_subset["xbar"],
+                s=80,
+                color=PALETTE["anomaly"]["primary"],
+                marker="o",
+                facecolors="none",
+                linewidths=2,
+                zorder=5,
+                label=f"违规点 ({len(vio_idx_list)}个)",
+            )
 
     # X 轴标签
     def _fmt_labels(vals):
@@ -561,7 +672,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     _adjust_xlabels(ax1, len(x_labels), fig)
     ax1.set_ylabel(y_col, fontsize=10)
     title_n = n_common if n_common > 1 else 1
-    title_info = f"{chart_subtype.upper()}控制图 — {y_col} ({len(agg)}点{'×'+str(title_n)+'样本' if title_n>1 else ''}{warn_unequal})"
+    title_info = f"{chart_subtype.upper()}控制图 — {y_col} ({len(agg)}点{'×' + str(title_n) + '样本' if title_n > 1 else ''}{warn_unequal})"
     ax1.set_title(title_info, fontsize=12)
     if has_groups:
         ax1.legend(fontsize=7, loc="upper right", ncol=max(1, n_series // 3 + 1))
@@ -573,19 +684,38 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     disp_key = _disp_key
     if lower_title != "—":
         ax2 = fig.add_subplot(212)
-        ax2.axhline(lower_cl, color=PALETTE["control"]["primary"], linestyle="--",
-                    linewidth=1.5, label=f"CL={lower_cl:.4f}")
-        ax2.axhline(lower_ucl, color=PALETTE["control"]["primary"], linestyle="--",
-                    linewidth=1.2, label=f"UCL={lower_ucl:.4f}")
-        ax2.axhline(lower_lcl, color=PALETTE["control"]["primary"], linestyle="--",
-                    linewidth=1.2, label=f"LCL={lower_lcl:.4f}")
+        ax2.axhline(
+            lower_cl,
+            color=PALETTE["control"]["primary"],
+            linestyle="--",
+            linewidth=1.5,
+            label=f"CL={lower_cl:.4f}",
+        )
+        ax2.axhline(
+            lower_ucl,
+            color=PALETTE["control"]["primary"],
+            linestyle="--",
+            linewidth=1.2,
+            label=f"UCL={lower_ucl:.4f}",
+        )
+        ax2.axhline(
+            lower_lcl,
+            color=PALETTE["control"]["primary"],
+            linestyle="--",
+            linewidth=1.2,
+            label=f"LCL={lower_lcl:.4f}",
+        )
 
         # ── 分组独立散度控制限 ──
         if has_groups and group_limits:
             for gname, glim in group_limits.items():
                 color = group_colors[gname]
-                ax2.axhline(glim["lower_ucl"], color=color, linestyle="--", linewidth=0.6, alpha=0.35)
-                ax2.axhline(glim["lower_lcl"], color=color, linestyle="--", linewidth=0.6, alpha=0.35)
+                ax2.axhline(
+                    glim["lower_ucl"], color=color, linestyle="--", linewidth=0.6, alpha=0.35
+                )
+                ax2.axhline(
+                    glim["lower_lcl"], color=color, linestyle="--", linewidth=0.6, alpha=0.35
+                )
 
         # 系列线
         for gi, gname in enumerate(group_names):
@@ -597,8 +727,16 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             g_disp = g_multi[disp_key].values
             color = group_colors[gname]
             ax2.plot(g_idx, g_disp, "-", color=color, linewidth=1.2, alpha=0.6)
-            ax2.scatter(g_idx, g_disp, s=20, color=color, marker="o",
-                       edgecolors="white", linewidth=0.5, zorder=4)
+            ax2.scatter(
+                g_idx,
+                g_disp,
+                s=20,
+                color=color,
+                marker="o",
+                edgecolors="white",
+                linewidth=0.5,
+                zorder=4,
+            )
 
             # ── 分组独立散度违规点 ──
             if has_groups and gname in per_group_violations:
@@ -611,11 +749,19 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                     g_disp_vio_idx = sorted(g_disp_vio)
                     g_multi_sorted = gdata[gdata["multi"]]
                     viol_disp = g_multi_sorted.iloc[
-                        [i for i in g_disp_vio_idx if i < len(g_multi_sorted)]]
+                        [i for i in g_disp_vio_idx if i < len(g_multi_sorted)]
+                    ]
                     if len(viol_disp) > 0:
-                        ax2.scatter(viol_disp["_idx"], viol_disp[disp_key], s=50,
-                                   color=color, marker="o", facecolors="none",
-                                   linewidths=1.5, zorder=5)
+                        ax2.scatter(
+                            viol_disp["_idx"],
+                            viol_disp[disp_key],
+                            s=50,
+                            color=color,
+                            marker="o",
+                            facecolors="none",
+                            linewidths=1.5,
+                            zorder=5,
+                        )
 
         # R/S 违规点（无分组时用全局检测）
         if not has_groups:
@@ -628,10 +774,17 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 lvio_idx_list = [i for i in all_lower_violated if i < len(multi_only)]
                 if lvio_idx_list:
                     lvio_subset = multi_only.iloc[lvio_idx_list]
-                    ax2.scatter(lvio_subset["_idx"], lvio_subset[disp_key], s=80,
-                               color=PALETTE["anomaly"]["primary"], marker="o",
-                               facecolors="none", linewidths=2, zorder=5,
-                               label=f"违规点 ({len(lvio_idx_list)}个)")
+                    ax2.scatter(
+                        lvio_subset["_idx"],
+                        lvio_subset[disp_key],
+                        s=80,
+                        color=PALETTE["anomaly"]["primary"],
+                        marker="o",
+                        facecolors="none",
+                        linewidths=2,
+                        zorder=5,
+                        label=f"违规点 ({len(lvio_idx_list)}个)",
+                    )
 
         ax2.set_xlabel("X", fontsize=10)
         ax2.set_ylabel(lower_label, fontsize=10)
@@ -648,49 +801,68 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     if has_groups and per_group_violations:
         for gname, gv in per_group_violations.items():
             for rule_name, idxs in gv["xbar"].items():
-                v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
-                            if i < len(agg[agg["multi"]])]
-                violation_rows.append({
-                    "分组": str(gname),
+                v_labels = [
+                    str(agg[agg["multi"]].iloc[i]["x_val"])
+                    for i in idxs
+                    if i < len(agg[agg["multi"]])
+                ]
+                violation_rows.append(
+                    {
+                        "分组": str(gname),
+                        "图表": "X-bar",
+                        "规则": rule_name,
+                        "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
+                        "违规点数": len(idxs),
+                    }
+                )
+            lower_chart_label = "S" if use_s_chart else "R"
+            for rule_name, idxs in gv["disp"].items():
+                v_labels = [
+                    str(agg[agg["multi"]].iloc[i]["x_val"])
+                    for i in idxs
+                    if i < len(agg[agg["multi"]])
+                ]
+                violation_rows.append(
+                    {
+                        "分组": str(gname),
+                        "图表": lower_chart_label,
+                        "规则": rule_name,
+                        "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
+                        "违规点数": len(idxs),
+                    }
+                )
+        total_violations = sum(
+            len(gv["xbar"]) + len(gv["disp"]) for gv in per_group_violations.values()
+        )
+    else:
+        for rule_name, idxs in xbar_violations.items():
+            v_labels = [
+                str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs if i < len(agg[agg["multi"]])
+            ]
+            violation_rows.append(
+                {
                     "图表": "X-bar",
                     "规则": rule_name,
                     "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
                     "违规点数": len(idxs),
-                })
-            lower_chart_label = "S" if use_s_chart else "R"
-            for rule_name, idxs in gv["disp"].items():
-                v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
-                            if i < len(agg[agg["multi"]])]
-                violation_rows.append({
-                    "分组": str(gname),
-                    "图表": lower_chart_label,
-                    "规则": rule_name,
-                    "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
-                    "违规点数": len(idxs),
-                })
-        total_violations = sum(
-            len(gv["xbar"]) + len(gv["disp"]) for gv in per_group_violations.values())
-    else:
-        for rule_name, idxs in xbar_violations.items():
-            v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
-                        if i < len(agg[agg["multi"]])]
-            violation_rows.append({
-                "图表": "X-bar",
-                "规则": rule_name,
-                "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
-                "违规点数": len(idxs),
-            })
+                }
+            )
         if r_violations:
             lower_chart_label = "S" if use_s_chart else "R"
             for rule_name, idxs in r_violations.items():
-                v_labels = [str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs
-                            if i < len(agg[agg["multi"]])]
-                violation_rows.append({
-                    "图表": lower_chart_label,
-                    "规则": rule_name,
-                    "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
-                    "违规点数": len(idxs),
-                })
+                v_labels = [
+                    str(agg[agg["multi"]].iloc[i]["x_val"])
+                    for i in idxs
+                    if i < len(agg[agg["multi"]])
+                ]
+                violation_rows.append(
+                    {
+                        "图表": lower_chart_label,
+                        "规则": rule_name,
+                        "违规子组": ", ".join(v_labels[:10]) + ("…" if len(v_labels) > 10 else ""),
+                        "违规点数": len(idxs),
+                    }
+                )
         total_violations = len(xbar_violations) + len(r_violations)
     is_stable = total_violations == 0
 
@@ -701,29 +873,32 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     elif len(multi_data) > 0:
         lower_stats_name = "R"
 
-    limits_rows = [{
-        "统计量": "X-bar",
-        "CL": f"{xbar_bar:.4f}",
-        "UCL": f"{ucl_x:.4f}",
-        "LCL": f"{lcl_x:.4f}",
-        "1σ上限": f"{xbar_bar + sigma_xbar:.4f}",
-        "1σ下限": f"{xbar_bar - sigma_xbar:.4f}",
-    }]
+    limits_rows = [
+        {
+            "统计量": "X-bar",
+            "CL": f"{xbar_bar:.4f}",
+            "UCL": f"{ucl_x:.4f}",
+            "LCL": f"{lcl_x:.4f}",
+            "1σ上限": f"{xbar_bar + sigma_xbar:.4f}",
+            "1σ下限": f"{xbar_bar - sigma_xbar:.4f}",
+        }
+    ]
     if lower_stats_name != "—":
-        limits_rows.append({
-            "统计量": lower_stats_name,
-            "CL": f"{lower_cl:.4f}",
-            "UCL": f"{lower_ucl:.4f}",
-            "LCL": f"{lower_lcl:.4f}",
-            "1σ上限": "—",
-            "1σ下限": "—",
-        })
+        limits_rows.append(
+            {
+                "统计量": lower_stats_name,
+                "CL": f"{lower_cl:.4f}",
+                "UCL": f"{lower_ucl:.4f}",
+                "LCL": f"{lower_lcl:.4f}",
+                "1σ上限": "—",
+                "1σ下限": "—",
+            }
+        )
     limits = pd.DataFrame(limits_rows)
 
     # ── 10. 摘要 ──
     stability_summary = (
-        "过程稳定 ✓" if is_stable
-        else f"过程存在异常，共触发 {total_violations} 条规则"
+        "过程稳定 ✓" if is_stable else f"过程存在异常，共触发 {total_violations} 条规则"
     )
 
     messages: list[str] = []
@@ -734,8 +909,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         )
     if warn_unequal and n_common > 1:
         messages.append(
-            f"⚠ 子组大小不一致: {warn_unequal.strip(' ()')}。"
-            "控制限基于最小子组大小估计。"
+            f"⚠ 子组大小不一致: {warn_unequal.strip(' ()')}。控制限基于最小子组大小估计。"
         )
     single_count = len(single_data)
     if single_count > 0:
@@ -747,7 +921,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     metadata: dict = {
         "xbar_mean": xbar_bar,
         "sigma_xbar": sigma_xbar,
-        "ucl_x": ucl_x, "lcl_x": lcl_x,
+        "ucl_x": ucl_x,
+        "lcl_x": lcl_x,
         "subgroup_size": n_common,
         "chart_type": chart_subtype,
         "n_series": n_series,
@@ -780,7 +955,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         task="spc_xbar",
         tables={
             "control_limits": limits,
-            "violations": pd.DataFrame(violation_rows) if violation_rows
+            "violations": pd.DataFrame(violation_rows)
+            if violation_rows
             else pd.DataFrame({"状态": ["未检测到违规"]}),
         },
         figures=[fig],
@@ -831,15 +1007,14 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     # 按 (X, group) 聚合
     valid = data[y_col].notna()
     dv = data[valid]
-    agg = dv.groupby(["_x", "_g"], dropna=False)[y_col].agg(
-        count="sum", size="count"
-    ).reset_index()
+    agg = dv.groupby(["_x", "_g"], dropna=False)[y_col].agg(count="sum", size="count").reset_index()
     agg = agg.rename(columns={"_x": "x_val", "_g": "group_val"})
 
     m = len(agg)
     if m < 5:
-        return AnalysisResult(task="spc_attribute", status="error",
-            messages=["分组数量不足(至少5个)"])
+        return AnalysisResult(
+            task="spc_attribute", status="error", messages=["分组数量不足(至少5个)"]
+        )
 
     # 按图表类型计算
     n_col = req.params.get("n_col")
@@ -853,17 +1028,20 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
             n_map[idx] = float(val) if (not pd.isna(val)) else None
         agg["n_vals"] = agg.apply(
             lambda r: float(
-                v if (v := n_map.get((r["x_val"], r["group_val"]))) is not None
-                else mean_size
+                v if (v := n_map.get((r["x_val"], r["group_val"]))) is not None else mean_size
             ),
-            axis=1)
+            axis=1,
+        )
     else:
         agg["n_vals"] = agg["size"].astype(float)
 
     if chart_type == "p":
         if (agg["n_vals"] == 0).any():
-            return AnalysisResult(task="spc_attribute", status="error",
-                messages=["子组样本量包含0值，无法计算比率控制图"])
+            return AnalysisResult(
+                task="spc_attribute",
+                status="error",
+                messages=["子组样本量包含0值，无法计算比率控制图"],
+            )
         agg["stat"] = agg["count"] / agg["n_vals"]
         stat_name = "不良率(p)"
         p_bar = float(agg["count"].sum() / agg["n_vals"].sum())
@@ -888,20 +1066,26 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
 
     elif chart_type == "u":
         if (agg["n_vals"] == 0).any():
-            return AnalysisResult(task="spc_attribute", status="error",
-                messages=["子组样本量包含0值，无法计算比率控制图"])
+            return AnalysisResult(
+                task="spc_attribute",
+                status="error",
+                messages=["子组样本量包含0值，无法计算比率控制图"],
+            )
         agg["stat"] = agg["count"] / agg["n_vals"]
         stat_name = "单位缺陷率(u)"
         u_bar = float(agg["count"].sum() / agg["n_vals"].sum())
         cl = u_bar
         ucl_const = None
     else:
-        return AnalysisResult(task="spc_attribute", status="error",
-            messages=[f"不支持的图表类型: {chart_type}，支持 p/np/c/u"])
+        return AnalysisResult(
+            task="spc_attribute",
+            status="error",
+            messages=[f"不支持的图表类型: {chart_type}，支持 p/np/c/u"],
+        )
 
     # 控制限
     if ucl_const is not None:
-        lcl_const = max(0, 2*cl - ucl_const)
+        lcl_const = max(0, 2 * cl - ucl_const)
         agg["ucl"] = ucl_const
         agg["lcl"] = lcl_const
     elif chart_type == "p":
@@ -938,23 +1122,49 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         g_idx = gdata["_idx"].values
         g_stat = gdata["stat"].values
 
-        ax.plot(g_idx, g_stat, "o-", markersize=5, color=color, linewidth=1.2,
-                label=label, alpha=0.8)
+        ax.plot(
+            g_idx, g_stat, "o-", markersize=5, color=color, linewidth=1.2, label=label, alpha=0.8
+        )
 
     # 控制限
-    ax.axhline(cl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
-               label=f"CL={cl:.4f}")
+    ax.axhline(
+        cl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5, label=f"CL={cl:.4f}"
+    )
     if ucl_const is not None:
-        ax.axhline(ucl_const, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                   label=f"UCL={ucl_const:.4f}")
-        ax.axhline(lcl_const, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                   label=f"LCL={lcl_const:.4f}")
+        ax.axhline(
+            ucl_const,
+            color=PALETTE["control"]["primary"],
+            linestyle="--",
+            linewidth=1.2,
+            label=f"UCL={ucl_const:.4f}",
+        )
+        ax.axhline(
+            lcl_const,
+            color=PALETTE["control"]["primary"],
+            linestyle="--",
+            linewidth=1.2,
+            label=f"LCL={lcl_const:.4f}",
+        )
     else:
         all_idx = np.arange(len(x_unique))
-        ax.plot(all_idx, agg.groupby("_idx")["ucl"].first().values, "--",
-                color=PALETTE["control"]["primary"], linewidth=1, alpha=0.5, label="UCL")
-        ax.plot(all_idx, agg.groupby("_idx")["lcl"].first().values, "--",
-                color=PALETTE["control"]["primary"], linewidth=1, alpha=0.5, label="LCL")
+        ax.plot(
+            all_idx,
+            agg.groupby("_idx")["ucl"].first().values,
+            "--",
+            color=PALETTE["control"]["primary"],
+            linewidth=1,
+            alpha=0.5,
+            label="UCL",
+        )
+        ax.plot(
+            all_idx,
+            agg.groupby("_idx")["lcl"].first().values,
+            "--",
+            color=PALETTE["control"]["primary"],
+            linewidth=1,
+            alpha=0.5,
+            label="LCL",
+        )
 
     # 违规标记
     viol_mask = agg["stat"].notna()
@@ -964,9 +1174,16 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     viol_lcl = agg.loc[viol_mask, "lcl"].values
     viol_pts = np.where((viol_stat > viol_ucl) | (viol_stat < viol_lcl))[0]
     if len(viol_pts) > 0:
-        ax.scatter(viol_idx[viol_pts], viol_stat[viol_pts], s=80,
-                   color=PALETTE["anomaly"]["primary"], marker="x", linewidths=2.5,
-                   zorder=5, label=f"超出控制限 ({len(viol_pts)}个)")
+        ax.scatter(
+            viol_idx[viol_pts],
+            viol_stat[viol_pts],
+            s=80,
+            color=PALETTE["anomaly"]["primary"],
+            marker="x",
+            linewidths=2.5,
+            zorder=5,
+            label=f"超出控制限 ({len(viol_pts)}个)",
+        )
 
     # 标签
     def _fmt_attr_labels(vals):
@@ -1000,21 +1217,20 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
-    summary = (
-        f"{chart_type.upper()} 控制图: CL={cl:.4f}, "
-        f"超出控制限 {violations}/{m} 个点"
-    )
+    summary = f"{chart_type.upper()} 控制图: CL={cl:.4f}, 超出控制限 {violations}/{m} 个点"
 
     # 控制限表
     table_rows = []
     for _, row in agg.iterrows():
-        table_rows.append({
-            "X": row["x_val"],
-            "分组": row["group_val"] if has_groups else "—",
-            stat_name: round(float(row["stat"]), 4),
-            "UCL": round(float(row["ucl"]), 4),
-            "LCL": round(float(row["lcl"]), 4),
-        })
+        table_rows.append(
+            {
+                "X": row["x_val"],
+                "分组": row["group_val"] if has_groups else "—",
+                stat_name: round(float(row["stat"]), 4),
+                "UCL": round(float(row["ucl"]), 4),
+                "LCL": round(float(row["lcl"]), 4),
+            }
+        )
 
     return AnalysisResult(
         task="spc_attribute",
@@ -1078,15 +1294,22 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         k, h = float(k), float(h)
     except (ValueError, TypeError):
         return AnalysisResult(
-            task="spc_cusum", status="error",
+            task="spc_cusum",
+            status="error",
             messages=[f"参数 k/h 值无效: k={k}, h={h}，请输入数值"],
         )
     if k <= 0:
-        return AnalysisResult(task="spc_cusum", status="error",
-            messages=[f"参数 k ({k}) 无效：参考值必须为正数，建议 k=0.5"])
+        return AnalysisResult(
+            task="spc_cusum",
+            status="error",
+            messages=[f"参数 k ({k}) 无效：参考值必须为正数，建议 k=0.5"],
+        )
     if h <= 0:
-        return AnalysisResult(task="spc_cusum", status="error",
-            messages=[f"参数 h ({h}) 无效：决策区间必须为正数，建议 h=4~5"])
+        return AnalysisResult(
+            task="spc_cusum",
+            status="error",
+            messages=[f"参数 h ({h}) 无效：决策区间必须为正数，建议 h=4~5"],
+        )
 
     user_mu = req.params.get("mu")
     user_sigma = req.params.get("sigma")
@@ -1095,7 +1318,8 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             user_mu, user_sigma = float(user_mu), float(user_sigma)
         except (ValueError, TypeError):
             return AnalysisResult(
-                task="spc_cusum", status="error",
+                task="spc_cusum",
+                status="error",
                 messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
             )
 
@@ -1134,18 +1358,25 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
                 c_plus[i] = max(0, z[i] - k)
                 c_minus[i] = max(0, -z[i] - k)
             else:
-                c_plus[i] = max(0, c_plus[i-1] + z[i] - k)
-                c_minus[i] = max(0, c_minus[i-1] - z[i] - k)
+                c_plus[i] = max(0, c_plus[i - 1] + z[i] - k)
+                c_minus[i] = max(0, c_minus[i - 1] - z[i] - k)
             if c_plus[i] > h:
                 alarm_plus.append(i)
             if c_minus[i] > h:
                 alarm_minus.append(i)
 
-        group_results.append({
-            "name": gname, "data": gdata.values, "mu": mu, "sigma": sigma,
-            "c_plus": c_plus, "c_minus": c_minus,
-            "alarm_plus": alarm_plus, "alarm_minus": alarm_minus,
-        })
+        group_results.append(
+            {
+                "name": gname,
+                "data": gdata.values,
+                "mu": mu,
+                "sigma": sigma,
+                "c_plus": c_plus,
+                "c_minus": c_minus,
+                "alarm_plus": alarm_plus,
+                "alarm_minus": alarm_minus,
+            }
+        )
 
     # 汇总跳过警告（P1 fix: 区分零方差和数据不足）
     if skipped_zero_var:
@@ -1164,7 +1395,8 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         else:
             detail = "无有效分组：部分分组标准差为零，部分数据不足"
         return AnalysisResult(
-            task="spc_cusum", status="error",
+            task="spc_cusum",
+            status="error",
             messages=[detail] + warn_msgs,
         )
 
@@ -1179,10 +1411,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
 
     total_alarms = 0
     if user_mu is None:
-        warn_msgs.append(
-            "⚠ μ/σ 从各组数据独立估计。"
-            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
-        )
+        warn_msgs.append("⚠ μ/σ 从各组数据独立估计。建议通过参数 mu/sigma 指定已知受控状态的参数。")
 
     for gr in group_results:
         gname = gr["name"]
@@ -1192,24 +1421,58 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         total_alarms += len(gr["alarm_plus"]) + len(gr["alarm_minus"])
 
         # 数据子图
-        ax1.plot(pos, gr["data"], "o-", markersize=2, color=color, linewidth=0.8,
-                alpha=0.7, label=label)
+        ax1.plot(
+            pos, gr["data"], "o-", markersize=2, color=color, linewidth=0.8, alpha=0.7, label=label
+        )
         ax1.axhline(gr["mu"], color=color, linestyle="--", linewidth=0.8, alpha=0.4)
 
         # CUSUM 子图
-        ax2.plot(pos, gr["c_plus"], "-", color=color, linewidth=1.2,
-                alpha=0.8, label=f"{label} C+" if has_groups else "C+ (上偏移)")
-        ax2.plot(pos, gr["c_minus"], "--", color=color, linewidth=1.2,
-                alpha=0.8, label=f"{label} C-" if has_groups else "C- (下偏移)")
+        ax2.plot(
+            pos,
+            gr["c_plus"],
+            "-",
+            color=color,
+            linewidth=1.2,
+            alpha=0.8,
+            label=f"{label} C+" if has_groups else "C+ (上偏移)",
+        )
+        ax2.plot(
+            pos,
+            gr["c_minus"],
+            "--",
+            color=color,
+            linewidth=1.2,
+            alpha=0.8,
+            label=f"{label} C-" if has_groups else "C- (下偏移)",
+        )
         if gr["alarm_plus"]:
-            ax2.scatter(gr["alarm_plus"], gr["c_plus"][gr["alarm_plus"]], s=50,
-                       color=color, marker="x", linewidths=2, zorder=5)
+            ax2.scatter(
+                gr["alarm_plus"],
+                gr["c_plus"][gr["alarm_plus"]],
+                s=50,
+                color=color,
+                marker="x",
+                linewidths=2,
+                zorder=5,
+            )
         if gr["alarm_minus"]:
-            ax2.scatter(gr["alarm_minus"], gr["c_minus"][gr["alarm_minus"]], s=50,
-                       color=color, marker="x", linewidths=2, zorder=5)
+            ax2.scatter(
+                gr["alarm_minus"],
+                gr["c_minus"][gr["alarm_minus"]],
+                s=50,
+                color=color,
+                marker="x",
+                linewidths=2,
+                zorder=5,
+            )
 
-    ax2.axhline(h, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.2,
-                label=f"决策区间 h={h}")
+    ax2.axhline(
+        h,
+        color=PALETTE["control"]["primary"],
+        linestyle="--",
+        linewidth=1.2,
+        label=f"决策区间 h={h}",
+    )
     ax2.fill_between(np.arange(max_n), 0, h, alpha=0.05, color=PALETTE["center"]["primary"])
 
     ax1.set_ylabel(y_col, fontsize=10)
@@ -1236,13 +1499,15 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     for gr in group_results:
         gname = gr["name"]
         label = str(gname) if has_groups else "全部"
-        stats_rows.append({
-            "分组": label,
-            "均值(μ)": f"{gr['mu']:.4f}",
-            "标准差(σ)": f"{gr['sigma']:.4f}",
-            "上偏移报警": str(len(gr["alarm_plus"])),
-            "下偏移报警": str(len(gr["alarm_minus"])),
-        })
+        stats_rows.append(
+            {
+                "分组": label,
+                "均值(μ)": f"{gr['mu']:.4f}",
+                "标准差(σ)": f"{gr['sigma']:.4f}",
+                "上偏移报警": str(len(gr["alarm_plus"])),
+                "下偏移报警": str(len(gr["alarm_minus"])),
+            }
+        )
 
     return AnalysisResult(
         task="spc_cusum",
@@ -1253,7 +1518,8 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         summary="".join(summary_parts),
         messages=warn_msgs,
         metadata={
-            "k": k, "h": h,
+            "k": k,
+            "h": h,
             "total_alarms": total_alarms,
             "n_groups": len(group_results),
             "groups": [str(g) for g in all_group_names if g != "_default"],
@@ -1280,13 +1546,16 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         lam, L = float(lam), float(L)
     except (ValueError, TypeError):
         return AnalysisResult(
-            task="spc_ewma", status="error",
+            task="spc_ewma",
+            status="error",
             messages=[f"参数 lam/L 值无效: lam={lam}, L={L}，请输入数值"],
         )
     if not 0 < lam <= 1:
         return AnalysisResult(
-            task="spc_ewma", status="error",
-            messages=[f"λ (平滑参数) 必须在 (0, 1] 范围内，当前值: {lam}"])
+            task="spc_ewma",
+            status="error",
+            messages=[f"λ (平滑参数) 必须在 (0, 1] 范围内，当前值: {lam}"],
+        )
 
     user_mu = req.params.get("mu")
     user_sigma = req.params.get("sigma")
@@ -1295,7 +1564,8 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             user_mu, user_sigma = float(user_mu), float(user_sigma)
         except (ValueError, TypeError):
             return AnalysisResult(
-                task="spc_ewma", status="error",
+                task="spc_ewma",
+                status="error",
                 messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
             )
 
@@ -1321,7 +1591,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         ewma_vals = np.zeros(n)
         ewma_vals[0] = lam * gdata.values[0] + (1 - lam) * mu
         for i in range(1, n):
-            ewma_vals[i] = lam * gdata.values[i] + (1 - lam) * ewma_vals[i-1]
+            ewma_vals[i] = lam * gdata.values[i] + (1 - lam) * ewma_vals[i - 1]
 
         sigma_ewma_asym = sigma * np.sqrt(lam / (2 - lam))
         t = np.arange(1, n + 1)
@@ -1334,17 +1604,26 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         below = ewma_vals < lcl_t
         violations = above | below
 
-        group_results.append({
-            "name": gname, "data": gdata.values, "mu": mu, "sigma": sigma,
-            "ewma": ewma_vals, "ucl_t": ucl_t, "lcl_t": lcl_t,
-            "ucl_asym": float(mu + L * sigma_ewma_asym),
-            "lcl_asym": float(mu - L * sigma_ewma_asym),
-            "violations": violations, "n": n,
-        })
+        group_results.append(
+            {
+                "name": gname,
+                "data": gdata.values,
+                "mu": mu,
+                "sigma": sigma,
+                "ewma": ewma_vals,
+                "ucl_t": ucl_t,
+                "lcl_t": lcl_t,
+                "ucl_asym": float(mu + L * sigma_ewma_asym),
+                "lcl_asym": float(mu - L * sigma_ewma_asym),
+                "violations": violations,
+                "n": n,
+            }
+        )
 
     if len(group_results) < 1:
         return AnalysisResult(
-            task="spc_ewma", status="error",
+            task="spc_ewma",
+            status="error",
             messages=["有效数据不足(每组至少3个点)"],
         )
 
@@ -1358,10 +1637,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     total_violations = 0
     warn_msgs: list[str] = []
     if user_mu is None:
-        warn_msgs.append(
-            "⚠ μ/σ 从各组数据独立估计。"
-            "建议通过参数 mu/sigma 指定已知受控状态的参数。"
-        )
+        warn_msgs.append("⚠ μ/σ 从各组数据独立估计。建议通过参数 mu/sigma 指定已知受控状态的参数。")
 
     for gr in group_results:
         gname = gr["name"]
@@ -1370,18 +1646,33 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         pos = np.arange(gr["n"])
         total_violations += int(gr["violations"].sum())
 
-        ax.plot(pos, gr["data"], "o-", markersize=2, alpha=0.3,
-                color=color, linewidth=0.6, label=f"{label} 原始" if has_groups else "原始数据")
-        ax.plot(pos, gr["ewma"], "-", color=color, linewidth=2,
-                label=label if has_groups else f"EWMA (λ={lam})")
+        ax.plot(
+            pos,
+            gr["data"],
+            "o-",
+            markersize=2,
+            alpha=0.3,
+            color=color,
+            linewidth=0.6,
+            label=f"{label} 原始" if has_groups else "原始数据",
+        )
+        ax.plot(
+            pos,
+            gr["ewma"],
+            "-",
+            color=color,
+            linewidth=2,
+            label=label if has_groups else f"EWMA (λ={lam})",
+        )
         ax.axhline(gr["mu"], color=color, linestyle="--", linewidth=0.8, alpha=0.4)
         ax.plot(pos, gr["ucl_t"], "--", color=color, linewidth=0.8, alpha=0.5)
         ax.plot(pos, gr["lcl_t"], "--", color=color, linewidth=0.8, alpha=0.5)
 
         if gr["violations"].sum() > 0:
             vpos = np.where(gr["violations"])[0]
-            ax.scatter(vpos, gr["ewma"][vpos], s=60, color=color, marker="x",
-                      linewidths=2, zorder=5)
+            ax.scatter(
+                vpos, gr["ewma"][vpos], s=60, color=color, marker="x", linewidths=2, zorder=5
+            )
 
     # 全局参考线
     ax.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5, alpha=0.3)
@@ -1400,26 +1691,27 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     for gr in group_results:
         gname = gr["name"]
         label = f"{gname}: " if has_groups else ""
-        summary_parts.append(
-            f"{label}渐近UCL={gr['ucl_asym']:.4f}, LCL={gr['lcl_asym']:.4f}；"
-        )
+        summary_parts.append(f"{label}渐近UCL={gr['ucl_asym']:.4f}, LCL={gr['lcl_asym']:.4f}；")
 
     # 统计表
     stats_rows = []
     for gr in group_results:
         gname = gr["name"]
         label = str(gname) if has_groups else "全部"
-        stats_rows.append({
-            "分组": label,
-            "均值(μ)": f"{gr['mu']:.4f}",
-            "标准差(σ)": f"{gr['sigma']:.4f}",
-            "渐近UCL": f"{gr['ucl_asym']:.4f}",
-            "渐近LCL": f"{gr['lcl_asym']:.4f}",
-            "违规点数": str(int(gr["violations"].sum())),
-        })
+        stats_rows.append(
+            {
+                "分组": label,
+                "均值(μ)": f"{gr['mu']:.4f}",
+                "标准差(σ)": f"{gr['sigma']:.4f}",
+                "渐近UCL": f"{gr['ucl_asym']:.4f}",
+                "渐近LCL": f"{gr['lcl_asym']:.4f}",
+                "违规点数": str(int(gr["violations"].sum())),
+            }
+        )
 
     meta: dict = {
-        "lam": lam, "L": L,
+        "lam": lam,
+        "L": L,
         "total_violations": total_violations,
         "n_groups": len(group_results),
         "groups": [str(g) for g in all_group_names if g != "_default"],
@@ -1456,8 +1748,11 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     n = len(data)
 
     if n < 10:
-        return AnalysisResult(task="spc_nonparametric", status="error",
-            messages=[f"有效数据不足(至少10个点, 当前{n}个)"])
+        return AnalysisResult(
+            task="spc_nonparametric",
+            status="error",
+            messages=[f"有效数据不足(至少10个点, 当前{n}个)"],
+        )
 
     side = req.params.get("side", "two-sided")
     values = data.values
@@ -1473,16 +1768,22 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     if (values > 0).all():
         shape_ln, loc_ln, scale_ln = sp_stats.lognorm.fit(values, floc=0)
         ks_ln = sp_stats.kstest(values, sp_stats.lognorm(shape_ln, loc=0, scale=scale_ln).cdf)
-        fits["Lognormal"] = {"dist": sp_stats.lognorm, "args": (shape_ln, 0, scale_ln),
-                            "ks_p": ks_ln.pvalue}
+        fits["Lognormal"] = {
+            "dist": sp_stats.lognorm,
+            "args": (shape_ln, 0, scale_ln),
+            "ks_p": ks_ln.pvalue,
+        }
 
     # Weibull
     if (values > 0).all():
         try:
             shape_w, loc_w, scale_w = sp_stats.weibull_min.fit(values, floc=0)
             ks_w = sp_stats.kstest(values, sp_stats.weibull_min(shape_w, loc=0, scale=scale_w).cdf)
-            fits["Weibull"] = {"dist": sp_stats.weibull_min, "args": (shape_w, 0, scale_w),
-                              "ks_p": ks_w.pvalue}
+            fits["Weibull"] = {
+                "dist": sp_stats.weibull_min,
+                "args": (shape_w, 0, scale_w),
+                "ks_p": ks_w.pvalue,
+            }
         except Exception:
             logger.debug("Weibull fit failed in spc_nonparametric", exc_info=True)
 
@@ -1523,9 +1824,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         lcl_2s = _ppf(0.02275)
         ucl_1s = _ppf(0.8413)
         lcl_1s = _ppf(0.1587)
-        violations = sorted(set(
-            list(np.where(values > ucl)[0]) + list(np.where(values < lcl)[0])
-        ))
+        violations = sorted(set(list(np.where(values > ucl)[0]) + list(np.where(values < lcl)[0])))
         side_note = f"双侧控制限 (拟合={best_name})"
 
     limit_label = []
@@ -1540,9 +1839,9 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     if abs(skew_val) > 0.5:
         asym_parts = [f"数据偏度={skew_val:.2f}({'右偏' if skew_val > 0 else '左偏'})"]
         if ucl is not None:
-            asym_parts.append(f"上限距中位数={ucl-cl:.3f}")
+            asym_parts.append(f"上限距中位数={ucl - cl:.3f}")
         if lcl is not None:
-            asym_parts.append(f"下限距中位数={cl-lcl:.3f}")
+            asym_parts.append(f"下限距中位数={cl - lcl:.3f}")
         asym_note = "，".join(asym_parts)
     else:
         asym_note = f"数据近似对称(偏度={skew_val:.2f})"
@@ -1552,37 +1851,76 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     pos = np.arange(n)
     ax = fig.add_subplot(111)
 
-    ax.plot(pos, values, "o-", markersize=3, color=PALETTE["data"]["primary"], linewidth=1, alpha=0.6, label="数据")
-    ax.axhline(cl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=2, label=f"CL (中位数)={cl:.4f}")
+    ax.plot(
+        pos,
+        values,
+        "o-",
+        markersize=3,
+        color=PALETTE["data"]["primary"],
+        linewidth=1,
+        alpha=0.6,
+        label="数据",
+    )
+    ax.axhline(
+        cl,
+        color=PALETTE["control"]["primary"],
+        linestyle="--",
+        linewidth=2,
+        label=f"CL (中位数)={cl:.4f}",
+    )
 
     if ucl is not None:
-        ax.axhline(ucl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
-                   label=f"UCL (P99.865)={ucl:.4f}")
+        ax.axhline(
+            ucl,
+            color=PALETTE["control"]["primary"],
+            linestyle="--",
+            linewidth=1.5,
+            label=f"UCL (P99.865)={ucl:.4f}",
+        )
         if ucl_2s:
-            ax.axhline(ucl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6)
+            ax.axhline(
+                ucl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6
+            )
         if ucl_1s:
-            ax.axhline(ucl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
+            ax.axhline(
+                ucl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4
+            )
         ax.fill_between(pos, cl, ucl, alpha=0.04, color=PALETTE["center"]["primary"])
 
     if lcl is not None:
-        ax.axhline(lcl, color=PALETTE["control"]["primary"], linestyle="--", linewidth=1.5,
-                   label=f"LCL (P0.135)={lcl:.4f}")
+        ax.axhline(
+            lcl,
+            color=PALETTE["control"]["primary"],
+            linestyle="--",
+            linewidth=1.5,
+            label=f"LCL (P0.135)={lcl:.4f}",
+        )
         if lcl_2s:
-            ax.axhline(lcl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6)
+            ax.axhline(
+                lcl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6
+            )
         if lcl_1s:
-            ax.axhline(lcl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4)
+            ax.axhline(
+                lcl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4
+            )
         ax.fill_between(pos, lcl, cl, alpha=0.04, color=PALETTE["center"]["primary"])
 
     if violations:
-        ax.scatter(violations, values[violations], s=80, color=PALETTE["anomaly"]["primary"],
-                  marker="x", linewidths=2.5, zorder=5,
-                  label=f"违规 ({len(violations)}个)")
+        ax.scatter(
+            violations,
+            values[violations],
+            s=80,
+            color=PALETTE["anomaly"]["primary"],
+            marker="x",
+            linewidths=2.5,
+            zorder=5,
+            label=f"违规 ({len(violations)}个)",
+        )
 
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
     ax.set_title(
-        f"非参数控制图 — {req.target_col} ({side_note})\n"
-        f"CL={cl:.4f} | {limit_label}",
+        f"非参数控制图 — {req.target_col} ({side_note})\nCL={cl:.4f} | {limit_label}",
         fontsize=10,
     )
     ax.legend(fontsize=7.5, loc="upper right", ncol=2)
@@ -1613,20 +1951,32 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     return AnalysisResult(
         task="spc_nonparametric",
         tables={
-            "control_limits": pd.DataFrame({
-                "统计量": [k for k, _ in present_pairs],
-                "值": [f"{v:.4f}" for _, v in present_pairs],
-            }),
-            "violations": pd.DataFrame({
-                "序号": violations,
-                "值": values[violations].round(4),
-            }) if violations else pd.DataFrame({"状态": ["未检测到违规"]}),
+            "control_limits": pd.DataFrame(
+                {
+                    "统计量": [k for k, _ in present_pairs],
+                    "值": [f"{v:.4f}" for _, v in present_pairs],
+                }
+            ),
+            "violations": pd.DataFrame(
+                {
+                    "序号": violations,
+                    "值": values[violations].round(4),
+                }
+            )
+            if violations
+            else pd.DataFrame({"状态": ["未检测到违规"]}),
         },
         figures=[fig],
         summary=summary,
         metadata={
-            "cl": cl, "ucl": ucl, "lcl": lcl, "side": side,
-            "ucl_2s": ucl_2s, "lcl_2s": lcl_2s,
-            "n": n, "n_violations": n_violations, "is_stable": is_stable,
+            "cl": cl,
+            "ucl": ucl,
+            "lcl": lcl,
+            "side": side,
+            "ucl_2s": ucl_2s,
+            "lcl_2s": lcl_2s,
+            "n": n,
+            "n_violations": n_violations,
+            "is_stable": is_stable,
         },
     )

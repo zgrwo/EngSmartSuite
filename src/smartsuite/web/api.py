@@ -1,4 +1,5 @@
 """REST API — 将分析引擎能力暴露为 HTTP 端点。"""
+
 import base64
 import io
 import logging
@@ -23,26 +24,33 @@ def column_info(df: pd.DataFrame) -> list[dict]:
     info = []
     for c in df.columns:
         col = df[c]
-        info.append({
-            "name": c,
-            "dtype": str(col.dtype),
-            "nunique": int(col.nunique()),
-            "missing": int(col.isnull().sum()),
-            "sample": [str(v) for v in col.dropna().head(3).tolist()],
-        })
+        info.append(
+            {
+                "name": c,
+                "dtype": str(col.dtype),
+                "nunique": int(col.nunique()),
+                "missing": int(col.isnull().sum()),
+                "sample": [str(v) for v in col.dropna().head(3).tolist()],
+            }
+        )
     return info
 
 
-def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
-                 features: list[str], categoricals: list[str],
-                 params: dict | None = None) -> list[dict]:
+def run_analysis(
+    task: str,
+    df: pd.DataFrame,
+    targets: list[str],
+    features: list[str],
+    categoricals: list[str],
+    params: dict | None = None,
+) -> list[dict]:
     """执行分析并返回 JSON 可序列化的结果列表。"""
     if params is None:
         params = {}
 
     # 无需目标列的任务：VIF/一致性/信度/功效分析仅依赖 X 列或参数
     if not targets and task in NO_TARGET_TASKS:
-        targets = ['']  # 占位触发一次迭代，引擎不使用 target_col
+        targets = [""]  # 占位触发一次迭代，引擎不使用 target_col
 
     results = []
 
@@ -59,8 +67,10 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
 
     # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
     from smartsuite.services.orchestrator import RAW_CAT_TASKS
+
     df_enc, feat_enc, imputation_log, unknown_cat_warnings = preprocess_for_task(
-        df, features, task, categoricals, RAW_CAT_TASKS)
+        df, features, task, categoricals, RAW_CAT_TASKS
+    )
     # 将数据预处理日志转换为用户可见的警告
     for col, n_coerced in imputation_log.items():
         data_warnings.append(f"列「{col}」中 {n_coerced} 个缺失值已自动填充")
@@ -78,8 +88,13 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
         merged_rows = {}
         for target in targets:
             try:
-                req = AnalysisRequest(task="correlation", data=df_enc, target_col=target,
-                    feature_cols=feat_enc, params=params)
+                req = AnalysisRequest(
+                    task="correlation",
+                    data=df_enc,
+                    target_col=target,
+                    feature_cols=feat_enc,
+                    params=params,
+                )
                 r = orchestrate(req)
                 m = r.tables.get("correlation_matrix")
                 if m is not None and target in m.index:
@@ -92,7 +107,6 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
 
     for target in targets:
         try:
-
             if task == "hypothesis_test" and "group_col" not in params:
                 extra = infer_group_col(df, features, categoricals)
                 if extra:
@@ -105,8 +119,11 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                     params = {**params, **extra}
 
             req = AnalysisRequest(
-                task=task, data=df_enc, target_col=target,
-                feature_cols=feat_enc, params=params,
+                task=task,
+                data=df_enc,
+                target_col=target,
+                feature_cols=feat_enc,
+                params=params,
             )
             result = orchestrate(req)
 
@@ -117,8 +134,15 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                     "columns": [str(c) for c in tbl.columns],
                     "index": [str(i) for i in tbl.index],
                     "data": tbl.apply(
-                        lambda col: col.round(4) if pd.api.types.is_numeric_dtype(col) and not pd.api.types.is_datetime64_any_dtype(col) else col
-                    ).fillna("").values.tolist(),
+                        lambda col: (
+                            col.round(4)
+                            if pd.api.types.is_numeric_dtype(col)
+                            and not pd.api.types.is_datetime64_any_dtype(col)
+                            else col
+                        )
+                    )
+                    .fillna("")
+                    .values.tolist(),
                     "shape": list(tbl.shape),
                 }
             # 附加合并矩阵到第一个结果
@@ -143,6 +167,7 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 import math as _math
 
                 import numpy as _np
+
                 if _depth > 10:  # 循环引用保护
                     return str(val)
                 if isinstance(val, bool):
@@ -169,24 +194,28 @@ def run_analysis(task: str, df: pd.DataFrame, targets: list[str],
                 return str(val)
 
             meta = {str(k): _serialize_meta(v) for k, v in result.metadata.items()}
-            results.append({
-                "target": target,
-                "status": result.status,
-                "summary": result.summary,
-                "messages": data_warnings + (result.messages or []),
-                "metadata": meta,
-                "tables": tables,
-                "charts": charts,
-            })
+            results.append(
+                {
+                    "target": target,
+                    "status": result.status,
+                    "summary": result.summary,
+                    "messages": data_warnings + (result.messages or []),
+                    "metadata": meta,
+                    "tables": tables,
+                    "charts": charts,
+                }
+            )
         except Exception as e:
             logger.exception("分析目标列 %s 时失败 (%s)", target, type(e).__name__)
-            results.append({
-                "target": target,
-                "status": "error",
-                "summary": "分析失败",
-                "messages": [f"目标列「{target}」分析异常，请检查数据格式"],
-                "tables": {},
-                "charts": [],
-            })
+            results.append(
+                {
+                    "target": target,
+                    "status": "error",
+                    "summary": "分析失败",
+                    "messages": [f"目标列「{target}」分析异常，请检查数据格式"],
+                    "tables": {},
+                    "charts": [],
+                }
+            )
 
     return results

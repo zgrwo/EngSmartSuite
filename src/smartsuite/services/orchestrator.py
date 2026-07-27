@@ -1,4 +1,5 @@
 """工作流编排 — 按 task 字段路由到对应引擎函数。"""
+
 import logging
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
@@ -105,8 +106,13 @@ DEFAULT_PARAMS = {
     "cronbach_alpha": {},
     "distribution_summary": {},
     "normality_check": {},
-    "power_analysis": {"mode": "required_n", "test_type": "ttest",
-                       "effect_size": 0.5, "alpha": 0.05, "target_power": 0.80},
+    "power_analysis": {
+        "mode": "required_n",
+        "test_type": "ttest",
+        "effect_size": 0.5,
+        "alpha": 0.05,
+        "target_power": 0.80,
+    },
     # DOE / 优化
     "regression": {"model_type": "linear"},
     "response_surface": {"direction": "maximize"},
@@ -129,8 +135,16 @@ DEFAULT_PARAMS = {
     "anomaly_detect": {"method": "iqr"},
     "change_point": {"min_segment": 10, "n_changepoints": 5},
     "outlier_consensus": {},
-    "box_chart": {"mode": "facet", "group_col": None, "usl": None, "lsl": None,
-                  "ucl": None, "lcl": None, "cl": None, "target": None},
+    "box_chart": {
+        "mode": "facet",
+        "group_col": None,
+        "usl": None,
+        "lsl": None,
+        "ucl": None,
+        "lcl": None,
+        "cl": None,
+        "target": None,
+    },
     "scatter_plot": {"fit": "none", "show_ci": "true", "group_col": None},
     "bootstrap_ci": {"statistic": "mean", "n_bootstrap": 2000, "ci_level": 0.95},
     "median_ci": {"ci_level": 0.95},
@@ -148,25 +162,28 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     """
     if req.task not in TASK_REGISTRY:
         return AnalysisResult(
-            task=req.task, status="error",
-            messages=[f"未知的分析任务「{req.task}」, 支持: {list(TASK_REGISTRY.keys())}"]
+            task=req.task,
+            status="error",
+            messages=[f"未知的分析任务「{req.task}」, 支持: {list(TASK_REGISTRY.keys())}"],
         )
 
     # ── 集中列存在性检查：在分派到引擎函数之前验证 target_col ──
     if req.target_col and req.target_col not in req.data.columns:
         return AnalysisResult(
-            task=req.task, status="error",
-            messages=[f"目标列「{req.target_col}」不存在于数据中。"
-                      f"可用列: {list(req.data.columns)[:20]}"
-                      + ("…" if len(req.data.columns) > 20 else "")]
+            task=req.task,
+            status="error",
+            messages=[
+                f"目标列「{req.target_col}」不存在于数据中。"
+                f"可用列: {list(req.data.columns)[:20]}"
+                + ("…" if len(req.data.columns) > 20 else "")
+            ],
         )
 
     defaults = DEFAULT_PARAMS.get(req.task, {})
     merged = {**defaults, **req.params}
     # 规范化: JS 端空字符串 '' → Python None (修复 Web/CLI 参数桥接)
     # 仅对默认值为 None 的参数做此转换，保留 explicit '' 的语义
-    merged = {k: (None if v == '' and defaults.get(k) is None else v)
-              for k, v in merged.items()}
+    merged = {k: (None if v == "" and defaults.get(k) is None else v) for k, v in merged.items()}
     req = req.model_copy(update={"params": merged})
 
     try:
@@ -174,7 +191,8 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     except SmartSuiteError as e:
         logger.warning("分析任务 %s SmartSuite异常: %s", req.task, str(e)[:200])
         return AnalysisResult(
-            task=req.task, status="error",
+            task=req.task,
+            status="error",
             messages=[f"分析执行失败: {str(e)}", "如问题持续出现，请联系开发者"],
         )
     except Exception as e:
@@ -197,7 +215,8 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         }
         detail = detail_map.get(err_cls, "分析计算过程中出现异常，请检查数据完整性")
         return AnalysisResult(
-            task=req.task, status="error",
+            task=req.task,
+            status="error",
             messages=[
                 f"分析执行失败: {detail}",
                 "如问题持续出现，请联系开发者并提供数据样本",
@@ -208,27 +227,44 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
 # ── 任务标签和分组（Web/CLI 共享）──
 TASK_LABELS = {
     # 要因分析
-    "correlation": "相关性分析", "anova": "ANOVA方差分析",
-    "hypothesis_test": "假设检验", "decision_tree": "决策树重要性",
-    "vif": "VIF共线性", "contingency": "列联表分析",
-    "proportion_ci": "比例置信区间", "variance_test": "方差齐性检验",
-    "cohens_kappa": "评定者一致性", "cronbach_alpha": "信度分析(Cronbach α)",
-    "distribution_summary": "分布特征摘要", "normality_check": "正态性评估",
+    "correlation": "相关性分析",
+    "anova": "ANOVA方差分析",
+    "hypothesis_test": "假设检验",
+    "decision_tree": "决策树重要性",
+    "vif": "VIF共线性",
+    "contingency": "列联表分析",
+    "proportion_ci": "比例置信区间",
+    "variance_test": "方差齐性检验",
+    "cohens_kappa": "评定者一致性",
+    "cronbach_alpha": "信度分析(Cronbach α)",
+    "distribution_summary": "分布特征摘要",
+    "normality_check": "正态性评估",
     "power_analysis": "统计功效分析",
     # DOE/优化
-    "regression": "回归建模(OLS)", "response_surface": "响应面分析",
-    "grid_search": "网格搜索寻优", "multi_objective": "多目标优化",
-    "doe_analysis": "DOE效应估计", "roc_analysis": "ROC/AUC分析",
-    "logistic_regression": "Logistic回归", "lasso_regression": "Lasso回归",
-    "robust_regression": "稳健回归(Huber)", "quantile_regression": "分位数回归",
+    "regression": "回归建模(OLS)",
+    "response_surface": "响应面分析",
+    "grid_search": "网格搜索寻优",
+    "multi_objective": "多目标优化",
+    "doe_analysis": "DOE效应估计",
+    "roc_analysis": "ROC/AUC分析",
+    "logistic_regression": "Logistic回归",
+    "lasso_regression": "Lasso回归",
+    "robust_regression": "稳健回归(Huber)",
+    "quantile_regression": "分位数回归",
     # 过程监控
-    "spc_xbar": "X-bar/R控制图", "spc_attribute": "计数型控制图(p/np/c/u)",
-    "spc_cusum": "CUSUM控制图", "spc_ewma": "EWMA控制图",
-    "process_capability": "过程能力Cp/Cpk", "trend_forecast": "趋势预测",
-    "anomaly_detect": "异常检测", "change_point": "变点检测",
+    "spc_xbar": "X-bar/R控制图",
+    "spc_attribute": "计数型控制图(p/np/c/u)",
+    "spc_cusum": "CUSUM控制图",
+    "spc_ewma": "EWMA控制图",
+    "process_capability": "过程能力Cp/Cpk",
+    "trend_forecast": "趋势预测",
+    "anomaly_detect": "异常检测",
+    "change_point": "变点检测",
     "outlier_consensus": "异常共识(3方法投票)",
-    "bootstrap_ci": "Bootstrap置信区间", "median_ci": "中位数置信区间",
-    "gage_rr": "量具R&R分析", "tolerance_interval": "统计容许区间",
+    "bootstrap_ci": "Bootstrap置信区间",
+    "median_ci": "中位数置信区间",
+    "gage_rr": "量具R&R分析",
+    "tolerance_interval": "统计容许区间",
     "survival_analysis": "生存分析(Kaplan-Meier)",
     "box_chart": "分组箱线图",
     "scatter_plot": "散点图(含拟合)",
@@ -236,28 +272,73 @@ TASK_LABELS = {
 }
 
 TASK_GROUPS = {
-    "要因筛选": ["correlation", "anova", "hypothesis_test", "decision_tree",
-                 "vif", "contingency", "proportion_ci", "variance_test"],
-    "信度诊断": ["cohens_kappa", "cronbach_alpha", "distribution_summary",
-                 "normality_check", "power_analysis"],
-    "建模优化": ["regression", "response_surface", "grid_search", "multi_objective",
-                 "doe_analysis", "roc_analysis", "logistic_regression",
-                 "lasso_regression", "robust_regression", "quantile_regression"],
-    "过程监控": ["spc_xbar", "spc_attribute", "spc_cusum", "spc_ewma",
-                 "process_capability", "trend_forecast", "anomaly_detect",
-                 "change_point", "outlier_consensus", "box_chart",
-                 "scatter_plot", "spc_nonparametric"],
-    "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval",
-                 "survival_analysis"],
+    "要因筛选": [
+        "correlation",
+        "anova",
+        "hypothesis_test",
+        "decision_tree",
+        "vif",
+        "contingency",
+        "proportion_ci",
+        "variance_test",
+    ],
+    "信度诊断": [
+        "cohens_kappa",
+        "cronbach_alpha",
+        "distribution_summary",
+        "normality_check",
+        "power_analysis",
+    ],
+    "建模优化": [
+        "regression",
+        "response_surface",
+        "grid_search",
+        "multi_objective",
+        "doe_analysis",
+        "roc_analysis",
+        "logistic_regression",
+        "lasso_regression",
+        "robust_regression",
+        "quantile_regression",
+    ],
+    "过程监控": [
+        "spc_xbar",
+        "spc_attribute",
+        "spc_cusum",
+        "spc_ewma",
+        "process_capability",
+        "trend_forecast",
+        "anomaly_detect",
+        "change_point",
+        "outlier_consensus",
+        "box_chart",
+        "scatter_plot",
+        "spc_nonparametric",
+    ],
+    "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval", "survival_analysis"],
 }
 
 # ── 需要保留原始类别列的任务（不做 One-Hot 编码）──
 # 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
-RAW_CAT_TASKS: set[str] = {"box_chart", "anova", "variance_test", "contingency",
-                            "cohens_kappa", "hypothesis_test", "survival_analysis",
-                            "spc_xbar", "spc_attribute", "scatter_plot"}
+RAW_CAT_TASKS: set[str] = {
+    "box_chart",
+    "anova",
+    "variance_test",
+    "contingency",
+    "cohens_kappa",
+    "hypothesis_test",
+    "survival_analysis",
+    "spc_xbar",
+    "spc_attribute",
+    "scatter_plot",
+}
 
 # ── 不需要目标列 (Y 列) 的任务 ──
 # 这些引擎函数不使用 req.target_col，Web 层通过此常量判断是否允许不选 Y 列
-NO_TARGET_TASKS: set[str] = {"vif", "cohens_kappa", "cronbach_alpha", "power_analysis",
-                                "multi_objective"}
+NO_TARGET_TASKS: set[str] = {
+    "vif",
+    "cohens_kappa",
+    "cronbach_alpha",
+    "power_analysis",
+    "multi_objective",
+}

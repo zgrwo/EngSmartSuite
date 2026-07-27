@@ -1,4 +1,5 @@
 """Flask application — SmartSuite Web UI 入口。"""
+
 import atexit
 import functools
 import logging
@@ -92,6 +93,7 @@ def _periodic_cleanup() -> None:
         except OSError:
             pass
 
+
 # ── CSRF 防护 ──
 _CSRF_TOKEN_KEY = "_csrf_token"
 
@@ -156,10 +158,9 @@ def index():
     # 为每个页面访问生成 CSRF token
     if _CSRF_TOKEN_KEY not in session:
         _generate_csrf_token()
-    return render_template("index.html",
-        task_labels=TASK_LABELS,
-        task_groups=TASK_GROUPS,
-        group_colors=GROUP_COLORS)
+    return render_template(
+        "index.html", task_labels=TASK_LABELS, task_groups=TASK_GROUPS, group_colors=GROUP_COLORS
+    )
 
 
 @app.route("/api/csrf-token")
@@ -183,12 +184,17 @@ def upload():
     filename = f.filename or ""
     ext = os.path.splitext(filename)[1].lower()
     if not ext:
-        return jsonify({"error": "无法识别文件类型（无扩展名），请上传 .xlsx / .xlsm / .csv 文件"}), 400
+        return jsonify(
+            {"error": "无法识别文件类型（无扩展名），请上传 .xlsx / .xlsm / .csv 文件"}
+        ), 400
     if ext not in (".xlsx", ".xlsm", ".csv"):
-        return jsonify({"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xlsm / .csv 文件"}), 400
+        return jsonify(
+            {"error": f"不支持的文件格式「{ext}」，请上传 .xlsx / .xlsm / .csv 文件"}
+        ), 400
 
     import io
     import zipfile
+
     f_bytes = f.read()
 
     if ext == ".csv":
@@ -230,9 +236,13 @@ def upload():
     max_rows = 100_000
     max_cols = 500
     if df.shape[0] > max_rows:
-        return jsonify({"error": f"数据行数 ({df.shape[0]}) 超过限制 ({max_rows}行)，请减少数据量"}), 400
+        return jsonify(
+            {"error": f"数据行数 ({df.shape[0]}) 超过限制 ({max_rows}行)，请减少数据量"}
+        ), 400
     if df.shape[1] > max_cols:
-        return jsonify({"error": f"数据列数 ({df.shape[1]}) 超过限制 ({max_cols}列)，请减少列数"}), 400
+        return jsonify(
+            {"error": f"数据列数 ({df.shape[1]}) 超过限制 ({max_cols}列)，请减少列数"}
+        ), 400
 
     # 大文件内存警告（当前实现将整个文件读入内存）
     _mem_mb = len(f_bytes) / (1024 * 1024)
@@ -285,7 +295,9 @@ def analyze():
         if not isinstance(params, dict):
             return jsonify({"error": "params 必须是字典"}), 400
         if task not in TASK_REGISTRY:
-            return jsonify({"error": f"未知的分析任务「{task}」，支持: {list(TASK_REGISTRY.keys())}"}), 400
+            return jsonify(
+                {"error": f"未知的分析任务「{task}」，支持: {list(TASK_REGISTRY.keys())}"}
+            ), 400
         path = session.get("_data_path")
         if not path or not os.path.exists(path):
             return jsonify({"error": "请先上传数据文件"}), 400
@@ -299,13 +311,15 @@ def analyze():
 
 @app.route("/api/tasks")
 def list_tasks():
-    return jsonify({"tasks": list(TASK_REGISTRY.keys()),
-                    "labels": TASK_LABELS, "groups": TASK_GROUPS})
+    return jsonify(
+        {"tasks": list(TASK_REGISTRY.keys()), "labels": TASK_LABELS, "groups": TASK_GROUPS}
+    )
 
 
 def main(host="127.0.0.1", port=5050, debug=False):
     # 日志配置：文件 DEBUG 全量，控制台 INFO
     from smartsuite import setup_logging
+
     setup_logging()
 
     if debug and host != "127.0.0.1":

@@ -2,6 +2,7 @@
 
 # ── matplotlib.use() 必须在第一次 import matplotlib 之前调用 ──
 import matplotlib as _mpl
+
 _mpl.use("Agg")
 matplotlib = _mpl  # 向后兼容别名
 
@@ -13,6 +14,7 @@ import platform
 
 _logger = logging.getLogger(__name__)
 
+
 # ── 跨平台中文字体加载 ──
 # Windows: 先尝试环境变量 SystemRoot/WINDIR，再查注册表，最后用 C:/Windows 回退
 def _get_windows_font_dir() -> str:
@@ -22,14 +24,17 @@ def _get_windows_font_dir() -> str:
     # 注册表查询（支持非标安装路径，如 D:\Windows）
     try:
         import winreg as _wr
-        with _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE,
-                         r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as key:
+
+        with _wr.OpenKey(
+            _wr.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+        ) as key:
             sysroot = _wr.QueryValueEx(key, "SystemRoot")[0]
         if os.path.isdir(f"{sysroot}/Fonts"):
             return sysroot
     except (OSError, RuntimeError, ImportError):
         pass
     return "C:/Windows"  # 最终回退
+
 
 _WINDOWS_SYSROOT = _get_windows_font_dir()
 _FONT_CANDIDATES = {
@@ -50,12 +55,10 @@ _FONT_CANDIDATES = {
         ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", "Droid Sans Fallback"),
         # Flatpak / Snap 容器路径
         ("/app/share/fonts/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
-        ("/snap/current/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-         "Noto Sans CJK SC"),
+        ("/snap/current/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
         # 用户字体目录
         (os.path.expanduser("~/.fonts/NotoSansCJK-Regular.ttc"), "Noto Sans CJK SC"),
-        (os.path.expanduser("~/.local/share/fonts/NotoSansCJK-Regular.ttc"),
-         "Noto Sans CJK SC"),
+        (os.path.expanduser("~/.local/share/fonts/NotoSansCJK-Regular.ttc"), "Noto Sans CJK SC"),
     ],
 }
 
@@ -67,13 +70,15 @@ if _env_font and os.path.exists(_env_font):
     try:
         _font_prop = matplotlib.font_manager.fontManager.addfont(_env_font)
         # 仅当用户未自定义 font.family 时才覆盖（保护用户配置）
-        if "font.family" not in matplotlib.rcParams or \
-           matplotlib.rcParams["font.family"] == ["sans-serif"]:
+        if "font.family" not in matplotlib.rcParams or matplotlib.rcParams["font.family"] == [
+            "sans-serif"
+        ]:
             if hasattr(_font_prop, "family_name") and _font_prop.family_name:
                 matplotlib.rcParams["font.family"] = _font_prop.family_name
             else:
-                matplotlib.rcParams["font.family"] = os.path.splitext(
-                    os.path.basename(_env_font))[0]
+                matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[
+                    0
+                ]
         _font_loaded = True
     except Exception as e:
         _logger.debug("环境变量字体 %s 加载失败: %s", _env_font, e)
@@ -85,8 +90,9 @@ if not _font_loaded:
         if os.path.exists(font_path):
             try:
                 matplotlib.font_manager.fontManager.addfont(font_path)
-                if "font.family" not in matplotlib.rcParams or \
-                   matplotlib.rcParams["font.family"] == ["sans-serif"]:
+                if "font.family" not in matplotlib.rcParams or matplotlib.rcParams[
+                    "font.family"
+                ] == ["sans-serif"]:
                     matplotlib.rcParams["font.family"] = family
                 _font_loaded = True
                 break
@@ -96,14 +102,20 @@ if not _font_loaded:
 
 if not _font_loaded:
     # 回退: 尝试使用 matplotlib 字体查找机制（保护用户已有配置）
-    _fallback_fonts = ["SimHei", "Microsoft YaHei", "PingFang SC",
-                       "Noto Sans CJK SC", "DejaVu Sans"]
+    _fallback_fonts = [
+        "SimHei",
+        "Microsoft YaHei",
+        "PingFang SC",
+        "Noto Sans CJK SC",
+        "DejaVu Sans",
+    ]
     # 仅当未自定义时才设置回退链
     if matplotlib.rcParams.get("font.sans-serif", ["sans-serif"]) == ["sans-serif"]:
         matplotlib.rcParams["font.sans-serif"] = _fallback_fonts
     # 尝试为每个 fallback 字体查找并注册字体文件
     # 需要显式导入 font_manager（新版 matplotlib lazy-loading 不自动暴露为属性）
     import matplotlib.font_manager as _fm  # noqa: E402
+
     for _fb in _fallback_fonts:
         try:
             _fb_path = _fm.findfont(_fb, fallback_to_default=False)
@@ -123,7 +135,17 @@ matplotlib.rcParams["axes.unicode_minus"] = False
 from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._palette import PALETTE  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._palette import _to_argb  # noqa: F401 — 公开导出，供 services 层使用
-from smartsuite.engine._constants import CLIFFS_DELTA_LARGE, CLIFFS_DELTA_MEDIUM, CLIFFS_DELTA_SMALL, CORRELATION_LARGE, CORRELATION_MEDIUM, CORRELATION_SMALL, CRAMERS_V_LARGE, CRAMERS_V_MEDIUM, CRAMERS_V_SMALL  # noqa: F401 — 公开导出
+from smartsuite.engine._constants import (
+    CLIFFS_DELTA_LARGE,  # noqa: F401 — 公开导出
+    CLIFFS_DELTA_MEDIUM,  # noqa: F401
+    CLIFFS_DELTA_SMALL,  # noqa: F401
+    CORRELATION_LARGE,  # noqa: F401
+    CORRELATION_MEDIUM,  # noqa: F401
+    CORRELATION_SMALL,  # noqa: F401
+    CRAMERS_V_LARGE,  # noqa: F401
+    CRAMERS_V_MEDIUM,  # noqa: F401
+    CRAMERS_V_SMALL,  # noqa: F401
+)
 from smartsuite.engine._constants import CPK_GOOD, CPK_MINIMUM, DW_SAFE_LOWER, DW_SAFE_UPPER  # noqa: F401 — 公开导出
 from smartsuite.engine._palette import get_palette_style
 
@@ -199,21 +221,50 @@ except ImportError as e:
     ) from e
 
 __all__ = [
-    "CPK_GOOD", "CPK_MINIMUM", "DW_SAFE_LOWER", "DW_SAFE_UPPER",  # 公开统计常量
-    "GROUP_COLORS", "PALETTE",  # 公开配色常量/工具，供 services/web 层使用
-    "correlation_analysis", "anova_analysis", "contingency_analysis",
-    "cohens_kappa", "cronbach_alpha",
+    "CPK_GOOD",
+    "CPK_MINIMUM",
+    "DW_SAFE_LOWER",
+    "DW_SAFE_UPPER",  # 公开统计常量
+    "GROUP_COLORS",
+    "PALETTE",  # 公开配色常量/工具，供 services/web 层使用
+    "correlation_analysis",
+    "anova_analysis",
+    "contingency_analysis",
+    "cohens_kappa",
+    "cronbach_alpha",
     "hypothesis_test",
-    "decision_tree_analysis", "vif_analysis", "power_analysis", "normality_check",
+    "decision_tree_analysis",
+    "vif_analysis",
+    "power_analysis",
+    "normality_check",
     "distribution_summary",
-    "proportion_ci", "variance_test",
-    "regression_analysis", "response_surface_analysis", "grid_search",
-    "multi_objective_opt", "doe_analysis", "roc_analysis",
-    "logistic_regression", "lasso_regression",
-    "robust_regression", "quantile_regression",
-    "xbar_r_chart", "attribute_chart", "cusum_chart", "ewma_chart", "change_point_detect",
-    "process_capability_analysis", "trend_forecast", "anomaly_detect",
-    "outlier_consensus", "bootstrap_ci", "box_chart", "gage_rr", "tolerance_interval",
-    "scatter_plot", "spc_nonparametric",
-    "survival_analysis", "median_ci",
+    "proportion_ci",
+    "variance_test",
+    "regression_analysis",
+    "response_surface_analysis",
+    "grid_search",
+    "multi_objective_opt",
+    "doe_analysis",
+    "roc_analysis",
+    "logistic_regression",
+    "lasso_regression",
+    "robust_regression",
+    "quantile_regression",
+    "xbar_r_chart",
+    "attribute_chart",
+    "cusum_chart",
+    "ewma_chart",
+    "change_point_detect",
+    "process_capability_analysis",
+    "trend_forecast",
+    "anomaly_detect",
+    "outlier_consensus",
+    "bootstrap_ci",
+    "box_chart",
+    "gage_rr",
+    "tolerance_interval",
+    "scatter_plot",
+    "spc_nonparametric",
+    "survival_analysis",
+    "median_ci",
 ]

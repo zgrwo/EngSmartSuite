@@ -19,7 +19,10 @@ class AnalysisRequest(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     task: str = Field(..., min_length=1, description="分析方法名称（必须在 TASK_REGISTRY 中注册）")
-    data: pd.DataFrame = Field(..., description="输入数据（不能为 None，允许空 DataFrame 以支持无数据方法如 power_analysis）")
+    data: pd.DataFrame = Field(
+        ...,
+        description="输入数据（不能为 None，允许空 DataFrame 以支持无数据方法如 power_analysis）",
+    )
     target_col: str = Field(default="", description="目标列名")
     feature_cols: list[str] = Field(default_factory=list, description="特征列名列表")
     params: dict[str, Any] = Field(default_factory=dict, description="分析参数")

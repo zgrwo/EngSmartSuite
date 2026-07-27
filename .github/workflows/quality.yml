@@ -60,4 +60,4 @@ jobs:
       - name: Ruff check
         run: ruff check src/smartsuite/
       - name: Ruff format check
-        run: ruff format --check src/smartsuite/ || true
+        run: ruff format --check src/smartsuite/

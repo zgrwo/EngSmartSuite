@@ -1,4 +1,5 @@
 """Reporter — 多格式报告输出：Excel 图表 / PDF / PPT。"""
+
 import io
 import logging
 import os
@@ -28,8 +29,7 @@ def _validate_output_path(output_path: str) -> str:
     return abs_path
 
 
-def to_excel(result: AnalysisResult, workbook,
-             sheet_name: str = "分析结果") -> str:
+def to_excel(result: AnalysisResult, workbook, sheet_name: str = "分析结果") -> str:
     """将分析结果写入 Excel 新 Sheet。
 
     注意: 此函数依赖 xlwings Excel add-in 运行环境，需要:
@@ -56,11 +56,12 @@ def to_excel(result: AnalysisResult, workbook,
             r += len(df) + 2
         for i, fig in enumerate(result.figures):
             buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=_CHART_DPI, bbox_inches='tight')
+            fig.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
             buf.seek(0)
             pic = workbook.sheets.add(f"图表_{i + 1}", after=workbook.sheets[-1])
-            pic.pictures.add(buf, left=pic.range("A1").left,
-                             top=pic.range("A1").top, width=600, height=450)
+            pic.pictures.add(
+                buf, left=pic.range("A1").left, top=pic.range("A1").top, width=600, height=450
+            )
             plt.close(fig)
         return sheet_name
     except Exception as e:
@@ -130,7 +131,7 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
                 c.showPage()
                 y = h - 50
             buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=_PDF_DPI, bbox_inches='tight')
+            fig.savefig(buf, format="png", dpi=_PDF_DPI, bbox_inches="tight")
             buf.seek(0)
             c.drawImage(ImageReader(buf), 50, y - 300, width=450, height=300)
             plt.close(fig)
@@ -143,33 +144,31 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
         raise OutputError("PDF 输出失败，请检查输出路径是否可写") from e
 
 
-def to_ppt(result: AnalysisResult, output_path: str,
-           template_path: str | None = None) -> str:
+def to_ppt(result: AnalysisResult, output_path: str, template_path: str | None = None) -> str:
     """生成 PPT 报告。"""
     output_path = _validate_output_path(output_path)
     try:
         from pptx import Presentation
         from pptx.util import Inches
 
-        prs = Presentation(template_path) if template_path and os.path.exists(
-            template_path
-        ) else Presentation()
+        prs = (
+            Presentation(template_path)
+            if template_path and os.path.exists(template_path)
+            else Presentation()
+        )
         prs.slide_width = Inches(13.333)
         prs.slide_height = Inches(7.5)
 
         slide = prs.slides.add_slide(prs.slide_layouts[6])
-        txBox = slide.shapes.add_textbox(
-            Inches(1), Inches(2.5), Inches(11), Inches(2)
-        )
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(2.5), Inches(11), Inches(2))
         txBox.text_frame.text = f"分析报告: {result.task}\n\n{result.summary}"
 
         for fig in result.figures:
             buf = io.BytesIO()
-            fig.savefig(buf, format='png', dpi=_CHART_DPI, bbox_inches='tight')
+            fig.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
             buf.seek(0)
             slide = prs.slides.add_slide(prs.slide_layouts[6])
-            slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5),
-                                     Inches(12), Inches(6.5))
+            slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5), Inches(12), Inches(6.5))
             plt.close(fig)
 
         prs.save(output_path)
@@ -210,7 +209,9 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
         ]
 
         # 状态 + 结论
-        status_class = f"status-{result.status}" if result.status in ("ok","error") else "status-warn"
+        status_class = (
+            f"status-{result.status}" if result.status in ("ok", "error") else "status-warn"
+        )
         html_parts.append(
             f"<div class='summary'><strong>状态:</strong> "
             f"<span class='{status_class}'>{_esc(result.status)}</span><br>"
@@ -227,16 +228,25 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
         # 数据表
         for name, df in result.tables.items():
             html_parts.append(f"<h2>📊 {_esc(name)}</h2>")
-            html_parts.append(df.head(50).to_html(
-                index=False, classes="table", border=0, escape=True,
-                float_format=lambda x: (
-                    f"{x:.4f}" if isinstance(x, (int, float)) and abs(x) < 1e6
-                    else f"{x:.2e}" if isinstance(x, (int, float))
-                    else str(x)
+            html_parts.append(
+                df.head(50).to_html(
+                    index=False,
+                    classes="table",
+                    border=0,
+                    escape=True,
+                    float_format=lambda x: (
+                        f"{x:.4f}"
+                        if isinstance(x, (int, float)) and abs(x) < 1e6
+                        else f"{x:.2e}"
+                        if isinstance(x, (int, float))
+                        else str(x)
+                    ),
                 )
-            ))
+            )
             if len(df) > 50:
-                html_parts.append(f"<p style='color:#777;font-size:11px'>(仅显示前50行，共{len(df)}行)</p>")
+                html_parts.append(
+                    f"<p style='color:#777;font-size:11px'>(仅显示前50行，共{len(df)}行)</p>"
+                )
 
         # 图表 (Base64 内嵌，压缩 PNG)
         for i, fig in enumerate(result.figures):
@@ -246,6 +256,7 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
             # PIL 压缩优化
             try:
                 from PIL import Image
+
                 img = Image.open(buf)
                 out_buf = io.BytesIO()
                 img.save(out_buf, format="PNG", optimize=True)
@@ -254,8 +265,8 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
             except ImportError:
                 img_b64 = base64.b64encode(buf.read()).decode("utf-8")
             html_parts.append(
-                f"<h2>📈 图表 {i+1}</h2>"
-                f"<img src='data:image/png;base64,{img_b64}' alt='图表{i+1}'>"
+                f"<h2>📈 图表 {i + 1}</h2>"
+                f"<img src='data:image/png;base64,{img_b64}' alt='图表{i + 1}'>"
             )
             plt.close(fig)
 
@@ -268,8 +279,7 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
             html_parts.append("</ul>")
 
         html_parts.append(
-            "<div class='meta'>由 SmartSuite 生成 | "
-            "工艺数据分析工具箱</div></body></html>"
+            "<div class='meta'>由 SmartSuite 生成 | 工艺数据分析工具箱</div></body></html>"
         )
 
         html_content = "\n".join(html_parts)

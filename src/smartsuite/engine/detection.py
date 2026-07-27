@@ -1,4 +1,5 @@
 """异常检测模块：趋势预测、变化点检测、异常检测、离群点共识。"""
+
 import logging
 
 import numpy as np
@@ -21,6 +22,7 @@ from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import durbin_watson
 
 logger = logging.getLogger(__name__)
+
 
 def _ljung_box(residuals, lags=None):
     """Ljung-Box 检验 — 残差自相关的整体显著性检验。"""
@@ -81,7 +83,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # ── 精度指标 ──
         # MAPE (处理零值)
         mape_mask = np.abs(y) > EPSILON
-        mape = float(np.mean(np.abs(residuals[mape_mask] / y[mape_mask])) * 100) if mape_mask.sum() > 0 else None
+        mape = (
+            float(np.mean(np.abs(residuals[mape_mask] / y[mape_mask])) * 100)
+            if mape_mask.sum() > 0
+            else None
+        )
         rmse = float(np.sqrt(np.mean(residuals**2)))
         mae = float(np.mean(np.abs(residuals)))
         r2 = float(model.score(X, y))
@@ -106,32 +112,55 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         future_conf = []
         for step in range(1, steps + 1):
             x_future = n + step - 1  # 0-indexed future position
-            se_future = resid_std_se * np.sqrt(1 + 1/n + (x_future - x_mean)**2 / ssx)
+            se_future = resid_std_se * np.sqrt(1 + 1 / n + (x_future - x_mean) ** 2 / ssx)
             future_conf.append(float(t_crit * se_future))
         conf_array = np.array(future_conf)
 
-        forecast_df = pd.DataFrame({
-            "步数": range(1, steps + 1),
-            "预测值": predictions.round(4),
-            "下限": (predictions - conf_array).round(4),
-            "上限": (predictions + conf_array).round(4),
-        })
+        forecast_df = pd.DataFrame(
+            {
+                "步数": range(1, steps + 1),
+                "预测值": predictions.round(4),
+                "下限": (predictions - conf_array).round(4),
+                "上限": (predictions + conf_array).round(4),
+            }
+        )
 
         # ── 精度指标表 ──
         lb_label = f"显著自相关 (p={lb_p:.4f})" if lb_p < 0.05 else f"无显著自相关 (p={lb_p:.4f})"
-        metrics_df = pd.DataFrame({
-            "指标": ["R²", "调整R²", "RMSE", "MAE", "MAPE (%)",
-                    "Durbin-Watson", "Ljung-Box Q", "Ljung-Box p",
-                    "残差诊断", "样本量", "预测步数", "斜率 (每步)", "截距"],
-            "值": [
-                f"{r2:.4f}", f"{adj_r2:.4f}", f"{rmse:.4f}", f"{mae:.4f}",
-                f"{mape:.2f}%" if mape is not None else "N/A",
-                f"{dw:.4f}", f"{lb_q:.3f}", f"{lb_p:.4f}",
-                f"{dw_label}; {lb_label}",
-                str(n), str(steps),
-                f"{float(model.coef_[0]):.6f}", f"{float(model.intercept_):.4f}",
-            ],
-        })
+        metrics_df = pd.DataFrame(
+            {
+                "指标": [
+                    "R²",
+                    "调整R²",
+                    "RMSE",
+                    "MAE",
+                    "MAPE (%)",
+                    "Durbin-Watson",
+                    "Ljung-Box Q",
+                    "Ljung-Box p",
+                    "残差诊断",
+                    "样本量",
+                    "预测步数",
+                    "斜率 (每步)",
+                    "截距",
+                ],
+                "值": [
+                    f"{r2:.4f}",
+                    f"{adj_r2:.4f}",
+                    f"{rmse:.4f}",
+                    f"{mae:.4f}",
+                    f"{mape:.2f}%" if mape is not None else "N/A",
+                    f"{dw:.4f}",
+                    f"{lb_q:.3f}",
+                    f"{lb_p:.4f}",
+                    f"{dw_label}; {lb_label}",
+                    str(n),
+                    str(steps),
+                    f"{float(model.coef_[0]):.6f}",
+                    f"{float(model.intercept_):.4f}",
+                ],
+            }
+        )
 
         trend_dir = "上升" if model.coef_[0] > 0 else "下降"
 
@@ -152,13 +181,41 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # 左上：趋势 + 预测 + 置信带
         ax1 = fig.add_subplot(2, 2, 1)
         hist_idx = np.arange(n)
-        ax1.plot(hist_idx, y, "o-", markersize=3, label="历史数据", color=PALETTE["data"]["primary"], linewidth=1.2)
-        ax1.plot(hist_idx, y_pred_in, "-", color=PALETTE["data"]["secondary"], linewidth=2, alpha=0.6,
-                label=f"趋势线 (R²={r2:.3f})")
+        ax1.plot(
+            hist_idx,
+            y,
+            "o-",
+            markersize=3,
+            label="历史数据",
+            color=PALETTE["data"]["primary"],
+            linewidth=1.2,
+        )
+        ax1.plot(
+            hist_idx,
+            y_pred_in,
+            "-",
+            color=PALETTE["data"]["secondary"],
+            linewidth=2,
+            alpha=0.6,
+            label=f"趋势线 (R²={r2:.3f})",
+        )
         fut_idx = np.arange(n, n + steps)
-        ax1.plot(fut_idx, predictions, "o-", markersize=4, label="预测", color=PALETTE["target"]["primary"])
-        ax1.fill_between(fut_idx, predictions - conf_array, predictions + conf_array,
-                        alpha=0.2, color=PALETTE["target"]["primary"], label="95% 预测区间")
+        ax1.plot(
+            fut_idx,
+            predictions,
+            "o-",
+            markersize=4,
+            label="预测",
+            color=PALETTE["target"]["primary"],
+        )
+        ax1.fill_between(
+            fut_idx,
+            predictions - conf_array,
+            predictions + conf_array,
+            alpha=0.2,
+            color=PALETTE["target"]["primary"],
+            label="95% 预测区间",
+        )
         ax1.set_xlabel("时间点", fontsize=9)
         ax1.set_ylabel(req.target_col, fontsize=9)
         ax1.set_title(f"趋势预测 — {req.target_col} ({trend_dir})", fontsize=10)
@@ -168,7 +225,9 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         ax2 = fig.add_subplot(2, 2, 2)
         ax2.scatter(hist_idx, residuals, s=12, color=PALETTE["data"]["secondary"], alpha=0.7)
         ax2.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
-        ax2.plot(hist_idx, residuals, "-", color=PALETTE["data"]["secondary"], alpha=0.3, linewidth=0.5)
+        ax2.plot(
+            hist_idx, residuals, "-", color=PALETTE["data"]["secondary"], alpha=0.3, linewidth=0.5
+        )
         ax2.set_xlabel("时间点", fontsize=9)
         ax2.set_ylabel("残差", fontsize=9)
         ax2.set_title(f"残差 — {dw_label}", fontsize=10)
@@ -178,8 +237,12 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         lags = range(max_lag + 1)
         ax3.bar(lags, acf_vals, color=PALETTE["data"]["secondary"], width=0.4, edgecolor="white")
         ax3.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
-        ax3.axhline(acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6)
-        ax3.axhline(-acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6)
+        ax3.axhline(
+            acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6
+        )
+        ax3.axhline(
+            -acf_conf, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=0.8, alpha=0.6
+        )
         ax3.set_xlabel("滞后阶数", fontsize=9)
         ax3.set_ylabel("自相关 (ACF)", fontsize=9)
         ax3.set_title("残差自相关 (ACF)", fontsize=10)
@@ -187,8 +250,13 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # 右下：Actual vs Predicted
         ax4 = fig.add_subplot(2, 2, 4)
         ax4.scatter(y_pred_in, y, s=12, alpha=0.6, color=PALETTE["data"]["primary"])
-        ax4.plot([y.min(), y.max()], [y.min(), y.max()],
-                 color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
+        ax4.plot(
+            [y.min(), y.max()],
+            [y.min(), y.max()],
+            color=PALETTE["anomaly"]["primary"],
+            linestyle="--",
+            linewidth=1,
+        )
         ax4.set_xlabel("预测值", fontsize=9)
         ax4.set_ylabel("实际值", fontsize=9)
         ax4.set_title(f"Actual vs Predicted (R²={r2:.3f})", fontsize=10)
@@ -213,19 +281,30 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
             metadata={
                 "slope": float(model.coef_[0]),
                 "intercept": float(model.intercept_),
-                "r_squared": r2, "r_squared_adj": adj_r2,
-                "rmse": rmse, "mae": mae, "mape": mape,
-                "durbin_watson": dw, "dw_interpretation": dw_label,
-                "ljung_box_q": lb_q, "ljung_box_p": lb_p, "ljung_box_lags": lb_lags,
-                "forecast_steps": steps, "n": n,
+                "r_squared": r2,
+                "r_squared_adj": adj_r2,
+                "rmse": rmse,
+                "mae": mae,
+                "mape": mape,
+                "durbin_watson": dw,
+                "dw_interpretation": dw_label,
+                "ljung_box_q": lb_q,
+                "ljung_box_p": lb_p,
+                "ljung_box_lags": lb_lags,
+                "forecast_steps": steps,
+                "n": n,
             },
         )
     except (ValueError, np.linalg.LinAlgError) as e:
         logger.warning("趋势预测模型拟合失败: %s", e)
         return AnalysisResult(
-            task="trend_forecast", status="error",
-            messages=["趋势预测模型拟合失败，数据可能不足或存在共线性问题，"
-                      "请检查数据中是否包含足够的有效观测值。"])
+            task="trend_forecast",
+            status="error",
+            messages=[
+                "趋势预测模型拟合失败，数据可能不足或存在共线性问题，"
+                "请检查数据中是否包含足够的有效观测值。"
+            ],
+        )
 
 
 def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
@@ -240,7 +319,8 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     n = len(data)
     if n < 20:
         return AnalysisResult(
-            task="change_point", status="error",
+            task="change_point",
+            status="error",
             messages=["有效数据不足(至少20个点)"],
         )
 
@@ -255,9 +335,12 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
         min_peak_ratio = float(min_peak_ratio)
     except (ValueError, TypeError):
         return AnalysisResult(
-            task="change_point", status="error",
-            messages=["变点检测参数格式错误：min_segment 和 n_changepoints 需为整数，"
-                      "min_peak_ratio 需为数值"],
+            task="change_point",
+            status="error",
+            messages=[
+                "变点检测参数格式错误：min_segment 和 n_changepoints 需为整数，"
+                "min_peak_ratio 需为数值"
+            ],
         )
 
     values = data.values
@@ -312,11 +395,16 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     # ── 分段统计 ──
     if not changepoints:
         # 无变点：只有一个段
-        segment_stats = [{
-            "段": 1, "起始": 0, "结束": n - 1, "样本数": n,
-            "均值": f"{float(np.mean(values)):.4f}",
-            "标准差": f"{float(np.std(values, ddof=1)):.4f}",
-        }]
+        segment_stats = [
+            {
+                "段": 1,
+                "起始": 0,
+                "结束": n - 1,
+                "样本数": n,
+                "均值": f"{float(np.mean(values)):.4f}",
+                "标准差": f"{float(np.std(values, ddof=1)):.4f}",
+            }
+        ]
         summary = f"未检测到显著变点，过程整体平稳 (n={n})"
     else:
         segment_stats = []
@@ -325,19 +413,27 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
             start, end = boundaries[seg_i], boundaries[seg_i + 1]
             seg_vals = values[start:end]
             if len(seg_vals) > 0:
-                segment_stats.append({
-                    "段": seg_i + 1,
-                    "起始": start,
-                    "结束": end - 1,
-                    "样本数": end - start,
-                    "均值": f"{float(np.mean(seg_vals)):.4f}",
-                    "标准差": f"{float(np.std(seg_vals, ddof=1)):.4f}" if len(seg_vals) >= 2 else "—",
-                    "变化方向": (
-                        "↑ 上升" if seg_i > 0 and float(np.mean(seg_vals)) >
-                        float(np.mean(values[boundaries[seg_i-1]:boundaries[seg_i]]))
-                        else "↓ 下降" if seg_i > 0 else "—"
-                    ),
-                })
+                segment_stats.append(
+                    {
+                        "段": seg_i + 1,
+                        "起始": start,
+                        "结束": end - 1,
+                        "样本数": end - start,
+                        "均值": f"{float(np.mean(seg_vals)):.4f}",
+                        "标准差": f"{float(np.std(seg_vals, ddof=1)):.4f}"
+                        if len(seg_vals) >= 2
+                        else "—",
+                        "变化方向": (
+                            "↑ 上升"
+                            if seg_i > 0
+                            and float(np.mean(seg_vals))
+                            > float(np.mean(values[boundaries[seg_i - 1] : boundaries[seg_i]]))
+                            else "↓ 下降"
+                            if seg_i > 0
+                            else "—"
+                        ),
+                    }
+                )
         cp_positions = ", ".join(str(cp) for cp in changepoints)
         summary = (
             f"检测到 {len(changepoints)} 个变点 (位置: {cp_positions})，"
@@ -348,32 +444,50 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(12, 5))
     ax = fig.add_subplot(111)
     pos = np.arange(n)
-    ax.plot(pos, values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.7, label="数据")
+    ax.plot(
+        pos, values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.7, label="数据"
+    )
 
     # 分段均值线
     if changepoints:
         boundaries = [0] + changepoints + [n]
-        colors = [PALETTE["data"]["primary"], PALETTE["target"]["primary"], PALETTE["center"]["primary"], PALETTE["contrast"]["d"], PALETTE["contrast"]["b"]]
+        colors = [
+            PALETTE["data"]["primary"],
+            PALETTE["target"]["primary"],
+            PALETTE["center"]["primary"],
+            PALETTE["contrast"]["d"],
+            PALETTE["contrast"]["b"],
+        ]
         for seg_i in range(len(boundaries) - 1):
             start, end = boundaries[seg_i], boundaries[seg_i + 1]
             seg_mean = float(np.mean(values[start:end]))
-            ax.plot([start, end - 1], [seg_mean, seg_mean], "-",
-                   color=colors[seg_i % len(colors)], linewidth=2.5,
-                   label=f"段{seg_i+1} μ={seg_mean:.3f}")
+            ax.plot(
+                [start, end - 1],
+                [seg_mean, seg_mean],
+                "-",
+                color=colors[seg_i % len(colors)],
+                linewidth=2.5,
+                label=f"段{seg_i + 1} μ={seg_mean:.3f}",
+            )
 
     # 标记变点
     for cp in changepoints:
-        ax.axvline(cp, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5, alpha=0.8)
-        ax.annotate(f"变点{cp}", xy=(cp, values[cp]),
-                   xytext=(cp + 5, values[cp] + 0.5 * np.std(values)),
-                   fontsize=8, color=PALETTE["anomaly"]["primary"],
-                   arrowprops=dict(arrowstyle="->", color=PALETTE["anomaly"]["primary"], lw=0.8))
+        ax.axvline(
+            cp, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5, alpha=0.8
+        )
+        ax.annotate(
+            f"变点{cp}",
+            xy=(cp, values[cp]),
+            xytext=(cp + 5, values[cp] + 0.5 * np.std(values)),
+            fontsize=8,
+            color=PALETTE["anomaly"]["primary"],
+            arrowprops=dict(arrowstyle="->", color=PALETTE["anomaly"]["primary"], lw=0.8),
+        )
 
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
     ax.set_title(
-        f"变点检测 — {req.target_col} | "
-        f"{len(changepoints)} 个变点, {len(segment_stats)} 段",
+        f"变点检测 — {req.target_col} | {len(changepoints)} 个变点, {len(segment_stats)} 段",
         fontsize=11,
     )
     ax.legend(fontsize=7.5, loc="upper left", ncol=2)
@@ -402,7 +516,8 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     n = len(data)
     if n < 10:
         return AnalysisResult(
-            task="outlier_consensus", status="error",
+            task="outlier_consensus",
+            status="error",
             messages=["有效数据不足(至少10个点)"],
         )
 
@@ -415,7 +530,9 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=["数据无变化(IQR=0)，无法检测异常"],
         )
-    iqr_mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR)
+    iqr_mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (
+        data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR
+    )
 
     # ── 方法 2: Z-score ──
     z_scores = np.abs((data - data.mean()) / (data.std(ddof=1) + EPSILON))
@@ -424,6 +541,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     # ── 方法 3: Isolation Forest ──
     try:
         from sklearn.ensemble import IsolationForest
+
         iso = IsolationForest(contamination=0.05, random_state=42, n_estimators=100)
         if len(req.feature_cols) > 0:
             feature_cols = [c for c in req.feature_cols if c in req.data.columns]
@@ -450,15 +568,17 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     anomaly_rows = []
     for i, idx in enumerate(data.index):
         if any_flag.iloc[i]:
-            anomaly_rows.append({
-                "序号": idx,
-                req.target_col: round(float(data.iloc[i]), 4),
-                "IQR": "是" if iqr_mask.iloc[i] else "否",
-                "Z-Score": "是" if z_mask.iloc[i] else "否",
-                "IsoForest": "是" if iso_mask.iloc[i] else "否",
-                "投票数": int(votes.iloc[i]),
-                "置信度": "高 (≥2票)" if high_conf.iloc[i] else "低 (1票)",
-            })
+            anomaly_rows.append(
+                {
+                    "序号": idx,
+                    req.target_col: round(float(data.iloc[i]), 4),
+                    "IQR": "是" if iqr_mask.iloc[i] else "否",
+                    "Z-Score": "是" if z_mask.iloc[i] else "否",
+                    "IsoForest": "是" if iso_mask.iloc[i] else "否",
+                    "投票数": int(votes.iloc[i]),
+                    "置信度": "高 (≥2票)" if high_conf.iloc[i] else "低 (1票)",
+                }
+            )
 
     # ── 可视化 ──
     fig = Figure(figsize=(10, 5))
@@ -470,16 +590,31 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     # 低置信 (1票)
     low_conf_pos = np.where(any_flag & ~high_conf)[0]
     if len(low_conf_pos) > 0:
-        ax.scatter(low_conf_pos, data.values[low_conf_pos], s=60,
-                  color=PALETTE["spec"]["secondary"], marker="s", facecolors="none", linewidths=1.5,
-                  zorder=4, label=f"低置信 (1票, {len(low_conf_pos)}个)")
+        ax.scatter(
+            low_conf_pos,
+            data.values[low_conf_pos],
+            s=60,
+            color=PALETTE["spec"]["secondary"],
+            marker="s",
+            facecolors="none",
+            linewidths=1.5,
+            zorder=4,
+            label=f"低置信 (1票, {len(low_conf_pos)}个)",
+        )
 
     # 高置信 (≥2票)
     high_conf_pos = np.where(high_conf)[0]
     if len(high_conf_pos) > 0:
-        ax.scatter(high_conf_pos, data.values[high_conf_pos], s=100,
-                  color=PALETTE["anomaly"]["primary"], marker="x", linewidths=3, zorder=5,
-                  label=f"高置信 (≥2票, {len(high_conf_pos)}个)")
+        ax.scatter(
+            high_conf_pos,
+            data.values[high_conf_pos],
+            s=100,
+            color=PALETTE["anomaly"]["primary"],
+            marker="x",
+            linewidths=3,
+            zorder=5,
+            label=f"高置信 (≥2票, {len(high_conf_pos)}个)",
+        )
 
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
@@ -501,14 +636,19 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     return AnalysisResult(
         task="outlier_consensus",
         tables={
-            "anomalies": pd.DataFrame(anomaly_rows) if anomaly_rows
-            else pd.DataFrame(),
-            "method_counts": pd.DataFrame({
-                "方法": ["IQR", "Z-Score", "Isolation Forest", "高置信(≥2票)", "任意标记"],
-                "检测数": [int(iqr_mask.sum()), int(z_mask.sum()),
-                         int(iso_mask.sum()), int(high_conf.sum()),
-                         int(any_flag.sum())],
-            }),
+            "anomalies": pd.DataFrame(anomaly_rows) if anomaly_rows else pd.DataFrame(),
+            "method_counts": pd.DataFrame(
+                {
+                    "方法": ["IQR", "Z-Score", "Isolation Forest", "高置信(≥2票)", "任意标记"],
+                    "检测数": [
+                        int(iqr_mask.sum()),
+                        int(z_mask.sum()),
+                        int(iso_mask.sum()),
+                        int(high_conf.sum()),
+                        int(any_flag.sum()),
+                    ],
+                }
+            ),
         },
         figures=[fig],
         summary=summary,
@@ -534,10 +674,12 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         sub = req.data[feature_cols].dropna()
         if len(sub) < 5:
             return AnalysisResult(
-                task="anomaly_detect", status="error",
+                task="anomaly_detect",
+                status="error",
                 messages=["有效样本不足(至少需要5个完整观测)"],
             )
         from sklearn.ensemble import IsolationForest
+
         contamination = req.params.get("contamination", 0.05)
         try:
             iso = IsolationForest(
@@ -552,7 +694,8 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         except Exception as e:
             logger.warning("Isolation Forest 拟合失败: %s", e, exc_info=True)
             return AnalysisResult(
-                task="anomaly_detect", status="error",
+                task="anomaly_detect",
+                status="error",
                 messages=[f"Isolation Forest 模型拟合失败: {e}"],
             )
 
@@ -564,12 +707,25 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             ax1 = fig.add_subplot(1, 2, 1)
             c1, c2 = feature_cols[0], feature_cols[1]
             normal_mask = ~mask
-            ax1.scatter(sub.loc[normal_mask, c1], sub.loc[normal_mask, c2],
-                       s=20, alpha=0.5, color=PALETTE["data"]["secondary"], label=f"正常 ({normal_mask.sum()})")
+            ax1.scatter(
+                sub.loc[normal_mask, c1],
+                sub.loc[normal_mask, c2],
+                s=20,
+                alpha=0.5,
+                color=PALETTE["data"]["secondary"],
+                label=f"正常 ({normal_mask.sum()})",
+            )
             if mask.sum() > 0:
-                ax1.scatter(sub.loc[mask, c1], sub.loc[mask, c2],
-                           s=60, alpha=0.9, color=PALETTE["anomaly"]["primary"], marker="x",
-                           linewidths=2, label=f"异常 ({mask.sum()})")
+                ax1.scatter(
+                    sub.loc[mask, c1],
+                    sub.loc[mask, c2],
+                    s=60,
+                    alpha=0.9,
+                    color=PALETTE["anomaly"]["primary"],
+                    marker="x",
+                    linewidths=2,
+                    label=f"异常 ({mask.sum()})",
+                )
             ax1.set_xlabel(c1, fontsize=9)
             ax1.set_ylabel(c2, fontsize=9)
             ax1.set_title("多变量异常检测 (Isolation Forest)", fontsize=10)
@@ -579,12 +735,24 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             ax2 = fig.add_subplot(1, 2, 2)
         else:
             ax2 = fig.add_subplot(111)
-        ax2.hist(scores[~mask], bins=20, alpha=0.7, color=PALETTE["data"]["secondary"],
-                label=f"正常 (n={(~mask).sum()})")
+        ax2.hist(
+            scores[~mask],
+            bins=20,
+            alpha=0.7,
+            color=PALETTE["data"]["secondary"],
+            label=f"正常 (n={(~mask).sum()})",
+        )
         if mask.sum() > 0:
-            ax2.hist(scores[mask], bins=10, alpha=0.8, color=PALETTE["target"]["primary"],
-                    label=f"异常 (n={mask.sum()})")
-        ax2.axvline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, label="决策边界")
+            ax2.hist(
+                scores[mask],
+                bins=10,
+                alpha=0.8,
+                color=PALETTE["target"]["primary"],
+                label=f"异常 (n={mask.sum()})",
+            )
+        ax2.axvline(
+            0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, label="决策边界"
+        )
         ax2.set_xlabel("异常分数 (越低越异常)", fontsize=9)
         ax2.set_ylabel("频数", fontsize=9)
         ax2.set_title("异常分数分布", fontsize=10)
@@ -603,8 +771,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(
             task="anomaly_detect",
             tables={
-                "anomalies": pd.DataFrame(anomaly_rows) if anomaly_rows
-                else pd.DataFrame(),
+                "anomalies": pd.DataFrame(anomaly_rows) if anomaly_rows else pd.DataFrame(),
             },
             figures=[fig],
             summary=(
@@ -648,8 +815,8 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             if n_remain < 3:
                 break
             t_crit = sp_stats.t.ppf(1 - alpha_g / (2 * n_remain), n_remain - 2)
-            G_crit = (n_remain - 1) / np.sqrt(n_remain) * np.sqrt(
-                t_crit**2 / (n_remain - 2 + t_crit**2)
+            G_crit = (
+                (n_remain - 1) / np.sqrt(n_remain) * np.sqrt(t_crit**2 / (n_remain - 2 + t_crit**2))
             )
             if G > G_crit:
                 mask[keep_idx[max_idx]] = True
@@ -666,7 +833,9 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=["数据无变化(IQR=0)，无法检测异常"],
             )
-        mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR)
+        mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (
+            data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR
+        )
     else:
         if data_std < EPSILON:
             return AnalysisResult(
@@ -688,24 +857,62 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     ax.scatter(pos, data.values, s=10, color=PALETTE["data"]["primary"])
     if mask.sum() > 0:
         anomaly_pos = np.where(mask)[0]
-        ax.scatter(anomaly_pos, data.values[mask], s=80, color=PALETTE["anomaly"]["primary"],
-                   marker="x", linewidths=2.5, zorder=5, label=f"异常({mask.sum()}个)")
+        ax.scatter(
+            anomaly_pos,
+            data.values[mask],
+            s=80,
+            color=PALETTE["anomaly"]["primary"],
+            marker="x",
+            linewidths=2.5,
+            zorder=5,
+            label=f"异常({mask.sum()}个)",
+        )
         if method == "iqr":
             lower_bound = Q1 - IQR_OUTLIER_MULTIPLIER * IQR
             upper_bound = Q3 + IQR_OUTLIER_MULTIPLIER * IQR
-            ax.axhline(lower_bound, color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"下界={lower_bound:.3f}")
-            ax.axhline(upper_bound, color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"上界={upper_bound:.3f}")
+            ax.axhline(
+                lower_bound,
+                color=PALETTE["spec"]["secondary"],
+                linestyle="--",
+                linewidth=1,
+                alpha=0.6,
+                label=f"下界={lower_bound:.3f}",
+            )
+            ax.axhline(
+                upper_bound,
+                color=PALETTE["spec"]["secondary"],
+                linestyle="--",
+                linewidth=1,
+                alpha=0.6,
+                label=f"上界={upper_bound:.3f}",
+            )
         elif method == "grubbs":
             # Grubbs 使用迭代临界值 (t 分布)，不画 ±3σ 线避免误导
-            ax.axhline(data.mean(), color=PALETTE["spec"]["secondary"], linestyle=":",
-                      linewidth=1, alpha=0.4, label=f"均值={data.mean():.3f}")
+            ax.axhline(
+                data.mean(),
+                color=PALETTE["spec"]["secondary"],
+                linestyle=":",
+                linewidth=1,
+                alpha=0.4,
+                label=f"均值={data.mean():.3f}",
+            )
         else:
-            ax.axhline(data.mean() + 3*data_std, color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"上界={data.mean()+3*data_std:.3f}")
-            ax.axhline(data.mean() - 3*data_std, color=PALETTE["spec"]["secondary"], linestyle="--",
-                      linewidth=1, alpha=0.6, label=f"下界={data.mean()-3*data_std:.3f}")
+            ax.axhline(
+                data.mean() + 3 * data_std,
+                color=PALETTE["spec"]["secondary"],
+                linestyle="--",
+                linewidth=1,
+                alpha=0.6,
+                label=f"上界={data.mean() + 3 * data_std:.3f}",
+            )
+            ax.axhline(
+                data.mean() - 3 * data_std,
+                color=PALETTE["spec"]["secondary"],
+                linestyle="--",
+                linewidth=1,
+                alpha=0.6,
+                label=f"下界={data.mean() - 3 * data_std:.3f}",
+            )
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
     ax.set_title(f"异常检测 — {req.target_col} (方法: {method})", fontsize=11)

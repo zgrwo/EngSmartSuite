@@ -1,4 +1,5 @@
 """Data I/O — Excel 数据读写与校验。"""
+
 import logging
 import uuid
 
@@ -25,8 +26,7 @@ def read_excel_range(sheet, range_addr: str | None = None) -> pd.DataFrame:
     return df
 
 
-def validate_data(df: pd.DataFrame, target_col: str,
-                  feature_cols: list[str]) -> list[str]:
+def validate_data(df: pd.DataFrame, target_col: str, feature_cols: list[str]) -> list[str]:
     """校验数据列存在性、类型、缺失值。返回警告消息列表。"""
     messages = []
     if df.empty:
@@ -44,7 +44,9 @@ def validate_data(df: pd.DataFrame, target_col: str,
 
     null_count = int(df[[target_col] + feature_cols].isna().sum().sum())
     if null_count > 0:
-        messages.append(f"检测到 {null_count} 个缺失值，分析中将自动填充（数值型用中位数，类别型标记为'缺失'）")
+        messages.append(
+            f"检测到 {null_count} 个缺失值，分析中将自动填充（数值型用中位数，类别型标记为'缺失'）"
+        )
 
     n_rows = len(df)
     if n_rows < 3:
@@ -55,10 +57,14 @@ def validate_data(df: pd.DataFrame, target_col: str,
     return messages
 
 
-def preprocess_data(df: pd.DataFrame, features: list[str],
-                    categorical_cols: set[str] | None = None,
-                    known_cat_map: dict[str, list[str]] | None = None
-                    ) -> tuple[pd.DataFrame, list[str], dict[str, list[str]], dict[str, int], list[tuple[str, set[str], int]]]:
+def preprocess_data(
+    df: pd.DataFrame,
+    features: list[str],
+    categorical_cols: set[str] | None = None,
+    known_cat_map: dict[str, list[str]] | None = None,
+) -> tuple[
+    pd.DataFrame, list[str], dict[str, list[str]], dict[str, int], list[tuple[str, set[str], int]]
+]:
     """预处理数据：One-Hot 编码类别列、数值强制转换、中位数填充缺失值。
 
     Args:
@@ -74,11 +80,16 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                              调用方可据此决定是否中断分析或向用户展示警告
     """
     if not categorical_cols:
-        categorical_cols = {c for c in features
-                           if (pd.api.types.is_string_dtype(df[c])
-                               or pd.api.types.is_bool_dtype(df[c])
-                               or str(df[c].dtype) in ('object', 'category'))
-                           and not pd.api.types.is_numeric_dtype(df[c])}
+        categorical_cols = {
+            c
+            for c in features
+            if (
+                pd.api.types.is_string_dtype(df[c])
+                or pd.api.types.is_bool_dtype(df[c])
+                or str(df[c].dtype) in ("object", "category")
+            )
+            and not pd.api.types.is_numeric_dtype(df[c])
+        }
 
     df = df.copy()
     encoded_cols: list[str] = []
@@ -93,7 +104,10 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
             if n_unique > 50:
                 logger.warning(
                     "列「%s」有 %d 个唯一值，One-Hot 编码将产生 %d 个虚拟列，"
-                    "建议先分组归并或降维处理", col, n_unique, n_unique - 1
+                    "建议先分组归并或降维处理",
+                    col,
+                    n_unique,
+                    n_unique - 1,
                 )
             # 单唯一值列 (如全 NaN→"(缺失)"): drop_first 会导致零列输出, 保留该列
             _drop_first = True if n_unique > 1 else False
@@ -113,7 +127,10 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                     logger.warning(
                         "列「%s」出现 %d 个未知类别，影响 %d 行，已归入参照组: %s。"
                         "建议检查数据或重新训练模型以确保分析准确性。",
-                        col, len(extra), n_affected, extra
+                        col,
+                        len(extra),
+                        n_affected,
+                        extra,
                     )
                 dummies = dummies[known_cat_map[col]]
             for dc in dummies.columns:
@@ -129,12 +146,11 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
             # 记录参照类别 (drop_first 丢弃的第一个类别) 用于系数解读
             _all_cats = list(pd.get_dummies(col_str, prefix=col, drop_first=False).columns)
             _ref_cat = [c for c in _all_cats if c not in dummies.columns]
-            cat_map[col] = list(dummies.columns) + (
-                [f"_(参照) {_ref_cat[0]}"] if _ref_cat else [])
+            cat_map[col] = list(dummies.columns) + ([f"_(参照) {_ref_cat[0]}"] if _ref_cat else [])
         else:
             # 转为数值型，然后统一用中位数填充所有缺失值
             n_before = int(df[col].notna().sum())
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors="coerce")
             n_after = int(df[col].notna().sum())
             n_coerced = n_before - n_after
             # P2 fix: 静默 coercion 警告 — 当非数值比例 >5% 时记录
@@ -142,7 +158,10 @@ def preprocess_data(df: pd.DataFrame, features: list[str],
                 logger.warning(
                     "列「%s」中 %d/%d (%.1f%%) 个值无法转为数值，已用中位数填充。"
                     "请检查数据中是否包含非数值内容（如单位、文本等）。",
-                    col, n_coerced, n_before, n_coerced / n_before * 100
+                    col,
+                    n_coerced,
+                    n_before,
+                    n_coerced / n_before * 100,
                 )
             total_na = df[col].isna()
             n_missing = int(total_na.sum())
@@ -173,25 +192,27 @@ def missing_pattern_analysis(df: pd.DataFrame) -> dict:
     col_stats = []
     for col in df.columns:
         n_miss = int(df[col].isna().sum())
-        col_stats.append({
-            "列名": col,
-            "缺失数": n_miss,
-            "缺失率(%)": round(n_miss / n_total * 100, 2) if n_total > 0 else 0.0,
-            "数据类型": str(df[col].dtype),
-            "唯一值": int(df[col].nunique()),
-        })
+        col_stats.append(
+            {
+                "列名": col,
+                "缺失数": n_miss,
+                "缺失率(%)": round(n_miss / n_total * 100, 2) if n_total > 0 else 0.0,
+                "数据类型": str(df[col].dtype),
+                "唯一值": int(df[col].nunique()),
+            }
+        )
     col_missing_df = pd.DataFrame(col_stats).sort_values("缺失率(%)", ascending=False)
 
     # ── 缺失模式 ──
     # 限制列数以防范指数级分组 (groupby over >20 boolean columns)
     max_pattern_cols = 20
-    pattern_cols = df.columns[:min(len(df.columns), max_pattern_cols)]
+    pattern_cols = df.columns[: min(len(df.columns), max_pattern_cols)]
     miss_pattern = df[pattern_cols].isna().astype(int)
     if len(df.columns) > max_pattern_cols:
         miss_pattern["_others"] = df[df.columns[max_pattern_cols:]].isna().any(axis=1).astype(int)
-    pattern_counts = miss_pattern.groupby(
-        list(miss_pattern.columns)
-    ).size().reset_index(name="行数")
+    pattern_counts = (
+        miss_pattern.groupby(list(miss_pattern.columns)).size().reset_index(name="行数")
+    )
     pattern_counts = pattern_counts.sort_values("行数", ascending=False)
 
     # ── 高基数列检测 ──
@@ -199,12 +220,14 @@ def missing_pattern_analysis(df: pd.DataFrame) -> dict:
     for col in df.columns:
         n_unique = int(df[col].nunique())
         if n_unique > 50 and str(df[col].dtype) in ("object", "string", "category"):
-            high_cardinality.append({
-                "列名": col,
-                "唯一值数": n_unique,
-                "基数比(%)": round(n_unique / n_total * 100, 2) if n_total > 0 else 0.0,
-                "警告": "One-Hot 编码将产生大量列，建议先分组归并",
-            })
+            high_cardinality.append(
+                {
+                    "列名": col,
+                    "唯一值数": n_unique,
+                    "基数比(%)": round(n_unique / n_total * 100, 2) if n_total > 0 else 0.0,
+                    "警告": "One-Hot 编码将产生大量列，建议先分组归并",
+                }
+            )
 
     # ── 零方差别检测 ──
     zero_variance: list[str] = []
@@ -226,7 +249,8 @@ def missing_pattern_analysis(df: pd.DataFrame) -> dict:
         "cols_with_missing": cols_with_missing,
         "column_missing_stats": col_missing_df,
         "missing_patterns": pattern_counts.head(20),
-        "high_cardinality_columns": pd.DataFrame(high_cardinality) if high_cardinality
+        "high_cardinality_columns": pd.DataFrame(high_cardinality)
+        if high_cardinality
         else pd.DataFrame({"信息": ["未检测到高基数列"]}),
         "zero_variance_columns": zero_variance,
         "summary": (
@@ -246,11 +270,15 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
     """
     n_rows, n_cols = df.shape
     numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    cat_cols = [c for c in df.columns
-                if str(df[c].dtype) in ("object", "string", "category")
-                and not pd.api.types.is_datetime64_any_dtype(df[c])]
-    binary_cols = [c for c in df.columns
-                   if c != target_col and 1 <= df[c].nunique(dropna=True) <= 2]
+    cat_cols = [
+        c
+        for c in df.columns
+        if str(df[c].dtype) in ("object", "string", "category")
+        and not pd.api.types.is_datetime64_any_dtype(df[c])
+    ]
+    binary_cols = [
+        c for c in df.columns if c != target_col and 1 <= df[c].nunique(dropna=True) <= 2
+    ]
     date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
     # 启发式检测隐式日期列（object/string 类型但内容可解析为日期）
     for c in [c for c in df.columns if str(df[c].dtype) in ("object", "string")]:
@@ -269,118 +297,158 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
 
     # ── 数据量检查（警告但不阻止其他推荐）──
     if n_rows < 10:
-        recommendations.append({
-            "优先级": "P0",
-            "类别": "数据质量",
-            "推荐分析": "数据不足",
-            "原因": f"仅 {n_rows} 行数据，大部分统计方法需要更多样本",
-        })
+        recommendations.append(
+            {
+                "优先级": "P0",
+                "类别": "数据质量",
+                "推荐分析": "数据不足",
+                "原因": f"仅 {n_rows} 行数据，大部分统计方法需要更多样本",
+            }
+        )
 
     # ── 缺失值检查 ──
     missing_pct = df.isna().mean().max() * 100
     if missing_pct > 10:
-        recommendations.append({
-            "优先级": "P0", "类别": "数据质量",
-            "推荐分析": "missing_pattern_analysis",
-            "原因": f"最高缺失率达 {missing_pct:.0f}%，需先诊断缺失模式",
-        })
+        recommendations.append(
+            {
+                "优先级": "P0",
+                "类别": "数据质量",
+                "推荐分析": "missing_pattern_analysis",
+                "原因": f"最高缺失率达 {missing_pct:.0f}%，需先诊断缺失模式",
+            }
+        )
 
     # ── 相关性/要因分析 ──
     if len(numeric_cols) >= 3:
-        recommendations.append({
-            "优先级": "P1", "类别": "要因分析",
-            "推荐分析": "correlation" if target_col else "correlation (需选目标列)",
-            "原因": f"{len(numeric_cols)} 个数值列，相关性分析可快速筛选关键因子",
-        })
+        recommendations.append(
+            {
+                "优先级": "P1",
+                "类别": "要因分析",
+                "推荐分析": "correlation" if target_col else "correlation (需选目标列)",
+                "原因": f"{len(numeric_cols)} 个数值列，相关性分析可快速筛选关键因子",
+            }
+        )
     if target_col and len(numeric_cols) >= 2:
-        recommendations.append({
-            "优先级": "P1", "类别": "要因分析",
-            "推荐分析": "regression",
-            "原因": "量化各因子对目标变量的影响大小 (含标准化系数)",
-        })
+        recommendations.append(
+            {
+                "优先级": "P1",
+                "类别": "要因分析",
+                "推荐分析": "regression",
+                "原因": "量化各因子对目标变量的影响大小 (含标准化系数)",
+            }
+        )
     if len(numeric_cols) >= 4:
-        recommendations.append({
-            "优先级": "P2", "类别": "要因分析",
-            "推荐分析": "vif",
-            "原因": f"{len(numeric_cols)} 个变量，建议检查共线性",
-        })
+        recommendations.append(
+            {
+                "优先级": "P2",
+                "类别": "要因分析",
+                "推荐分析": "vif",
+                "原因": f"{len(numeric_cols)} 个变量，建议检查共线性",
+            }
+        )
 
     # ── 分组/对比 ──
     if len(binary_cols) >= 1 and target_col:
-        recommendations.append({
-            "优先级": "P1", "类别": "对比分析",
-            "推荐分析": "hypothesis_test",
-            "原因": f"存在二分类列 ({binary_cols[0]})，可进行组间差异检验",
-        })
+        recommendations.append(
+            {
+                "优先级": "P1",
+                "类别": "对比分析",
+                "推荐分析": "hypothesis_test",
+                "原因": f"存在二分类列 ({binary_cols[0]})，可进行组间差异检验",
+            }
+        )
     if len(cat_cols) >= 1 and target_col:
         # 遍历 cat_cols 找第一个适合分组的列
         for group_col in cat_cols:
             n_groups = df[group_col].nunique()
             if 2 <= n_groups <= 10:
-                recommendations.append({
-                    "优先级": "P2", "类别": "对比分析",
-                    "推荐分析": "anova",
-                    "原因": f"「{group_col}」有 {n_groups} 个水平，可用 ANOVA 检测组间差异",
-                })
+                recommendations.append(
+                    {
+                        "优先级": "P2",
+                        "类别": "对比分析",
+                        "推荐分析": "anova",
+                        "原因": f"「{group_col}」有 {n_groups} 个水平，可用 ANOVA 检测组间差异",
+                    }
+                )
                 break
 
     # ── DOE/优化 ──
     if target_col and len(numeric_cols) >= 3:
-        recommendations.append({
-            "优先级": "P2", "类别": "工艺优化",
-            "推荐分析": "doe_analysis",
-            "原因": "评估各因子的主效应大小，识别优化方向",
-        })
+        recommendations.append(
+            {
+                "优先级": "P2",
+                "类别": "工艺优化",
+                "推荐分析": "doe_analysis",
+                "原因": "评估各因子的主效应大小，识别优化方向",
+            }
+        )
     if target_col and len(numeric_cols) >= 2:
-        recommendations.append({
-            "优先级": "P2", "类别": "工艺优化",
-            "推荐分析": "response_surface",
-            "原因": "可探索两个关键因子的最优组合区域",
-        })
+        recommendations.append(
+            {
+                "优先级": "P2",
+                "类别": "工艺优化",
+                "推荐分析": "response_surface",
+                "原因": "可探索两个关键因子的最优组合区域",
+            }
+        )
 
     # ── 时序/SPC ──
     has_time = len(date_cols) > 0
     if n_rows >= 20:
         if has_time:
-            recommendations.append({
-                "优先级": "P1",
-                "类别": "过程监控",
-                "推荐分析": "trend_forecast",
-                "原因": f"{n_rows} 行数据，含日期列，可进行趋势预测",
-            })
+            recommendations.append(
+                {
+                    "优先级": "P1",
+                    "类别": "过程监控",
+                    "推荐分析": "trend_forecast",
+                    "原因": f"{n_rows} 行数据，含日期列，可进行趋势预测",
+                }
+            )
         else:
             # 检查是否有潜在子组列
-            subgroup_candidates = [c for c in df.columns
-                                  if c != target_col and 2 <= df[c].nunique() <= 30]
+            subgroup_candidates = [
+                c for c in df.columns if c != target_col and 2 <= df[c].nunique() <= 30
+            ]
             if subgroup_candidates:
-                recommendations.append({
-                    "优先级": "P2",
-                    "类别": "过程监控",
-                    "推荐分析": f"spc_xbar (子组列: {subgroup_candidates[0]})",
-                    "原因": f"{n_rows} 行数据，检测到潜在子组列「{subgroup_candidates[0]}」",
-                })
+                recommendations.append(
+                    {
+                        "优先级": "P2",
+                        "类别": "过程监控",
+                        "推荐分析": f"spc_xbar (子组列: {subgroup_candidates[0]})",
+                        "原因": f"{n_rows} 行数据，检测到潜在子组列「{subgroup_candidates[0]}」",
+                    }
+                )
     if target_col:
-        recommendations.append({
-            "优先级": "P2", "类别": "过程监控",
-            "推荐分析": "process_capability",
-            "原因": "评估当前过程是否满足规格要求 (需提供 USL/LSL)",
-        })
+        recommendations.append(
+            {
+                "优先级": "P2",
+                "类别": "过程监控",
+                "推荐分析": "process_capability",
+                "原因": "评估当前过程是否满足规格要求 (需提供 USL/LSL)",
+            }
+        )
 
     # ── 异常检测 ──
     if n_rows >= 30:
-        recommendations.append({
-            "优先级": "P2", "类别": "异常检测",
-            "推荐分析": "outlier_consensus",
-            "原因": "多方法投票检测异常点，减少误报",
-        })
+        recommendations.append(
+            {
+                "优先级": "P2",
+                "类别": "异常检测",
+                "推荐分析": "outlier_consensus",
+                "原因": "多方法投票检测异常点，减少误报",
+            }
+        )
 
     # ── 数据质量 ──
     if len(high_card) > 0:
-        recommendations.append({
-            "优先级": "P1", "类别": "数据质量",
-            "推荐分析": "preprocess_data (高基数处理)",
-            "原因": f"列「{high_card[0]}」有 {_cat_nunique[high_card[0]]} 个唯一值，建模前需处理",
-        })
+        recommendations.append(
+            {
+                "优先级": "P1",
+                "类别": "数据质量",
+                "推荐分析": "preprocess_data (高基数处理)",
+                "原因": f"列「{high_card[0]}」有 {_cat_nunique[high_card[0]]} 个唯一值，建模前需处理",
+            }
+        )
 
     # 排序
     priority_order = {"P0": 0, "P1": 1, "P2": 2}
@@ -400,7 +468,8 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
         "recommendations": rec_df,
         "summary": summary,
         "data_profile": {
-            "n_rows": n_rows, "n_cols": n_cols,
+            "n_rows": n_rows,
+            "n_cols": n_cols,
             "numeric_cols": len(numeric_cols),
             "categorical_cols": len(cat_cols),
             "binary_cols": len(binary_cols),
@@ -427,15 +496,15 @@ def auto_generate_subgroup_col(df: pd.DataFrame, params: dict) -> tuple[pd.DataF
     while subgroup_col_name in df.columns:
         subgroup_col_name = f"_自动子组_{uuid.uuid4().hex[:8]}"
     df[subgroup_col_name] = pd.cut(
-        range(n), bins=n_subgroups,
-        labels=[f"子组{i+1}" for i in range(n_subgroups)]
+        range(n), bins=n_subgroups, labels=[f"子组{i + 1}" for i in range(n_subgroups)]
     ).astype(str)
     params = {**params, "subgroup_col": subgroup_col_name}
     return df, params
 
 
-def infer_group_col(df: pd.DataFrame, features: list[str],
-                    categoricals: list[str] | None = None) -> dict | None:
+def infer_group_col(
+    df: pd.DataFrame, features: list[str], categoricals: list[str] | None = None
+) -> dict | None:
     """为假设检验自动推断分组列（查找恰好有 2 个水平的列）。
 
     从 web/api.py 提取至 services/ 层，CLI 和 Web 路径共享。
@@ -444,20 +513,22 @@ def infer_group_col(df: pd.DataFrame, features: list[str],
         {'group_col': col_name} 或 None（未找到合适的列）
     """
     cat_set = set(categoricals) if categoricals else set()
-    candidates = [c for c in features if c in cat_set or
-        str(df[c].dtype) in ('object', 'string', 'category')] or \
-        [c for c in features if df[c].nunique() <= 10]
+    candidates = [
+        c for c in features if c in cat_set or str(df[c].dtype) in ("object", "string", "category")
+    ] or [c for c in features if df[c].nunique() <= 10]
     for col in candidates:
         if df[col].dropna().nunique() == 2:
             return {"group_col": col}
     return None
 
 
-def preprocess_for_task(df: pd.DataFrame, features: list[str], task: str,
-                        categoricals: list[str] | None = None,
-                        raw_cat_tasks: set[str] | None = None
-                        ) -> tuple[pd.DataFrame, list[str], dict[str, int],
-                                   list[tuple[str, set[str], int]]]:
+def preprocess_for_task(
+    df: pd.DataFrame,
+    features: list[str],
+    task: str,
+    categoricals: list[str] | None = None,
+    raw_cat_tasks: set[str] | None = None,
+) -> tuple[pd.DataFrame, list[str], dict[str, int], list[tuple[str, set[str], int]]]:
     """任务感知的数据预处理：对需要原始类别列的任务跳过 One-Hot 编码。
 
     Args:
@@ -469,5 +540,7 @@ def preprocess_for_task(df: pd.DataFrame, features: list[str], task: str,
     if raw_cat_tasks and task in raw_cat_tasks:
         return df.copy(), list(features), {}, []
     cat_set = set(categoricals) if categoricals else None  # None 触发 auto-detect
-    df_enc, feat_enc, _, imputation_log, unknown_cat_warnings = preprocess_data(df, features, cat_set)
+    df_enc, feat_enc, _, imputation_log, unknown_cat_warnings = preprocess_data(
+        df, features, cat_set
+    )
     return df_enc, feat_enc, imputation_log, unknown_cat_warnings
