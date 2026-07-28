@@ -12,7 +12,7 @@ from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import _adjust_xlabels
+from smartsuite.engine._utils import _adjust_xlabels, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
             task="median_ci", status="error", messages=["有效数据不足(至少5个点)"]
         )
 
-    ci_level = req.params.get("ci_level", 0.95)
+    ci_level = safe_float(req.params.get("ci_level", 0.95), 0.95)
     alpha = 1 - ci_level
 
     sorted_data = np.sort(data.values)
@@ -124,9 +124,9 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
         n_boot = max(100, min(int(n_boot_raw), 10000))
     except (ValueError, TypeError):
         n_boot = 2000
-    ci_level = req.params.get("ci_level", 0.95)
+    ci_level = safe_float(req.params.get("ci_level", 0.95), 0.95)
     alpha = 1 - ci_level
-    random_state = req.params.get("random_state", 42)
+    random_state = int(safe_float(req.params.get("random_state", 42), 42))
 
     rng = np.random.RandomState(random_state)
     values = data.values
