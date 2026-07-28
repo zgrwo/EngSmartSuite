@@ -4,7 +4,7 @@
 
 ## 1. 项目概述
 
-**EngSmartSuite**（工艺数据分析工具箱）是一个将 Python 统计分析能力与 Excel 交互体验深度整合的工具，提供 40 个统计分析方法，覆盖要因分析、DOE/优化、SPC 控制图、过程能力、异常检测、可靠性/MSA、探索性分析等 7 大领域。
+**EngSmartSuite**（工艺数据分析工具箱）是一个将 Python 统计分析能力与 Web UI 交互体验深度整合的工具，提供 40 个统计分析方法，覆盖要因分析、DOE/优化、SPC 控制图、过程能力、异常检测、可靠性/MSA、探索性分析等 7 大领域。
 
 ### 核心价值
 
@@ -95,7 +95,7 @@ smartsuite/
 │
 ├── services/      # ② 应用服务层：唯一桥接层
 │   ├── orchestrator.py # TASK_REGISTRY + DEFAULT_PARAMS
-│   ├── data_io.py      # Excel 读写 + 预处理
+│   ├── data_io.py      # 数据读写 + 预处理（支持 Excel/CSV）
 │   ├── reporter.py     # 多格式输出
 │   └── audit.py        # 综合审计
 │

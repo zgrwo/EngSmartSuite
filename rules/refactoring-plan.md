@@ -40,7 +40,7 @@
 | 效应量报告 | 部分方法缺失 | APA 第 7 版：所有检验报告效应量 + 95% CI | 🔴 高 |
 | 可视化交互 | matplotlib 静态图 | Plotly/Bokeh 交互式 HTML 输出 | 🟡 中 |
 | 国际化 | 硬编码中文 | gettext / Babel 多语言 | 🟡 中 |
-| 开源基础 | 无 LICENSE/CONTRIBUTING | MIT + 贡献指南 + Issue 模板 | 🔴 高 |
+| 开源基础 | ✅ 已完成 | MIT + 贡献指南 + Issue 模板 | ✅ |
 
 ### 1.4 技术债
 
@@ -50,7 +50,7 @@
 - [ ] 前端参数面板仅 24/39 方法覆盖
 - [ ] 缺少性能基准（大样本 n>5000）
 - [ ] 含随机方法（bootstrap/decision_tree）无 seed 参数
-- [ ] 无 LICENSE / CONTRIBUTING.md / CHANGELOG
+- [x] ~~无 LICENSE / CONTRIBUTING.md / CHANGELOG~~（已补齐）
 
 ## 2. 重构目标
 
@@ -110,7 +110,7 @@
 | GitHub Actions CI | `.github/workflows/ci.yml` | PR 触发 pytest 分层运行 | — |
 | Issue/PR 模板 | `.github/ISSUE_TEMPLATE/` | bug/feature/method-request 模板 | — |
 | 效应量阈值提取 | `_constants.py` 完善 | 所有阈值集中定义 | Phase 0 |
-| 第 1-2 批方法审查 | `docs/statistics-review.md` | 11 方法逐项确认公式 | Phase 0 |
+| 第 1-2 批方法审查 | `rules/statistics-review.md` | 11 方法逐项确认公式 | Phase 0 |
 | 添加统计不变量测试 | `test_invariants.py` 扩展 | 效应量范围/自由度正负 | — |
 | 关键 5 方法与 R 对比 | `tests/crossval_r/` | anova/regression/spc_xbar/capability/gage_rr | — |
 | 效应量 + 95% CI 补全 | 源码修复 | 所有检验方法报告效应量 + CI | 审查后 |
@@ -139,7 +139,7 @@ result = {
 | 全量 falsy 排查 | `scripts/falsy_audit.py` | 检测 `if x:` 模式，标记风险 | Phase 0 |
 | 修复高风险 falsy | 源码修复（第 1-2 批方法优先） | 改为 `if x is not None:` 等 | Phase 1 |
 | 添加 ruff 规则 | `pyproject.toml` | 启用 B007/SIM 规则 | — |
-| 建立 falsy checklist | `docs/falsy-pitfalls.md` | 新增函数前逐项确认 | — |
+| 建立 falsy checklist | `rules/falsy-pitfalls.md` | 新增函数前逐项确认 | — |
 | seed 参数补全 | 源码修复 | bootstrap/decision_tree/outlier 等强制 seed | Phase 0 |
 | Pydantic 替代 dataclass | `core/contracts.py` 重构 | AnalysisRequest 自动验证 + 错误消息 | — |
 

@@ -2,7 +2,7 @@
 
 > **可复用审查 Prompt** — 覆盖 20 个维度：架构、算法、实现、注册链、数据管道、输出层、Web/CLI、模板、测试 4 防线、文档 5 文件、跨切面 5 类、DRY、死代码、可观测、发布。每次发版全量跑，日常 diff 模式。
 >
-> **协作定位**：`agents.md`（架构入口）→ `skills/smartsuite-dev.md`（陷阱+模板）→ **本文档**（审查清单）→ `.claude/known-issues.md`（误判豁免）
+> **协作定位**：`agents.md`（架构入口）→ `skills/smartsuite-dev.md`（陷阱+模板）→ **本文档**（审查清单 + 误判豁免）
 >
 > 项目概况：`~9,000 Python + ~470 JS + 42 YAML` | `40 methods` | `web/ → services/ → engine/` | `4 层防线`
 
@@ -29,7 +29,7 @@ python scripts/verify_consistency.py
 ruff check smartsuite/
 ```
 
-### 0.3 误判速查（审查前必读 `.claude/known-issues.md`）
+### 0.3 误判速查（审查前必读）
 
 | EX | 模式 | 结论 |
 |----|------|------|
@@ -647,7 +647,7 @@ pytest tests/ -v -k "<related_pattern>" --tb=short
 ### 审查后
 
 - [ ] 问题按 P0-P3 分级（§0.1）；P0/P1 阻断修复
-- [ ] 误判同步到 `.claude/known-issues.md`
+- [ ] 误判同步到本文档 §0.3 误判速查表
 - [ ] 报告存为 `.claude/code-review-report-YYYY-MM-DD.md`
 - [ ] 修复后重跑对应维度验证
 

@@ -71,12 +71,13 @@ EngSmartSuite/
 │       ├── test_differential.py      #   CLI vs Web 路径一致性
 │       └── test_manual_parity.py     #   Web/CLI/Python/手册 四路一致性
 │
-├── docs/                             # 文档
+├── rules/                            # 规范文档
 │   ├── api-reference.md              #   40 函数签名查阅
 │   ├── user-manual.md                #   40 方法操作指南
-│   ├── skill.md                      #   分析决策树
-│   ├── adr/                          #   架构决策记录
-│   ├── contributing/                 #   贡献指南 + 审查 Prompt
+│   ├── specification.md              #   项目规格文档
+│   ├── context.md                    #   术语表
+│   ├── statistics-review.md          #   统计方法审查
+│   ├── falsy-pitfalls.md             #   Falsy 陷阱清单
 │   └── images/                       #   示例图片
 │
 ├── skills/                           # AI Skill 定义
