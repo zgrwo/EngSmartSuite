@@ -7,44 +7,45 @@
 ```
 EngSmartSuite/
 │
-├── smartsuite/                       # 主包
-│   ├── __init__.py                   #   包初始化 + check_core_deps()
-│   ├── cli.py                        #   CLI 入口: smartsuite run / list
-│   │
-│   ├── core/                         # ① 数据契约层：零依赖，仅 dataclass
-│   │   ├── __init__.py
-│   │   ├── contracts.py              #   AnalysisRequest / AnalysisResult
-│   │   └── exceptions.py             #   分层异常体系（3 层）
-│   │
-│   ├── engine/                       # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
-│   │   ├── __init__.py               #   matplotlib 全局配置 + 字体 + 公开 API 导出
-│   │   ├── _palette.py               #   统一可视化配色方案（PALETTE 字典）
-│   │   ├── _constants.py             #   统计分析常量（阈值/乘数/效应量判定）
-│   │   ├── _utils.py                 #   共享工具函数 (safe_float, threshold_label)
-│   │   ├── root_cause.py             #   要因分析 (correlation, anova, hypothesis_test...)
-│   │   ├── doe_opt.py                #   DOE/优化 (regression, rsm, grid_search...)
-│   │   ├── spc_charts.py             #   SPC 控制图 (xbar_r, cusum, ewma, attribute...)
-│   │   ├── spc_monitor.py            #   SPC 统一入口（向后兼容，委托至子模块）
-│   │   ├── capability.py             #   过程能力 (Cp/Cpk, Sigma Level, Box-Cox)
-│   │   ├── detection.py              #   异常检测 (trend_forecast, changepoint...)
-│   │   ├── reliability.py            #   可靠性/MSA (gage_rr, tolerance, survival)
-│   │   └── exploratory.py            #   探索性分析 (box_chart, scatter_plot...)
-│   │
-│   ├── services/                     # ② 应用服务层：唯一桥接层
-│   │   ├── __init__.py
-│   │   ├── orchestrator.py           #   TASK_REGISTRY (40项) + DEFAULT_PARAMS
-│   │   ├── data_io.py                #   Excel 读写 + 校验 + 预处理
-│   │   ├── reporter.py               #   多格式输出: to_excel / to_pdf / to_ppt / to_html
-│   │   └── audit.py                  #   综合审计: process_audit / batch_analyze
-│   │
-│   └── web/                          # Web UI 层 (Flask)
-│       ├── __init__.py
-│       ├── app.py                    #   Flask 入口 + TASK_GROUPS (5组)
-│       ├── api.py                    #   REST API: run_analysis / column_info
-│       ├── templates/index.html      #   主页面
-│       └── static/
-│           ├── app.js                #   前端逻辑：列标记、参数面板、结果渲染
-│           └── style.css             #   前端样式
+├── src/
+│   └── smartsuite/                       # 主包
+│       ├── __init__.py                   #   包初始化 + check_core_deps()
+│       ├── cli.py                        #   CLI 入口: smartsuite run / list
+│       │
+│       ├── core/                         # ① 数据契约层：零依赖，仅 dataclass
+│       │   ├── __init__.py
+│       │   ├── contracts.py              #   AnalysisRequest / AnalysisResult
+│       │   └── exceptions.py             #   分层异常体系（3 层）
+│       │
+│       ├── engine/                       # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
+│       │   ├── __init__.py               #   matplotlib 全局配置 + 字体 + 公开 API 导出
+│       │   ├── _palette.py               #   统一可视化配色方案（PALETTE 字典）
+│       │   ├── _constants.py             #   统计分析常量（阈值/乘数/效应量判定）
+│       │   ├── _utils.py                 #   共享工具函数 (safe_float, threshold_label)
+│       │   ├── root_cause.py             #   要因分析 (correlation, anova, hypothesis_test...)
+│       │   ├── doe_opt.py                #   DOE/优化 (regression, rsm, grid_search...)
+│       │   ├── spc_charts.py             #   SPC 控制图 (xbar_r, cusum, ewma, attribute...)
+│       │   ├── spc_monitor.py            #   SPC 统一入口（向后兼容，委托至子模块）
+│       │   ├── capability.py             #   过程能力 (Cp/Cpk, Sigma Level, Box-Cox)
+│       │   ├── detection.py              #   异常检测 (trend_forecast, changepoint...)
+│       │   ├── reliability.py            #   可靠性/MSA (gage_rr, tolerance, survival)
+│       │   └── exploratory.py            #   探索性分析 (box_chart, scatter_plot...)
+│       │
+│       ├── services/                     # ② 应用服务层：唯一桥接层
+│       │   ├── __init__.py
+│       │   ├── orchestrator.py           #   TASK_REGISTRY (40项) + DEFAULT_PARAMS
+│       │   ├── data_io.py                #   Excel 读写 + 校验 + 预处理
+│       │   ├── reporter.py               #   多格式输出: to_excel / to_pdf / to_ppt / to_html
+│       │   └── audit.py                  #   综合审计: process_audit / batch_analyze
+│       │
+│       └── web/                          # Web UI 层 (Flask)
+│           ├── __init__.py
+│           ├── app.py                    #   Flask 入口 + TASK_GROUPS (5组)
+│           ├── api.py                    #   REST API: run_analysis / column_info
+│           ├── templates/index.html      #   主页面
+│           └── static/
+│               ├── app.js                #   前端逻辑：列标记、参数面板、结果渲染
+│               └── style.css             #   前端样式
 │
 ├── tests/                            # 测试
 │   ├── conftest.py                   #   共享 fixtures
@@ -108,6 +109,8 @@ smartsuite/engine/    ← ③ 分析引擎层：纯 Python，零外部依赖
     ↓ 使用
 smartsuite/core/      ← ① 数据契约层：零依赖，仅 dataclass
 ```
+
+> 注：所有源码位于 `src/` 目录下（src 布局），以上路径相对于 `src/`。
 
 ## 命名约定
 

@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smartsuite"
 version = "1.0.0"
-description = "SmartSuite — 工艺数据分析工具箱 (Excel + Python)"
+description = "SmartSuite — 工艺数据分析工具箱 (Flask Web UI + CLI + Python API)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "SmartSuite Team"}
 ]
-keywords = ["excel", "analysis", "manufacturing", "doe", "spc", "anova"]
+keywords = ["flask", "web", "cli", "analysis", "manufacturing", "doe", "spc", "anova"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Manufacturing",

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -41,12 +41,6 @@ class AnalysisRequest(BaseModel):
         if v is None:
             raise ValueError("data 不能为 None")
         return v
-
-    @model_validator(mode="after")
-    def validate_columns(self) -> AnalysisRequest:
-        """target_col 和 feature_cols 必须存在于 data 中（宽松模式：仅警告）。"""
-        # 宽松验证：不强制报错（部分方法允许动态列名）
-        return self
 
 
 @dataclass

@@ -11,7 +11,7 @@ description: SmartSuite 项目开发技能 — 工艺数据分析工具箱的代
 
 ## 触发条件
 
-当任务涉及以下任一模块时，应加载本技能：
+当任务涉及以下任一模块时，应加载本技能（路径相对于 `src/`）：
 - `smartsuite/engine/` — 引擎层（root_cause / doe_opt / spc_monitor → spc_charts / capability / detection / reliability / exploratory）
 - `smartsuite/web/` — Web UI 层（app.js / api.py / app.py）
 - `smartsuite/services/` — 桥接层（orchestrator / data_io）

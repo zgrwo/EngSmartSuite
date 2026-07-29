@@ -98,14 +98,14 @@ DEFAULT_PARAMS = {
     "anova": {"alpha": 0.05, "interactions": 0},
     "hypothesis_test": {"alpha": 0.05, "test": "ttest_ind"},
     "decision_tree": {"max_depth": 5},
-    "vif": {},
+    "vif": {"threshold": 5},
     "contingency": {"alpha": 0.05},
-    "proportion_ci": {},
+    "proportion_ci": {"ci_level": 0.95, "method": "wilson"},
     "variance_test": {"group_col": None, "alpha": 0.05},
-    "cohens_kappa": {},
-    "cronbach_alpha": {},
-    "distribution_summary": {},
-    "normality_check": {},
+    "cohens_kappa": {"alpha": 0.05},
+    "cronbach_alpha": {"alpha": 0.05},
+    "distribution_summary": {"bins": 15},
+    "normality_check": {"alpha": 0.05},
     "power_analysis": {
         "mode": "required_n",
         "test_type": "ttest",
@@ -119,10 +119,10 @@ DEFAULT_PARAMS = {
     "grid_search": {"ranges": None, "direction": "maximize", "n_points": 10},
     "multi_objective": {"objectives": None},
     "doe_analysis": {"alpha": 0.05},
-    "roc_analysis": {},
+    "roc_analysis": {"threshold": 0.5},
     "logistic_regression": {"threshold": 0.5},
     "lasso_regression": {"alpha_lasso": None, "l1_ratio": 1.0},
-    "robust_regression": {},
+    "robust_regression": {"model_type": "huber"},
     "quantile_regression": {"quantile": 0.5},
     # 过程监控
     "spc_xbar": {"group_col": None, "usl": None, "lsl": None, "target": None},
@@ -150,7 +150,7 @@ DEFAULT_PARAMS = {
     "median_ci": {"ci_level": 0.95},
     "gage_rr": {"tolerance": None, "sigma_multiplier": 5.15},
     "tolerance_interval": {"coverage": 0.99, "confidence": 0.95, "side": "two-sided"},
-    "survival_analysis": {},
+    "survival_analysis": {"time_col": None, "event_col": None},
 }
 
 

@@ -2317,18 +2317,21 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
     if len(df) < len(cols) + 2:
         return AnalysisResult(task="vif", status="error", messages=[f"有效样本({len(df)})不足"])
 
+    # 用户可通过 params 自定义阈值，fallback 到全局常量
+    threshold = _safe_float(req.params.get("threshold", VIF_THRESHOLD), VIF_THRESHOLD)
+
     try:
         X = sm.add_constant(df)
         vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
         vif_full = pd.DataFrame({"变量": X.columns, "VIF": vif_vals})
         # 排除无意义的 const 列
         vif_data = vif_full[vif_full["变量"] != "const"].copy()
-        high_vif = vif_data[vif_data["VIF"] > VIF_THRESHOLD]
+        high_vif = vif_data[vif_data["VIF"] > threshold]
         # VIF < 1 在数学上不可能（VIF = 1/(1-R²) ≥ 1），异常值提示常量列或数值问题
         invalid_vif = vif_data[vif_data["VIF"] < 0.99]  # 允许浮点舍入误差 (~0.999…)
         vif_warnings = []
         if len(high_vif) > 0:
-            vif_warnings.append(f"{len(high_vif)} 个变量 VIF>{VIF_THRESHOLD}，存在共线性风险")
+            vif_warnings.append(f"{len(high_vif)} 个变量 VIF>{threshold:g}，存在共线性风险")
         if len(invalid_vif) > 0:
             bad_cols = invalid_vif["变量"].tolist()
             vif_warnings.append(
@@ -2338,7 +2341,7 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         warning = (
             "; ".join(vif_warnings)
             if vif_warnings
-            else f"所有变量 VIF<={VIF_THRESHOLD}，无明显共线性"
+            else f"所有变量 VIF<={threshold:g}，无明显共线性"
         )
 
         # VIF 柱状图
@@ -2346,16 +2349,16 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         fig = Figure(figsize=(max(len(vif_plot) * 0.7, 5), 3.5))
         ax = fig.add_subplot(111)
         colors = [
-            PALETTE["target"]["primary"] if v > VIF_THRESHOLD else PALETTE["data"]["primary"]
+            PALETTE["target"]["primary"] if v > threshold else PALETTE["data"]["primary"]
             for v in vif_plot["VIF"]
         ]
         ax.barh(vif_plot["变量"], vif_plot["VIF"], color=colors)
         ax.axvline(
-            VIF_THRESHOLD,
+            threshold,
             color=PALETTE["anomaly"]["primary"],
             linestyle="--",
             linewidth=1,
-            label=f"VIF={VIF_THRESHOLD} 阈值",
+            label=f"VIF={threshold:g} 阈值",
         )
         ax.set_xlabel("VIF", fontsize=9)
         ax.set_title("共线性诊断 — VIF", fontsize=11)
@@ -2790,8 +2793,12 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
 
     p_hat = successes / n
 
+    # 置信水平（用户可配置，默认 95%）
+    ci_level = _safe_float(req.params.get("ci_level", 0.95), 0.95)
+    alpha_tail = (1 - ci_level) / 2
+
     # Wilson Score CI
-    z = sp_stats.norm.ppf(0.975)
+    z = sp_stats.norm.ppf(1 - alpha_tail)
     denominator = 1 + z**2 / n
     center = (p_hat + z**2 / (2 * n)) / denominator
     margin = z * sqrt((p_hat * (1 - p_hat) + z**2 / (4 * n)) / n) / denominator
@@ -2799,8 +2806,8 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     wilson_upper = min(1, center + margin)
 
     # Clopper-Pearson 精确 CI
-    cp_lower = sp_stats.beta.ppf(0.025, successes, n - successes + 1) if successes > 0 else 0
-    cp_upper = sp_stats.beta.ppf(0.975, successes + 1, n - successes) if successes < n else 1
+    cp_lower = sp_stats.beta.ppf(alpha_tail, successes, n - successes + 1) if successes > 0 else 0
+    cp_upper = sp_stats.beta.ppf(1 - alpha_tail, successes + 1, n - successes) if successes < n else 1
 
     # 可视化
     fig = Figure(figsize=(6, 3))
@@ -2817,14 +2824,14 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     )
     ax.axvline(p_hat, color=PALETTE["target"]["primary"], linewidth=2, label=f"p_hat={p_hat:.4f}")
     ax.set_xlabel("比例", fontsize=10)
-    ax.set_title(f"二项比例 95% CI — {req.target_col} (n={n})", fontsize=11)
+    ax.set_title(f"二项比例 {ci_level:.0%} CI — {req.target_col} (n={n})", fontsize=11)
     ax.legend(fontsize=8)
     ax.set_xlim(0, 1)
     fig.tight_layout()
 
     summary = (
         f"比例估计: {successes}/{n} = {p_hat:.2%}。"
-        f"Wilson 95%CI: [{wilson_lower:.2%}, {wilson_upper:.2%}]"
+        f"Wilson {ci_level:.0%}CI: [{wilson_lower:.2%}, {wilson_upper:.2%}]"
     )
 
     return AnalysisResult(
@@ -3211,11 +3218,13 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             pass
 
     # 直方图 + 拟合曲线
+    bins_param = req.params.get("bins")
+    n_bins = int(bins_param) if bins_param is not None else min(30, int(np.sqrt(n)) * 2)
     fig = Figure(figsize=(8, 5))
     ax = fig.add_subplot(111)
     ax.hist(
         data,
-        bins=min(30, int(np.sqrt(n)) * 2),
+        bins=n_bins,
         density=True,
         color=PALETTE["data"]["secondary"],
         edgecolor="white",
@@ -3289,6 +3298,8 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
     if not cols:
         return AnalysisResult(task="normality_check", status="error", messages=["没有可分析的列"])
 
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+
     results = []
     for col in cols:
         d = req.data[col].dropna()
@@ -3325,7 +3336,7 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         kurt = float(d.kurtosis())
 
         # 判断和建议变换 (综合 S-W 和 A-D)
-        sw_normal = sw_p is not None and sw_p > 0.05
+        sw_normal = sw_p is not None and sw_p > alpha
         is_normal = sw_normal or (ad_normal if ad_normal is not None else False)
 
         if is_normal:

@@ -4,7 +4,7 @@
 >
 > **协作定位**：`agents.md`（架构入口）→ `skills/smartsuite-dev.md`（陷阱+模板）→ **本文档**（审查清单 + 误判豁免）
 >
-> 项目概况：`~9,000 Python + ~470 JS + 42 YAML` | `40 methods` | `web/ → services/ → engine/` | `4 层防线`
+> 项目概况：`~9,000 Python + ~470 JS + 43 YAML` | `40 methods` | `web/ → services/ → engine/` | `4 层防线`
 
 ---
 
@@ -379,7 +379,7 @@ for f in sorted(os.listdir('templates/')):
 "
 ```
 
-- [ ] 42 模板全部可解析；task 字段有效；参数与 `DEFAULT_PARAMS` 兼容
+- [ ] 43 模板全部可解析；task 字段有效；参数与 `DEFAULT_PARAMS` 兼容
 - [ ] `example_workflow_guide.yaml` 工作流分步指南（含注释说明）结构正确
 
 ---

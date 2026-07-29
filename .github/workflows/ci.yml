@@ -52,13 +52,17 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
         exclude:
-          # 减少组合数：3.12 仅在 ubuntu 上测（最新 Python 稳定性哨兵）
+          # 减少组合数：3.12/3.13 仅在 ubuntu 上测（最新 Python 稳定性哨兵）
           - os: windows-latest
             python-version: "3.12"
           - os: macos-latest
             python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
 
@@ -107,7 +111,7 @@ jobs:
         run: vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" || true
 
       - name: 依赖安全审计
-        run: pip-audit 2>/dev/null || echo "pip-audit 未安装，跳过"
+        run: pip-audit || echo "::warning::pip-audit 发现漏洞，请检查依赖版本"
 
       - name: 上传覆盖率报告
         uses: actions/upload-artifact@v4

@@ -145,7 +145,7 @@ const TASK_PARAMS = {
   scatter_plot:      { fit: 'none', show_ci: 'true', group_col: '' },
   correlation:       { method: 'pearson' },
   contingency:       { alpha: 0.05 },
-  outlier_consensus: { method: 'iqr', threshold: 3.0 },
+  outlier_consensus: {},
   roc_analysis:      { threshold: 0.5 },
   robust_regression: { model_type: 'huber' },
   survival_analysis: { time_col: '', event_col: '' },
@@ -154,7 +154,7 @@ const TASK_PARAMS = {
   normality_check:   { alpha: 0.05 },
   distribution_summary: { bins: 15 },
   proportion_ci:     { ci_level: 0.95, method: 'wilson' },
-  vif:               { threshold: 10 },
+  vif:               { threshold: 5 },
 };
 
 // 参数元数据：定义类型和下拉选项

@@ -77,7 +77,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 ```
 EngSmartSuite/
-├── smartsuite/                       # 主包（core / engine / services / web）
+├── src/smartsuite/                  # 主包（core / engine / services / web）
 ├── tests/                            # 测试
 ├── rules/                            # 规范文档
 ├── skills/                           # Skill 定义
@@ -120,8 +120,8 @@ EngSmartSuite/
 | :--- | :--- |
 | 安装开发环境 | `pip install -e ".[dev]"` |
 | 快速测试 | `pytest tests/ -x -q` |
-| 代码检查 | `ruff check smartsuite/` |
-| 启动 Web UI | `python smartsuite/web/app.py` |
+| 代码检查 | `ruff check src/smartsuite/` |
+| 启动 Web UI | `python src/smartsuite/web/app.py` |
 
 ## 历史经验（从 diff 提炼）
 
