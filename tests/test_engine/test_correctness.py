@@ -1236,3 +1236,131 @@ def test_scatter_plot_insufficient_data():
     result = scatter_plot(req)
     assert result.status == "error"
     assert len(result.messages) > 0
+
+
+# ── 参数消费验证 (commit 2405507 新增参数通道) ──
+
+
+def test_vif_custom_threshold():
+    """VIF: 自定义 threshold 参数应影响判定结果。"""
+    from smartsuite.engine.root_cause import vif_analysis
+
+    np.random.seed(42)
+    n = 200
+    x1 = np.random.normal(0, 1, n)
+    x2 = x1 + np.random.normal(0, 0.1, n)  # 中等共线性
+    x3 = np.random.normal(0, 1, n)
+    df = pd.DataFrame({"x1": x1, "x2": x2, "x3": x3})
+
+    # 严格阈值 (threshold=1.5) 应检测到更多高 VIF 变量
+    req_strict = AnalysisRequest(task="vif", data=df, target_col="",
+                                 feature_cols=["x1", "x2", "x3"],
+                                 params={"threshold": 1.5})
+    result_strict = vif_analysis(req_strict)
+    assert result_strict.status == "ok"
+
+    # 宽松阈值 (threshold=100) 应检测不到高 VIF 变量
+    req_loose = AnalysisRequest(task="vif", data=df, target_col="",
+                                feature_cols=["x1", "x2", "x3"],
+                                params={"threshold": 100})
+    result_loose = vif_analysis(req_loose)
+    assert result_loose.status == "ok"
+    assert result_loose.metadata["high_vif_count"] == 0
+
+
+def test_proportion_ci_custom_ci_level():
+    """比例置信区间: ci_level=0.90 应产生比 0.95 更窄的区间。"""
+    from smartsuite.engine.root_cause import proportion_ci
+
+    df = pd.DataFrame({"y": [1] * 30 + [0] * 70})
+
+    req_95 = AnalysisRequest(task="proportion_ci", data=df,
+                             target_col="y", params={"ci_level": 0.95})
+    req_90 = AnalysisRequest(task="proportion_ci", data=df,
+                             target_col="y", params={"ci_level": 0.90})
+    r95 = proportion_ci(req_95)
+    r90 = proportion_ci(req_90)
+    assert r95.status == "ok" and r90.status == "ok"
+
+    w95 = r95.metadata["wilson_ci"]
+    w90 = r90.metadata["wilson_ci"]
+    width_95 = w95[1] - w95[0]
+    width_90 = w90[1] - w90[0]
+    assert width_90 < width_95, "90% CI 应比 95% CI 更窄"
+
+
+def test_proportion_ci_invalid_ci_level():
+    """比例置信区间: ci_level 超出 (0,1) 应返回 error。"""
+    from smartsuite.engine.root_cause import proportion_ci
+
+    df = pd.DataFrame({"y": [1] * 10 + [0] * 10})
+
+    req = AnalysisRequest(task="proportion_ci", data=df,
+                          target_col="y", params={"ci_level": 1.5})
+    result = proportion_ci(req)
+    assert result.status == "error"
+    assert "ci_level" in result.messages[0]
+
+
+def test_distribution_summary_custom_bins():
+    """分布特征摘要: bins 参数应影响直方图分箱数。"""
+    from smartsuite.engine.root_cause import distribution_summary
+
+    np.random.seed(42)
+    df = pd.DataFrame({"y": np.random.normal(100, 15, 200)})
+
+    req = AnalysisRequest(task="distribution_summary", data=df,
+                          target_col="y", params={"bins": 20})
+    result = distribution_summary(req)
+    assert result.status == "ok"
+
+
+def test_distribution_summary_invalid_bins():
+    """分布特征摘要: bins 为负数应返回 error。"""
+    from smartsuite.engine.root_cause import distribution_summary
+
+    np.random.seed(42)
+    df = pd.DataFrame({"y": np.random.normal(0, 1, 100)})
+
+    req = AnalysisRequest(task="distribution_summary", data=df,
+                          target_col="y", params={"bins": -5})
+    result = distribution_summary(req)
+    assert result.status == "error"
+    assert "bins" in result.messages[0]
+
+
+def test_normality_check_custom_alpha():
+    """正态性评估: alpha 参数应影响判定结果。"""
+    from smartsuite.engine.root_cause import normality_check
+
+    np.random.seed(42)
+    # 构造边缘正态数据 (p 值在 0.01~0.05 之间)
+    n = 100
+    data = np.random.normal(0, 1, n)
+    df = pd.DataFrame({"x": data})
+
+    # alpha=0.05 和 alpha=0.01 都应返回 ok
+    req_05 = AnalysisRequest(task="normality_check", data=df,
+                             target_col="x", params={"alpha": 0.05})
+    req_01 = AnalysisRequest(task="normality_check", data=df,
+                             target_col="x", params={"alpha": 0.01})
+    r05 = normality_check(req_05)
+    r01 = normality_check(req_01)
+    assert r05.status == "ok" and r01.status == "ok"
+
+
+def test_normality_check_ad_test_functional():
+    """正态性评估: Anderson-Darling 检验应产生非 None 结果。"""
+    from smartsuite.engine.root_cause import normality_check
+
+    np.random.seed(42)
+    df = pd.DataFrame({"x": np.random.normal(0, 1, 200)})
+
+    req = AnalysisRequest(task="normality_check", data=df, target_col="x")
+    result = normality_check(req)
+    assert result.status == "ok"
+
+    table = result.tables["normality_results"]
+    ad_cell = str(table.iloc[0]["Anderson-Darling"])
+    assert ad_cell != "N/A", f"AD 检验应产生有效结果，实际={ad_cell}"
+    assert "A-D stat=" in ad_cell, f"AD 检验应包含统计量，实际={ad_cell}"

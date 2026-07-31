@@ -2795,6 +2795,12 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
 
     # 置信水平（用户可配置，默认 95%）
     ci_level = _safe_float(req.params.get("ci_level", 0.95), 0.95)
+    if not 0 < ci_level < 1:
+        return AnalysisResult(
+            task="proportion_ci",
+            status="error",
+            messages=[f"置信水平 ci_level 必须在 (0, 1) 范围内，当前值: {ci_level}"],
+        )
     alpha_tail = (1 - ci_level) / 2
 
     # Wilson Score CI
@@ -3219,7 +3225,19 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
 
     # 直方图 + 拟合曲线
     bins_param = req.params.get("bins")
-    n_bins = int(bins_param) if bins_param is not None else min(30, int(np.sqrt(n)) * 2)
+    if bins_param is not None:
+        try:
+            n_bins = int(bins_param)
+        except (ValueError, TypeError):
+            n_bins = min(30, int(np.sqrt(n)) * 2)
+        if n_bins < 1:
+            return AnalysisResult(
+                task="distribution_summary",
+                status="error",
+                messages=[f"bins 参数必须为正整数，当前值: {bins_param}"],
+            )
+    else:
+        n_bins = min(30, int(np.sqrt(n)) * 2)
     fig = Figure(figsize=(8, 5))
     ax = fig.add_subplot(111)
     ax.hist(
@@ -3320,17 +3338,15 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
 
         _, sw_p = sp_stats.shapiro(d) if n <= 5000 else (None, None)
         # Anderson-Darling (更稳健的大样本检验)
+        # scipy >= 1.17: method="interpolate" 返回 SignificanceResult (statistic + pvalue)
         try:
             ad_result = sp_stats.anderson(d, dist="norm", method="interpolate")
             ad_stat = float(ad_result.statistic)
-            # 取 5% 显著性水平的临界值
-            ad_crit = (
-                float(ad_result.critical_values[2]) if len(ad_result.critical_values) > 2 else 0
-            )
-            ad_normal = ad_stat < ad_crit
+            ad_p = float(ad_result.pvalue)
+            ad_normal = ad_p > alpha
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)
-            ad_stat, ad_crit, ad_normal = None, None, None
+            ad_stat, ad_p, ad_normal = None, None, None
 
         skew = float(d.skew())
         kurt = float(d.kurtosis())
@@ -3364,7 +3380,7 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             else:
                 recommendation = "Box-Cox / Yeo-Johnson"
 
-        ad_info = f"A-D stat={ad_stat:.3f}" if ad_stat else "N/A"
+        ad_info = f"A-D stat={ad_stat:.3f}, p={ad_p:.4f}" if ad_stat is not None else "N/A"
         results.append(
             {
                 "列名": col,

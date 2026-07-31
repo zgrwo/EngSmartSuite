@@ -111,7 +111,7 @@ jobs:
         run: vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" || true
 
       - name: 依赖安全审计
-        run: pip-audit || echo "::warning::pip-audit 发现漏洞，请检查依赖版本"
+        run: pip-audit || echo "::warning::pip-audit 执行失败（未安装或发现漏洞），请检查依赖版本"
 
       - name: 上传覆盖率报告
         uses: actions/upload-artifact@v4

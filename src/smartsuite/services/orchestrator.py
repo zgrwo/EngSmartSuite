@@ -100,10 +100,10 @@ DEFAULT_PARAMS = {
     "decision_tree": {"max_depth": 5},
     "vif": {"threshold": 5},
     "contingency": {"alpha": 0.05},
-    "proportion_ci": {"ci_level": 0.95, "method": "wilson"},
+    "proportion_ci": {"ci_level": 0.95},
     "variance_test": {"group_col": None, "alpha": 0.05},
-    "cohens_kappa": {"alpha": 0.05},
-    "cronbach_alpha": {"alpha": 0.05},
+    "cohens_kappa": {},
+    "cronbach_alpha": {},
     "distribution_summary": {"bins": 15},
     "normality_check": {"alpha": 0.05},
     "power_analysis": {
@@ -119,10 +119,10 @@ DEFAULT_PARAMS = {
     "grid_search": {"ranges": None, "direction": "maximize", "n_points": 10},
     "multi_objective": {"objectives": None},
     "doe_analysis": {"alpha": 0.05},
-    "roc_analysis": {"threshold": 0.5},
+    "roc_analysis": {},
     "logistic_regression": {"threshold": 0.5},
     "lasso_regression": {"alpha_lasso": None, "l1_ratio": 1.0},
-    "robust_regression": {"model_type": "huber"},
+    "robust_regression": {},
     "quantile_regression": {"quantile": 0.5},
     # 过程监控
     "spc_xbar": {"group_col": None, "usl": None, "lsl": None, "target": None},
@@ -150,7 +150,7 @@ DEFAULT_PARAMS = {
     "median_ci": {"ci_level": 0.95},
     "gage_rr": {"tolerance": None, "sigma_multiplier": 5.15},
     "tolerance_interval": {"coverage": 0.99, "confidence": 0.95, "side": "two-sided"},
-    "survival_analysis": {"time_col": None, "event_col": None},
+    "survival_analysis": {},
 }
 
 

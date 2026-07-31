@@ -8,8 +8,7 @@
 ### AnalysisRequest
 
 ```python
-@dataclass
-class AnalysisRequest:
+class AnalysisRequest(BaseModel):  # Pydantic v2
     task: str                    # 任务类型键 (如 "anova", "correlation")
     data: pd.DataFrame           # 输入数据
     target_col: str              # 目标列名 (Y)
@@ -82,9 +81,9 @@ class AnalysisResult:
 ### vif_analysis
 - **Task Key**: `vif`
 - **描述**: 方差膨胀因子 (VIF) — 多元共线性诊断
-- **params**: 无
-- **返回**: `vif_table` (VIF > 5 标记为高风险)
-- **图**: VIF 柱状图 (阈值线 = 5)
+- **params**: `threshold` (5) — VIF 判定阈值，超过此值标记为高风险
+- **返回**: `vif_table` (VIF > threshold 标记为高风险)
+- **图**: VIF 柱状图 (阈值线 = threshold)
 
 ### contingency_analysis
 - **Task Key**: `contingency`
@@ -96,7 +95,7 @@ class AnalysisResult:
 ### proportion_ci
 - **Task Key**: `proportion_ci`
 - **描述**: 二项比例置信区间 — Wilson Score + Clopper-Pearson 精确方法
-- **params**: `success_value` (可指定"成功"标签)
+- **params**: `success_value` (可指定“成功”标签), `ci_level` (0.95) — 置信水平
 - **返回**: `proportion_ci`
 - **图**: Wilson vs Clopper-Pearson 区间对比
 
@@ -121,14 +120,14 @@ class AnalysisResult:
 ### distribution_summary
 - **Task Key**: `distribution_summary`
 - **描述**: 分布特征摘要 — 描述性统计 + Normal/Lognormal/Weibull 拟合
-- **params**: 无
+- **params**: `bins` (15) — 直方图分箱数
 - **返回**: `descriptive_stats`, `distribution_fits`
 - **图**: 直方图 + 多元分布拟合曲线
 
 ### normality_check
 - **Task Key**: `normality_check`
 - **描述**: 正态性评估 — Shapiro-Wilk + Anderson-Darling，推荐变换方法
-- **params**: 无
+- **params**: `alpha` (0.05) — 显著性水平（同时影响 S-W 和 A-D 判定）
 - **返回**: `normality_results` (含偏度/峰度/建议变换)
 - **图**: Q-Q 子图矩阵
 
