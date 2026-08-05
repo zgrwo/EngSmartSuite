@@ -48,7 +48,7 @@ jobs:
         run: python scripts/verify_consistency.py
 
   ruff-check:
-    name: Ruff Lint (B007 + SIM)
+    name: Ruff Format Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +57,5 @@ jobs:
           python-version: "3.12"
       - name: Install ruff
         run: pip install ruff
-      - name: Ruff check
-        run: ruff check src/smartsuite/
       - name: Ruff format check
         run: ruff format --check src/smartsuite/

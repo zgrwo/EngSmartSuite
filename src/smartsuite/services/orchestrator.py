@@ -1,6 +1,7 @@
 """工作流编排 — 按 task 字段路由到对应引擎函数。"""
 
 import logging
+import time
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
 from smartsuite.engine import GROUP_COLORS  # noqa: F401 — re-export for web layer
@@ -160,7 +161,18 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     Note: model_copy() 执行浅拷贝，req.data (DataFrame) 以引用共享。
     引擎函数不应修改输入的 DataFrame；如需修改应自行 .copy()。
     """
+    logger.info(
+        "分析任务开始: task=%s, rows=%d, cols=%d, target=%s, features=%d",
+        req.task,
+        len(req.data),
+        len(req.data.columns),
+        req.target_col or "(无)",
+        len(req.feature_cols) if req.feature_cols else 0,
+    )
+    t0 = time.monotonic()
+
     if req.task not in TASK_REGISTRY:
+        logger.warning("未知分析任务: %s", req.task)
         return AnalysisResult(
             task=req.task,
             status="error",
@@ -169,6 +181,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 集中列存在性检查：在分派到引擎函数之前验证 target_col ──
     if req.target_col and req.target_col not in req.data.columns:
+        logger.warning("目标列不存在: %s (可用列: %s)", req.target_col, list(req.data.columns)[:10])
         return AnalysisResult(
             task=req.task,
             status="error",
@@ -187,16 +200,30 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     req = req.model_copy(update={"params": merged})
 
     try:
-        return TASK_REGISTRY[req.task](req)
+        result = TASK_REGISTRY[req.task](req)
+        elapsed = time.monotonic() - t0
+        logger.info(
+            "分析任务完成: task=%s, status=%s, elapsed=%.2fs",
+            req.task, result.status, elapsed,
+        )
+        return result
     except SmartSuiteError as e:
-        logger.warning("分析任务 %s SmartSuite异常: %s", req.task, str(e)[:200])
+        elapsed = time.monotonic() - t0
+        logger.warning(
+            "分析任务 SmartSuite异常: task=%s, elapsed=%.2fs, error=%s",
+            req.task, elapsed, str(e)[:200],
+        )
         return AnalysisResult(
             task=req.task,
             status="error",
             messages=[f"分析执行失败: {str(e)}", "如问题持续出现，请联系开发者"],
         )
     except Exception as e:
-        logger.exception("分析任务 %s 执行失败: %s", req.task, str(e)[:200])
+        elapsed = time.monotonic() - t0
+        logger.exception(
+            "分析任务执行失败: task=%s, elapsed=%.2fs, error_type=%s, error=%s",
+            req.task, elapsed, type(e).__name__, str(e)[:200],
+        )
         # 将异常转为中文工艺术语，不暴露原始 traceback
         err_cls = type(e).__name__
         detail_map = {

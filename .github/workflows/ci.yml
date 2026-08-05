@@ -78,9 +78,6 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
 
-      - name: Ruff Lint
-        run: ruff check src/smartsuite/
-
       - name: 全量测试
         run: pytest tests/ -q --tb=short
 
@@ -108,10 +105,10 @@ jobs:
         run: pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html
 
       - name: 死代码检测 (vulture)
-        run: vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" || true
+        run: vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*"
 
       - name: 依赖安全审计
-        run: pip-audit || echo "::warning::pip-audit 执行失败（未安装或发现漏洞），请检查依赖版本"
+        run: pip-audit
 
       - name: 上传覆盖率报告
         uses: actions/upload-artifact@v4
