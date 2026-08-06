@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
@@ -64,7 +64,7 @@ jobs:
           - os: macos-latest
             python-version: "3.13"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
@@ -105,7 +105,15 @@ jobs:
         run: pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html
 
       - name: 死代码检测 (vulture)
-        run: vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*"
+        # Pydantic classmethod validator 的 cls 参数为误报，过滤之
+        run: |
+          output=$(vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" 2>&1) || true
+          filtered=$(echo "$output" | grep -v "unused variable 'cls'")
+          if [ -n "$filtered" ]; then
+            echo "$filtered"
+            exit 1
+          fi
+          echo "Vulture: 无死代码（已过滤 Pydantic cls 误报）"
 
       - name: 依赖安全审计
         run: pip-audit
@@ -122,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:

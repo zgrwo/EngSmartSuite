@@ -3349,12 +3349,25 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
 
         _, sw_p = sp_stats.shapiro(d) if n <= 5000 else (None, None)
         # Anderson-Darling (更稳健的大样本检验)
-        # scipy >= 1.17: method="interpolate" 返回 SignificanceResult (statistic + pvalue)
+        # scipy >= 1.16: method="interpolate" 返回 SignificanceResult (statistic + pvalue)
+        # scipy <  1.16: 不支持 method 参数，需回退到 critical_values 判定
         try:
-            ad_result = sp_stats.anderson(d, dist="norm", method="interpolate")
+            try:
+                ad_result = sp_stats.anderson(d, dist="norm", method="interpolate")
+            except TypeError:
+                # scipy < 1.16 不支持 method="interpolate"，回退到基础调用
+                ad_result = sp_stats.anderson(d, dist="norm")
             ad_stat = float(ad_result.statistic)
-            ad_p = float(ad_result.pvalue)
-            ad_normal = ad_p > alpha
+            if hasattr(ad_result, "pvalue") and ad_result.pvalue is not None:
+                ad_p = float(ad_result.pvalue)
+            else:
+                # 旧版 scipy 无 pvalue，用 5% 临界值近似判定
+                ad_p = None
+            if ad_p is not None:
+                ad_normal = ad_p > alpha
+            else:
+                # critical_values 对应 [15%, 10%, 5%, 2.5%, 1%] 显著性水平
+                ad_normal = ad_stat < ad_result.critical_values[2]
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)
             ad_stat, ad_p, ad_normal = None, None, None
@@ -3391,7 +3404,13 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             else:
                 recommendation = "Box-Cox / Yeo-Johnson"
 
-        ad_info = f"A-D stat={ad_stat:.3f}, p={ad_p:.4f}" if ad_stat is not None else "N/A"
+        if ad_stat is not None:
+            if ad_p is not None:
+                ad_info = f"A-D stat={ad_stat:.3f}, p={ad_p:.4f}"
+            else:
+                ad_info = f"A-D stat={ad_stat:.3f} (p 需查表)"
+        else:
+            ad_info = "N/A"
         results.append(
             {
                 "列名": col,
