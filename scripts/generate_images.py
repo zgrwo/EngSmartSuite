@@ -27,23 +27,29 @@ def _make_sample_data() -> pd.DataFrame:
     """生成通用示例数据。"""
     np.random.seed(42)
     n = 60
-    return pd.DataFrame({
-        "y": np.random.normal(100, 10, n),
-        "x1": np.random.normal(50, 5, n),
-        "x2": np.random.normal(30, 3, n),
-        "x3": np.random.normal(20, 2, n),
-        "group": np.random.choice(["A", "B", "C"], n),
-        "time": np.arange(1, n + 1, dtype=float),
-        "defects": np.random.poisson(3, n),
-        "binary": np.random.choice([0, 1], n),
-    })
+    return pd.DataFrame(
+        {
+            "y": np.random.normal(100, 10, n),
+            "x1": np.random.normal(50, 5, n),
+            "x2": np.random.normal(30, 3, n),
+            "x3": np.random.normal(20, 2, n),
+            "group": np.random.choice(["A", "B", "C"], n),
+            "time": np.arange(1, n + 1, dtype=float),
+            "defects": np.random.poisson(3, n),
+            "binary": np.random.choice([0, 1], n),
+        }
+    )
 
 
 # 每个方法的参数配置
 METHOD_CONFIGS: dict[str, dict] = {
     "correlation": {"target": "y", "features": ["x1", "x2", "x3"], "params": {"method": "pearson"}},
     "anova": {"target": "y", "features": ["group"], "params": {}},
-    "hypothesis_test": {"target": "y", "features": ["group"], "params": {"test": "ttest_ind", "group_col": "group"}},
+    "hypothesis_test": {
+        "target": "y",
+        "features": ["group"],
+        "params": {"test": "ttest_ind", "group_col": "group"},
+    },
     "decision_tree": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
     "vif": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
     "regression": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
@@ -61,14 +67,32 @@ METHOD_CONFIGS: dict[str, dict] = {
     "bootstrap_ci": {"target": "y", "features": [], "params": {"n_bootstrap": 1000}},
     "box_chart": {"target": "y", "features": ["group"], "params": {}},
     "scatter_plot": {"target": "y", "features": ["x1"], "params": {"fit": "linear"}},
-    "gage_rr": {"target": "y", "features": ["group"], "params": {"part_col": "group", "operator_col": "group"}},
+    "gage_rr": {
+        "target": "y",
+        "features": ["group"],
+        "params": {"part_col": "group", "operator_col": "group"},
+    },
     "normality_check": {"target": "y", "features": [], "params": {}},
     "distribution_summary": {"target": "y", "features": [], "params": {}},
-    "power_analysis": {"target": "", "features": [], "params": {"effect_size": 0.5, "alpha": 0.05, "target_power": 0.8, "mode": "required_n", "test_type": "ttest"}},
+    "power_analysis": {
+        "target": "",
+        "features": [],
+        "params": {
+            "effect_size": 0.5,
+            "alpha": 0.05,
+            "target_power": 0.8,
+            "mode": "required_n",
+            "test_type": "ttest",
+        },
+    },
     "median_ci": {"target": "y", "features": [], "params": {}},
     "proportion_ci": {"target": "binary", "features": [], "params": {}},
     "variance_test": {"target": "y", "features": ["group"], "params": {"group_col": "group"}},
-    "survival_analysis": {"target": "y", "features": ["group"], "params": {"time_col": "time", "event_col": "binary"}},
+    "survival_analysis": {
+        "target": "y",
+        "features": ["group"],
+        "params": {"time_col": "time", "event_col": "binary"},
+    },
     "tolerance_interval": {"target": "y", "features": [], "params": {}},
     "cohens_kappa": {"target": "group", "features": ["binary"], "params": {}},
     "cronbach_alpha": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
@@ -109,12 +133,14 @@ def generate_images(output_dir: Path):
                 print(f"  ⚠️ {method_name}: 无图片输出")
             else:
                 failed.append((method_name, result.messages[0] if result.messages else "unknown"))
-                print(f"  ❌ {method_name}: {result.messages[0][:50] if result.messages else 'error'}")
+                print(
+                    f"  ❌ {method_name}: {result.messages[0][:50] if result.messages else 'error'}"
+                )
         except Exception as e:
             failed.append((method_name, str(e)))
             print(f"  ❌ {method_name}: {str(e)[:50]}")
 
-    print(f"\n═══ 图片生成完成 ═══")
+    print("\n═══ 图片生成完成 ═══")
     print(f"成功: {success}/{len(TASK_REGISTRY)}")
     if failed:
         print(f"失败: {len(failed)}")
@@ -124,6 +150,7 @@ def generate_images(output_dir: Path):
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="生成方法示例图片")
     parser.add_argument("--output-dir", default=str(ROOT / "rules" / "images"))
     args = parser.parse_args()

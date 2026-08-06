@@ -38,7 +38,7 @@ pip install -e ".[dev,report]"
 ## 提交前必检
 
 ```bash
-ruff check src/smartsuite/       # 零错误
+ruff check src/smartsuite/ scripts/  # 零错误
 pytest tests/ -x -q              # 全绿
 python scripts/verify_consistency.py  # 一致性校验
 ```
@@ -55,6 +55,14 @@ python scripts/verify_consistency.py  # 一致性校验
 - **Bug**：使用 bug 模板，附最小复现代码
 - **新方法请求**：使用 method-request 模板，说明统计依据
 - **功能建议**：使用 feature 模板
+
+## 发版与 tag 规范
+
+> 本仓库为 ExcelFormulaLabs monorepo，tag 全局共享（如 v1.0.x/v2.0.0 可能属于其他套件）。
+
+1. 发版前同步三处：`pyproject.toml` version、`src/smartsuite/__init__.py` `__version__`、`CHANGELOG.md` 新条目
+2. tag 必须带项目前缀：`smartsuite-v<版本号>`（如 `smartsuite-v1.0.1`），避免与其他套件 tag 冲突
+3. 版本号遵循 Semantic Versioning：数值/算法变更 → major，新方法/API → minor，修复 → patch
 
 ## 许可证
 

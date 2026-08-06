@@ -12,6 +12,8 @@ import logging
 import os
 import platform
 
+import matplotlib.font_manager as _fm  # noqa: E402 — 显式导入，供字体加载使用
+
 _logger = logging.getLogger(__name__)
 
 
@@ -68,7 +70,7 @@ _env_font = os.environ.get("MATPLOTLIB_FONT_PATH")
 # 环境变量字体（跨平台通用）
 if _env_font and os.path.exists(_env_font):
     try:
-        _font_prop = matplotlib.font_manager.fontManager.addfont(_env_font)
+        _font_prop = _fm.fontManager.addfont(_env_font)
         # 仅当用户未自定义 font.family 时才覆盖（保护用户配置）
         if "font.family" not in matplotlib.rcParams or matplotlib.rcParams["font.family"] == [
             "sans-serif"
@@ -89,7 +91,7 @@ if not _font_loaded:
     for font_path, family in _FONT_CANDIDATES.get(system, []):
         if os.path.exists(font_path):
             try:
-                matplotlib.font_manager.fontManager.addfont(font_path)
+                _fm.fontManager.addfont(font_path)
                 if "font.family" not in matplotlib.rcParams or matplotlib.rcParams[
                     "font.family"
                 ] == ["sans-serif"]:
@@ -113,16 +115,23 @@ if not _font_loaded:
     if matplotlib.rcParams.get("font.sans-serif", ["sans-serif"]) == ["sans-serif"]:
         matplotlib.rcParams["font.sans-serif"] = _fallback_fonts
     # 尝试为每个 fallback 字体查找并注册字体文件
-    # 需要显式导入 font_manager（新版 matplotlib lazy-loading 不自动暴露为属性）
-    import matplotlib.font_manager as _fm  # noqa: E402
-
+    # 匹配成功才注册并标记加载成功（findfont 默认 fallback_to_default=True，
+    # 需比对返回路径排除默认 DejaVu 回退）
     for _fb in _fallback_fonts:
         try:
-            _fb_path = _fm.findfont(_fb, fallback_to_default=False)
-            if _fb_path and os.path.exists(_fb_path):
+            _fb_path = _fm.findfont(_fb)
+            if _fb_path and os.path.exists(_fb_path) and "DejaVu" not in _fb_path:
                 _fm.fontManager.addfont(_fb_path)
+                # 仅当用户未自定义 font.family 时才覆盖（保护用户配置，与上方两分支一致）
+                if "font.family" not in matplotlib.rcParams or matplotlib.rcParams[
+                    "font.family"
+                ] == ["sans-serif"]:
+                    matplotlib.rcParams["font.family"] = _fb
+                _font_loaded = True
+                break
         except (OSError, RuntimeError, ValueError):
             pass
+if not _font_loaded:
     _logger.warning(
         "未检测到中文字体，图表中文可能无法正常显示。"
         "Windows: 安装微软雅黑; Mac: 使用 PingFang SC; "

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate requirements.txt from downloaded wheel/tarball files in packages/."""
+
 import re
 import sys
 from pathlib import Path
@@ -22,7 +23,7 @@ def main() -> None:
         """从原始匹配结果中剥离归档后缀，确保版本号为纯 semver。"""
         for suffix in _ARCHIVE_SUFFIXES:
             if raw.endswith(suffix):
-                return raw[:-len(suffix)]
+                return raw[: -len(suffix)]
         return raw
 
     pkgs: dict[str, str] = {}

@@ -383,6 +383,7 @@ async function runAnalysis(task) {
     'distribution_summary', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
     'spc_cusum', 'spc_ewma',
+    'grid_search',
   ]);
   // X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
   const _xOptionalTasks = new Set([

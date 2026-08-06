@@ -351,7 +351,7 @@ pytest tests/ -x -q
 pytest tests/test_engine/ -x -q
 
 # 代码检查
-ruff check smartsuite/
+ruff check src/smartsuite/ scripts/
 
 # 一致性校验
 python scripts/verify_consistency.py

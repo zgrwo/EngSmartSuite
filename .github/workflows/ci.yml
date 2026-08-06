@@ -31,7 +31,7 @@ jobs:
         run: python -c "from smartsuite.engine import __all__ as eng; from smartsuite.services.orchestrator import TASK_REGISTRY; print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
 
       - name: Ruff Lint
-        run: ruff check src/smartsuite/
+        run: ruff check src/smartsuite/ scripts/
 
       - name: 引擎层核心测试
         run: pytest tests/test_engine/ -x -q --tb=short

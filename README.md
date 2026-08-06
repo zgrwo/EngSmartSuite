@@ -169,7 +169,7 @@ pip install -e ".[dev]"
 pytest tests/ -x -q
 
 # 代码检查
-ruff check src/smartsuite/
+ruff check src/smartsuite/ scripts/
 
 # 启动 Web UI
 python run_server.py

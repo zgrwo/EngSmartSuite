@@ -716,7 +716,10 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
                 messages=[f"第 {i + 1} 个优化目标缺少 'col' 字段"],
             )
 
-    weights = req.params.get("weights", [1.0] * len(objectives))
+    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P3 fix)
+    weights = req.params.get("weights")
+    if weights is None:
+        weights = [1.0] * len(objectives)
     if len(weights) != len(objectives):
         return AnalysisResult(
             task="multi_objective",

@@ -21,19 +21,60 @@ ENGINE_DIR = ROOT / "src" / "smartsuite" / "engine"
 
 # 已知安全的变量名前缀/模式（布尔/集合/对象）
 SAFE_PATTERNS = {
-    "is_", "has_", "can_", "should_", "use_", "enable_", "show_",
-    "warn_", "verbose", "debug", "flag", "done", "found", "valid",
-    "success", "error", "result", "results", "items", "cols", "rows",
-    "groups", "data", "df", "sub", "fig", "ax", "fig_", "warn_msgs",
-    "posthoc_results", "figures", "partial_results", "norm_warn",
+    "is_",
+    "has_",
+    "can_",
+    "should_",
+    "use_",
+    "enable_",
+    "show_",
+    "warn_",
+    "verbose",
+    "debug",
+    "flag",
+    "done",
+    "found",
+    "valid",
+    "success",
+    "error",
+    "result",
+    "results",
+    "items",
+    "cols",
+    "rows",
+    "groups",
+    "data",
+    "df",
+    "sub",
+    "fig",
+    "ax",
+    "fig_",
+    "warn_msgs",
+    "posthoc_results",
+    "figures",
+    "partial_results",
+    "norm_warn",
 }
 
 # 高风险变量名（数值型，0 是有效值）
 HIGH_RISK_NAMES = {
-    "threshold", "value", "count",
-    "effect_size", "statistic", "sigma", "mean", "std", "var",
-    "cp", "cpk", "ppm", "tolerance", "offset", "shift",
-    "weibull_shape", "weibull_scale",
+    "threshold",
+    "value",
+    "count",
+    "effect_size",
+    "statistic",
+    "sigma",
+    "mean",
+    "std",
+    "var",
+    "cp",
+    "cpk",
+    "ppm",
+    "tolerance",
+    "offset",
+    "shift",
+    "weibull_shape",
+    "weibull_scale",
 }
 
 
@@ -72,19 +113,22 @@ def audit_file(filepath: Path) -> list[dict]:
                 if var_name.startswith(("self", "cls", "__")):
                     continue
                 risk = classify_risk(var_name)
-                findings.append({
-                    "file": str(filepath.relative_to(ROOT)),
-                    "line": node.lineno,
-                    "var": var_name,
-                    "risk": risk,
-                    "code": source.splitlines()[node.lineno - 1].strip(),
-                })
+                findings.append(
+                    {
+                        "file": str(filepath.relative_to(ROOT)),
+                        "line": node.lineno,
+                        "var": var_name,
+                        "risk": risk,
+                        "code": source.splitlines()[node.lineno - 1].strip(),
+                    }
+                )
     return findings
 
 
 def main():
     """主入口：扫描 engine/ 目录。"""
     import io
+
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
     all_findings = []
@@ -100,7 +144,7 @@ def main():
     medium = [f for f in all_findings if f["risk"] == "MEDIUM"]
     low = [f for f in all_findings if f["risk"] == "LOW"]
 
-    print(f"═══ falsy 模式审计报告 ═══")
+    print("═══ falsy 模式审计报告 ═══")
     print(f"扫描目录: {ENGINE_DIR}")
     print(f"总发现: {len(all_findings)} 处")
     print(f"  HIGH:   {len(high)} 处 {'❌ 需修复' if high else '✅'}")

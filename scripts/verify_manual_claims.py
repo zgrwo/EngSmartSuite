@@ -2,10 +2,11 @@
 
 Robust version: uses positional column access and detection to avoid encoding issues.
 """
-import sys
-import os
+
 import io
-import numpy as np
+import os
+import sys
+
 import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,8 +18,11 @@ from smartsuite.services.orchestrator import orchestrate
 
 OUTPUT = os.path.join(PROJECT_ROOT, "scripts", "verify_manual_claims_output.txt")
 buf = io.StringIO()
+
+
 def p(*args, **kwargs):
     print(*args, **kwargs, file=buf)
+
 
 # ────────────────────────────────────────────────────────
 # Load data & define column indices
@@ -26,38 +30,49 @@ def p(*args, **kwargs):
 df_raw = pd.read_excel(os.path.join(PROJECT_ROOT, "tests", "test_data.xlsx"))
 COLS = df_raw.columns  # by-index access
 # Verified via data patterns:
-IDX_MELT_TEMP = 24   # values ~200
-IDX_MOLD_TEMP = 25   # values ~60, has NaN
-IDX_INJ_PRESS = 26   # values ~80
-IDX_COOL_TIME = 29   # values ~20
-IDX_DEFECT    = 40   # values ~4
-IDX_MATERIAL  = 8    # categorical: ABS/PP/PA66/PC/PA6
-IDX_MAINT     = 13   # categorical: 2 groups (保养日, counts: 否=897/是=103)
-IDX_FIRST_OK  = 18   # categorical: 2 groups
-IDX_APPEAR    = 19   # categorical: 2 groups
+IDX_MELT_TEMP = 24  # values ~200
+IDX_MOLD_TEMP = 25  # values ~60, has NaN
+IDX_INJ_PRESS = 26  # values ~80
+IDX_COOL_TIME = 29  # values ~20
+IDX_DEFECT = 40  # values ~4
+IDX_MATERIAL = 8  # categorical: ABS/PP/PA66/PC/PA6
+IDX_MAINT = 13  # categorical: 2 groups (保养日, counts: 否=897/是=103)
+IDX_FIRST_OK = 18  # categorical: 2 groups
+IDX_APPEAR = 19  # categorical: 2 groups
 
 C_MELT = COLS[IDX_MELT_TEMP]
 C_MOLD = COLS[IDX_MOLD_TEMP]
-C_INJ  = COLS[IDX_INJ_PRESS]
+C_INJ = COLS[IDX_INJ_PRESS]
 C_COOL = COLS[IDX_COOL_TIME]
-C_DEF  = COLS[IDX_DEFECT]
-C_MAT  = COLS[IDX_MATERIAL]
+C_DEF = COLS[IDX_DEFECT]
+C_MAT = COLS[IDX_MATERIAL]
 C_MAINT = COLS[IDX_MAINT]
-C_OK   = COLS[IDX_FIRST_OK]
+C_OK = COLS[IDX_FIRST_OK]
 
 LABEL = {C_MELT: "熔体温度", C_MOLD: "模具温度", C_INJ: "注射压力", C_COOL: "冷却时间"}
 FEATURES = [C_MELT, C_MOLD, C_INJ, C_COOL]
 
 p("=== Columns ===")
-for i in [IDX_MELT_TEMP, IDX_MOLD_TEMP, IDX_INJ_PRESS, IDX_COOL_TIME, IDX_DEFECT, IDX_MATERIAL, IDX_MAINT, IDX_FIRST_OK]:
+for i in [
+    IDX_MELT_TEMP,
+    IDX_MOLD_TEMP,
+    IDX_INJ_PRESS,
+    IDX_COOL_TIME,
+    IDX_DEFECT,
+    IDX_MATERIAL,
+    IDX_MAINT,
+    IDX_FIRST_OK,
+]:
     p(f"  Col[{i}] = {repr(COLS[i])}")
 p()
+
 
 def preprocess_numeric(df, features, categoricals=None):
     """Web UI preprocessing for non-RAW_CAT_TASKS."""
     cat_set = set(categoricals) if categoricals else set()
     df_enc, feat_enc, _, imp_log, _ = preprocess_data(df, features, cat_set)
     return df_enc, feat_enc
+
 
 # ────────────────────────────────────────────────────────
 # 1. CORRELATION (4.1)
@@ -67,15 +82,20 @@ p("1. CORRELATION (4.1)")
 p("=" * 70)
 
 df_c, feat_c = preprocess_numeric(df_raw, FEATURES)
-req = AnalysisRequest(task="correlation", data=df_c, target_col=C_DEF,
-    feature_cols=feat_c, params={"method": "pearson"})
+req = AnalysisRequest(
+    task="correlation",
+    data=df_c,
+    target_col=C_DEF,
+    feature_cols=feat_c,
+    params={"method": "pearson"},
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
 tc = res.metadata.get("target_correlations", {})
 tpa = res.metadata.get("target_p_adjusted", {})
 for c in sorted(tc, key=lambda x: abs(tc[x]), reverse=True):
-    p(f"  {LABEL.get(c,c)}: r={tc[c]:+.4f}  |r|={abs(tc[c]):.4f}  p_adj={tpa.get(c,'?')}")
+    p(f"  {LABEL.get(c, c)}: r={tc[c]:+.4f}  |r|={abs(tc[c]):.4f}  p_adj={tpa.get(c, '?')}")
 
 corr_r = {c: round(tc.get(c, 0), 4) for c in FEATURES}
 corr_padj = {c: round(tpa.get(c, 0), 4) for c in FEATURES}
@@ -89,8 +109,9 @@ p("2. ANOVA (4.2)")
 p("=" * 70)
 
 df_a = df_raw.copy()
-req = AnalysisRequest(task="anova", data=df_a, target_col=C_DEF,
-    feature_cols=[C_MAT], params={"alpha": 0.05})
+req = AnalysisRequest(
+    task="anova", data=df_a, target_col=C_DEF, feature_cols=[C_MAT], params={"alpha": 0.05}
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
@@ -113,7 +134,7 @@ anova_omega2 = float(at.iloc[0, 7]) if at is not None else None
 p(f"  F={anova_F}, p={anova_p}, eta2={anova_eta2}, omega2={anova_omega2}")
 
 # ABS mean
-abs_mean = float(df_raw[df_raw[C_MAT] == 'ABS'][C_DEF].mean())
+abs_mean = float(df_raw[df_raw[C_MAT] == "ABS"][C_DEF].mean())
 p(f"  ABS mean = {abs_mean:.4f}")
 
 # ────────────────────────────────────────────────────────
@@ -125,8 +146,13 @@ p("3. HYPOTHESIS_TEST (4.3)")
 p("=" * 70)
 
 df_h = df_raw.copy()
-req = AnalysisRequest(task="hypothesis_test", data=df_h, target_col=C_DEF,
-    feature_cols=[C_MAINT], params={"test": "ttest_ind", "group_col": C_MAINT})
+req = AnalysisRequest(
+    task="hypothesis_test",
+    data=df_h,
+    target_col=C_DEF,
+    feature_cols=[C_MAINT],
+    params={"test": "ttest_ind", "group_col": C_MAINT},
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
@@ -160,8 +186,13 @@ p("4. DECISION_TREE (4.4)")
 p("=" * 70)
 
 df_d, feat_d = preprocess_numeric(df_raw, FEATURES)
-req = AnalysisRequest(task="decision_tree", data=df_d, target_col=C_DEF,
-    feature_cols=feat_d, params={"max_depth": 5, "random_state": 42})
+req = AnalysisRequest(
+    task="decision_tree",
+    data=df_d,
+    target_col=C_DEF,
+    feature_cols=feat_d,
+    params={"max_depth": 5, "random_state": 42},
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
@@ -191,8 +222,9 @@ p("5. VIF (4.5)")
 p("=" * 70)
 
 df_v, feat_v = preprocess_numeric(df_raw, FEATURES)
-req = AnalysisRequest(task="vif", data=df_v, target_col="",
-    feature_cols=feat_v, params={"threshold": 5})
+req = AnalysisRequest(
+    task="vif", data=df_v, target_col="", feature_cols=feat_v, params={"threshold": 5}
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
@@ -218,8 +250,9 @@ p("=" * 70)
 
 df_ct = df_raw.copy()
 # contingency_analysis uses: col1=target_col, col2=feature_cols[0]
-req = AnalysisRequest(task="contingency", data=df_ct, target_col=C_MAT,
-    feature_cols=[C_MAINT], params={})
+req = AnalysisRequest(
+    task="contingency", data=df_ct, target_col=C_MAT, feature_cols=[C_MAINT], params={}
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
@@ -285,7 +318,7 @@ for v in uv:
         b = ord(sv[0])
         # In GBK: 合 = 0xBACF, 不 = 0xB2BB
         # Binary approach: '不合格' starts with the '不' character
-        val_map[v] = 0 if '不' in sv else 1
+        val_map[v] = 0 if "不" in sv else 1
     else:
         val_map[v] = 0
 p(f"Value map: {val_map}")
@@ -293,8 +326,13 @@ p(f"Value map: {val_map}")
 df_p[C_OK] = df_p[C_OK].map(val_map)
 p(f"Mapped counts: {df_p[C_OK].value_counts().to_dict()}")
 
-req = AnalysisRequest(task="proportion_ci", data=df_p, target_col=C_OK,
-    feature_cols=[], params={"method": "wilson", "alpha": 0.05})
+req = AnalysisRequest(
+    task="proportion_ci",
+    data=df_p,
+    target_col=C_OK,
+    feature_cols=[],
+    params={"method": "wilson", "alpha": 0.05},
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
@@ -318,8 +356,13 @@ p("=" * 70)
 p("8. PROCESS_CAPABILITY (7.5)")
 p("=" * 70)
 
-req = AnalysisRequest(task="process_capability", data=df_raw.copy(), target_col=C_DEF,
-    feature_cols=[], params={"usl": 10, "lsl": 1})
+req = AnalysisRequest(
+    task="process_capability",
+    data=df_raw.copy(),
+    target_col=C_DEF,
+    feature_cols=[],
+    params={"usl": 10, "lsl": 1},
+)
 res = orchestrate(req)
 assert res.status != "error", str(res.messages)
 
@@ -338,7 +381,7 @@ for k, v in res.tables.items():
             val = v.iloc[idx, col]
             try:
                 fv = float(val)
-                label = str(v.index[idx]) if hasattr(v, 'index') else str(idx)
+                label = str(v.index[idx]) if hasattr(v, "index") else str(idx)
                 col_label = str(v.columns[col])
                 pc_vals[f"{k}.{label}.{col_label}"] = fv
             except (ValueError, TypeError):
@@ -361,6 +404,7 @@ p("FINAL COMPARISON REPORT")
 p("=" * 100)
 p()
 
+
 def rpt(analysis, value_name, manual, actual, tolerance=0.001):
     """Report a single comparison."""
     if actual is None:
@@ -377,6 +421,7 @@ def rpt(analysis, value_name, manual, actual, tolerance=0.001):
             match = "ERR"
             disp = str(actual)
     p(f"  {analysis:<24} | {value_name:<25} | {str(manual):<18} | {disp:<18} | {match}")
+
 
 p("--- 4.1 CORRELATION ---")
 rpt("correlation", "注射压力 r", -0.050, corr_r.get(C_INJ), 0.001)
@@ -401,22 +446,30 @@ rpt("hypothesis_test", "p value", 0.0000, ht_p, 0.001)
 for i in range(len(ds)):
     grp = str(ds.iloc[i, 0])
     mv = float(ds.iloc[i, 2])
-    if '否' in grp:
-        rpt("hypothesis_test", f"No group mean", 4.405, round(mv, 4), 0.005)
-    elif '是' in grp:
-        rpt("hypothesis_test", f"Yes group mean", 2.891, round(mv, 4), 0.005)
+    if "否" in grp:
+        rpt("hypothesis_test", "No group mean", 4.405, round(mv, 4), 0.005)
+    elif "是" in grp:
+        rpt("hypothesis_test", "Yes group mean", 2.891, round(mv, 4), 0.005)
 
 p()
 p("--- 4.4 DECISION_TREE ---")
-for factor, short, claim in [(C_COOL, "冷却时间", 0.194), (C_MELT, "熔体温度", 0.106),
-                              (C_MOLD, "模具温度", 0.049), (C_INJ, "注射压力", 0.004)]:
+for factor, short, claim in [
+    (C_COOL, "冷却时间", 0.194),
+    (C_MELT, "熔体温度", 0.106),
+    (C_MOLD, "模具温度", 0.049),
+    (C_INJ, "注射压力", 0.004),
+]:
     actual = dt_perm.get(factor)
     rpt("decision_tree", f"{short} perm", claim, actual, 0.01 if claim > 0.05 else 0.005)
 
 p()
 p("--- 4.5 VIF ---")
-for factor, short in [(C_MELT, "VIF 熔体温度"), (C_MOLD, "VIF 模具温度"),
-                       (C_INJ, "VIF 注射压力"), (C_COOL, "VIF 冷却时间")]:
+for factor, short in [
+    (C_MELT, "VIF 熔体温度"),
+    (C_MOLD, "VIF 模具温度"),
+    (C_INJ, "VIF 注射压力"),
+    (C_COOL, "VIF 冷却时间"),
+]:
     actual = vif_vals.get(factor)
     if actual is not None:
         ok = 1.0 <= actual <= 1.005
@@ -441,9 +494,14 @@ p("--- 7.5 PROCESS_CAPABILITY ---")
 # Search for Cp and Cpk in pc_vals
 for key, val in pc_vals.items():
     key_lower = key.lower()
-    if 'cpk' in key_lower and 'ppk' not in key_lower and 'ci' not in key_lower:
+    if "cpk" in key_lower and "ppk" not in key_lower and "ci" not in key_lower:
         rpt("process_capability", f"Cpk ({key})", 0.923, round(val, 4), 0.01)
-    elif 'cp' in key_lower and 'cpk' not in key_lower and 'pp' not in key_lower and 'ci' not in key_lower:
+    elif (
+        "cp" in key_lower
+        and "cpk" not in key_lower
+        and "pp" not in key_lower
+        and "ci" not in key_lower
+    ):
         rpt("process_capability", f"Cp ({key})", 1.279, round(val, 4), 0.01)
 
 p()

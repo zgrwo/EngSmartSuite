@@ -327,7 +327,10 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                 logger.debug("散点矩阵生成失败", exc_info=True)  # 散点矩阵失败不影响主分析
 
     # ── 偏相关分析（控制混淆变量）──
-    control_vars = req.params.get("control_vars", [])
+    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P3 fix)
+    control_vars = req.params.get("control_vars")
+    if control_vars is None:
+        control_vars = []
     control_vars = [
         c
         for c in control_vars
@@ -1053,7 +1056,10 @@ def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
 
 def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
     """Kolmogorov-Smirnov 双样本检验。"""
-    group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
+    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P3 fix)
+    group_col = req.params.get("group_col")
+    if group_col is None:
+        group_col = req.feature_cols[0] if req.feature_cols else "group"
     groups = req.data[group_col].unique()
     if len(groups) != 2:
         return AnalysisResult(
@@ -1968,7 +1974,10 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # ── 独立双样本检验 ──
-    group_col = req.params.get("group_col", req.feature_cols[0] if req.feature_cols else "group")
+    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P3 fix)
+    group_col = req.params.get("group_col")
+    if group_col is None:
+        group_col = req.feature_cols[0] if req.feature_cols else "group"
     groups = req.data[group_col].unique()
     if len(groups) != 2:
         return AnalysisResult(
@@ -2813,7 +2822,9 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
 
     # Clopper-Pearson 精确 CI
     cp_lower = sp_stats.beta.ppf(alpha_tail, successes, n - successes + 1) if successes > 0 else 0
-    cp_upper = sp_stats.beta.ppf(1 - alpha_tail, successes + 1, n - successes) if successes < n else 1
+    cp_upper = (
+        sp_stats.beta.ppf(1 - alpha_tail, successes + 1, n - successes) if successes < n else 1
+    )
 
     # 可视化
     fig = Figure(figsize=(6, 3))

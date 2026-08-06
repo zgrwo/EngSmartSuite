@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smartsuite"
-version = "1.0.0"
+version = "1.0.1"
 description = "SmartSuite — 工艺数据分析工具箱 (Flask Web UI + CLI + Python API)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -46,7 +46,7 @@ report = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "ruff>=0.1",
+    "ruff==0.15.20",
 ]
 all = [
     "flask>=3.0",
@@ -95,3 +95,6 @@ ignore = ["E501", "N806"]
 "src/smartsuite/services/reporter.py" = ["N806", "B904"]  # txBox variable + raise from err (Python 3.10)
 "src/smartsuite/services/data_io.py" = ["SIM108", "SIM210"]  # ternary style
 "tests/*" = ["N806", "E501", "F841", "B007", "E701", "E402", "I001"]  # test fixtures + math vars + import order
+"scripts/verify_consistency.py" = ["E402"]  # 顺序式验证脚本：import 与检查交错执行
+"scripts/verify_cross_consistency.py" = ["E402"]  # sys.path 注入后导入 + 顺序式验证
+"scripts/verify_manual_claims.py" = ["E402", "N816"]  # sys.path 注入后导入 + 统计符号 F 值命名

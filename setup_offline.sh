@@ -2,7 +2,9 @@
 # ============================================================
 # SmartSuite 离线安装脚本（macOS / Linux）
 # 用法:
-#   联网下载:  bash setup_offline.sh download
+#   联网下载 (当前平台):      bash setup_offline.sh download
+#   联网下载 (指定 Python):   bash setup_offline.sh download 312
+#   联网下载 (跨平台):        bash setup_offline.sh download 312 win_amd64
 #   离线安装:  bash setup_offline.sh install
 # ============================================================
 set -euo pipefail
@@ -11,17 +13,36 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PACKAGES_DIR="$SCRIPT_DIR/packages"
 
 download_deps() {
+    local target_py="${1:-}"
+    local target_platform="${2:-}"
+    local platform_args=()
+
+    if [ -n "$target_py" ]; then
+        if ! [[ "$target_py" =~ ^3[0-9]{2}$ ]]; then
+            echo "[错误] 无效的 Python 版本: 「$target_py」，应为 3 位数字（如 310/311/312/313）"
+            exit 1
+        fi
+        platform_args+=(--python-version "$target_py" --implementation cp --abi "cp$target_py" --only-binary=:all:)
+        if [ -n "$target_platform" ]; then
+            platform_args+=(--platform "$target_platform")
+            echo "目标平台: $target_platform + Python ${target_py:0:1}.${target_py:1} (cp$target_py)"
+        else
+            echo "目标: 当前操作系统 + Python ${target_py:0:1}.${target_py:1} (cp$target_py)"
+        fi
+        echo "⚠ 离线安装时，目标机器 Python 版本必须精确匹配，且仅支持 wheel 安装（无需编译器）"
+    fi
+
     echo "[1/4] 创建 packages 目录..."
     mkdir -p "$PACKAGES_DIR"
 
     echo "[2/4] 下载构建依赖 (setuptools, wheel)..."
     echo "       这些是 pip 构建 smartsuite 包时必需的，"
     echo "       但 pip download 不会自动包含它们。"
-    pip download 'setuptools>=68.0' wheel -d "$PACKAGES_DIR"
+    pip download 'setuptools>=68.0' wheel -d "$PACKAGES_DIR" ${platform_args[@]+"${platform_args[@]}"}
 
     echo "[3/4] 下载全部运行时依赖到 packages/ ..."
     echo "       含核心依赖 + web + report + dev"
-    pip download '.[web,report,dev]' -d "$PACKAGES_DIR"
+    pip download '.[web,report,dev]' -d "$PACKAGES_DIR" ${platform_args[@]+"${platform_args[@]}"}
 
     echo "[4/4] 生成 requirements.txt..."
     python3 scripts/gen_requirements.py "$PACKAGES_DIR"
@@ -105,7 +126,7 @@ install_reqs() {
 
 case "${1:-}" in
     download)
-        download_deps
+        download_deps "${2:-}" "${3:-}"
         ;;
     install)
         install_offline
@@ -117,9 +138,11 @@ case "${1:-}" in
         echo "SmartSuite 离线安装脚本"
         echo "========================================"
         echo "用法:"
-        echo "  bash setup_offline.sh download      - 在有网机器上下载所有依赖到 packages/"
-        echo "  bash setup_offline.sh install        - 从本地 packages/ 离线安装（原有方式）"
-        echo "  bash setup_offline.sh install-reqs   - 从 packages/requirements.txt 离线安装"
+        echo "  bash setup_offline.sh download                 - 下载当前平台依赖到 packages/"
+        echo "  bash setup_offline.sh download 312             - 下载当前 OS + Python 3.12 的依赖"
+        echo "  bash setup_offline.sh download 312 win_amd64   - 跨平台下载 (Windows x64 + Python 3.12)"
+        echo "  bash setup_offline.sh install                  - 从本地 packages/ 离线安装（原有方式）"
+        echo "  bash setup_offline.sh install-reqs             - 从 packages/requirements.txt 离线安装"
         echo "========================================"
         ;;
 esac

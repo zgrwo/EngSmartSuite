@@ -26,7 +26,7 @@ python --version                       # ≥ 3.10
 python -c "import smartsuite; print('OK')"
 python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"  # 预期 40
 python scripts/verify_consistency.py
-ruff check smartsuite/
+ruff check src/smartsuite/ scripts/
 ```
 
 ### 0.3 误判速查（审查前必读）
@@ -620,7 +620,7 @@ git diff origin/main..HEAD --name-only        # 变更范围
 ```bash
 python scripts/verify_consistency.py
 pytest tests/test_engine/test_invariants.py -q
-ruff check smartsuite/
+ruff check src/smartsuite/ scripts/
 ```
 
 ### Diff 模式（PR 审查）

@@ -45,7 +45,7 @@
 | 范围 | Skill 文件 | 内容 |
 | :--- | :--- | :--- |
 | 修改任何源码前 | `skills/smartsuite-dev.md` | 7 大高发陷阱 + 5 套修复模板 |
-| 为用户推荐分析方法 | `rules/skill.md` | 决策树 → 选分析方法 |
+| 为用户推荐分析方法 | `skills/analysis-decision-tree.md` | 决策树 → 选分析方法 |
 
 > 🔴 **修改源码前必须加载 smartsuite-dev 技能**。
 
@@ -120,7 +120,7 @@ EngSmartSuite/
 | :--- | :--- |
 | 安装开发环境 | `pip install -e ".[dev]"` |
 | 快速测试 | `pytest tests/ -x -q` |
-| 代码检查 | `ruff check src/smartsuite/` |
+| 代码检查 | `ruff check src/smartsuite/ scripts/` |
 | 启动 Web UI | `python src/smartsuite/web/app.py` |
 
 ## 历史经验（从 diff 提炼）
@@ -161,7 +161,7 @@ EngSmartSuite/
 
 ### 提交前必检
 
-- [ ] `ruff check smartsuite/` 零错误
+- [ ] `ruff check src/smartsuite/ scripts/` 零错误
 - [ ] `pytest tests/ -x -q` 全绿
 - [ ] 无裸 `except:` 或 `except Exception:` 不记录日志
 - [ ] 新增函数已注册到 TASK_REGISTRY（如适用）

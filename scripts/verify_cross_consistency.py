@@ -8,18 +8,19 @@
 4. figures 数量一致性
 5. 用户手册记录的关键数值是否与实际输出一致
 """
+
+import os
 import sys
+
 import numpy as np
 import pandas as pd
 
-import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 np.random.seed(42)
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.engine import *
-from smartsuite.services.orchestrator import RAW_CAT_TASKS, orchestrate, TASK_REGISTRY
 from smartsuite.services.data_io import preprocess_data
+from smartsuite.services.orchestrator import RAW_CAT_TASKS, orchestrate
 
 # ── 加载测试数据 ──
 df_raw = pd.read_excel("tests/test_data.xlsx")
@@ -71,31 +72,58 @@ MANUAL_EXPECTATIONS = {
 # (task, target_col, feature_cols, categoricals, params, skip_reason)
 TEST_CASES = [
     # === 要因筛选 ===
-    ("correlation", "不良率", ["熔体温度","模具温度","注射压力","冷却时间"], [], {}),
+    ("correlation", "不良率", ["熔体温度", "模具温度", "注射压力", "冷却时间"], [], {}),
     ("anova", "不良率", ["原料类型"], ["原料类型"], {"alpha": 0.05}),
     ("hypothesis_test", "不良率", ["保养日"], ["保养日"], {"test": "ttest_ind"}),
-    ("decision_tree", "不良率", ["熔体温度","模具温度","注射压力","冷却时间"], [], {"max_depth": 5}),
-    ("vif", "", ["熔体温度","模具温度","注射压力","冷却时间"], [], {}),
-    ("contingency", "保养日", ["原料类型"], ["保养日","原料类型"], {}),
+    (
+        "decision_tree",
+        "不良率",
+        ["熔体温度", "模具温度", "注射压力", "冷却时间"],
+        [],
+        {"max_depth": 5},
+    ),
+    ("vif", "", ["熔体温度", "模具温度", "注射压力", "冷却时间"], [], {}),
+    ("contingency", "保养日", ["原料类型"], ["保养日", "原料类型"], {}),
     ("proportion_ci", "首件合格", [], [], {}),
     ("variance_test", "不良率", ["原料类型"], ["原料类型"], {"group_col": "原料类型"}),
     # === 信度诊断 ===
-    ("cohens_kappa", "", ["首件合格","外观检查"], [], {}),
-    ("cronbach_alpha", "", ["熔体温度","模具温度","注射压力"], [], {}),
+    ("cohens_kappa", "", ["首件合格", "外观检查"], [], {}),
+    ("cronbach_alpha", "", ["熔体温度", "模具温度", "注射压力"], [], {}),
     ("distribution_summary", "不良率", [], [], {}),
     ("normality_check", "不良率", ["熔体温度"], [], {}),
-    ("power_analysis", "", [], [], {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5}),
+    (
+        "power_analysis",
+        "",
+        [],
+        [],
+        {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5},
+    ),
     # === 建模优化 ===
-    ("regression", "不良率", ["熔体温度","注射压力","冷却时间"], [], {}),
-    ("response_surface", "不良率", ["熔体温度","模具温度"], [], {"direction": "minimize"}),
-    ("grid_search", "不良率", ["熔体温度"], [], {"ranges": {"熔体温度": (180, 220)}, "n_points": 10}),
-    ("multi_objective", "不良率", ["熔体温度","模具温度"], [], {
-        "objectives": [{"col": "不良率", "direction": "minimize"}, {"col": "拉伸强度", "direction": "maximize"}]
-    }),
-    ("doe_analysis", "不良率", ["熔体温度","模具温度","注射压力"], [], {}),
+    ("regression", "不良率", ["熔体温度", "注射压力", "冷却时间"], [], {}),
+    ("response_surface", "不良率", ["熔体温度", "模具温度"], [], {"direction": "minimize"}),
+    (
+        "grid_search",
+        "不良率",
+        ["熔体温度"],
+        [],
+        {"ranges": {"熔体温度": (180, 220)}, "n_points": 10},
+    ),
+    (
+        "multi_objective",
+        "不良率",
+        ["熔体温度", "模具温度"],
+        [],
+        {
+            "objectives": [
+                {"col": "不良率", "direction": "minimize"},
+                {"col": "拉伸强度", "direction": "maximize"},
+            ]
+        },
+    ),
+    ("doe_analysis", "不良率", ["熔体温度", "模具温度", "注射压力"], [], {}),
     ("roc_analysis", "首件合格", ["熔体温度"], [], {}),
-    ("logistic_regression", "保养日", ["熔体温度","模具温度"], ["保养日"], {}),
-    ("lasso_regression", "不良率", ["熔体温度","模具温度","注射压力"], [], {}),
+    ("logistic_regression", "保养日", ["熔体温度", "模具温度"], ["保养日"], {}),
+    ("lasso_regression", "不良率", ["熔体温度", "模具温度", "注射压力"], [], {}),
     ("robust_regression", "不良率", ["熔体温度"], [], {}),
     ("quantile_regression", "不良率", ["熔体温度"], [], {"quantile": 0.5}),
     # === 过程监控 ===
@@ -113,7 +141,13 @@ TEST_CASES = [
     # === 高级分析 ===
     ("bootstrap_ci", "不良率", [], [], {"n_bootstrap": 200}),
     ("median_ci", "不良率", [], [], {}),
-    ("gage_rr", "不良率", ["模具编号","检验员"], ["模具编号","检验员"], {"part_col": "模具编号", "operator_col": "检验员"}),
+    (
+        "gage_rr",
+        "不良率",
+        ["模具编号", "检验员"],
+        ["模具编号", "检验员"],
+        {"part_col": "模具编号", "operator_col": "检验员"},
+    ),
     ("tolerance_interval", "不良率", [], [], {}),
     ("survival_analysis", "不良率", ["设备报警"], [], {}),  # 设备报警是0/1数值列，适合作事件指示
     ("scatter_plot", "不良率", ["熔体温度"], [], {"fit": "linear"}),
@@ -139,8 +173,9 @@ for task, target, features, cats, params in TEST_CASES:
     try:
         df_a = df_raw.copy()
         params_a = dict(params)
-        req_a = AnalysisRequest(task=task, data=df_a, target_col=target,
-                                feature_cols=features, params=params_a)
+        req_a = AnalysisRequest(
+            task=task, data=df_a, target_col=target, feature_cols=features, params=params_a
+        )
         result_a = orchestrate(req_a)
         status_a = result_a.status
         summary_a = result_a.summary
@@ -168,8 +203,9 @@ for task, target, features, cats, params in TEST_CASES:
 
         params_b = dict(params)
 
-        req_b = AnalysisRequest(task=task, data=df_b, target_col=target,
-                                feature_cols=feat_b, params=params_b)
+        req_b = AnalysisRequest(
+            task=task, data=df_b, target_col=target, feature_cols=feat_b, params=params_b
+        )
         result_b = orchestrate(req_b)
         status_b = result_b.status
         summary_b = result_b.summary
@@ -185,9 +221,9 @@ for task, target, features, cats, params in TEST_CASES:
         issues.append(f"PATH_B_CRASH: {test_name}: {e}")
 
     # ── 对比 ──
-    status_match = (status_a == status_b)
-    tables_match = (tables_a == tables_b)
-    figs_match = (figs_a == figs_b)
+    status_match = status_a == status_b
+    tables_match = tables_a == tables_b
+    figs_match = figs_a == figs_b
 
     if not status_match:
         issues.append(f"STATUS MISMATCH: {test_name}: A={status_a}, B={status_b}")
@@ -217,10 +253,18 @@ for task, target, features, cats, params in TEST_CASES:
                     issues.append(f"MANUAL: {task} |r|={r:.3f} not in {exp['|r|范围']}")
 
         elif task == "anova":
-            p = meta_a.get("r_squared", 0)
-            if p >= 0:
+            r2 = meta_a.get("r_squared", 0)
+            p = None
+            anova_tbl = result_a.tables.get("anova_enhanced")
+            if anova_tbl is not None and "p值" in anova_tbl.columns:
+                pvals = anova_tbl["p值"].dropna()
+                if len(pvals) > 0:
+                    p = float(pvals.iloc[0])
+            if p is not None and exp["p值范围"][0] <= p <= exp["p值范围"][1]:
                 manual_checks_passed += 1
-                manual_result = f"PASS R²={p:.4f}"
+                manual_result = f"PASS p={p:.6f} R²={r2:.4f}"
+            else:
+                issues.append(f"MANUAL: {task} p_value={p} not in {exp['p值范围']}")
 
         elif task == "hypothesis_test":
             p = meta_a.get("p_value", 1)
@@ -232,10 +276,12 @@ for task, target, features, cats, params in TEST_CASES:
                 issues.append(f"MANUAL: {task} p={p:.6f} not in range")
 
         elif task == "decision_tree":
-            cv = meta_a.get("cv_r2", None)
+            cv = meta_a.get("cv_r2")
             if cv is not None:
                 manual_checks_passed += 1
                 manual_result = f"PASS CV_R²={cv:.3f}"
+            else:
+                issues.append(f"MANUAL: {task} cv_r2 missing in metadata")
 
         elif task == "vif":
             vif_table = result_a.tables.get("vif_table")
@@ -246,6 +292,22 @@ for task, target, features, cats, params in TEST_CASES:
                     manual_result = f"PASS max(VIF)={max_vif:.3f}"
                 else:
                     issues.append(f"MANUAL: {task} max(VIF)={max_vif:.3f}")
+
+        elif task == "contingency":
+            p = meta_a.get("p_value")
+            if p is not None and exp["p值"][0] <= p <= exp["p值"][1]:
+                manual_checks_passed += 1
+                manual_result = f"PASS p={p:.6f}"
+            else:
+                issues.append(f"MANUAL: {task} p_value={p} missing or out of range")
+
+        elif task == "proportion_ci":
+            ph = meta_a.get("p_hat")
+            if ph is not None and exp["点估计"][0] <= ph <= exp["点估计"][1]:
+                manual_checks_passed += 1
+                manual_result = f"PASS p_hat={ph:.4f}"
+            else:
+                issues.append(f"MANUAL: {task} p_hat={ph} not in {exp['点估计']}")
 
         elif task == "regression":
             r2 = meta_a.get("r_squared", 0)
@@ -261,38 +323,53 @@ for task, target, features, cats, params in TEST_CASES:
             if exp["判定"] in judge:
                 manual_checks_passed += 1
                 manual_result = f"PASS judge={judge}"
+            else:
+                issues.append(f"MANUAL: {task} judge={judge!r} does not contain {exp['判定']!r}")
 
         elif task == "distribution_summary":
             bf = meta_a.get("best_fit", "")
             if exp["最佳拟合"] in bf:
                 manual_checks_passed += 1
                 manual_result = f"PASS best_fit={bf}"
+            else:
+                issues.append(
+                    f"MANUAL: {task} best_fit={bf!r} does not contain {exp['最佳拟合']!r}"
+                )
 
         elif task == "outlier_consensus":
             n = meta_a.get("n", 1000)
-            hc = meta_a.get("high_conf_count", 0)
+            hc = meta_a.get("high_confidence_count", 0)
             ratio = hc / n if n > 0 else 0
             if exp["高置信比例"][0] <= ratio <= exp["高置信比例"][1]:
                 manual_checks_passed += 1
                 manual_result = f"PASS high_conf={hc}/{n}={ratio:.1%}"
+            else:
+                issues.append(
+                    f"MANUAL: {task} high_conf={hc}/{n}={ratio:.1%} not in {exp['高置信比例']}"
+                )
 
     # ── 日志 (ASCII only for Windows GBK terminal) ──
     match_str = "OK" if (status_match and tables_match and figs_match) else "!!"
     fig_str = f"{figs_a}/{figs_b}" if figs_a == figs_b else f"{figs_a}!={figs_b}"
     print(f"  {match_str} {task:<30} status={status_a}  tables={len(tables_a)}  figs={fig_str}")
 
-    results.append({
-        "task": task, "status_a": status_a, "status_b": status_b,
-        "tables_match": tables_match, "figs_match": figs_match,
-        "manual_check": manual_result,
-    })
+    results.append(
+        {
+            "task": task,
+            "status_a": status_a,
+            "status_b": status_b,
+            "tables_match": tables_match,
+            "figs_match": figs_match,
+            "manual_check": manual_result,
+        }
+    )
 
 # ── 汇总 ──
 print()
 print("=" * 70)
 ok_count = sum(1 for r in results if r["status_a"] == "ok")
 error_count = sum(1 for r in results if r["status_a"] == "error")
-status_mismatch = sum(1 for r in results if not r["status_a"] == r["status_b"])
+status_mismatch = sum(1 for r in results if r["status_a"] != r["status_b"])
 tables_mismatch = sum(1 for r in results if not r["tables_match"])
 figs_mismatch = sum(1 for r in results if not r["figs_match"])
 

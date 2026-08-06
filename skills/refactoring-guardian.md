@@ -14,7 +14,7 @@ argument-hint: "[phase: 0|1|2|3|4] [action: start|end]"
 
 | 用途 | 命令 |
 |------|------|
-| 代码检查 | `ruff check smartsuite/` |
+| 代码检查 | `ruff check src/smartsuite/ scripts/` |
 | 快速测试 | `pytest tests/ -x -q` |
 | 全量测试 | `pytest tests/ -v` |
 | 数值正确性 | `pytest tests/test_correctness.py -v` |
@@ -35,7 +35,7 @@ pytest tests/ -v
 ### 步骤 2: 运行代码检查
 
 ```bash
-ruff check smartsuite/
+ruff check src/smartsuite/ scripts/
 ```
 
 ### 步骤 3: 记录 baseline 快照
@@ -79,7 +79,7 @@ ruff check smartsuite/
 ## 快速守卫（提交前）
 
 ```bash
-ruff check smartsuite/     # 零错误
+ruff check src/smartsuite/ scripts/  # 零错误
 pytest tests/ -x -q        # 全绿
 ```
 

@@ -95,13 +95,13 @@ TASK_REGISTRY = {
 
 DEFAULT_PARAMS = {
     # 要因分析
-    "correlation": {"method": "pearson"},
+    "correlation": {"method": "pearson", "control_vars": []},
     "anova": {"alpha": 0.05, "interactions": 0},
-    "hypothesis_test": {"alpha": 0.05, "test": "ttest_ind"},
-    "decision_tree": {"max_depth": 5},
+    "hypothesis_test": {"alpha": 0.05, "test": "ttest_ind", "group_col": None},
+    "decision_tree": {"max_depth": 5, "random_state": 42},
     "vif": {"threshold": 5},
     "contingency": {"alpha": 0.05},
-    "proportion_ci": {"ci_level": 0.95},
+    "proportion_ci": {"ci_level": 0.95, "success_value": None},
     "variance_test": {"group_col": None, "alpha": 0.05},
     "cohens_kappa": {},
     "cronbach_alpha": {},
@@ -118,7 +118,7 @@ DEFAULT_PARAMS = {
     "regression": {"model_type": "linear"},
     "response_surface": {"direction": "maximize"},
     "grid_search": {"ranges": None, "direction": "maximize", "n_points": 10},
-    "multi_objective": {"objectives": None},
+    "multi_objective": {"objectives": None, "weights": None},
     "doe_analysis": {"alpha": 0.05},
     "roc_analysis": {},
     "logistic_regression": {"threshold": 0.5},
@@ -131,9 +131,9 @@ DEFAULT_PARAMS = {
     "spc_cusum": {"k": 0.5, "h": 5.0, "group_col": None},
     "spc_ewma": {"lam": 0.2, "L": 2.7, "group_col": None},
     "spc_nonparametric": {"side": "two-sided"},
-    "process_capability": {"usl": None, "lsl": None},
+    "process_capability": {"usl": None, "lsl": None, "target": None},
     "trend_forecast": {"forecast_steps": 5},
-    "anomaly_detect": {"method": "iqr"},
+    "anomaly_detect": {"method": "iqr", "max_outliers": 5},
     "change_point": {"min_segment": 10, "n_changepoints": 5},
     "outlier_consensus": {},
     "box_chart": {
@@ -147,9 +147,19 @@ DEFAULT_PARAMS = {
         "target": None,
     },
     "scatter_plot": {"fit": "none", "show_ci": "true", "group_col": None},
-    "bootstrap_ci": {"statistic": "mean", "n_bootstrap": 2000, "ci_level": 0.95},
+    "bootstrap_ci": {
+        "statistic": "mean",
+        "n_bootstrap": 2000,
+        "ci_level": 0.95,
+        "random_state": 42,
+    },
     "median_ci": {"ci_level": 0.95},
-    "gage_rr": {"tolerance": None, "sigma_multiplier": 5.15},
+    "gage_rr": {
+        "tolerance": None,
+        "sigma_multiplier": 5.15,
+        "part_col": None,
+        "operator_col": None,
+    },
     "tolerance_interval": {"coverage": 0.99, "confidence": 0.95, "side": "two-sided"},
     "survival_analysis": {},
 }
@@ -204,14 +214,18 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         elapsed = time.monotonic() - t0
         logger.info(
             "分析任务完成: task=%s, status=%s, elapsed=%.2fs",
-            req.task, result.status, elapsed,
+            req.task,
+            result.status,
+            elapsed,
         )
         return result
     except SmartSuiteError as e:
         elapsed = time.monotonic() - t0
         logger.warning(
             "分析任务 SmartSuite异常: task=%s, elapsed=%.2fs, error=%s",
-            req.task, elapsed, str(e)[:200],
+            req.task,
+            elapsed,
+            str(e)[:200],
         )
         return AnalysisResult(
             task=req.task,
@@ -222,7 +236,10 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         elapsed = time.monotonic() - t0
         logger.exception(
             "分析任务执行失败: task=%s, elapsed=%.2fs, error_type=%s, error=%s",
-            req.task, elapsed, type(e).__name__, str(e)[:200],
+            req.task,
+            elapsed,
+            type(e).__name__,
+            str(e)[:200],
         )
         # 将异常转为中文工艺术语，不暴露原始 traceback
         err_cls = type(e).__name__

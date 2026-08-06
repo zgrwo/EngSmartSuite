@@ -2,6 +2,28 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] - 2026-08-05
+
+> 发版前全量深度审查（七遍模式）修复。
+
+### Fixed
+
+- **P1 中文字体 fallback 链在 Windows 静默失效**：`engine/__init__.py` 引用未导入的
+  `matplotlib.font_manager`，异常被吞导致图表中文显示为方块；修复后三平台字体加载真正生效
+- **P2 grid_search Web UI 强制选 X 列**：引擎不需要 feature_cols，已加入前端 `_yOnlyTasks`
+- **P2 E2E 防线失效**：`test_web_e2e.py` 为模块级脚本致 pytest 收集 0 项，重写为
+  parametrize 风格并补齐 scatter_plot（40/40 方法全覆盖）
+- **P3 高级参数注册缺口**：9 个引擎消费但未入 `DEFAULT_PARAMS` 的参数（group_col、weights、
+  part_col、operator_col、target、success_value、control_vars、max_outliers、random_state）
+  全部注册；hypothesis_test/multi_objective/correlation 补 None 注入防护（项目既有 P2 fix 模式）
+- **P3 verify_cross_consistency 手册验证静默漏报**：键名不符 + 缺失分支 + 恒真断言，修复后 11/11
+
+### Changed
+
+- `scripts/` 目录 ruff lint/format 清零，并纳入 CI lint 与 format 门禁
+- `setup_offline.sh` 支持指定 Python 版本与跨平台下载（`download 312 win_amd64`），与 bat 版对齐
+- api-reference.md 补充 anomaly_detect `max_outliers` 参数说明
+
 ## [1.0.0] - 2026-07-25
 
 ### Added
