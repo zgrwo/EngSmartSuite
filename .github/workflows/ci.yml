@@ -109,7 +109,7 @@ jobs:
         # Pydantic classmethod validator 的 cls 参数为误报，过滤之
         run: |
           output=$(vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" 2>&1) || true
-          filtered=$(echo "$output" | grep -v "unused variable 'cls'")
+          filtered=$(echo "$output" | grep -v "unused variable 'cls'" || true)
           if [ -n "$filtered" ]; then
             echo "$filtered"
             exit 1
