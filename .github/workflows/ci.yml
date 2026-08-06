@@ -46,7 +46,7 @@ jobs:
   # ── 全矩阵测试（仅 main 分支 push 或手动触发，节省 resources）──
   full:
     needs: quick
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -85,10 +85,10 @@ jobs:
       - name: 一致性校验
         run: python scripts/verify_consistency.py
 
-  # ── 代码质量分析（仅 main push 触发）──
+  # ── 代码质量分析（仅 main push 或手动触发）──
   quality:
     needs: quick
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
