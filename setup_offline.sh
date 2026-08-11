@@ -77,13 +77,14 @@ install_offline() {
     echo "       这一步解决 'setuptools 找不到' 的错误"
     pip install --no-index --find-links="$PACKAGES_DIR" setuptools wheel
 
-    # Step 2: 安装所有运行时依赖
-    echo "[2/3] 从本地 packages/ 安装全部运行时依赖..."
-    pip install --no-index --find-links="$PACKAGES_DIR" --no-build-isolation 'smartsuite[web,report,dev]'
-
-    # Step 3: 安装 smartsuite 本身（开发模式）
-    echo "[3/3] 安装 smartsuite 本身（开发模式）..."
+    # Step 2: 安装 smartsuite 本身（开发模式，不装依赖）
+    #         必须先装 smartsuite，pip 才能解析 [web,report,dev] extras 的依赖
+    echo "[2/3] 安装 smartsuite 本身（开发模式，不装依赖）..."
     pip install --no-deps --no-build-isolation -e "$SCRIPT_DIR"
+
+    # Step 3: 安装所有运行时依赖（通过已安装的 smartsuite 元数据解析 extras）
+    echo "[3/3] 从本地 packages/ 安装全部运行时依赖..."
+    pip install --no-index --find-links="$PACKAGES_DIR" --no-build-isolation 'smartsuite[web,report,dev]'
 
     echo ""
     echo "========================================"

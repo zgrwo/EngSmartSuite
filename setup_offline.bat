@@ -327,7 +327,16 @@ if errorlevel 1 (
     goto :menu
 )
 
-echo [2/3] 安装全部运行时依赖...
+echo [2/3] 安装 smartsuite 本身 ^(可编辑, 不装依赖^)...
+pip install --no-deps --no-build-isolation -e "%PROJECT_DIR%."
+if errorlevel 1 (
+    echo.
+    echo [错误] smartsuite 安装失败，请检查项目文件是否完整
+    pause
+    goto :menu
+)
+
+echo [3/3] 安装全部运行时依赖...
 pip install --no-index --find-links="%PACKAGES_DIR%" --no-build-isolation smartsuite[web,report,dev]
 if errorlevel 1 (
     echo.
@@ -342,15 +351,6 @@ if errorlevel 1 (
     echo.
     echo  请确认 packages/ 中的 wheel 文件与当前 Python 版本兼容。
     echo  如版本不匹配，请回到有网机器重新下载对应版本。
-    pause
-    goto :menu
-)
-
-echo [3/3] 安装 smartsuite 本身...
-pip install --no-deps --no-build-isolation -e "%PROJECT_DIR%."
-if errorlevel 1 (
-    echo.
-    echo [错误] smartsuite 安装失败，请检查项目文件是否完整
     pause
     goto :menu
 )
