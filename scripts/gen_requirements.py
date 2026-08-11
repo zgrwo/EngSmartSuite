@@ -5,6 +5,40 @@ import re
 import sys
 from pathlib import Path
 
+# Wheel 文件名: {dist}-{version}(-{build})?-{py}-{abi}-{plat}.whl
+# 发行名与版本中的 '-'/'_' 在 wheel 名里已规范化为 '_'，故 '-' 仅作字段分隔符。
+_WHEEL_RE = re.compile(r"^([a-zA-Z0-9_.-]+?)-(\d[^-]*)")
+
+# sdist 支持的归档后缀（长后缀在前，避免 ".tar" 吞掉 ".tar.gz"）
+_SDIST_EXTS = (".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tar", ".zip")
+
+
+def _parse_wheel(filename: str):
+    """解析 wheel 文件名 -> (name, version)。"""
+    m = _WHEEL_RE.match(filename)
+    if not m:
+        return None
+    name = m.group(1).replace("_", "-").lower()
+    return name, m.group(2)
+
+
+def _parse_sdist(filename: str):
+    """解析 sdist 文件名 -> (name, version)。
+
+    sdist 版本可含连字符预发布号（如 1.0-rc1），故不能沿用 wheel 的分隔符规则：
+    取第一个 '-数字' 作为版本起点（PEP 440 版本以数字开头，后续可含 '-'）。
+    """
+    body = filename
+    for suffix in _SDIST_EXTS:
+        if body.endswith(suffix):
+            body = body[: -len(suffix)]
+            break
+    m = re.search(r"-(\d)", body)
+    if not m:
+        return None
+    name = body[: m.start()].replace("_", "-").lower()
+    return name, body[m.start() + 1 :]
+
 
 def main() -> None:
     packages_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("packages")
@@ -12,28 +46,15 @@ def main() -> None:
         print(f"[错误] {packages_dir} 目录不存在，请先运行 setup_offline download", file=sys.stderr)
         sys.exit(1)
 
-    # Wheel: {distribution}-{version}(-{build})?-{py}-{abi}-{plat}.whl
-    # Sdist:  {distribution}-{version}.tar.gz
-    pattern = re.compile(r"^([a-zA-Z0-9_.-]+?)-(\d[^-]*)")
-
-    # 已知的归档/包后缀，需从版本号中剥离
-    _ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar", ".zip", ".tgz")
-
-    def _clean_version(raw: str) -> str:
-        """从原始匹配结果中剥离归档后缀，确保版本号为纯 semver。"""
-        for suffix in _ARCHIVE_SUFFIXES:
-            if raw.endswith(suffix):
-                return raw[: -len(suffix)]
-        return raw
-
     pkgs: dict[str, str] = {}
-    for ext in ("*.whl", "*.tar.gz"):
+    for ext in ("*.whl", "*.tar.gz", "*.tar.bz2", "*.tar.xz", "*.tgz", "*.zip"):
         for f in sorted(packages_dir.glob(ext)):
-            m = pattern.match(f.name)
-            if m:
-                name = m.group(1).replace("_", "-").lower()
-                version = _clean_version(m.group(2))
-                pkgs[name] = version
+            if f.name.endswith(".whl"):
+                parsed = _parse_wheel(f.name)
+            else:
+                parsed = _parse_sdist(f.name)
+            if parsed:
+                pkgs[parsed[0]] = parsed[1]
 
     output = packages_dir / "requirements.txt"
     with open(output, "w", encoding="utf-8") as out:

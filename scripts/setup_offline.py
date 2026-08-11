@@ -40,9 +40,10 @@ USAGE = """SmartSuite 离线安装脚本
 macOS / Linux 将 setup_offline.bat 换成 setup_offline.sh。
 """
 
-_BUILD_DEPS = ("setuptools>=68.0", "wheel")
-_RUNTIME_EXTRAS = ".[web,report,dev]"
-_RUNTIME_SPEC = "smartsuite[web,report,dev]"
+# 与 pyproject.toml [build-system] 保持一致的下限（>=83.0 修 PYSEC-2026-3447）
+_BUILD_DEPS = ("setuptools>=83.0", "wheel")
+_RUNTIME_EXTRAS = ".[all,dev]"  # all = web + report，dev = 目标机开发工具
+_RUNTIME_SPEC = "smartsuite[all,dev]"
 _MIN_PY = (3, 10)
 _PY_RE = re.compile(r"3[0-9]{2}")
 
@@ -279,7 +280,8 @@ def install_reqs_commands(root, packages):
 
 
 def verify_command():
-    return [sys.executable, "-c", "import smartsuite; print('  [OK] smartsuite 导入成功')"]
+    code = common.IMPORT_CHECK + "print('  [OK] smartsuite 及 Web/报告依赖导入成功')"
+    return [sys.executable, "-c", code]
 
 
 def _completion_box() -> None:
@@ -323,11 +325,11 @@ def do_install(print_cmd) -> int:
             return 1
 
     print()
-    print("[验证] 导入 smartsuite...")
+    print("[验证] 导入 smartsuite 及 Web/报告依赖...")
     if run_or_print(verify_command(), root, print_cmd) != 0:
         print("  [警告] 导入验证失败，请检查依赖是否完整")
     else:
-        print("  [OK] smartsuite 导入成功")
+        print("  [OK] smartsuite 及 Web/报告依赖可用")
     _completion_box()
     return 0
 

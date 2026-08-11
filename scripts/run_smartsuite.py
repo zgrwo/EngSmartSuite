@@ -55,7 +55,7 @@ def ensure_venv(root, py_exe) -> Path:
 
 def ensure_deps(root, run_python) -> int:
     """在虚拟环境中安装依赖（离线优先，失败回退在线）。返回退出码。"""
-    if common.run_quiet([str(run_python), "-c", "import smartsuite"]):
+    if common.run_quiet([str(run_python), "-c", common.IMPORT_CHECK]):
         print("  [OK] SmartSuite 已安装")
         return 0
 
@@ -66,7 +66,7 @@ def ensure_deps(root, run_python) -> int:
         cmd = [str(run_python), "-m", "pip", "install", "--no-index",
                f"--find-links={packages}", "-e", f"{root}[web,report]", "--quiet"]
         if common.run(cmd, cwd=root) == 0 and common.run_quiet(
-            [str(run_python), "-c", "import smartsuite"]
+            [str(run_python), "-c", common.IMPORT_CHECK]
         ):
             print("  [OK] 离线安装完成")
             return 0
@@ -124,7 +124,7 @@ def main(argv) -> int:
     print(f"  [OK] 找到 {py_ver}")
 
     print("  [2] 检测 SmartSuite...")
-    if common.run_quiet([py_exe, "-c", "import smartsuite"]):
+    if common.run_quiet([py_exe, "-c", common.IMPORT_CHECK]):
         print("  [OK] SmartSuite 已安装，跳过虚拟环境")
         run_python = py_exe
     else:

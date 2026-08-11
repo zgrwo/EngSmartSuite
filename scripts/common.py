@@ -49,6 +49,15 @@ def packages_dir() -> Path:
     return project_root() / "packages"
 
 
+# 运行完整性检查：smartsuite 及其 Web/报告扩展依赖必须可导入。
+# 作为 setup_offline / run_smartsuite 判断“安装是否完整”的判据，
+# 仅以字符串形式存在，由目标解释器在子进程里执行（本模块自身仍只依赖标准库）。
+IMPORT_CHECK = (
+    "import smartsuite\n"
+    "import flask, pyarrow, pptx, reportlab, openpyxl\n"
+)
+
+
 def web_url() -> str:
     """Web UI 地址（与 run_server.py 读取相同的环境变量）。"""
     host = os.environ.get("SMARTSUITE_HOST", "127.0.0.1")
