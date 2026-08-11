@@ -1,0 +1,3 @@
+# Unix shell scripts must stay LF: a CRLF shebang (#!/usr/bin/env bash\r)
+# breaks the launcher even when core.autocrlf=true would renormalize to CRLF.
+*.sh text eol=lf

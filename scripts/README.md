@@ -2,6 +2,17 @@
 
 此目录包含开发辅助脚本。未纳入 CI 的脚本需手动运行。
 
+## 启动器（Windows 安装脚本的 Python 逻辑入口）
+
+根目录的 `setup_offline.bat/.sh` 与 `run_smartsuite.bat/.sh` 均为纯 ASCII 启动器，
+全部逻辑在此：
+
+| 脚本 | 用途 |
+|------|------|
+| `setup_offline.py` | 离线安装：菜单 / download / install / install-reqs / clean（支持 `--print-cmd` 干跑） |
+| `run_smartsuite.py` | 一键启动：检测 Python → venv → 离线优先装依赖 → 启动 Web UI |
+| `common.py` | 共享工具（仅标准库，依赖未装时也可运行） |
+
 ## 数据生成
 
 | 脚本 | 用途 |
