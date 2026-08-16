@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # 对比 PR 前后依赖清单（pyproject.toml），检测已知漏洞/恶意包
       - uses: actions/dependency-review-action@v4
 
@@ -29,7 +29,7 @@ jobs:
     name: 测试质量守卫（弱断言/缺测/命名）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -42,7 +42,7 @@ jobs:
     name: 文档一致性（断链/目录树/裸异常/版本漂移）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -53,7 +53,7 @@ jobs:
     name: 手册数值一致性
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -66,7 +66,7 @@ jobs:
     name: Falsy 模式审计
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -77,7 +77,7 @@ jobs:
     name: 架构约束检查
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -90,7 +90,7 @@ jobs:
     name: Ruff Format Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
