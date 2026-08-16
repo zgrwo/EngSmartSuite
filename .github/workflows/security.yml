@@ -28,7 +28,7 @@ jobs:
         # 本仓为纯 Python 项目（前端 app.js 静态文件不参与构建），仅保留 python
         language: [python]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: 依赖漏洞扫描（pip-audit）
         # 检查项目已解析依赖是否含已知 CVE（补 CodeQL 静态分析盲区；来源：VibeCodingTemplate）。
         # 关键：先安装项目依赖再 audit（否则审计的是 runner 环境而非项目依赖 = no-op）。
