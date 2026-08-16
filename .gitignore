@@ -55,6 +55,11 @@ tests/demo_output/
 docs/code-review-report-*.md
 docs/known-issues.md
 
+# AI 审查文档（5S：不入库；本地如需使用可手动保留）
+rules/code-review-prompt.md
+rules/statistics-review.md
+rules/refactoring-plan.md
+
 # 开发者工具（本地保留，不推送）
 # (docs/contributing/ — 已移除，comprehensive-review-prompt.md 应纳入版本控制)
 # 一次性数据生成脚本

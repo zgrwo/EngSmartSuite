@@ -232,8 +232,6 @@ EngSmartSuite/
 | [context.md](rules/context.md) | 术语表 |
 | [project-structure.md](rules/project-structure.md) | 结构地图 |
 | [documentation.md](rules/documentation.md) | 文档职责 |
-| [code-review-prompt.md](rules/code-review-prompt.md) | 审查模板 |
-| [refactoring-plan.md](rules/refactoring-plan.md) | 重构计划 |
 | [sentinel-contract.md](rules/sentinel-contract.md) | 哨兵契约（L1-L5 + NaN/Inf 守卫清单） |
 | [adr-template.md](rules/adr-template.md) | ADR 模板（重大架构决策记录） |
 | [tooling-pitfalls.md](rules/tooling-pitfalls.md) | 工具链陷阱清单（PowerShell/git/CI） |

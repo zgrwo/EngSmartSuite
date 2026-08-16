@@ -374,7 +374,6 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 决策知识 | `skills/analysis-decision-tree.md` | 分析方法决策树 + 工作流 |
 | API 参考 | `rules/api-reference.md` | 40 个函数完整签名 |
 | 用户手册 | `rules/user-manual.md` | 操作说明 + 六段式示例 |
-| 已知问题 | `rules/code-review-prompt.md` §0.3 | 误判豁免清单（审查前必读） |
 | 架构决策 | `rules/0001-*.md` / `rules/0002-*.md` | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel |
 | 防错契约 | `rules/sentinel-contract.md` | L1-L5 哨兵 + NaN/Inf 守卫清单（新增/修改引擎函数必查） |
 | 配色方案 | `smartsuite/engine/_palette.py` | PALETTE 字典完整定义 |

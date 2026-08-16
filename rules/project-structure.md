@@ -102,7 +102,6 @@ EngSmartSuite/
 │   ├── user-manual.md              #   40 方法操作指南
 │   ├── specification.md            #   项目规格文档
 │   ├── context.md                  #   术语表
-│   ├── statistics-review.md        #   统计方法审查
 │   ├── falsy-pitfalls.md           #   Falsy 陷阱清单
 │   ├── sentinel-contract.md        #   哨兵契约 L1-L5 与 NaN/Inf 守卫
 │   ├── tooling-pitfalls.md         #   工具链陷阱清单
@@ -110,10 +109,8 @@ EngSmartSuite/
 │   ├── adr/                        #   架构决策记录
 │   ├── 0001-three-layer-architecture.md   #   ADR-001 三层架构
 │   ├── 0002-web-ui-replaces-excel-layer.md # ADR-002 Web UI 替代 Excel
-│   ├── code-review-prompt.md       #   审查提示词
 │   ├── documentation.md            #   文档职责
 │   ├── project-structure.md        #   本文件（目录树契约）
-│   ├── refactoring-plan.md         #   重构计划
 │   └── images/                     #   示例图片
 │
 ├── skills/                         # AI Skill 定义
