@@ -1,0 +1,30 @@
+# ============================================================================
+# release.yml — release-please 自动发版
+# 触发：main 分支推送
+# 机制：从 Conventional Commits 自动推导版本号、生成 CHANGELOG.md、
+#       打开 release PR → 合并后自动打 tag + 建 GitHub Release
+# 前置：
+#   1. 仓库 Settings → Actions → Workflow permissions 允许写权限
+#   2. commit 必须符合 Conventional Commits（见 ci.yml「提交规范检查」，
+#      scripts/validate-commit-msg.sh）——commit 规范 → 版本推导的闭环前提
+# 手动覆盖：在 release PR 的 commit body 加 `Release-As: x.y.z` 强制指定版本
+# ============================================================================
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # manifest 模式下不得在 with 中设置 release-type（会覆盖 config.json）
+      - uses: googleapis/release-please-action@v5
+        with:
+          config-file: .github/release-please/config.json
+          manifest-file: .release-please-manifest.json
