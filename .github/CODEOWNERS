@@ -1,0 +1,15 @@
+# ============================================================================
+# CODEOWNERS — 默认代码所有者（PR 自动请求审查）
+# 说明：单维护者项目，全部路径默认归 @zgrwo；按需调整
+# 参考：https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# ============================================================================
+
+# 全局兜底：所有文件默认归项目所有者
+* @zgrwo
+
+# 规范文档变更必须由文档负责人审查
+rules/ @zgrwo
+
+# CI/脚本变更建议由基础设施负责人审查
+.github/ @zgrwo
+scripts/ @zgrwo
