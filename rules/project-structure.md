@@ -114,19 +114,29 @@ EngSmartSuite/
 │   └── images/                     #   示例图片
 │
 ├── skills/                         # AI Skill 定义
+│   ├── README.md                   #   技能目录说明
 │   ├── smartsuite-dev.md           #   7 大陷阱 + 5 套修复模板
 │   ├── analysis-decision-tree.md   #   分析方法决策树
 │   ├── architecture-reviewer.md    #   架构审查
 │   ├── refactoring-guardian.md     #   重构守卫
-│   └── project-plan-review.md      #   计划评审
+│   ├── project-plan-review.md      #   计划评审
+│   ├── brainstorming/              #   Superpowers 过程技能（第三方，MIT）
+│   ├── writing-plans/
+│   ├── test-driven-development/
+│   ├── systematic-debugging/
+│   ├── verification-before-completion/
+│   └── subagent-driven-development/
 │
-├── templates/                      # YAML 分析模板 (43 个) + new_analysis.py
+├── templates/                      # YAML 分析模板 (43 个) + new_analysis.py + README.md
 ├── scripts/                        # 开发辅助脚本
 │   ├── README.md
 │   ├── common.py
+│   ├── doctor.py                   #   环境就绪性诊断
+│   ├── verify_all.py               #   一键全量验证入口
 │   ├── run_affected_tests.py       #   影响范围测试路由
 │   ├── verify_docs.py              #   文档一致性验证
 │   ├── test_quality_guard.py       #   测试质量守卫
+│   ├── retry.py                    #   瞬态错误重试装饰器
 │   ├── verify_consistency.py       #   行为/架构一致性
 │   ├── verify_cross_consistency.py #   Web/CLI 交叉一致性
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
@@ -153,6 +163,7 @@ EngSmartSuite/
 ├── agents.md                       # 项目宪法 / AI 行为准则
 ├── README.md                       # 用户入口
 ├── CONTRIBUTING.md                 # 贡献指南
+├── CODE_OF_CONDUCT.md              # 贡献者行为准则
 ├── CHANGELOG.md                    # 变更记录
 ├── SECURITY.md                     # 安全政策
 ├── LICENSE                         # MIT

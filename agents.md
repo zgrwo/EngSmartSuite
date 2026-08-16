@@ -46,8 +46,14 @@
 | :--- | :--- | :--- |
 | 修改任何源码前 | `skills/smartsuite-dev.md` | 7 大高发陷阱 + 5 套修复模板 |
 | 为用户推荐分析方法 | `skills/analysis-decision-tree.md` | 决策树 → 选分析方法 |
+| 创造性工作前 | `skills/brainstorming/` | 探索意图/需求/设计后再实现 |
+| 多步任务动代码前 | `skills/writing-plans/` | 写执行计划 |
+| 实现功能/修 Bug 前 | `skills/test-driven-development/` | 先写测试（红-绿-重构） |
+| 遇到 Bug 时 | `skills/systematic-debugging/` | 系统性调试，不猜 |
+| 声称完成前 | `skills/verification-before-completion/` | 运行验证，证据先行 |
 
 > 🔴 **修改源码前必须加载 smartsuite-dev 技能**。
+> 过程技能（Superpowers）为第三方上游原样分发（MIT），见 skills/README.md。
 
 ### 专家 Skill（重构生命周期）
 
@@ -81,7 +87,7 @@ EngSmartSuite/
 ├── src/                              # 主包（core / engine / services / web）
 ├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
 ├── rules/                            # 规范文档（含哨兵契约/ADR 模板/陷阱清单）
-├── skills/                           # Skill 定义（5 个）
+├── skills/                           # Skill 定义（领域 5 + 过程 6）
 ├── templates/                        # YAML 分析模板 (43 个)
 ├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）
 ├── tools/                            # 工具目录
@@ -95,6 +101,7 @@ EngSmartSuite/
 ├── agents.md                         # 本文件
 ├── README.md                         # 用户向功能指南
 ├── CONTRIBUTING.md                   # 贡献指南
+├── CODE_OF_CONDUCT.md                # 贡献者行为准则
 ├── CHANGELOG.md                      # 变更记录
 ├── SECURITY.md                       # 安全政策
 ├── LICENSE                           # MIT
@@ -141,6 +148,8 @@ EngSmartSuite/
 | :--- | :--- |
 | 安装开发环境 | `pip install -e ".[dev]"` |
 | 快速测试 | `pytest tests/ -x -q` |
+| 一键全量验证 | `python scripts/verify_all.py` |
+| 环境诊断 | `python scripts/doctor.py` |
 | 增量测试（只跑受影响） | `python scripts/run_affected_tests.py` |
 | 代码检查 | `ruff check src/smartsuite/ scripts/` |
 | 文档一致性 | `python scripts/verify_docs.py --strict` |
