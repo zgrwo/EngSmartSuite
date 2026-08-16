@@ -1,4 +1,4 @@
-﻿# EngSmartSuite — 重构计划
+# EngSmartSuite — 重构计划
 
 > 基于 ~120 commits 全量历史分析 | 目标：从"15+ 轮审查"到"一次做对"
 > 项目成熟度：★★★★★（重构完成，4 层测试防线 + 40/40 交叉验证通过）
@@ -176,7 +176,7 @@ class AnalysisRequest(BaseModel):
 
 | 任务 | 产出 | 验收标准 | 依赖 |
 |------|------|----------|------|
-| 四路一致性脚本 | `scripts/verify_manual_parity.py` | 自动对比四路输出 | Phase 1-2 |
+| 四路一致性脚本 | `scripts/verify_manual_claims.py` | 自动对比四路输出 | Phase 1-2 |
 | 图片自动生成脚本 | `scripts/generate_images.py` | 从 Python 运行生成图片 | — |
 | 修复手册数值 | `rules/user-manual.md` 更新 | 与 Python 实际输出一致 | 上一项 |
 | 集成到 CI | `.github/workflows/quality.yml` | PR 自动验证 | — |
@@ -230,7 +230,7 @@ Phase 2 (1-2周): falsy + 可复现性 【P1】
   └─ Pydantic 迁移
 
 Phase 3 (1-2周): 手册一致性 + 可视化 【P1】
-  ├─ verify_manual_parity.py
+  ├─ verify_manual_claims.py
   ├─ 图片自动生成 + 修复手册
   └─ Plotly 交互式图表（可选）
 

@@ -77,13 +77,33 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 ```
 EngSmartSuite/
-├── src/smartsuite/                  # 主包（core / engine / services / web）
-├── tests/                            # 测试
-├── rules/                            # 规范文档
-├── skills/                           # Skill 定义
+├── .github/                          # GitHub 配置（工作流/Issue 模板/CODEOWNERS）
+├── src/                              # 主包（core / engine / services / web）
+├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
+├── rules/                            # 规范文档（含哨兵契约/ADR 模板/陷阱清单）
+├── skills/                           # Skill 定义（5 个）
+├── templates/                        # YAML 分析模板 (43 个)
+├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）
+├── tools/                            # 工具目录
+├── run_smartsuite.bat              # 一键启动脚本（Windows）
+├── run_smartsuite.sh               # 一键启动脚本（Linux/macOS）
+├── run_server.py                   # Web UI 启动入口
+├── setup_offline.bat               # 离线安装脚本（Windows）
+├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
+├── pyproject.toml                    # 包配置 + ruff 规则
+├── CONTEXT.md                        # 领域术语
 ├── agents.md                         # 本文件
 ├── README.md                         # 用户向功能指南
-└── .gitignore
+├── CONTRIBUTING.md                   # 贡献指南
+├── CHANGELOG.md                      # 变更记录
+├── SECURITY.md                       # 安全政策
+├── LICENSE                           # MIT
+├── MANIFEST.in
+├── .editorconfig
+├── .gitattributes
+├── .gitignore
+├── .pre-commit-config.yaml           # 提交前检查
+└── .release-please-manifest.json     # 发版版本基线
 ```
 
 ## 红线规则
@@ -99,6 +119,7 @@ EngSmartSuite/
 - 无裸 `except:` 或 `except Exception:` 不记录日志
 - 错误信息使用中文工艺术语，不暴露 traceback
 - 优雅降级：输出失败退到更可靠格式
+- 退化输入走哨兵值（NaN/""），不静默传播 —— 见 [sentinel-contract.md](rules/sentinel-contract.md)
 
 ### 3. 文档同步
 
@@ -120,7 +141,11 @@ EngSmartSuite/
 | :--- | :--- |
 | 安装开发环境 | `pip install -e ".[dev]"` |
 | 快速测试 | `pytest tests/ -x -q` |
+| 增量测试（只跑受影响） | `python scripts/run_affected_tests.py` |
 | 代码检查 | `ruff check src/smartsuite/ scripts/` |
+| 文档一致性 | `python scripts/verify_docs.py --strict` |
+| 测试质量守卫 | `python scripts/test_quality_guard.py` |
+| 提交规范校验 | `echo "fix(engine): 描述" \| sh scripts/validate-commit-msg.sh` |
 | 启动 Web UI | `python src/smartsuite/web/app.py` |
 
 ## 历史经验（从 diff 提炼）
@@ -209,3 +234,6 @@ EngSmartSuite/
 | [documentation.md](rules/documentation.md) | 文档职责 |
 | [code-review-prompt.md](rules/code-review-prompt.md) | 审查模板 |
 | [refactoring-plan.md](rules/refactoring-plan.md) | 重构计划 |
+| [sentinel-contract.md](rules/sentinel-contract.md) | 哨兵契约（L1-L5 + NaN/Inf 守卫清单） |
+| [adr-template.md](rules/adr-template.md) | ADR 模板（重大架构决策记录） |
+| [tooling-pitfalls.md](rules/tooling-pitfalls.md) | 工具链陷阱清单（PowerShell/git/CI） |
