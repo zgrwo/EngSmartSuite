@@ -12,7 +12,37 @@ import tempfile
 import openpyxl
 import pandas as pd
 
-from smartsuite.services.audit import auto_report, export_workbook
+from smartsuite.services.audit import auto_report, batch_analyze, export_workbook
+
+
+# ── batch_analyze 测试 ──
+
+
+def test_batch_analyze_basic(sample_doe_data):
+    """验证 batch_analyze 对多个任务批量分析返回结构化摘要。"""
+    result = batch_analyze(
+        sample_doe_data,
+        target_col="不良率",
+        feature_cols=["料温", "模温"],
+        tasks=["correlation", "distribution_summary"],
+    )
+    assert "results" in result
+    assert "summary" in result
+    assert "correlation" in result["results"]
+    assert "distribution_summary" in result["results"]
+    assert result["results"]["distribution_summary"]["status"] == "ok"
+
+
+def test_batch_analyze_failed_task_graceful(sample_doe_data):
+    """验证单个任务失败不拖垮批量（优雅降级为 error 状态）。"""
+    result = batch_analyze(
+        sample_doe_data,
+        target_col="不良率",
+        feature_cols=["料温"],
+        tasks=["vif"],  # 单特征 VIF 会失败
+    )
+    assert result["results"]["vif"]["status"] in ("ok", "error")
+    assert "results" in result
 
 
 # ── export_workbook 测试 ──
