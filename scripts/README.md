@@ -24,12 +24,24 @@
 | `generate_reliability_data.py` | 生成可靠性测试数据 |
 | `generate_warranty_data.py` | 生成保修分析测试数据 |
 
-## 验证
+## 验证与治理
 
 | 脚本 | 用途 | CI? |
 |------|------|-----|
-| `verify_consistency.py` | 验证文档与代码一致性 | 待接入 |
+| `verify_consistency.py` | 验证文档与代码一致性 | ✅ full |
 | `verify_cross_consistency.py` | Web/CLI 分析一致性交叉验证（需运行中 Flask server） | 手动 |
+| `verify_manual_claims.py` | 手册数值实跑验证（CLAIM 标记 → 实际输出） | 手动 |
+| `verify_docs.py` | 文档一致性：断链/目录树/裸异常/版本漂移（`--strict` 含未声明文件） | ✅ quality |
+| `falsy_audit.py` | Falsy 模式静态审计（0/空/False 误判风险） | ✅ quality |
+| `test_quality_guard.py` | 测试质量守卫：弱断言（WARN）/缺测/无意义命名（FAIL） | ✅ quality |
+| `run_affected_tests.py` | 增量测试路由：git-diff → 受影响测试（`--dry-run` 预览） | 本地 |
+
+## 提交规范
+
+| 文件 | 用途 |
+|------|------|
+| `validate-commit-msg.sh` | Conventional Commits 校验（SSOT 规则，CI 与本地 hook 共用） |
+| `git-hooks/commit-msg` | 本地 git hook：`git config core.hooksPath scripts/git-hooks` 安装 |
 
 ## 演示
 
