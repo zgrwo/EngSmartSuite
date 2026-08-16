@@ -59,6 +59,10 @@ def test_invalid_formats():
 
 
 def test_subject_length_limit():
-    """标题长度上限 72 字符。"""
+    """标题长度上限 72 字符（含 type 前缀）。
+
+    "fix: " 前缀占 5 字符，subject 最长 67 字符；68 字符即超限。
+    """
     assert run("fix: " + "长" * 73) == 1
-    assert run("fix: " + "长" * 72) == 0
+    assert run("fix: " + "长" * 68) == 1
+    assert run("fix: " + "长" * 67) == 0
