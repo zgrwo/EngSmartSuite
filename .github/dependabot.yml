@@ -1,0 +1,23 @@
+# ============================================================================
+# dependabot.yml — 依赖自动更新
+# 使用方式：直接启用（GitHub 自动读取），按项目语言取消注释对应条目
+#   - pip: 需要 pyproject.toml / requirements*.txt（本仓为 pyproject.toml）
+#   - github-actions: workflow 文件存在即可
+# ============================================================================
+version: 2
+updates:
+  # --- Python 项目：主依赖 + dev/extra 依赖 ---
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+
+  # --- GitHub Actions 自身 ---
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels: ["dependencies"]
