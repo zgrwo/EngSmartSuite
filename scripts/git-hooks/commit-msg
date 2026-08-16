@@ -1,0 +1,14 @@
+#!/bin/sh
+# ============================================================================
+# commit-msg — git 提交信息校验 hook（Conventional Commits）
+#
+# 安装：git config core.hooksPath scripts/git-hooks
+#       （手动安装；详见 CONTRIBUTING「提交规范」）
+# 逃生：紧急情况可用 git commit --no-verify（不推荐，但保留通道）
+# 实现：转发给 scripts/validate-commit-msg.sh（校验规则的唯一真相源）
+# ============================================================================
+
+# 定位脚本目录（兼容 Windows Git Bash / Linux / macOS BSD：
+# 不用 dirname -- / cd -- 等 GNU 扩展）
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+exec "$script_dir/../validate-commit-msg.sh" "$1"
