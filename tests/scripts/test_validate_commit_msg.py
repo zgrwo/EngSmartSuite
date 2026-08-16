@@ -16,11 +16,15 @@ pytestmark = pytest.mark.skipif(
 
 
 def run(subject: str) -> int:
-    """以 stdin 方式调用校验脚本，返回退出码。"""
+    """以 stdin 方式调用校验脚本，返回退出码。
+
+    显式 UTF-8：Windows 上 subprocess text 模式默认 cp1252，中文会 UnicodeEncodeError。
+    """
     return subprocess.run(
         ["sh", str(SCRIPT)],
         input=subject,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         cwd=ROOT,
     ).returncode
@@ -59,6 +63,11 @@ def test_invalid_formats():
 
 
 def test_subject_length_limit():
-    """标题长度上限 72 字符。"""
-    assert run("fix: " + "长" * 73) == 1
-    assert run("fix: " + "长" * 72) == 0
+    """标题长度上限 72 字符（含 type 前缀）。
+
+    "fix: " 前缀占 5 字符，subject 最长 67 字符；68 字符即超限。
+    用 ASCII 字符：wc -m 在非 UTF-8 locale（Windows git-bash）下对中文按字节计数。
+    """
+    assert run("fix: " + "a" * 73) == 1
+    assert run("fix: " + "a" * 68) == 1
+    assert run("fix: " + "a" * 67) == 0
