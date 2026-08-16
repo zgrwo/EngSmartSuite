@@ -52,10 +52,7 @@ def packages_dir() -> Path:
 # 运行完整性检查：smartsuite 及其 Web/报告扩展依赖必须可导入。
 # 作为 setup_offline / run_smartsuite 判断“安装是否完整”的判据，
 # 仅以字符串形式存在，由目标解释器在子进程里执行（本模块自身仍只依赖标准库）。
-IMPORT_CHECK = (
-    "import smartsuite\n"
-    "import flask, pyarrow, pptx, reportlab, openpyxl\n"
-)
+IMPORT_CHECK = "import smartsuite\nimport flask, pyarrow, pptx, reportlab, openpyxl\n"
 
 
 def web_url() -> str:
@@ -67,9 +64,7 @@ def web_url() -> str:
 
 def run(cmd, cwd=None) -> int:
     """运行子进程并继承标准输入输出（日志与 Ctrl+C 自然生效）。"""
-    return subprocess.run(
-        [str(a) for a in cmd], cwd=str(cwd) if cwd else None
-    ).returncode
+    return subprocess.run([str(a) for a in cmd], cwd=str(cwd) if cwd else None).returncode
 
 
 def run_quiet(cmd, cwd=None, timeout=30) -> bool:
@@ -110,7 +105,11 @@ def _python_install_bases():
     for env in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
         base = os.environ.get(env)
         if base:
-            bases.append(Path(base) / "Programs" / "Python" if env == "LOCALAPPDATA" else Path(base) / "Python")
+            bases.append(
+                Path(base) / "Programs" / "Python"
+                if env == "LOCALAPPDATA"
+                else Path(base) / "Python"
+            )
     return bases
 
 
@@ -141,9 +140,7 @@ def find_python():
     py = shutil.which("py")
     if py:
         try:
-            r = subprocess.run(
-                [py, "--list-paths"], capture_output=True, text=True, timeout=15
-            )
+            r = subprocess.run([py, "--list-paths"], capture_output=True, text=True, timeout=15)
             out = (r.stdout or "") + (r.stderr or "")
         except Exception:
             out = ""
@@ -151,7 +148,7 @@ def find_python():
             m = re.search(r"-V:(\d+\.\d+)", line)
             if not m:
                 continue
-            path = line[m.end():].lstrip("* ").strip()
+            path = line[m.end() :].lstrip("* ").strip()
             if path:
                 consider(path, m.group(1))
 

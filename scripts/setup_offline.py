@@ -142,9 +142,12 @@ def target_info(target_py, platform):
     if target_py is None:
         return "当前平台", []
     args = [
-        "--python-version", target_py,
-        "--implementation", "cp",
-        "--abi", f"cp{target_py}",
+        "--python-version",
+        target_py,
+        "--implementation",
+        "cp",
+        "--abi",
+        f"cp{target_py}",
         "--only-binary=:all:",
     ]
     if platform:
@@ -157,12 +160,27 @@ def target_info(target_py, platform):
 
 def download_commands(packages, platform_args):
     return [
-        [sys.executable, "-m", "pip", "download", *_BUILD_DEPS,
-         "-d", str(packages), *platform_args],
-        [sys.executable, "-m", "pip", "download", _RUNTIME_EXTRAS,
-         "-d", str(packages), *platform_args],
-        [sys.executable, str(common.scripts_dir() / "gen_requirements.py"),
-         str(packages)],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "download",
+            *_BUILD_DEPS,
+            "-d",
+            str(packages),
+            *platform_args,
+        ],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "download",
+            _RUNTIME_EXTRAS,
+            "-d",
+            str(packages),
+            *platform_args,
+        ],
+        [sys.executable, str(common.scripts_dir() / "gen_requirements.py"), str(packages)],
     ]
 
 
@@ -220,16 +238,20 @@ def do_download(argv, print_cmd, confirm=False) -> int:
 
     print("[2/4] 下载构建依赖 (setuptools, wheel)...")
     if run_or_print(cmds[0], root, print_cmd) != 0:
-        fail_box("构建依赖下载失败",
-                 "可能原因: 网络不通 / PyPI 不可达 / pip 版本过旧",
-                 "请检查网络后重试")
+        fail_box(
+            "构建依赖下载失败",
+            "可能原因: 网络不通 / PyPI 不可达 / pip 版本过旧",
+            "请检查网络后重试",
+        )
         return 1
 
     print("[3/4] 下载全部运行时依赖 (核心 + Web + 报告 + 开发)...")
     if run_or_print(cmds[1], root, print_cmd) != 0:
-        fail_box("运行时依赖下载失败",
-                 "可能原因: 部分包无对应平台的 wheel 文件 / 网络问题",
-                 "请尝试其他 Python 版本或检查网络")
+        fail_box(
+            "运行时依赖下载失败",
+            "可能原因: 部分包无对应平台的 wheel 文件 / 网络问题",
+            "请尝试其他 Python 版本或检查网络",
+        )
         return 1
 
     print("[4/4] 生成 requirements.txt...")
@@ -257,25 +279,71 @@ def do_download(argv, print_cmd, confirm=False) -> int:
 
 def install_commands(root, packages):
     return [
-        [sys.executable, "-m", "pip", "install",
-         "--no-index", f"--find-links={packages}", "setuptools", "wheel"],
-        [sys.executable, "-m", "pip", "install",
-         "--no-deps", "--no-build-isolation", "-e", str(root)],
-        [sys.executable, "-m", "pip", "install",
-         "--no-index", f"--find-links={packages}",
-         "--no-build-isolation", _RUNTIME_SPEC],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            f"--find-links={packages}",
+            "setuptools",
+            "wheel",
+        ],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-build-isolation",
+            "-e",
+            str(root),
+        ],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            f"--find-links={packages}",
+            "--no-build-isolation",
+            _RUNTIME_SPEC,
+        ],
     ]
 
 
 def install_reqs_commands(root, packages):
     return [
-        [sys.executable, "-m", "pip", "install",
-         "--no-index", f"--find-links={packages}", "setuptools", "wheel"],
-        [sys.executable, "-m", "pip", "install",
-         "--no-index", f"--find-links={packages}",
-         "-r", str(packages / "requirements.txt")],
-        [sys.executable, "-m", "pip", "install",
-         "--no-deps", "--no-build-isolation", "-e", str(root)],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            f"--find-links={packages}",
+            "setuptools",
+            "wheel",
+        ],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            f"--find-links={packages}",
+            "-r",
+            str(packages / "requirements.txt"),
+        ],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-build-isolation",
+            "-e",
+            str(root),
+        ],
     ]
 
 
@@ -299,9 +367,11 @@ def do_install(print_cmd) -> int:
     packages = common.packages_dir()
 
     if not packages.exists() or not any(packages.iterdir()):
-        fail_box("packages/ 文件夹不存在",
-                 "请先在有网机器上运行: setup_offline.bat download",
-                 "然后将整个项目文件夹复制到本机再安装")
+        fail_box(
+            "packages/ 文件夹不存在",
+            "请先在有网机器上运行: setup_offline.bat download",
+            "然后将整个项目文件夹复制到本机再安装",
+        )
         return 1
 
     print("离线安装 — 一键安装")
@@ -317,11 +387,13 @@ def do_install(print_cmd) -> int:
     for idx, title in steps:
         print(f"[{idx + 1}/3] {title}...")
         if run_or_print(cmds[idx], root, print_cmd) != 0:
-            fail_box("运行时依赖安装失败",
-                     "可能原因: Python 版本与下载时不匹配",
-                     f"当前 Python: {sys.version.split()[0]}",
-                     "请确认 packages/ 中的 wheel 与当前 Python 兼容。",
-                     "如版本不匹配，请回到有网机器重新下载对应版本。")
+            fail_box(
+                "运行时依赖安装失败",
+                "可能原因: Python 版本与下载时不匹配",
+                f"当前 Python: {sys.version.split()[0]}",
+                "请确认 packages/ 中的 wheel 与当前 Python 兼容。",
+                "如版本不匹配，请回到有网机器重新下载对应版本。",
+            )
             return 1
 
     print()
@@ -340,9 +412,11 @@ def do_install_reqs(print_cmd) -> int:
     reqs = packages / "requirements.txt"
 
     if not reqs.exists():
-        fail_box("packages/requirements.txt 不存在",
-                 "请先在有网机器上运行: setup_offline.bat download",
-                 "需要 Python 环境以生成 requirements.txt")
+        fail_box(
+            "packages/requirements.txt 不存在",
+            "请先在有网机器上运行: setup_offline.bat download",
+            "需要 Python 环境以生成 requirements.txt",
+        )
         return 1
 
     print("离线安装 — requirements.txt 方式")
@@ -358,10 +432,12 @@ def do_install_reqs(print_cmd) -> int:
     for idx, title in steps:
         print(f"[{idx + 1}/3] {title}...")
         if run_or_print(cmds[idx], root, print_cmd) != 0:
-            fail_box("依赖安装失败",
-                     "可能原因: Python 版本与下载时不匹配",
-                     f"当前 Python: {sys.version.split()[0]}",
-                     "请确认 packages/ 中的 wheel 与当前 Python 兼容。")
+            fail_box(
+                "依赖安装失败",
+                "可能原因: Python 版本与下载时不匹配",
+                f"当前 Python: {sys.version.split()[0]}",
+                "请确认 packages/ 中的 wheel 与当前 Python 兼容。",
+            )
             return 1
 
     _completion_box()

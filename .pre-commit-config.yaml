@@ -1,6 +1,51 @@
+# ============================================================================
+# .pre-commit-config.yaml — 提交前质量门禁（可选启用）
+#
+# 使用方式：
+#   pip install pre-commit
+#   pre-commit install           # 安装 git hooks
+#   pre-commit run --all-files   # 全量运行
+#   pre-commit run --files <f>    # 单文件运行
+#
+# 注意：
+#   - 保持 ruff 版本与 pyproject.toml 中 dev 依赖版本一致（避免规则漂移）
+#   - pre-commit 与 scripts/git-hooks/commit-msg 可共存（pre-commit 管代码质量，
+#     commit-msg 管 Conventional Commits 格式）
+#   - 本配置为本地可选工具，CI 门禁独立于 pre-commit（见 ci.yml/quality.yml）
+# ============================================================================
+
 repos:
+  # --- 基础通用 hooks（pre-commit-hooks v5.0.0）---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace        # 行尾空白
+        exclude: '\.ps1$'               # PowerShell 脚本保持 CRLF + BOM
+      - id: end-of-file-fixer          # 文件末尾统一换行
+        exclude: '\.ps1$'
+      - id: check-yaml                 # YAML 语法（.github/ 与 workflow 配置）
+        # ISSUE_TEMPLATE 的 yml 含 {{ }} 占位符时 YAML 解析器可能误报
+        exclude: '\.github/ISSUE_TEMPLATE/.*\.yml$'
+      - id: check-merge-conflict       # 冲突标记残留
+      - id: detect-private-key         # 误提交私钥检测
+      - id: mixed-line-ending          # 换行符统一（与 .gitattributes 配套）
+        args: ['--fix=lf']
+      - id: check-case-conflict        # 大小写冲突（跨平台文件名）
+      - id: check-added-large-files    # 大文件检测（防止误提交二进制）
+        args: ['--maxkb=500']
+
+  # --- Markdown / YAML / JSON 通用格式化（prettier）---
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: '\.(md|ya?ml|json)$'
+        exclude: '\.github/ISSUE_TEMPLATE/.*\.yml$'
+
+  # --- Python lint（ruff v0.15.20，与 pyproject.toml 一致）---
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.20
     hooks:
-      - id: ruff
-      - id: ruff-format
+      - id: ruff                       # lint 检查
+        args: ['--fix']                # 自动修复可修复的问题
+      - id: ruff-format                # 代码格式化

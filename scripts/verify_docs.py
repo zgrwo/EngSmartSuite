@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # 本地/运行时/工具目录（不入库或无需声明），不参与存在性与未声明检查
 EXCLUDED_DIRS = {
+    ".coverage",  # 覆盖率运行产物（.gitignore 已忽略）
     ".git",
     ".claude",
     ".codegraph",

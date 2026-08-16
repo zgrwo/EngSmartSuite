@@ -78,12 +78,14 @@ _SKIP_SUFFIXES = (".md", ".yml", ".yaml", ".json", ".toml", ".cfg", ".ini", ".ba
 #   新增脚本不在此列——必须配 tests/scripts/ 测试（缺测即失败，防门禁说谎）
 _EXEMPT_SCRIPTS = {
     "common.py",
+    "doctor.py",  # 环境诊断胶水（交互工具，无 CI 要求）
     "falsy_audit.py",
     "gen_requirements.py",
     "generate_images.py",
     "generate_test_data.py",
     "run_smartsuite.py",
     "setup_offline.py",
+    "verify_all.py",  # 一键验证胶水（各步骤由 CI 独立 job 覆盖）
     "verify_consistency.py",
     "verify_cross_consistency.py",
     "verify_manual_claims.py",

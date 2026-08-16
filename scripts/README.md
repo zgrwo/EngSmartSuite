@@ -28,6 +28,8 @@
 
 | 脚本 | 用途 | CI? |
 |------|------|-----|
+| `verify_all.py` | 一键全量验证（构建+测试+文档+审计+守卫，`--quick` 跳过文档） | 本地 |
+| `doctor.py` | 环境就绪性诊断（Python/工具/目录/文件，给出修复指引） | 本地 |
 | `verify_consistency.py` | 验证文档与代码一致性 | ✅ full |
 | `verify_cross_consistency.py` | Web/CLI 分析一致性交叉验证（需运行中 Flask server） | 手动 |
 | `verify_manual_claims.py` | 手册数值实跑验证（CLAIM 标记 → 实际输出） | 手动 |
@@ -35,6 +37,12 @@
 | `falsy_audit.py` | Falsy 模式静态审计（0/空/False 误判风险） | ✅ quality |
 | `test_quality_guard.py` | 测试质量守卫：弱断言（WARN）/缺测/无意义命名（FAIL） | ✅ quality |
 | `run_affected_tests.py` | 增量测试路由：git-diff → 受影响测试（`--dry-run` 预览） | 本地 |
+
+## 工具库
+
+| 脚本 | 用途 |
+|------|------|
+| `retry.py` | 瞬态错误重试装饰器 `@retry_transient`（网络/超时类错误指数退避重试） |
 
 ## 提交规范
 

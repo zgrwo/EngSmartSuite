@@ -1,0 +1,32 @@
+# templates/ — 分析模板目录
+
+本目录存放 43 个分析方法的 **YAML 参数模板**（`example_*.yaml`）与新建模板脚手架。
+
+## 用途
+
+- 每个模板对应一个分析方法（task），定义参数默认值与示例数据说明
+- Web UI 与 CLI 按模板加载参数面板/命令行参数
+- 模板是「11 步注册链」的第 7 步（见 agents.md / CONTRIBUTING.md）
+
+## 模板格式
+
+```yaml
+task: process_capability          # 任务名（与 TASK_REGISTRY 键一致）
+title: 过程能力分析                # 中文标题
+params:                           # 参数默认值（与 orchestrator.DEFAULT_PARAMS 一致）
+  target_col: 强度
+  usl: 55
+  lsl: 35
+```
+
+## 新建模板
+
+- 复制 `new_analysis.py` 脚手架思路：先实现引擎函数 → 注册 TASK_REGISTRY → 再生成 YAML
+- 模板键集必须与 `DEFAULT_PARAMS` 一致（CI consistency job 自动校验）
+
+## 一致性约束
+
+- 模板参数默认值应与 `orchestrator.py` 的 `DEFAULT_PARAMS` 保持一致
+  （当前无自动校验，由 11 步注册链人工保证——见 CONTRIBUTING.md）
+- 新增/修改模板后运行 `python scripts/verify_docs.py --strict`（断链/目录树检查）
+- 模板变更会触发 CI 的服务层 + 工作流测试（见 `scripts/run_affected_tests.py` 映射表）

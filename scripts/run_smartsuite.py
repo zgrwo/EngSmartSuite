@@ -63,8 +63,17 @@ def ensure_deps(root, run_python) -> int:
     whls = list(packages.glob("*.whl")) if packages.exists() else []
     if whls:
         print(f"        检测到离线依赖包 ({len(whls)} 个 wheel)，尝试离线安装...")
-        cmd = [str(run_python), "-m", "pip", "install", "--no-index",
-               f"--find-links={packages}", "-e", f"{root}[web,report]", "--quiet"]
+        cmd = [
+            str(run_python),
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            f"--find-links={packages}",
+            "-e",
+            f"{root}[web,report]",
+            "--quiet",
+        ]
         if common.run(cmd, cwd=root) == 0 and common.run_quiet(
             [str(run_python), "-c", common.IMPORT_CHECK]
         ):
@@ -88,11 +97,13 @@ def launch(root, run_python) -> int:
     print()
     print("  [启动] 启动 Web 界面...")
     print()
-    common.banner([
-        f"浏览器将自动打开 {common.web_url()}",
-        "上传 Excel → 选列 → 点按钮 → 看结果",
-        "按 Ctrl+C 或关闭此窗口停止服务",
-    ])
+    common.banner(
+        [
+            f"浏览器将自动打开 {common.web_url()}",
+            "上传 Excel → 选列 → 点按钮 → 看结果",
+            "按 Ctrl+C 或关闭此窗口停止服务",
+        ]
+    )
     print()
     return common.run([str(run_python), str(root / "run_server.py")], cwd=root)
 

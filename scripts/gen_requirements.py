@@ -49,9 +49,7 @@ def main() -> None:
     pkgs: dict[str, str] = {}
     for ext in ("*.whl", "*.tar.gz", "*.tar.bz2", "*.tar.xz", "*.tgz", "*.zip"):
         for f in sorted(packages_dir.glob(ext)):
-            parsed = (
-                _parse_wheel(f.name) if f.name.endswith(".whl") else _parse_sdist(f.name)
-            )
+            parsed = _parse_wheel(f.name) if f.name.endswith(".whl") else _parse_sdist(f.name)
             if parsed:
                 pkgs[parsed[0]] = parsed[1]
 
