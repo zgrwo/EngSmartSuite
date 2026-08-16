@@ -317,6 +317,13 @@ r = subprocess.run(
 # 仅检查 returncode，不 grep "failed" 单词 —
 # statsmodels ConvergenceWarning 中含有 "failed to converge" 文字会误判
 check("pytest all pass", r.returncode == 0, f"returncode={r.returncode}")
+if r.returncode != 0:
+    # 失败时透传子进程输出（含 FAILED 测试名与失败行），保证 CI 日志可诊断
+    print("  ── pytest 子进程输出（失败详情）──")
+    for line in (r.stdout or "").splitlines()[-40:]:
+        print(f"    {line}")
+    for line in (r.stderr or "").splitlines()[-10:]:
+        print(f"    [stderr] {line}")
 
 # ============================================================
 section("9. CLI")

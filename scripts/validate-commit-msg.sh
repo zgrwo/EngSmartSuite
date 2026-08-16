@@ -39,7 +39,8 @@ case "$subject" in
 esac
 
 # 匹配 Conventional Commits 格式（scope 允许中文与常见分隔符）
-if printf '%s' "$subject" | grep -Eq '^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert|release)(\([^) ]+\))?(!)?: .+$'; then
+# 冒号后必须至少一个非空白字符（防 `fix(engine):  ` 纯空格 subject 通过）
+if printf '%s' "$subject" | grep -Eq '^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert|release)(\([^) ]+\))?(!)?: \S.*$'; then
     len=$(printf '%s' "$subject" | wc -m)
     if [ "$len" -gt 72 ]; then
         echo "❌ 提交标题过长（${len} 字符，上限 72）：${subject}" >&2
