@@ -215,7 +215,7 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev,report]" pytest-cov vulture pip-audit
+        run: pip install -e ".[dev,report,web]" pytest-cov vulture pip-audit
 
       - name: 测试覆盖率
         # fail-under=70：当前基线 ~75%，留余量防跨平台波动；低于 70 即红（防测试退化）
