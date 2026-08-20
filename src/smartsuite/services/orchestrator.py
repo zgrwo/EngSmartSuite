@@ -133,8 +133,9 @@ DEFAULT_PARAMS = {
     "spc_nonparametric": {"side": "two-sided"},
     "process_capability": {"usl": None, "lsl": None, "target": None},
     "trend_forecast": {"forecast_steps": 5},
-    "anomaly_detect": {"method": "iqr", "max_outliers": 5},
-    "change_point": {"min_segment": 10, "n_changepoints": 5},
+    "anomaly_detect": {"method": "iqr", "alpha": 0.05, "max_outliers": 5},
+    # min_segment 不注入默认值：引擎侧自适应默认 max(10, n//20)（审查 2026-08-19 #2.20）
+    "change_point": {"n_changepoints": 5},
     "outlier_consensus": {},
     "box_chart": {
         "mode": "facet",

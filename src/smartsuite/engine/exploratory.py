@@ -30,6 +30,11 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
         )
 
     ci_level = safe_float(req.params.get("ci_level", 0.95), 0.95)
+    if not 0 < ci_level < 1:
+        return AnalysisResult(
+            task="median_ci", status="error",
+            messages=[f"ci_level 必须在 (0, 1) 区间内，当前: {ci_level!r}"],
+        )
     alpha = 1 - ci_level
 
     sorted_data = np.sort(data.values)
@@ -125,6 +130,11 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     except (ValueError, TypeError):
         n_boot = 2000
     ci_level = safe_float(req.params.get("ci_level", 0.95), 0.95)
+    if not 0 < ci_level < 1:
+        return AnalysisResult(
+            task="bootstrap_ci", status="error",
+            messages=[f"ci_level 必须在 (0, 1) 区间内，当前: {ci_level!r}"],
+        )
     alpha = 1 - ci_level
     random_state = int(safe_float(req.params.get("random_state", 42), 42))
 
@@ -262,7 +272,14 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             task="box_chart", status="error", messages=["需要至少 1 个分类列作为分组依据"]
         )
 
-    group_col = req.feature_cols[0]
+    # 分组列优先 params.group_col（Web 面板选择），回退 feature_cols[0]
+    # （审查 2026-08-19 #2.17：此前引擎忽略 params.group_col，UI 选择无效）
+    group_col = req.params.get("group_col") or req.feature_cols[0]
+    if group_col not in req.data.columns:
+        return AnalysisResult(
+            task="box_chart", status="error",
+            messages=[f"分组列「{group_col}」不存在于数据中。可用列: {list(req.data.columns)[:10]}"],
+        )
     sub_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
     mode = req.params.get("mode", "facet")  # "facet" | "nested"
 
@@ -493,11 +510,11 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     y_col = req.target_col
 
     # ── 提取有效数据 ──
-    cols_needed = [y_col, x_col]
     group_col = req.params.get("group_col")
     has_groups = bool(group_col and group_col in req.data.columns)
-    if has_groups:
-        cols_needed.append(group_col)
+    # 去重列名：group_col 与 X/Y 相同时避免重复列导致 sub[col] 返回 DataFrame
+    # （审查 2026-08-19 #1.2：'DataFrame' has no attribute 'unique' 崩溃）
+    cols_needed = list(dict.fromkeys([y_col, x_col] + ([group_col] if has_groups else [])))
 
     sub = req.data[cols_needed].dropna()
     if len(sub) < 3:

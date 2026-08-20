@@ -415,17 +415,41 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     else:
         # 全部 n=1: I 图风格
         xbar_bar = float(agg["xbar"].mean())
-        mr_vals = np.abs(np.diff(agg["xbar"].values))
-        if len(mr_vals) > 0:
-            sigma_xbar = float(np.mean(mr_vals)) / 1.128
+        if has_groups:
+            # 分组 + 全 n=1：σ 用组内 MR 池化（避免跨组差分污染，审查 #2.4），
+            # 规则检测用全局 σ（每组单点自身的 σ=0 会致全组误报）
+            _group_mr_parts: list[np.ndarray] = []
+            _group_series: dict[str, np.ndarray] = {}
+            for gname, gdata_i in agg.groupby("group_val"):
+                g_xbar = gdata_i["xbar"].values
+                g_mr = np.abs(np.diff(g_xbar))
+                if len(g_mr) > 0:
+                    _group_mr_parts.append(g_mr)
+                _group_series[gname] = g_xbar
+            if _group_mr_parts:
+                sigma_xbar = float(np.mean(np.concatenate(_group_mr_parts))) / 1.128
+            else:
+                sigma_xbar = float(agg["xbar"].std(ddof=1)) if len(agg) > 1 else 0.0
+            for gname, g_xbar in _group_series.items():
+                per_group_violations[gname] = {
+                    "xbar": _we_rules_xbar(g_xbar, xbar_bar, sigma_xbar),
+                    "disp": {},
+                }
         else:
-            sigma_xbar = float(agg["xbar"].std())
+            mr_vals = np.abs(np.diff(agg["xbar"].values))
+            if len(mr_vals) > 0:
+                sigma_xbar = float(np.mean(mr_vals)) / 1.128
+            else:
+                sigma_xbar = float(agg["xbar"].std())
         ucl_x = xbar_bar + 3.0 * sigma_xbar
         lcl_x = xbar_bar - 3.0 * sigma_xbar
         lower_label = "—"
         lower_title = "—"
         chart_subtype = "i_chart"
-        xbar_violations = _we_rules_xbar(agg["xbar"].values, xbar_bar, sigma_xbar)
+        if has_groups:
+            xbar_violations = {}
+        else:
+            xbar_violations = _we_rules_xbar(agg["xbar"].values, xbar_bar, sigma_xbar)
         r_violations = {}
 
     # NaN 校验
@@ -434,6 +458,12 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             task="spc_xbar",
             status="error",
             messages=[f"目标列「{y_col}」的所有值均为缺失值或不可计算，无法估计控制限。"],
+        )
+    # 常量列：σ=0 → 控制图无意义（审查 #2.8）
+    if sigma_xbar <= 1e-12:
+        return AnalysisResult(
+            task="spc_xbar", status="error",
+            messages=[f"目标列「{y_col}」为常量列（标准差为 0），控制图无意义。"],
         )
 
     # ── 7. 图表渲染 ──
@@ -446,7 +476,12 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     ax1 = fig.add_subplot(n_subplots * 100 + 11) if n_subplots == 2 else fig.add_subplot(111)
 
     # 构建统一索引 — 按 X 值排序，同一 X 值下按分组排
-    x_unique = sorted(agg["x_val"].unique(), key=lambda v: (isinstance(v, (int, float)), str(v)))
+    # 审查 2026-08-19 #2.2：数值 X 按字符串字典序排序（1,10,11,2,...）导致图表顺序错乱
+    x_unique = sorted(
+        agg["x_val"].unique(),
+        key=lambda v: ((0, float(v)) if isinstance(v, (int, float)) and not isinstance(v, bool)
+                       else (1, str(v))),
+    )
     x_to_idx = {v: i for i, v in enumerate(x_unique)}
     agg["_idx"] = agg["x_val"].map(x_to_idx)
 
@@ -615,7 +650,12 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                     g_vio_set.add(idx)
             if g_vio_set:
                 g_vio_idx = sorted(g_vio_set)
-                g_multi_sorted = gdata[gdata["multi"]]
+                # 审查 #2.3：I 图（全 n=1）gdata["multi"] 恒 False → 标记全丢；
+                # 此时违规索引直接对应组内行
+                if chart_subtype == "i_chart":
+                    g_multi_sorted = gdata
+                else:
+                    g_multi_sorted = gdata[gdata["multi"]]
                 viol_data = g_multi_sorted.iloc[[i for i in g_vio_idx if i < len(g_multi_sorted)]]
                 if len(viol_data) > 0:
                     ax1.scatter(
@@ -631,10 +671,12 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # 违规点标记（无分组时用全局检测）
     if not has_groups and all_xbar_violated:
-        multi_only = agg[agg["multi"]]
-        vio_idx_list = [i for i in all_xbar_violated if i < len(multi_only)]
+        # 审查 2026-08-19 #2.3：I 图路径（全 n=1）agg["multi"] 恒 False，
+        # 违规索引基于 agg 全表，此前过滤 multi 后标记全部丢失
+        viol_frame = agg if chart_subtype == "i_chart" else agg[agg["multi"]]
+        vio_idx_list = [i for i in all_xbar_violated if i < len(viol_frame)]
         if vio_idx_list:
-            vio_subset = multi_only.iloc[vio_idx_list]
+            vio_subset = viol_frame.iloc[vio_idx_list]
             ax1.scatter(
                 vio_subset["_idx"],
                 vio_subset["xbar"],
@@ -800,12 +842,13 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     violation_rows: list[dict] = []
     if has_groups and per_group_violations:
         for gname, gv in per_group_violations.items():
+            # 审查 #2.3：I 图分组模式下 multi 帧为空，取组内行帧
+            if chart_subtype == "i_chart":
+                _gframe = agg[agg["group_val"] == gname]
+            else:
+                _gframe = agg[agg["multi"]]
             for rule_name, idxs in gv["xbar"].items():
-                v_labels = [
-                    str(agg[agg["multi"]].iloc[i]["x_val"])
-                    for i in idxs
-                    if i < len(agg[agg["multi"]])
-                ]
+                v_labels = [str(_gframe.iloc[i]["x_val"]) for i in idxs if i < len(_gframe)]
                 violation_rows.append(
                     {
                         "分组": str(gname),
@@ -835,10 +878,9 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             len(gv["xbar"]) + len(gv["disp"]) for gv in per_group_violations.values()
         )
     else:
+        _vio_frame = agg if chart_subtype == "i_chart" else agg[agg["multi"]]
         for rule_name, idxs in xbar_violations.items():
-            v_labels = [
-                str(agg[agg["multi"]].iloc[i]["x_val"]) for i in idxs if i < len(agg[agg["multi"]])
-            ]
+            v_labels = [str(_vio_frame.iloc[i]["x_val"]) for i in idxs if i < len(_vio_frame)]
             violation_rows.append(
                 {
                     "图表": "X-bar",
@@ -979,6 +1021,15 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     data = req.data.copy()
     y_col = req.target_col
 
+    # 审查 2026-08-19 #2.8：常见中文二值串（合格/不合格、是/否）映射为 0/1，
+    # 使 p/np 图可直接用于质量记录列（此前只能吃数值列）
+    if y_col in data.columns and not pd.api.types.is_numeric_dtype(data[y_col]):
+        _bin_map = {"合格": 1, "不合格": 0, "是": 1, "否": 0,
+                    "TRUE": 1, "FALSE": 0, "True": 1, "False": 0, "true": 1, "false": 0}
+        _mapped = data[y_col].map(_bin_map)
+        if _mapped.notna().sum() == data[y_col].notna().sum() and _mapped.notna().sum() > 0:
+            data[y_col] = _mapped.astype(float)
+
     # X 列
     x_col = req.feature_cols[0] if req.feature_cols else None
     if x_col and x_col in data.columns:
@@ -1045,6 +1096,15 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         agg["stat"] = agg["count"] / agg["n_vals"]
         stat_name = "不良率(p)"
         p_bar = float(agg["count"].sum() / agg["n_vals"].sum())
+        # 审查 2026-08-19 #2.8：p 图要求 0/1 比例数据；若数据为百分比/任意数值
+        # （如 0-100 的不良率列），p_bar>1 → sqrt(负) → UCL/LCL=NaN 静默污染
+        if not 0 <= p_bar <= 1:
+            return AnalysisResult(
+                task="spc_attribute", status="error",
+                messages=["p 图要求目标列为 0/1 不良比例数据；"
+                          f"当前总体不良率={p_bar:.4f} 超出 [0,1]，"
+                          "请检查数据是否为 0/1 编码（百分比需除以 100）"],
+            )
         cl = p_bar
         ucl_const = None
 
@@ -1102,7 +1162,11 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     violations = int((above | below).sum())
 
     # 图表
-    x_unique = sorted(agg["x_val"].unique(), key=lambda v: (isinstance(v, (int, float)), str(v)))
+    x_unique = sorted(
+        agg["x_val"].unique(),
+        key=lambda v: ((0, float(v)) if isinstance(v, (int, float)) and not isinstance(v, bool)
+                       else (1, str(v))),
+    )
     x_to_idx = {v: i for i, v in enumerate(x_unique)}
     agg["_idx"] = agg["x_val"].map(x_to_idx)
 
@@ -1556,6 +1620,13 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=[f"λ (平滑参数) 必须在 (0, 1] 范围内，当前值: {lam}"],
         )
+    # 审查 2026-08-19 #2.8：L≤0 时控制限退化/反转导致全部点误报警
+    if L <= 0:
+        return AnalysisResult(
+            task="spc_ewma",
+            status="error",
+            messages=[f"L (控制限宽度) 必须大于 0，当前值: {L}"],
+        )
 
     user_mu = req.params.get("mu")
     user_sigma = req.params.get("sigma")
@@ -1568,6 +1639,13 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
             )
+    # 审查 2026-08-19 #2.8：只传一个时此前静默忽略两个；改为提示
+    if (user_mu is None) != (user_sigma is None):
+        return AnalysisResult(
+            task="spc_ewma",
+            status="error",
+            messages=["mu/sigma 必须同时提供或同时省略（当前只提供了一个）"],
+        )
 
     # 分组处理
     group_results = []
@@ -1744,7 +1822,8 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     参数:
         side: "two-sided"(默认) | "upper"(越小越好,只设上限) | "lower"(越大越好,只设下限)
     """
-    data = req.data[req.target_col].dropna()
+    # 审查 2026-08-19 #1.5：dropna 不过滤 ±Inf，norm.fit 对 Inf 直接抛异常
+    data = req.data[req.target_col].replace([np.inf, -np.inf], np.nan).dropna()
     n = len(data)
 
     if n < 10:
@@ -1757,6 +1836,13 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     side = req.params.get("side", "two-sided")
     values = data.values
 
+    # 审查 2026-08-19 #2.5：常量列 → 所有 KS p 为 nan → 假"过程稳定 ✓ CL=nan"
+    if float(np.std(values, ddof=1)) <= 1e-12:
+        return AnalysisResult(
+            task="spc_nonparametric", status="error",
+            messages=["目标列为常量列（方差为 0），无法进行分布拟合与控制限计算"],
+        )
+
     # ── 1. 分布拟合 (Normal / Lognormal / Weibull) ──
     fits = {}
     # Normal
@@ -1764,15 +1850,18 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     ks_n = sp_stats.kstest(values, sp_stats.norm(loc=mu, scale=sigma).cdf)
     fits["Normal"] = {"dist": sp_stats.norm, "args": (mu, sigma), "ks_p": ks_n.pvalue}
 
-    # Lognormal
+    # Lognormal（审查 2026-08-19 #2.8：lognorm.fit 与 Weibull 对称加保护）
     if (values > 0).all():
-        shape_ln, loc_ln, scale_ln = sp_stats.lognorm.fit(values, floc=0)
-        ks_ln = sp_stats.kstest(values, sp_stats.lognorm(shape_ln, loc=0, scale=scale_ln).cdf)
-        fits["Lognormal"] = {
-            "dist": sp_stats.lognorm,
-            "args": (shape_ln, 0, scale_ln),
-            "ks_p": ks_ln.pvalue,
-        }
+        try:
+            shape_ln, loc_ln, scale_ln = sp_stats.lognorm.fit(values, floc=0)
+            ks_ln = sp_stats.kstest(values, sp_stats.lognorm(shape_ln, loc=0, scale=scale_ln).cdf)
+            fits["Lognormal"] = {
+                "dist": sp_stats.lognorm,
+                "args": (shape_ln, 0, scale_ln),
+                "ks_p": ks_ln.pvalue,
+            }
+        except Exception:
+            logger.debug("Lognormal fit failed in spc_nonparametric", exc_info=True)
 
     # Weibull
     if (values > 0).all():

@@ -29,10 +29,16 @@ def safe_float(value, default: float) -> float:
     if value is None:
         return default
     try:
-        return float(value)
+        result = float(value)
     except (ValueError, TypeError):
         logger.debug("参数值转换失败: %r → 使用默认值 %s", value, default)
         return default
+    # 审查 2026-08-19 #2.6：float("nan")/float("inf") 不抛异常但会产生
+    # 非有限值，docstring 承诺"转换失败返回默认值"，NaN/Inf 视为转换失败
+    if not np.isfinite(result):
+        logger.debug("参数值非有限: %r → 使用默认值 %s", value, default)
+        return default
+    return result
 
 
 def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")):

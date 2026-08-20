@@ -43,6 +43,46 @@ from smartsuite.engine._utils import safe_float as _safe_float  # 共享工具�
 from smartsuite.engine._utils import threshold_label  # 共享工具函数
 
 
+def _resolve_group_col(req, task_name: str) -> tuple[str | None, AnalysisResult | None]:
+    """解析分组列参数：None 回退 feature_cols[0]，无效时返回 (None, 中文错误结果)。
+
+    审查 2026-08-19 #1.1/#2.10：DEFAULT_PARAMS 恒注入 group_col=None，
+    双参 .get(key, default) 会返回 None 而非默认值，导致 req.data[[target, None]]
+    KeyError；且 group_col 指向不存在列时同样 KeyError。统一在此处兜底。
+    """
+    group_col = req.params.get("group_col")
+    if group_col is None:
+        group_col = req.feature_cols[0] if req.feature_cols else None
+    if group_col is None or group_col not in req.data.columns:
+        return None, AnalysisResult(
+            task=task_name,
+            status="error",
+            messages=[f"分组列(group_col)无效或不存在: {group_col!r}，请检查参数或数据列名"],
+        )
+    return group_col, None
+
+
+def _safe_int(value, default=None):
+    """安全转换整数参数（CLI/YAML 字符串防护），失败返回 default。"""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _proportion_power(n: int, p0: float, p1: float, z_alpha: float) -> float:
+    """双比例 z 检验的统计功效（每组 n 样本，双侧近似）。
+
+    审查 2026-08-19 #2.10：power_analysis 的 proportion 模式此前误用
+    FTestAnovaPower 画 ANOVA 功效曲线；此处为比例检验自身的功效公式。
+    """
+    se = np.sqrt((p0 * (1 - p0) + p1 * (1 - p1)) / max(n, 1))
+    d = abs(p1 - p0)
+    if se <= 0:
+        return 0.0
+    return float(sp_stats.norm.cdf(d / se - z_alpha))
+
+
 def _significance_stars(p):
     """显著性星号标记（使用 _constants.py 中的 SIG_* 阈值）。"""
     if p is None or np.isnan(p):
@@ -188,14 +228,22 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 零方差提前检查：避免浪费图表生成计算 (P2 fix: 移到图表生成之前) ──
     if pd.isna(top_value):
-        return AnalysisResult(
-            task="correlation",
-            status="error",
-            messages=[
-                f"目标列「{req.target_col}」方差为零（常量列），无法计算相关性分析。"
-                f"请检查数据中该列是否所有值相同。"
-            ],
-        )
+        # 审查 2026-08-19 #2.6/#3.4：原消息一律指向目标列，但常量特征列
+        # （或有效样本不足）同样会导致 top_value=NaN，消息须指向真实原因
+        const_cols = [
+            c for c in cols if req.data[c].nunique(dropna=True) <= 1
+        ]
+        if const_cols:
+            msg = (
+                f"特征列「{const_cols[0]}」为常量列（无变异），无法计算相关性分析。"
+                f"请移除该列或检查数据。"
+            )
+        else:
+            msg = (
+                f"目标列「{req.target_col}」方差为零（常量列）或有效样本不足，"
+                f"无法计算相关性分析。"
+            )
+        return AnalysisResult(task="correlation", status="error", messages=[msg])
 
     # ── 热力图增强：只标注显著单元格，添加星号 ──
     n = len(cols)
@@ -536,6 +584,21 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     if len(cols) < 1:
         return AnalysisResult(
             task="anova", status="error", messages=["没有可用于 ANOVA 分析的特征列"]
+        )
+
+    # 审查 2026-08-19 #1.4：连续特征被当因子时水平数 = 唯一值数，
+    # n=6000 连续数据 → 数千个箱体 → matplotlib 原生崩溃（进程被杀，无 traceback）。
+    # 水平数超限时明确报错，引导用户改用回归或先分箱。
+    _level_counts = {c: int(req.data[c].nunique(dropna=True)) for c in cols}
+    _high_card = {c: k for c, k in _level_counts.items() if k > 200}
+    if _high_card:
+        return AnalysisResult(
+            task="anova", status="error",
+            messages=[
+                "因子列水平数过多，ANOVA 按因子处理会生成数千个分组，无法分析: "
+                + ", ".join(f"「{c}」({k} 个水平)" for c, k in _high_card.items())
+                + "。若为连续变量请改用 regression 分析，或先对数据分箱。"
+            ],
         )
 
     # 构建公式：可选两两交互项
@@ -1056,10 +1119,10 @@ def _ht_cochran_q(req: AnalysisRequest) -> AnalysisResult:
 
 def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
     """Kolmogorov-Smirnov 双样本检验。"""
-    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P3 fix)
-    group_col = req.params.get("group_col")
-    if group_col is None:
-        group_col = req.feature_cols[0] if req.feature_cols else "group"
+    # 显式检查 None + 列存在性：避免 DEFAULT_PARAMS 注入 None 阻断 fallback (P3 fix)
+    group_col, group_err = _resolve_group_col(req, "hypothesis_test")
+    if group_err is not None:
+        return group_err
     groups = req.data[group_col].unique()
     if len(groups) != 2:
         return AnalysisResult(
@@ -1487,9 +1550,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
     # ── Kruskal-Wallis H 检验 (非参数 ANOVA) ──
     if test_type in ("kruskal_wallis", "kruskal"):
-        group_col = req.params.get(
-            "group_col", req.feature_cols[0] if req.feature_cols else "group"
-        )
+        group_col, group_err = _resolve_group_col(req, "hypothesis_test")
+        if group_err is not None:
+            return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
         groups = sub[group_col].unique()
         if len(groups) < 2:
@@ -1792,9 +1855,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
     # ── Jonckheere-Terpstra 趋势检验 ──
     if test_type == "jonckheere":
-        group_col = req.params.get(
-            "group_col", req.feature_cols[0] if req.feature_cols else "group"
-        )
+        group_col, group_err = _resolve_group_col(req, "hypothesis_test")
+        if group_err is not None:
+            return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
         groups = sub[group_col].unique()
         if len(groups) < 3:
@@ -1974,10 +2037,10 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # ── 独立双样本检验 ──
-    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P3 fix)
-    group_col = req.params.get("group_col")
-    if group_col is None:
-        group_col = req.feature_cols[0] if req.feature_cols else "group"
+    # 显式检查 None + 列存在性：避免 DEFAULT_PARAMS 注入 None 阻断 fallback (P3 fix)
+    group_col, group_err = _resolve_group_col(req, "hypothesis_test")
+    if group_err is not None:
+        return group_err
     groups = req.data[group_col].unique()
     if len(groups) != 2:
         return AnalysisResult(
@@ -2165,8 +2228,10 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     X = df[cols]
     y = df[req.target_col]
-    max_depth = req.params.get("max_depth", 5)
-    random_state = req.params.get("random_state", 42)
+    # 审查 2026-08-19 #1.4：字符串 max_depth/random_state 会触发 sklearn
+    # InvalidParameterError，此处安全转换
+    max_depth = _safe_int(req.params.get("max_depth", 5), 5)
+    random_state = _safe_int(req.params.get("random_state", 42), 42)
 
     tree = DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
     tree.fit(X, y)
@@ -2428,6 +2493,12 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
     effect_size = float(effect_size)
     alpha = float(alpha)
     target_power = float(target_power)
+    # 审查 2026-08-19 #1.4：effect_size=0 时 statsmodels solve_power 抛 ValueError
+    if effect_size == 0:
+        return AnalysisResult(
+            task="power_analysis", status="error",
+            messages=["effect_size 不能为 0（无法检测零效应量），请输入非零值"],
+        )
     if current_n is not None:
         try:
             current_n = int(current_n)
@@ -2454,7 +2525,12 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
             )
             label = f"独立样本 t 检验所需每组样本量: {required} (总计 {required * 2})"
         elif test_type == "anova":
-            n_groups = req.params.get("n_groups", 3)
+            n_groups = _safe_int(req.params.get("n_groups", 3))
+            if n_groups is None or n_groups < 2:
+                return AnalysisResult(
+                    task="power_analysis", status="error",
+                    messages=["n_groups 必须为 ≥2 的整数"],
+                )
             from statsmodels.stats.power import FTestAnovaPower
 
             analysis = FTestAnovaPower()
@@ -2471,8 +2547,20 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
             required = ceil(total_n / n_groups)
             label = f"ANOVA ({n_groups}组) 所需每组样本量: {required} (总计 {required * n_groups})"
         elif test_type == "proportion":
-            p0 = req.params.get("p0", 0.5)
-            p1 = req.params.get("p1", 0.6)
+            # 审查 2026-08-19 #1.4：p0/p1 需 float 防护（CLI/YAML 字符串 → TypeError）
+            try:
+                p0 = float(req.params.get("p0", 0.5))
+                p1 = float(req.params.get("p1", 0.6))
+            except (ValueError, TypeError):
+                return AnalysisResult(
+                    task="power_analysis", status="error",
+                    messages=["参数 p0/p1 值无效，请输入 (0,1) 区间内的数值"],
+                )
+            if not (0 < p0 < 1 and 0 < p1 < 1):
+                return AnalysisResult(
+                    task="power_analysis", status="error",
+                    messages=[f"p0/p1 必须在 (0, 1) 区间内，当前: p0={p0}, p1={p1}"],
+                )
             z_alpha = abs(sp_stats.norm.ppf(alpha / 2))
             z_beta = abs(sp_stats.norm.ppf(1 - target_power))
             d = abs(p1 - p0)
@@ -2503,11 +2591,21 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
                 for n in n_range
             ]
         else:
-            n_groups = req.params.get("n_groups", 3)
-            powers = [
-                FTestAnovaPower().power(
-                    effect_size=abs(effect_size), nobs=n * n_groups, k_groups=n_groups, alpha=alpha
-                )
+            # 审查 2026-08-19 #2.10：proportion 模式此前误用 ANOVA 功效曲线
+            if test_type == "proportion":
+                p0 = float(req.params.get("p0", 0.5))
+                p1 = float(req.params.get("p1", 0.6))
+                z_alpha = abs(sp_stats.norm.ppf(alpha / 2))
+                powers = [
+                    _proportion_power(n, p0, p1, z_alpha)
+                    for n in n_range
+                ]
+            else:
+                n_groups = _safe_int(req.params.get("n_groups", 3)) or 3
+                powers = [
+                    FTestAnovaPower().power(
+                        effect_size=abs(effect_size), nobs=n * n_groups, k_groups=n_groups, alpha=alpha
+                    )
                 for n in n_range
             ]
 
@@ -2651,6 +2749,18 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
     sub = req.data[[col1, col2]].dropna()
     if len(sub) < 4:
         return AnalysisResult(task="contingency", status="error", messages=["有效数据不足"])
+
+    # 审查 2026-08-19 #1.4：连续列被当类别 → crosstab 生成 n×n 巨型表
+    # （6000 行连续数据 → 6000×6000 表，chi2_contingency/绘图原生崩溃）
+    _n1, _n2 = int(sub[col1].nunique()), int(sub[col2].nunique())
+    if _n1 > 200 or _n2 > 200:
+        return AnalysisResult(
+            task="contingency", status="error",
+            messages=[
+                f"列联表维度过高（{_n1} × {_n2}），无法分析。"
+                f"列联表分析需要分类列（水平数较少），连续变量请改用 correlation/regression。"
+            ],
+        )
 
     # 列联表
     ctab = pd.crosstab(sub[col1], sub[col2])

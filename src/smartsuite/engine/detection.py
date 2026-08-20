@@ -326,7 +326,10 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
 
     min_segment = req.params.get("min_segment", max(10, n // 20))
     max_cp = req.params.get("n_changepoints", 5)
-    min_peak_ratio = req.params.get("min_peak_ratio", 0.1)
+    # 标准化峰值阈值（审查 2026-08-19 #2.6）：CUSUM 统计量量纲为 σ√L，
+    # 与单点量纲的 data_range 比较是量纲错误；改为与 σ√L 比较。
+    # 噪声下 max|W(t)|（布朗桥最大值）期望 ≈1.2，默认 2.0 对应每段约 5% 误报率。
+    min_peak_ratio = req.params.get("min_peak_ratio", 2.0)
 
     # 参数类型安全转换 (CLI/YAML 传入字符串时防护)
     try:
@@ -343,14 +346,29 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
             ],
         )
 
+    # 参数范围校验（审查 2026-08-19 #1.3）
+    if min_segment < 1:
+        return AnalysisResult(
+            task="change_point", status="error",
+            messages=[f"min_segment 必须 ≥ 1，当前: {min_segment}"],
+        )
+    if min_segment > n // 2:
+        return AnalysisResult(
+            task="change_point", status="error",
+            messages=[
+                f"min_segment({min_segment}) 超过数据长度的一半({n // 2})，"
+                "无法在段内搜索变点"
+            ],
+        )
+
     values = data.values
     changepoints: list[int] = []
     segments_for_split = [(0, n)]
 
-    # 二元分割：每次在段内找最大 CUSUM 位置
+    # 二元分割：每次在段内找标准化 CUSUM 峰值最大的位置
     while len(changepoints) < max_cp and segments_for_split:
         best_cp = None
-        best_stat = 0
+        best_stat_norm = 0.0
         best_seg_idx = -1
 
         for seg_i, (start, end) in enumerate(segments_for_split):
@@ -358,6 +376,10 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
             if seg_len < 2 * min_segment:
                 continue
             seg_vals = values[start:end]
+            # 常量段无变点可检测，跳过（避免 σ=0 除零）
+            seg_std = float(np.std(seg_vals, ddof=1)) if len(seg_vals) >= 2 else 0.0
+            if seg_std <= 0:
+                continue
             seg_mean = np.mean(seg_vals)
             # CUSUM 统计量
             cumsum = np.cumsum(seg_vals - seg_mean)
@@ -369,18 +391,17 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
                 continue
             peak_idx = np.argmax(cusum_abs[search_start:search_end]) + search_start
             peak_val = cusum_abs[peak_idx]
+            # 标准化：除以 σ√L，消除段长/方差对跨段比较的影响（审查 #2.6 量纲修复）
+            peak_norm = peak_val / (seg_std * np.sqrt(seg_len))
 
-            if peak_val > best_stat:
-                best_stat = peak_val
+            if peak_norm > best_stat_norm:
+                best_stat_norm = peak_norm
                 best_cp = start + peak_idx
                 best_seg_idx = seg_i
 
         if best_cp is not None and best_cp not in changepoints:
-            # 检查峰值是否超过数据变化范围的最小比例
-            seg_start, seg_end = segments_for_split[best_seg_idx]
-            segment_vals = values[seg_start:seg_end]
-            data_range = float(np.max(segment_vals) - np.min(segment_vals))
-            if data_range > 0 and best_stat < min_peak_ratio * data_range:
+            # 标准化峰值阈值判定（噪声下 max|W| ≈ 1.2，默认 2.0）
+            if best_stat_norm < min_peak_ratio:
                 break
             changepoints.append(best_cp)
             old_start, old_end = segments_for_split[best_seg_idx]
@@ -798,8 +819,25 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
 
     if method == "grubbs":
         # Grubbs 检验：每次检测最大偏差，迭代最多 5 个异常点
-        alpha_g = req.params.get("alpha", 0.05)
-        max_outliers = req.params.get("max_outliers", 5)
+        # 类型安全转换（审查 2026-08-19 #1.4：CLI/YAML 字符串参数会 TypeError）
+        try:
+            alpha_g = float(req.params.get("alpha", 0.05))
+            max_outliers = int(req.params.get("max_outliers", 5))
+        except (ValueError, TypeError):
+            return AnalysisResult(
+                task="anomaly_detect", status="error",
+                messages=["Grubbs 检验参数格式错误：alpha 需为数值，max_outliers 需为整数"],
+            )
+        if not 0 < alpha_g < 1:
+            return AnalysisResult(
+                task="anomaly_detect", status="error",
+                messages=[f"alpha 必须在 (0, 1) 区间内，当前: {alpha_g!r}"],
+            )
+        if max_outliers < 1:
+            return AnalysisResult(
+                task="anomaly_detect", status="error",
+                messages=[f"max_outliers 必须 ≥ 1，当前: {max_outliers}"],
+            )
         vals = data.values.copy()
         mask = np.zeros(len(data), dtype=bool)
         keep_idx = np.arange(len(data))

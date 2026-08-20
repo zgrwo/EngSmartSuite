@@ -63,6 +63,9 @@ def _breusch_pagan(model, X):
         aux_model = sm.OLS(resid_sq, X).fit()
         ess = np.sum((aux_model.fittedvalues - resid_sq_mean) ** 2)
         rss = np.sum((resid_sq - aux_model.fittedvalues) ** 2)
+        # 审查 2026-08-19：#完美拟合时 ess=rss=0 → LM=0/0=NaN，返回 None 由调用方显示 N/A
+        if ess + rss <= 1e-12:
+            return None, None
         lm = n * ess / (ess + rss)
         k = X.shape[1] - 1
         p_val = float(sp_stats.chi2.sf(lm, max(k, 1)))
@@ -90,10 +93,23 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"有效样本量({len(df)})不足，需要至少{len(cols) + 2}条"],
         )
 
+    # 审查 2026-08-19 #1.4：常量目标列 → R²=0/0=-inf 且误报异方差/自相关诊断
+    if df[req.target_col].std() <= 1e-12:
+        return AnalysisResult(
+            task="regression", status="error",
+            messages=[f"目标列「{req.target_col}」为常量列（方差为 0），回归模型无意义"],
+        )
+
     try:
         X = sm.add_constant(df[cols])
         y = df[req.target_col]
         model = sm.OLS(y, X).fit()
+        # 审查 2026-08-19 #1.4：输出守卫——R² 非有限时替换为哨兵 N/A
+        if not np.isfinite(model.rsquared):
+            return AnalysisResult(
+                task="regression", status="error",
+                messages=["R² 计算为非有限值（数据可能为常量或退化），回归结果不可用"],
+            )
         residuals = model.resid
         fitted = model.fittedvalues
         n = len(y)
@@ -346,6 +362,13 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
             ],
         )
 
+    # 审查 2026-08-19 #1.4：常量目标列 → R²=-inf 且误报诊断
+    if df[req.target_col].std() <= 1e-12:
+        return AnalysisResult(
+            task="response_surface", status="error",
+            messages=[f"目标列「{req.target_col}」为常量列（方差为 0），响应面模型无意义"],
+        )
+
     try:
         X1, X2 = df[c1].values, df[c2].values
         y = df[req.target_col].values
@@ -392,6 +415,12 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 最优点查找 ──
     direction = req.params.get("direction", "maximize")
+    # 审查 2026-08-19 #2.6：direction 白名单校验（拼写错误静默反转方向）
+    if direction not in ("maximize", "minimize"):
+        return AnalysisResult(
+            task="response_surface", status="error",
+            messages=[f"方向参数 direction 无效: {direction!r}，请使用 'maximize' 或 'minimize'"],
+        )
     # colormap 方向适配: maximize→绿高红低, minimize→红低绿高(RdYlGn反转)
     _rsm_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
     if direction == "minimize":
@@ -557,7 +586,24 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     if total_points > 50000:
         n_points = max(2, int(50000 ** (1.0 / len(ranges))))
     direction = req.params.get("direction", "maximize")
+    # 审查 2026-08-19 #2.6：direction 白名单校验
+    if direction not in ("maximize", "minimize"):
+        return AnalysisResult(
+            task="grid_search", status="error",
+            messages=[f"方向参数 direction 无效: {direction!r}，请使用 'maximize' 或 'minimize'"],
+        )
     _gs_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
+
+    # 审查 2026-08-19 #2.1：isinstance 校验对 NaN 恒真、NaN>=NaN 恒假，
+    # [NaN, NaN] 能穿透校验并产生全 NaN 网格 → 显式 isfinite 兜底
+    _nan_bounds = [c for c, (lo, hi) in ranges.items()
+                   if not (np.isfinite(lo) and np.isfinite(hi))]
+    if _nan_bounds:
+        return AnalysisResult(
+            task="grid_search", status="error",
+            messages=[f"搜索范围包含无效数值 (NaN/Inf): {_nan_bounds}，"
+                      "请检查 ranges 格式，正确格式如 料温:180,220"],
+        )
 
     grids = {col: np.linspace(lo, hi, n_points) for col, (lo, hi) in ranges.items()}
     mesh = np.meshgrid(*grids.values(), indexing="ij")
@@ -577,6 +623,13 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             task="grid_search",
             status="error",
             messages=[f"有效样本({len(df)})不足"],
+        )
+
+    # 审查 2026-08-19 #2.6：常量目标列时 CV R² 恒为 1.000、最优参数无意义
+    if df[req.target_col].std() <= 1e-12:
+        return AnalysisResult(
+            task="grid_search", status="error",
+            messages=[f"目标列「{req.target_col}」为常量列，网格搜索最优参数无意义"],
         )
 
     try:
@@ -707,13 +760,13 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=["需要提供优化目标 (objectives)"],
         )
-    # 校验每个 objective 包含必需的 "col" 键
+    # 校验每个 objective 必须是包含 "col" 键的字典（审查 2026-08-19 #2.6）
     for i, obj in enumerate(objectives):
-        if "col" not in obj:
+        if not isinstance(obj, dict) or "col" not in obj:
             return AnalysisResult(
                 task="multi_objective",
                 status="error",
-                messages=[f"第 {i + 1} 个优化目标缺少 'col' 字段"],
+                messages=[f"第 {i + 1} 个优化目标格式无效，需为含 'col' 字段的字典: {obj!r}"],
             )
 
     # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P3 fix)
@@ -728,6 +781,14 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         )
     if len(weights) == 0:
         return AnalysisResult(task="multi_objective", status="error", messages=["权重列表不能为空"])
+    # 审查 2026-08-19 #2.6：权重元素需数值化（字符串权重 → np.sum TypeError）
+    try:
+        weights = [float(w) for w in weights]
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="multi_objective", status="error",
+            messages=["权重列表必须全部为数值"],
+        )
     weight_sum = np.sum(weights)
     if weight_sum <= 0:
         return AnalysisResult(
@@ -778,12 +839,13 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
 
     valid_idx = req.data.index[valid_rows]
     best_pos = np.argmax(scores[valid_rows])
-    best_idx = valid_idx[best_pos]  # DataFrame 索引标签（用于 numpy 数组访问）
-    best_row_iloc = req.data.index.get_loc(best_idx)  # 转为位置索引（用于 iloc）
-    if isinstance(best_row_iloc, slice):
-        best_row_iloc = best_row_iloc.start
-    elif hasattr(best_row_iloc, "__iter__"):
-        best_row_iloc = list(best_row_iloc)[0]
+    # 审查 2026-08-19 #1.4：重复且非连续 index 时 get_loc 返回布尔掩码，
+    # list(掩码)[0]=False → iloc[False] TypeError；改为 flatnonzero 取首个命中位置
+    if req.data.index.has_duplicates:
+        dup_positions = np.flatnonzero(req.data.index == valid_idx[best_pos])
+        best_row_iloc = int(dup_positions[0])
+    else:
+        best_row_iloc = int(req.data.index.get_loc(valid_idx[best_pos]))
     best_params = {
         c: req.data.iloc[best_row_iloc][c] for c in req.feature_cols if c in req.data.columns
     }
@@ -1173,6 +1235,12 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # 二值化标签
     unique_labels = sub[label_col].unique()
+    # 审查 2026-08-19 #1.4：目标/预测列全 NaN 时 sub 为空 → sorted([])[-1] IndexError
+    if len(unique_labels) < 2:
+        return AnalysisResult(
+            task="roc_analysis", status="error",
+            messages=["目标列需要至少 2 个类别（当前有效样本不足或类别数 <2）"],
+        )
     if len(unique_labels) > 2:
         return AnalysisResult(
             task="roc_analysis", status="error", messages=["目标列需要恰好 2 个不同值"]
@@ -1501,13 +1569,16 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         best_alpha = alpha
         train_r2 = None
     elif l1_ratio < 1.0:
+        # cv 下限 2：len(sub)//3 可能为 1 → sklearn InvalidParameterError（审查 2026-08-19 #1.4）
+        _cv = max(2, min(5, len(sub) // 3))
         model = ElasticNetCV(
-            l1_ratio=[l1_ratio], cv=min(5, len(sub) // 3), max_iter=_lasso_max_iter, random_state=42
+            l1_ratio=[l1_ratio], cv=_cv, max_iter=_lasso_max_iter, random_state=42
         ).fit(X_scaled, y)
         best_alpha = float(model.alpha_)
         train_r2 = float(model.score(X_scaled, y))
     else:
-        model = LassoCV(cv=min(5, len(sub) // 3), max_iter=_lasso_max_iter, random_state=42).fit(
+        _cv = max(2, min(5, len(sub) // 3))
+        model = LassoCV(cv=_cv, max_iter=_lasso_max_iter, random_state=42).fit(
             X_scaled, y
         )
         best_alpha = float(model.alpha_)

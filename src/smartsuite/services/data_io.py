@@ -3,6 +3,7 @@
 import logging
 import uuid
 
+import numpy as np
 import pandas as pd
 
 from smartsuite.core.exceptions import ValidationError
@@ -92,6 +93,9 @@ def preprocess_data(
         }
 
     df = df.copy()
+    # 审查 2026-08-19 #1.5：±Inf 穿透 dropna 系统性污染引擎计算，
+    # 在预处理层统一替换为 NaN（后续按列走中位数填充/dropna 路径）
+    df = df.replace([np.inf, -np.inf], np.nan)
     encoded_cols: list[str] = []
     cat_map: dict[str, list[str]] = {}
     imputation_log: dict[str, int] = {}
@@ -538,7 +542,8 @@ def preprocess_for_task(
         (encoded_df, encoded_cols, imputation_log, unknown_cat_warnings)
     """
     if raw_cat_tasks and task in raw_cat_tasks:
-        return df.copy(), list(features), {}, []
+        # 审查 2026-08-19 #1.5：RAW_CAT 分支同样需统一 Inf 清洗
+        return df.replace([np.inf, -np.inf], np.nan), list(features), {}, []
     cat_set = set(categoricals) if categoricals else None  # None 触发 auto-detect
     df_enc, feat_enc, _, imputation_log, unknown_cat_warnings = preprocess_data(
         df, features, cat_set
