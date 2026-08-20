@@ -2,6 +2,18 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.2](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.1...v1.1.2) (2026-08-20)
+
+
+### 🐛 Bug 修复
+
+* **ci:** Quality Gate architecture-check 安装 report extras（openpyxl/reportlab 缺失导致嵌套 pytest 收集失败） ([bf9ef67](https://github.com/zgrwo/EngSmartSuite/commit/bf9ef67deee2b4c5f75e19c20e0d2dc60012ff4d))
+
+
+### 🎨 代码风格
+
+* ruff format 全量格式化（16 个文件，纯格式无逻辑变化） ([c1a0649](https://github.com/zgrwo/EngSmartSuite/commit/c1a0649f804283977c488bd0100b860e85ead5f1))
+
 ## [1.1.1](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.0...v1.1.1) (2026-08-20)
 
 
