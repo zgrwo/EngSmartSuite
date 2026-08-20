@@ -57,7 +57,9 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev,report]"
+        # Round-2：test_services 现含 Web 层测试（api_client fixture import
+        # smartsuite.web.app → 需要 flask），quick job 必须装 web extras
+        run: pip install -e ".[dev,report,web]"
 
       # --- 提交规范：PR 内全部 commit 必须符合 Conventional Commits（与 release-please 闭环）---
       - name: 提交规范检查（Conventional Commits）
@@ -183,7 +185,8 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev,report]"
+        # Round-2：全量测试含 Web 层（flask）
+        run: pip install -e ".[dev,report,web]"
 
       - name: Linux CJK 字体 (matplotlib 图表中文渲染)
         if: runner.os == 'Linux'
