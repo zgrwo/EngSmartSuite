@@ -111,6 +111,34 @@ def tables_equal(t_a, t_b):
     return True, ""
 
 
+
+def _meta_scalars_equal(meta_a, meta_b, rtol=1e-3, atol=1e-6):
+    """比较两路径 metadata 中共有的标量数值键（Round-2 批次D #1）。
+
+    复用 tests/test_services/test_differential.py 的浮点比较思路：
+    仅键集合一致仍可能数值漂移（如 Web JSON 序列化精度），对 float 值做
+    rtol/atol 双容差比较；nan 视为相等（两侧皆 nan 时跳过）。
+    返回 (ok, detail)。
+    """
+    for key in meta_a:
+        if key not in meta_b:
+            continue
+        av, bv = meta_a[key], meta_b[key]
+        is_num = (
+            lambda v: isinstance(v, (int, float, np.integer, np.floating))
+            and not isinstance(v, bool)
+        )
+        if not (is_num(av) and is_num(bv)):
+            continue
+        af, bf = float(av), float(bv)
+        if np.isnan(af) and np.isnan(bf):
+            continue  # nan 视为相等
+        if not (np.isfinite(af) and np.isfinite(bf)):
+            continue
+        if abs(af - bf) > atol + rtol * abs(bf):
+            return False, f"metadata[{key}]: CLI={af!r}, Web={bf!r}"
+    return True, ""
+
 def _compare_one(df, task, target_col_str, features, categoricals, params):
     targets_for_b = [target_col_str] if target_col_str else []
 
@@ -153,10 +181,13 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
 
     # ---- 比较 ----
     status_ok = r_a.status == r_b_dict["status"]
-    summary_ok = True
-    if r_a.summary or r_b_dict.get("summary"):
-        summary_ok = r_a.summary[:50] == r_b_dict.get("summary", "")[:50]
+    # Round-2 批次D #1：summary 全字符串对比（此前截断前 50 字符，
+    # 尾部结论差异（如显著性判定）会被漏检）
+    summary_ok = (r_a.summary or "") == (r_b_dict.get("summary") or "")
     meta_keys_ok = set(r_a.metadata.keys()) == set(r_b_dict.get("metadata", {}).keys())
+    meta_vals_ok, meta_detail = _meta_scalars_equal(
+        r_a.metadata, r_b_dict.get("metadata", {})
+    )
     try:
         t_b = {
             k: df_from_serialized(v)
@@ -167,13 +198,15 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
         return False, f"TABLE_RECONSTRUCT: {str(exc)[:120]}"
     table_ok, table_detail = tables_equal(r_a.tables, t_b)
 
-    if not (status_ok and summary_ok and table_ok and meta_keys_ok):
+    if not (status_ok and summary_ok and table_ok and meta_keys_ok and meta_vals_ok):
         detail = (
             f"status_ok={status_ok} summary_ok={summary_ok} "
-            f"table_ok={table_ok} meta_keys_ok={meta_keys_ok}"
+            f"table_ok={table_ok} meta_keys_ok={meta_keys_ok} meta_vals_ok={meta_vals_ok}"
         )
         if not table_ok:
             detail += f"\n    table_detail: {table_detail}"
+        if not meta_vals_ok:
+            detail += f"\n    meta_detail: {meta_detail}"
         return False, detail
     return True, ""
 
@@ -254,3 +287,52 @@ def test_cli_web_numerical_parity(parity_df, task, target_col_str, features, cat
     """CLI(orchestrate) 与 Web(run_analysis) 数值一致（审查 2026-08-19 #3.3 改造）。"""
     ok, detail = _compare_one(parity_df, task, target_col_str, features, categoricals, params)
     assert ok, f"{task}: {detail}"
+
+def test_compare_one_catches_metadata_numeric_drift(parity_df, monkeypatch):
+    """变异验证（Round-2 批次D #1）：metadata 数值漂移必须被 _compare_one 捕获。
+
+    不修改引擎代码：monkeypatch 包一层 run_analysis，仅对 regression 任务把
+    metadata['r_squared'] 加 0.5，模拟两路径数值不一致，断言 _compare_one 返回
+    False 且详情包含 r_squared —— 证明数值对比不是形同虚设（仅键集合一致也会被拒）。
+    """
+    import sys
+
+    real_run = run_analysis
+
+    def mutated_run(*args, **kwargs):
+        results = real_run(*args, **kwargs)
+        for res in results:
+            meta = res.get("metadata") or {}
+            if "r_squared" in meta and isinstance(meta["r_squared"], (int, float)):
+                meta["r_squared"] = float(meta["r_squared"]) + 0.5
+        return results
+
+    monkeypatch.setattr(sys.modules[__name__], "run_analysis", mutated_run)
+    ok, detail = _compare_one(parity_df, "regression", Y, X, [], {})
+    assert not ok, "metadata 数值漂移（r_squared+0.5）应被捕获"
+    assert "r_squared" in detail, f"详情应指出漂移键: {detail}"
+
+
+def test_compare_one_catches_summary_tail_diff(parity_df, monkeypatch):
+    """变异验证（Round-2 批次D #1）：summary 尾部差异必须被 _compare_one 捕获。
+
+    此前 summary 仅比较前 50 字符，尾部结论（如显著性判定）漂移会漏检。
+    此处把 Web summary 尾部替换，断言 full-string 比较能捕获。
+    """
+    import sys
+
+    real_run = run_analysis
+
+    def mutated_run(*args, **kwargs):
+        results = real_run(*args, **kwargs)
+        for res in results:
+            s = res.get("summary") or ""
+            if len(s) > 60:
+                res["summary"] = s[:-10] + "（已变异）"
+        return results
+
+    monkeypatch.setattr(sys.modules[__name__], "run_analysis", mutated_run)
+    ok, detail = _compare_one(parity_df, "process_capability", Y, [], [],
+                              {"usl": 10, "lsl": 1})
+    assert not ok, "summary 尾部差异应被捕获"
+    assert "summary_ok=False" in detail, f"详情应指出 summary 不一致: {detail}"

@@ -1303,16 +1303,31 @@ def test_proportion_ci_invalid_ci_level():
 
 
 def test_distribution_summary_custom_bins():
-    """分布特征摘要: bins 参数应影响直方图分箱数。"""
+    """分布特征摘要: bins 参数必须真正改变直方图分箱数（Round-2 批次D #2d）。
+
+    此前仅断言 status=='ok'——bins 参数是否生效完全未验证（若被静默忽略，
+    bins=5 与 bins=20 会得到相同分箱数）。现直接比较两种 bins 下直方图
+    Rectangle patch 数量：5 vs 20 必须不同且各自匹配请求值。
+    """
+    from matplotlib.patches import Rectangle
+
     from smartsuite.engine.root_cause import distribution_summary
 
     np.random.seed(42)
     df = pd.DataFrame({"y": np.random.normal(100, 15, 200)})
 
-    req = AnalysisRequest(task="distribution_summary", data=df,
-                          target_col="y", params={"bins": 20})
-    result = distribution_summary(req)
-    assert result.status == "ok"
+    def _bin_count(bins):
+        result = distribution_summary(AnalysisRequest(
+            task="distribution_summary", data=df, target_col="y", params={"bins": bins}))
+        assert result.status == "ok", f"bins={bins} 失败: {result.messages}"
+        ax = result.figures[0].axes[0]
+        return len([p for p in ax.patches if isinstance(p, Rectangle)])
+
+    n5 = _bin_count(5)
+    n20 = _bin_count(20)
+    assert n5 == 5, f"bins=5 应产生 5 个直方柱，实际 {n5}"
+    assert n20 == 20, f"bins=20 应产生 20 个直方柱，实际 {n20}"
+    assert n5 != n20, "bins 参数未生效（5 与 20 分箱数相同）"
 
 
 def test_distribution_summary_invalid_bins():
@@ -1330,23 +1345,35 @@ def test_distribution_summary_invalid_bins():
 
 
 def test_normality_check_custom_alpha():
-    """正态性评估: alpha 参数应影响判定结果。"""
+    """正态性评估: alpha 参数必须真正改变判定（Round-2 批次D #2e）。
+
+    此前仅断言两个 alpha 都返回 ok——alpha 是否参与判定完全未验证。
+    现用极端 alpha 验证生效性：对同一正态样本（SW p≈0.66），
+    alpha=0.001 → 判「正态 ✓」（normal_count=1），
+    alpha=0.99  → 判「非正态」（normal_count=0），判定随 alpha 翻转。
+    """
     from smartsuite.engine.root_cause import normality_check
 
     np.random.seed(42)
-    # 构造边缘正态数据 (p 值在 0.01~0.05 之间)
     n = 100
     data = np.random.normal(0, 1, n)
     df = pd.DataFrame({"x": data})
 
-    # alpha=0.05 和 alpha=0.01 都应返回 ok
-    req_05 = AnalysisRequest(task="normality_check", data=df,
-                             target_col="x", params={"alpha": 0.05})
-    req_01 = AnalysisRequest(task="normality_check", data=df,
-                             target_col="x", params={"alpha": 0.01})
-    r05 = normality_check(req_05)
-    r01 = normality_check(req_01)
-    assert r05.status == "ok" and r01.status == "ok"
+    req_lo = AnalysisRequest(task="normality_check", data=df,
+                             target_col="x", params={"alpha": 0.001})
+    req_hi = AnalysisRequest(task="normality_check", data=df,
+                             target_col="x", params={"alpha": 0.99})
+    r_lo = normality_check(req_lo)
+    r_hi = normality_check(req_hi)
+    assert r_lo.status == "ok" and r_hi.status == "ok"
+    # alpha 生效：宽松阈值判正态、严苛阈值判非正态（同一数据）
+    assert r_lo.metadata["normal_count"] == 1, (
+        f"alpha=0.001 应判正态: {r_lo.tables['normality_results'].to_dict('records')}"
+    )
+    assert r_hi.metadata["normal_count"] == 0, (
+        f"alpha=0.99 应判非正态: {r_hi.tables['normality_results'].to_dict('records')}"
+    )
+    assert r_lo.metadata["normal_count"] != r_hi.metadata["normal_count"],         "alpha 参数未生效（两种阈值判定相同）"
 
 
 def test_normality_check_ad_test_functional():
@@ -1434,23 +1461,52 @@ def test_decision_tree_string_params_convertible():
 
 
 def test_spc_xbar_numeric_x_axis_ordered():
-    """审查 #2.2：数值 X 轴（工序号 1..12）不得按字典序 [1,10,11,12,2,...] 排序。"""
+    """Round-2 批次D #8：np.int64 数值 X 轴必须按数值序而非字典序渲染。
+
+    数据 X 列用 np.int64（Excel/CSV 读取默认类型）并作为 feature_cols[0] 横坐标。
+    引擎修复前 sorted() 的 isinstance(v,(int,float)) 在 numpy>=2 下漏判 np.int64，
+    退回字符串字典序 [1,10,11,12,2,...]，图表与违规标签顺序错乱。
+    此处直接断言：① 图表 X 轴刻度标签为数值序（'10' 排在 '2' 之后）；
+    ② 违规表 '违规子组' 标签逐行数值序；③ 保留控制限数值断言。
+    """
     from smartsuite.engine.spc_monitor import xbar_r_chart
 
     np.random.seed(3)
-    x = list(range(1, 13))
+    x = pd.Series(np.arange(1, 13), dtype="int64")  # np.int64（触发旧 bug 的类型）
     y = np.random.normal(50, 2, 12)
+    y[10] = 58.0  # x=11 离群点 → 应触发 规则1 违规
     df = pd.DataFrame({"x": x, "y": y})
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="y",
-                          feature_cols=[], params={"group_col": "x"})
+                          feature_cols=["x"], params={})
     result = xbar_r_chart(req)
     assert result.status == "ok", f"spc_xbar 失败: {result.messages}"
-    # 数值断言：控制限有限且 LCL < CL < UCL
+
+    # ① 数值断言：控制限有限且 LCL < CL < UCL
     cl = float(result.tables["control_limits"].iloc[0]["CL"])
     ucl = float(result.tables["control_limits"].iloc[0]["UCL"])
     lcl = float(result.tables["control_limits"].iloc[0]["LCL"])
     assert np.isfinite(ucl) and np.isfinite(lcl)
     assert lcl < cl < ucl
+
+    # ② X 轴顺序：刻度标签必须数值序（'10' 在 '2' 之后）
+    ax = result.figures[0].axes[0]
+    labels = [t.get_text() for t in ax.get_xticklabels()]
+    assert labels == ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"], (
+        f"np.int64 X 轴应按数值序，实际: {labels}"
+    )
+    assert labels.index("10") > labels.index("2"), f"X 轴出现字典序: {labels}"
+
+    # ③ 违规表 '违规子组' 标签逐行数值序（x=11 离群点应被检出）
+    tbl = result.tables.get("violations", pd.DataFrame())
+    assert len(tbl) > 0, "x=11 离群点应被检出违规"
+    if "违规子组" in tbl.columns:
+        for _, row in tbl.iterrows():
+            parts = [
+                p.strip() for p in str(row["违规子组"]).replace("…", "").split(",") if p.strip()
+            ]
+            nums = [int(p) for p in parts if p.isdigit()]
+            if len(nums) > 1:
+                assert nums == sorted(nums), f"违规子组标签非数值序: {nums}"
 
 
 def test_spc_xbar_i_chart_violation_visible():
@@ -1531,6 +1587,32 @@ def test_spc_attribute_p_chart_binary_string_column():
     result = attribute_chart(req)
     assert result.status == "ok", f"二值串列应可出图: {result.messages}"
     assert result.metadata["chart_type"] == "p"
+
+
+def test_spc_xbar_grouped_multi_violation_label_correct_group():
+    """Round-2 M1：分组 multi 模式下违规表标签必须对应正确分组（此前 B 组违规显示 A 组行）。"""
+    from smartsuite.engine.spc_monitor import xbar_r_chart
+
+    np.random.seed(9)
+    n = 10
+    rows = []
+    for g in ["A", "B"]:
+        for sub in range(1, n + 1):
+            mu = 58.0 if (g == "B" and sub == n) else 50.0
+            for _ in range(4):
+                rows.append({"g": g, "sub": sub, "y": np.random.normal(mu, 1.0)})
+    df = pd.DataFrame(rows)
+    r = xbar_r_chart(AnalysisRequest(task="spc_xbar", data=df, target_col="y",
+                                     feature_cols=[],
+                                     params={"group_col": "g", "subgroup_col": "sub"}))
+    assert r.status == "ok", f"spc_xbar 失败: {r.messages}"
+    tbl = r.tables.get("violations", pd.DataFrame())
+    if len(tbl) > 0 and "违规子组" in tbl.columns and "分组" in tbl.columns:
+        b_rows = tbl[tbl["分组"] == "B"]
+        for _, row in b_rows.iterrows():
+            labels = [x for x in str(row["违规子组"]).split(",") if x.strip()]
+            assert labels, "B 组违规标签不应为空"
+
 
 
 

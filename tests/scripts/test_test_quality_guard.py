@@ -103,3 +103,104 @@ def test_private_functions_ignored(tmp_path):
 def test_self_test_file_exempt_from_weak_asserts(tmp_path):
     # 本文件（自测夹具）含弱断言式写法，必须被 SELF_TEST_FILES 豁免
     assert "test_test_quality_guard.py" in guard.SELF_TEST_FILES
+
+
+# ── 状态断言分级（第二轮 #4b）────────────────────────────────
+
+def test_error_status_assert_not_weak(tmp_path):
+    """assert status == 'error' 是有效断言（error 路径验证），不判弱。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_demo.py", (
+        "def test_error_path():\n"
+        "    r = compute()\n"
+        "    assert r.status == 'error'\n"
+    ))
+    assert guard.check_status_only_asserts(tests) == []
+    assert guard.check_weak_asserts(tests) == []
+
+
+def test_ok_status_only_still_weak(tmp_path):
+    """仅 assert status == 'ok' 仍判弱（需配套具体值断言）。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_demo.py", (
+        "def test_ok_only():\n"
+        "    r = compute()\n"
+        "    assert r.status == 'ok'\n"
+    ))
+    problems = guard.check_status_only_asserts(tests)
+    assert any("test_ok_only" in p for p in problems)
+
+
+# ── 恒真断言（第二轮 #4c）────────────────────────────────────
+
+def test_ok_warning_tuple_not_always_true(tmp_path):
+    """('ok','warning') 不含 error——error 结果会失败，是有效断言，不判恒真。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_demo.py", (
+        "def test_ok_warning():\n"
+        "    r = compute()\n"
+        "    assert r.status in ('ok', 'warning')\n"
+    ))
+    assert guard.check_status_only_asserts(tests) == []
+
+
+def test_ok_error_tuple_is_always_true(tmp_path):
+    """('ok','error') 覆盖全部可能状态——判恒真。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_demo.py", (
+        "def test_ok_error():\n"
+        "    r = compute()\n"
+        "    assert r.status in ('ok', 'error')\n"
+    ))
+    problems = guard.check_status_only_asserts(tests)
+    assert any("恒真" in p and "test_ok_error" in p for p in problems)
+
+
+# ── 守卫架空（第二轮 #4a：AST 块归属 + else 双分支豁免）──────
+
+def test_guard_with_else_both_assert_not_flagged(tmp_path):
+    """if status=='ok' 有 else 且两分支都断言 → 不判守卫架空。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_demo.py", (
+        "def test_dual_branch():\n"
+        "    r = compute()\n"
+        "    if r.status == 'ok':\n"
+        "        assert len(r.summary) > 0\n"
+        "    else:\n"
+        "        assert len(r.messages) > 0\n"
+    ))
+    problems = guard.check_status_only_asserts(tests)
+    assert not any("守卫架空" in p for p in problems)
+
+
+def test_guard_without_else_flagged(tmp_path):
+    """if status=='ok' 无 else 分支且守卫内断言 → 判守卫架空。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_demo.py", (
+        "def test_guarded():\n"
+        "    r = compute()\n"
+        "    if r.status == 'ok':\n"
+        "        assert len(r.summary) > 0\n"
+    ))
+    problems = guard.check_status_only_asserts(tests)
+    assert any("守卫架空" in p and "test_guarded" in p for p in problems)
+
+
+def test_error_guard_inside_not_flagged(tmp_path):
+    """if status=='error' 守卫（非 ok 守卫）不触发架空检测。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_demo.py", (
+        "def test_error_guard():\n"
+        "    r = compute()\n"
+        "    if r.status == 'error':\n"
+        "        assert len(r.messages) > 0\n"
+    ))
+    problems = guard.check_status_only_asserts(tests)
+    assert not any("守卫架空" in p for p in problems)

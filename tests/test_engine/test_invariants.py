@@ -441,3 +441,82 @@ def test_p_value_range_all_tests():
     p2 = result2.metadata.get("p_value")
     if p2 is not None:
         assert 0 <= p2 <= 1, f"ANOVA p={p2} 超出 [0,1]"
+
+
+# ═══════════════════════════════════════════════════════════
+# Round-2 批次D：比例 CI / ROC / Cohen's κ / VIF 不变量
+# ═══════════════════════════════════════════════════════════
+
+def test_proportion_ci_bounds():
+    """比例 CI 不变量（Round-2 批次D #5a）：下限 ≤ 上限，且区间包含 p_hat。
+
+    Wilson Score 与 Clopper-Pearson 两条 CI 都必须满足——区间估计的数学前提。
+    """
+    from smartsuite.engine.root_cause import proportion_ci
+
+    df = pd.DataFrame({"x": ["合格"] * 85 + ["不合格"] * 15})
+    r = proportion_ci(AnalysisRequest(task="proportion_ci", data=df, target_col="x"))
+    assert r.status == "ok", r.messages
+    p_hat = r.metadata["p_hat"]
+    for ci_name in ("wilson_ci", "clopper_pearson_ci"):
+        lo, hi = r.metadata[ci_name]
+        assert lo <= hi + 1e-12, f"{ci_name} 下限 > 上限: {lo} > {hi}"
+        assert lo - 1e-9 <= p_hat <= hi + 1e-9, (
+            f"{ci_name} [{lo:.6f}, {hi:.6f}] 未包含 p_hat={p_hat:.6f}"
+        )
+
+
+def test_roc_auc_bounds():
+    """ROC 不变量（Round-2 批次D #5b）：AUC 必须在 [0, 1]。"""
+    from smartsuite.engine.doe_opt import roc_analysis
+
+    np.random.seed(42)
+    scores = np.concatenate([np.random.normal(5, 1, 100), np.random.normal(8, 1, 100)])
+    labels = ["合格"] * 100 + ["不合格"] * 100
+    df = pd.DataFrame({"score": scores, "label": labels})
+    r = roc_analysis(AnalysisRequest(task="roc_analysis", data=df, target_col="label",
+                                     feature_cols=["score"]))
+    assert r.status == "ok", r.messages
+    auc = r.metadata["auc"]
+    assert 0.0 <= auc <= 1.0, f"AUC={auc} 超出 [0,1]"
+    assert -1e-9 <= r.metadata["best_fpr"] <= 1.0 + 1e-9, (
+        f"best_fpr 超出 [0,1]: {r.metadata['best_fpr']}"
+    )
+    assert -1e-9 <= r.metadata["best_tpr"] <= 1.0 + 1e-9, (
+        f"best_tpr 超出 [0,1]: {r.metadata['best_tpr']}"
+    )
+
+
+def test_cohens_kappa_bounds():
+    """Cohen's κ 不变量（Round-2 批次D #5c）：κ 必须在 [-1, 1]。"""
+    from smartsuite.engine.root_cause import cohens_kappa
+
+    np.random.seed(42)
+    df = pd.DataFrame({
+        "r1": ["A"] * 40 + ["B"] * 10 + ["A"] * 5 + ["B"] * 45,
+        "r2": ["A"] * 42 + ["B"] * 8 + ["A"] * 8 + ["B"] * 42,
+    })
+    r = cohens_kappa(AnalysisRequest(task="cohens_kappa", data=df, target_col="",
+                                     feature_cols=["r1", "r2"]))
+    assert r.status == "ok", r.messages
+    kappa = r.metadata["kappa"]
+    assert -1.0 <= kappa <= 1.0, f"κ={kappa} 超出 [-1,1]"
+
+
+def test_vif_greater_equal_one():
+    """VIF 不变量（Round-2 批次D #5d）：VIF = 1/(1-R²) ≥ 1（浮点容差内）。"""
+    from smartsuite.engine.root_cause import vif_analysis
+
+    np.random.seed(42)
+    df = pd.DataFrame({
+        "x1": np.random.normal(0, 1, 50),
+        "x2": np.random.normal(0, 1, 50),
+        "x3": np.random.normal(0, 1, 50),
+    })
+    r = vif_analysis(AnalysisRequest(task="vif", data=df, target_col="",
+                                     feature_cols=["x1", "x2", "x3"]))
+    assert r.status == "ok", r.messages
+    vif_tbl = r.tables["vif_table"]
+    for _, row in vif_tbl.iterrows():
+        val = float(row["VIF"])
+        assert val >= 1.0 - 1e-6, f"VIF={val} < 1（数学上不可能，VIF=1/(1-R²)）"

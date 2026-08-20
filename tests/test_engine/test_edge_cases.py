@@ -37,19 +37,71 @@ def test_single_row_data_does_not_crash():
 
 
 def test_all_nan_column():
-    """全 NaN 列应被优雅处理。"""
+    """全 NaN 特征列：按任务断言具体状态 + 中文消息（Round-2 批次D #2b）。
+
+    此前状态断言恒真（status 三种取值皆通过，任何结果都不失败）。现按 per-task
+    期望表验证：多数任务应 error（带中文消息），无需数据的任务（power_analysis）
+    和只用目标列的任务（process_capability）可 ok。
+    """
     df = _make_df({"x": [np.nan, np.nan, np.nan], "y": [1.0, 2.0, 3.0]})
     req = AnalysisRequest(task="correlation", data=df, target_col="y", feature_cols=["x"])
     result = correlation_analysis(req)
-    assert result.status in ("ok", "error")  # 不应崩溃
+    assert result.status == "error", f"全 NaN 特征列相关性应 error: {result.messages}"
+    assert any("常量" in m or "变异" in m for m in result.messages), (
+        f"应给出中文常量列提示: {result.messages}"
+    )
+
+    # 回归/DOE/ANOVA：有效样本不足 → error + 中文消息
+    r2 = regression_analysis(AnalysisRequest(task="regression", data=df,
+                                             target_col="y", feature_cols=["x"]))
+    assert r2.status == "error"
+    assert any("有效样本" in m or "不足" in m for m in r2.messages), f"{r2.messages}"
+    r3 = doe_analysis(AnalysisRequest(task="doe_analysis", data=df,
+                                      target_col="y", feature_cols=["x"]))
+    assert r3.status == "error"
+    assert any("有效样本" in m or "不足" in m for m in r3.messages), f"{r3.messages}"
+    r4 = anova_analysis(AnalysisRequest(task="anova", data=df,
+                                        target_col="y", feature_cols=["x"]))
+    assert r4.status == "error"
+    assert len(r4.messages) > 0, "ANOVA error 应有中文消息"
+
+    # power_analysis 不依赖数据 → ok（个别任务豁免）
+    r5 = power_analysis(AnalysisRequest(task="power_analysis", data=df, target_col="y",
+                                        feature_cols=["x"], params={"effect_size": 0.5}))
+    assert r5.status == "ok", f"power_analysis 应可 ok: {r5.messages}"
+    # process_capability 只用目标列 → ok
+    r6 = process_capability_analysis(AnalysisRequest(task="process_capability", data=df,
+                                                     target_col="y", feature_cols=["x"],
+                                                     params={"usl": 10, "lsl": 1}))
+    assert r6.status == "ok", f"process_capability 应可 ok: {r6.messages}"
 
 
 def test_zero_variance_column():
-    """零方差列应被检测并处理。"""
+    """零方差特征列：按任务断言具体状态 + 中文消息（Round-2 批次D #2b）。
+
+    此前状态断言恒真（status 三种取值皆通过）。per-task 期望：依赖方差的任务
+    （correlation/regression/vif）应 error 且消息含「常量列」；doe/anova 对
+    零方差因子可降级 ok（因子无变异但可报告）。
+    """
     df = _make_df({"x": [5.0, 5.0, 5.0, 5.0, 5.0], "y": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    r_corr = correlation_analysis(AnalysisRequest(task="correlation", data=df,
+                                                  target_col="y", feature_cols=["x"]))
+    assert r_corr.status == "error", f"零方差列相关性应 error: {r_corr.messages}"
+    assert any("常量" in m for m in r_corr.messages), f"应提示常量列: {r_corr.messages}"
+    r_reg = regression_analysis(AnalysisRequest(task="regression", data=df,
+                                                target_col="y", feature_cols=["x"]))
+    assert r_reg.status == "error"
+    assert any("常量" in m for m in r_reg.messages), f"应提示常量列: {r_reg.messages}"
+    r_vif = vif_analysis(AnalysisRequest(task="vif", data=df, target_col="",
+                                         feature_cols=["x", "y"]))
+    assert r_vif.status == "error"
+    assert any("常量" in m for m in r_vif.messages), f"VIF 应提示常量列: {r_vif.messages}"
+
+    # doe_analysis 对零方差因子降级 ok（可报告，不崩溃）——回归保护
     req = AnalysisRequest(task="doe_analysis", data=df, target_col="y", feature_cols=["x"])
     result = doe_analysis(req)
-    assert result.status in ("ok", "error")
+    assert result.status == "ok", f"doe_analysis 应可降级 ok: {result.messages}"
+    assert len(result.summary) > 0, "doe ok 结果应有 summary"
 
 
 def test_anova_with_one_factor():
@@ -589,5 +641,469 @@ def test_anova_high_cardinality_factor_guarded():
     assert any("水平数过多" in m or "分箱" in m for m in result.messages)
 
 
+# ── Round-2 审查修复 批次A1 回归测试 ──
 
+
+def test_multi_objective_duplicate_index_picks_valid_row():
+    """Round-2 #A1：重复索引且首现行被 NaN 排除时，最优行必须是有效行（此前静默返回被排除行）。"""
+    from smartsuite.engine.doe_opt import multi_objective_opt
+
+    df = pd.DataFrame({"强度": [np.nan, 100.0, 50.0], "批次": ["P1", "P2", "P3"]}, index=[0, 0, 1])
+    r = multi_objective_opt(AnalysisRequest(
+        task="multi_objective", data=df, target_col="",
+        feature_cols=["批次"],
+        params={"objectives": [{"col": "强度", "direction": "maximize"}]}))
+    assert r.status == "ok", f"multi_objective 失败: {r.messages}"
+    best = r.metadata.get("optimal_params", {})
+    assert best.get("批次") == "P2", f"应选有效行 P2(强度=100)，实际: {best}"
+
+
+def test_anova_constant_target_rejected():
+    """Round-2 #A2：常量目标列不得输出 R²=-inf + 虚假显著结论。"""
+    from smartsuite.engine.root_cause import anova_analysis
+
+    df = pd.DataFrame({"g": ["A"] * 10 + ["B"] * 10, "y": [5.0] * 20})
+    r = anova_analysis(AnalysisRequest(task="anova", data=df, target_col="y", feature_cols=["g"]))
+    assert r.status == "error", f"常量目标列应报错: {r.status}"
+    assert any("常量" in m for m in r.messages)
+
+
+def test_box_chart_group_col_equals_target_or_subcol():
+    """Round-2 #A3：box_chart group_col 与目标列/次分类列同列时不得崩溃。"""
+    from smartsuite.engine.exploratory import box_chart
+
+    # group_col == target_col（数值列同时作 Y 与分组）
+    df = pd.DataFrame({"v": np.repeat([1.0, 2.0], 20),
+                       "w": np.random.normal(0, 1, 40)})
+    r1 = box_chart(AnalysisRequest(task="box_chart", data=df, target_col="v",
+                                   feature_cols=["w"], params={"group_col": "v"}))
+    assert r1.status == "ok", f"group==target 崩溃: {r1.messages}"
+    # group_col == feature_cols[1]（次分类列同列）
+    df2 = pd.DataFrame({"v": np.random.normal(0, 1, 40), "g": ["A"] * 20 + ["B"] * 20,
+                        "s": np.random.normal(0, 1, 40)})
+    r2 = box_chart(AnalysisRequest(task="box_chart", data=df2, target_col="s",
+                                   feature_cols=["v", "g"], params={"group_col": "g"}))
+    assert r2.status == "ok", f"group==feat[1] 崩溃: {r2.messages}"
+
+
+def test_grid_search_ranges_key_equals_target():
+    """Round-2 #A4：grid_search 的 ranges 键与目标列相同（重复列）时不得 ValueError。"""
+    from smartsuite.engine.doe_opt import grid_search
+
+    np.random.seed(1)
+    df = pd.DataFrame({"料温": np.random.uniform(170, 190, 30)})
+    r = grid_search(AnalysisRequest(task="grid_search", data=df, target_col="料温",
+                                    feature_cols=["料温"],
+                                    params={"ranges": {"料温": [170, 190]}}))
+    assert r.status == "ok", f"ranges==target 失败: {r.status} {r.messages[:1]}"
+
+
+def test_spc_xbar_int64_x_axis_ordered():
+    """Round-2 #A5：np.int64 X 列（Excel/CSV 默认类型）必须按数值序而非字典序。"""
+    from smartsuite.engine.spc_charts import _natural_sort_key
+    from smartsuite.engine.spc_monitor import xbar_r_chart
+
+    np.random.seed(3)
+    x = pd.Series(np.arange(1, 13), dtype="int64")
+    y = np.random.normal(50, 2, 12)
+    y[11] = 60.0
+    df = pd.DataFrame({"x": x, "y": y})
+    r = xbar_r_chart(AnalysisRequest(task="spc_xbar", data=df, target_col="y",
+                                     feature_cols=[], params={"group_col": "x"}))
+    assert r.status == "ok", f"spc_xbar 失败: {r.messages}"
+    # 真实排序键验证：np.int64 序列必须数值序（旧 key 得 [1,10,11,12,2,...]）
+    order = sorted(x.unique(), key=_natural_sort_key)
+    assert [int(v) for v in order] == list(range(1, 13)), f"int64 排序错误: {order}"
+    # float64 / Python int / 字符串混合类型不崩溃
+    mixed = sorted([1, 10, 2, "a", 11.5], key=_natural_sort_key)
+    assert mixed == [1, 2, 10, 11.5, "a"], f"混合类型排序错误: {mixed}"
+
+
+# ── Round-2 审查修复 批次A2 回归测试 ──
+
+
+def test_regression_constant_feature_rejected():
+    """Round-2 #A2a：常量特征列 → 系数 t=inf/NaN（此前进入 Web JSON 链）。"""
+    from smartsuite.engine.doe_opt import regression_analysis
+
+    np.random.seed(1)
+    df = pd.DataFrame({"x1": [5.0] * 30, "x2": np.random.normal(0, 1, 30),
+                       "y": np.random.normal(0, 1, 30)})
+    r = regression_analysis(AnalysisRequest(task="regression", data=df, target_col="y",
+                                            feature_cols=["x1", "x2"]))
+    assert r.status == "error", f"常量特征列应报错: {r.status}"
+    assert any("常量" in m for m in r.messages)
+
+
+def test_vif_constant_feature_detected():
+    """Round-2 #A2b：常量特征列 VIF 不得误判为'无明显共线性'。"""
+    from smartsuite.engine.root_cause import vif_analysis
+
+    np.random.seed(1)
+    df = pd.DataFrame({"x1": [1.0] * 10, "x2": np.random.normal(0, 1, 10)})
+    r = vif_analysis(AnalysisRequest(task="vif", data=df, target_col="",
+                                     feature_cols=["x1", "x2"]))
+    assert r.status == "error", f"常量特征列 VIF 应报错: {r.status}"
+    assert any("常量" in m for m in r.messages)
+
+
+def test_orchestrate_empty_target_col_rejected():
+    """Round-2 #A2c：空 target_col（''）应被 orchestrator 拦截为中文错误而非引擎 KeyError。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    df = pd.DataFrame({"x": [1.0, 2.0, 3.0]})
+    r = orchestrate(AnalysisRequest(task="regression", data=df, target_col="",
+                                    feature_cols=["x"]))
+    assert r.status == "error"
+    assert any("target" in m or "目标" in m for m in r.messages)
+
+
+def test_hypothesis_test_unknown_test_type_rejected():
+    """Round-2 #A2d：非法 test_type 不得静默跑 t 检验。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    df = pd.DataFrame({"g": ["A"] * 10 + ["B"] * 10, "v": np.random.normal(0, 1, 20)})
+    r = orchestrate(AnalysisRequest(task="hypothesis_test", data=df, target_col="v",
+                                    feature_cols=["g"],
+                                    params={"test": "bogus_test", "group_col": "g"}))
+    assert r.status == "error"
+    assert any("test" in m or "检验" in m for m in r.messages)
+
+
+def test_kruskal_continuous_fallback_rejected():
+    """Round-2 #A2e：kruskal 无分组列时回退到连续特征列 → 不得输出 η²_H=1.000 误导结果。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    np.random.seed(5)
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 60), "f": np.random.normal(0, 1, 60)})
+    r = orchestrate(AnalysisRequest(task="hypothesis_test", data=df, target_col="v",
+                                    feature_cols=["f"], params={"test": "kruskal"}))
+    assert r.status == "error", f"连续列回退应报错: {r.status}"
+    assert any("分组" in m for m in r.messages)
+
+
+# ── Round-2 审查修复 批次A3 回归测试 ──
+
+
+def test_trend_forecast_string_steps_rejected():
+    """Round-2 #A3b：forecast_steps 字符串/非法值不得 TypeError。"""
+    from smartsuite.engine.detection import trend_forecast
+
+    np.random.seed(7)
+    df = pd.DataFrame({"y": np.random.normal(0, 1, 30)})
+    r = trend_forecast(AnalysisRequest(task="trend_forecast", data=df, target_col="y",
+                                       params={"forecast_steps": "abc"}))
+    assert r.status == "error"
+    assert any("forecast" in m or "预测" in m for m in r.messages)
+
+
+def test_doe_analysis_string_factor_3levels():
+    """Round-2 #A3c：>=3 水平字符串因子不得 TypeError 崩溃。"""
+    from smartsuite.engine.doe_opt import doe_analysis
+
+    np.random.seed(1)
+    df = pd.DataFrame({
+        "f": ["低"] * 10 + ["中"] * 10 + ["高"] * 10,
+        "y": np.random.normal(0, 1, 30),
+    })
+    r = doe_analysis(AnalysisRequest(task="doe_analysis", data=df, target_col="y",
+                                     feature_cols=["f"]))
+    assert r.status in ("ok", "error"), f"doe_analysis 崩溃: {r.status}"
+    if r.status == "error":
+        assert any("无法" in m or "非数值" in m or "水平" in m for m in r.messages)
+
+
+def test_anomaly_contamination_invalid_rejected():
+    """Round-2 #A3d：contamination 非法值不得泄漏英文异常。"""
+    from smartsuite.engine.detection import anomaly_detect
+
+    np.random.seed(2)
+    df = pd.DataFrame({"a": np.random.normal(0, 1, 30), "b": np.random.normal(0, 1, 30)})
+    r = anomaly_detect(AnalysisRequest(task="anomaly_detect", data=df, target_col="a",
+                                       feature_cols=["b"],
+                                       params={"method": "isolation_forest",
+                                               "contamination": "oops"}))
+    assert r.status == "error"
+    assert all("contamination" in m or "污染" in m for m in r.messages)
+    assert "InvalidParameterError" not in " ".join(r.messages)
+
+
+def test_survival_event_column_validation():
+    """Round-2 #A3e：事件列编码 1/2（非 {0,1}）不得静默输出恒 1.0 的 KM 曲线。"""
+    from smartsuite.engine.reliability import survival_analysis
+
+    np.random.seed(3)
+    df = pd.DataFrame({"t": np.random.exponential(100, 40),
+                       "e": np.random.choice([1, 2], 40)})
+    r = survival_analysis(AnalysisRequest(task="survival_analysis", data=df, target_col="t",
+                                          feature_cols=["e"]))
+    if r.status == "ok":
+        tbl = r.tables.get("km_table")
+        if tbl is not None and "生存概率" in tbl.columns:
+            surv = tbl["生存概率"].astype(float)
+            assert surv.iloc[-1] < 1.0, "KM 曲线不应恒为 1.0（存在失效事件但被静默忽略）"
+    else:
+        assert any("事件" in m for m in r.messages)
+
+
+def test_ljung_box_q_matches_statsmodels():
+    """Round-2 #A3a：Ljung-Box Q 与 statsmodels 参考一致（旧 np.corrcoef 偏大）。"""
+    import statsmodels.stats.diagnostic as sm_diag
+
+    from smartsuite.engine.detection import _ljung_box
+
+    np.random.seed(7)
+    x = np.random.normal(0, 1, 200)
+    resid = x - x.mean()  # 非零均值残差更易暴露 corrcoef 偏差
+    q, p, lags = _ljung_box(resid, lags=10)
+    ref = sm_diag.acorr_ljungbox(resid, lags=[10], return_df=True)
+    ref_q = float(ref["lb_stat"].iloc[0])
+    assert abs(q - ref_q) < 0.5, f"Ljung-Box Q 偏差: 引擎={q:.2f} statsmodels={ref_q:.2f}"
+
+
+# ── Round-2 审查修复 批次A4 回归测试 ──
+
+
+def test_gage_rr_av_matches_anova():
+    """Round-2 #A3f：AV（操作员分量）用 AIAG d2* 后应与 ANOVA 估计接近（此前高估）。"""
+    from smartsuite.engine.reliability import gage_rr
+
+    np.random.seed(6)
+    parts = np.arange(1, 11)
+    ops = ["O1", "O2", "O3"]
+    rows = []
+    true_vals = np.random.normal(50, 2, 10)
+    for p_idx, p in enumerate(parts):
+        for op in ops:
+            op_bias = {"O1": 0.0, "O2": 0.4, "O3": -0.3}[op]
+            for _ in range(3):
+                rows.append({"part": p, "operator": op,
+                             "measurement": true_vals[p_idx] + op_bias
+                             + np.random.normal(0, 0.3)})
+    df = pd.DataFrame(rows)
+    r = gage_rr(AnalysisRequest(task="gage_rr", data=df, target_col="measurement",
+                                feature_cols=["part", "operator"],
+                                params={"part_col": "part", "operator_col": "operator"}))
+    assert r.status == "ok", f"gage_rr 失败: {r.messages}"
+    av = r.metadata.get("av")
+    assert av is not None and av > 0, "AV 应可计算"
+    import statsmodels.api as sm
+    from statsmodels.formula.api import ols
+
+    model = ols("measurement ~ C(part) + C(operator)", data=df).fit()
+    aov = sm.stats.anova_lm(model, typ=2)
+    # statsmodels 0.14+ 不输出 mean_sq 列 → 用 sum_sq/df 计算
+    ms_op = float(aov.loc["C(operator)", "sum_sq"] / aov.loc["C(operator)", "df"])
+    ms_e = float(aov.loc["Residual", "sum_sq"] / aov.loc["Residual", "df"])
+    sigma_op = np.sqrt(max(0, (ms_op - ms_e) / (10 * 3)))
+    assert abs(av - sigma_op) / sigma_op < 0.25, \
+        f"AV={av:.4f} 与 ANOVA sigma_op={sigma_op:.4f} 偏差过大（d2* 修正应缩小差距）"
+
+
+def test_power_analysis_achieved_n_groups_string():
+    """Round-2 #A2f：achieved 分支 n_groups='3' 不得 TypeError。"""
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"v": [1.0]})
+    r = power_analysis(AnalysisRequest(
+        task="power_analysis", data=df, target_col="v",
+        params={"mode": "achieved", "test_type": "anova", "n_groups": "3",
+                "current_n": 20, "effect_size": 0.5}))
+    assert r.status == "ok", f"achieved n_groups 应可转换: {r.messages}"
+    assert "功效" in r.summary
+
+
+def test_power_analysis_effect_size_nan_rejected():
+    """Round-2 #A2f：effect_size='nan' 不得穿透顶层校验。"""
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"v": [1.0]})
+    r = power_analysis(AnalysisRequest(
+        task="power_analysis", data=df, target_col="v",
+        params={"effect_size": "nan", "test_type": "ttest"}))
+    assert r.status == "error"
+    assert any("有限" in m or "effect" in m.lower() for m in r.messages)
+
+
+def test_decision_tree_max_depth_zero_rejected():
+    """Round-2 #A2g：max_depth=0 应返回中文错误而非 sklearn ValueError。"""
+    from smartsuite.engine.root_cause import decision_tree_analysis
+
+    np.random.seed(1)
+    df = pd.DataFrame({"x1": np.random.normal(0, 1, 30), "y": np.random.normal(0, 1, 30)})
+    r = decision_tree_analysis(AnalysisRequest(
+        task="decision_tree", data=df, target_col="y", feature_cols=["x1"],
+        params={"max_depth": 0}))
+    assert r.status == "error"
+    assert any("max_depth" in m for m in r.messages)
+
+
+def test_cohens_kappa_full_consensus_undefined():
+    """Round-2 #A2h：全一致表不得判'低于随机一致'（kappa 无定义）。"""
+    from smartsuite.engine.root_cause import cohens_kappa
+
+    df = pd.DataFrame({"r1": ["A"] * 10 + ["B"] * 10, "r2": ["A"] * 10 + ["B"] * 10})
+    r = cohens_kappa(AnalysisRequest(task="cohens_kappa", data=df, target_col="r1",
+                                     feature_cols=["r2"]))
+    assert r.status == "error" or "几乎完美" in r.summary or "无定义" in " ".join(r.messages), \
+        f"全一致表误判: {r.status} {r.summary[:60]}"
+
+
+def test_cusum_partial_mu_sigma_rejected():
+    """Round-2 #A2j：CUSUM 只传 mu 或 sigma 应报错（与 EWMA 一致）。"""
+    from smartsuite.engine.spc_monitor import cusum_chart
+
+    df = pd.DataFrame({"y": np.random.normal(0, 1, 30)})
+    r = cusum_chart(AnalysisRequest(task="spc_cusum", data=df, target_col="y",
+                                    feature_cols=[], params={"mu": 0.0}))
+    assert r.status == "error"
+    assert any("mu/sigma" in m for m in r.messages)
+
+
+def test_process_capability_constant_data_rejected():
+    """Round-2 #A2n：常量数据不得返回全 None 的 ok 结果。"""
+    from smartsuite.engine.capability import process_capability_analysis
+
+    df = pd.DataFrame({"v": [10.0] * 50})
+    r = process_capability_analysis(AnalysisRequest(
+        task="process_capability", data=df, target_col="v",
+        params={"usl": 12, "lsl": 8}))
+    assert r.status == "error"
+    assert any("常量" in m for m in r.messages)
+
+
+# ── Round-2 审查修复 批次A4b 回归测试（白名单）──
+
+
+def test_anomaly_method_whitelist():
+    """Round-2 #A2p：未知 method 不得静默按 Z-score 执行。"""
+    from smartsuite.engine.detection import anomaly_detect
+
+    np.random.seed(2)
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 30)})
+    r = anomaly_detect(AnalysisRequest(task="anomaly_detect", data=df, target_col="v",
+                                       params={"method": "bogus"}))
+    assert r.status == "error"
+    assert any("method" in m or "方法" in m for m in r.messages)
+
+
+def test_spc_nonparametric_side_whitelist():
+    """Round-2 #A2p：未知 side 不得静默按双侧执行。"""
+    from smartsuite.engine.spc_monitor import spc_nonparametric
+
+    np.random.seed(2)
+    df = pd.DataFrame({"y": np.random.normal(0, 1, 30)})
+    r = spc_nonparametric(AnalysisRequest(task="spc_nonparametric", data=df, target_col="y",
+                                          feature_cols=[], params={"side": "both"}))
+    assert r.status == "error"
+    assert any("side" in m for m in r.messages)
+
+
+def test_bootstrap_statistic_whitelist():
+    """Round-2 #A2p：未知 statistic 不得静默按 mean 执行。"""
+    from smartsuite.engine.exploratory import bootstrap_ci
+
+    np.random.seed(2)
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 30)})
+    r = bootstrap_ci(AnalysisRequest(task="bootstrap_ci", data=df, target_col="v",
+                                     params={"statistic": "variance"}))
+    assert r.status == "error"
+    assert any("statistic" in m for m in r.messages)
+
+
+def test_anova_quote_column_rejected():
+    """Round-2 #A2o：含单引号列名应返回明确中文错误而非 patsy 解析失败。"""
+    from smartsuite.engine.root_cause import anova_analysis
+
+    df = pd.DataFrame({"a'b": ["A"] * 10 + ["B"] * 10, "y": np.random.normal(0, 1, 20)})
+    r = anova_analysis(AnalysisRequest(task="anova", data=df, target_col="y",
+                                       feature_cols=["a'b"]))
+    assert r.status == "error"
+    assert any("单引号" in m or "重命名" in m for m in r.messages)
+
+# ── Round-2 批次D：常量列边界定向 + EWMA 回归 ──
+
+
+def test_normality_check_constant_column():
+    """边界定向（Round-2 批次D #6）：normality_check 常量列必须有明确结果。
+
+    当前引擎行为：常量列 SW p=1.0 → 判定「正态 ✓」（无警告、不崩溃）。
+    固定此确定性行为，防止未来回归成 NaN/崩溃。
+    """
+    from smartsuite.engine.root_cause import normality_check
+
+    df = _make_df({"x": [5.0] * 20})
+    result = normality_check(AnalysisRequest(task="normality_check", data=df, target_col="x"))
+    assert result.status == "ok", f"常量列应可评估: {result.messages}"
+    tbl = result.tables["normality_results"]
+    row = tbl.iloc[0]
+    assert str(row["Shapiro-Wilk p"]) == "1.0000", f"常量列 SW p 应为 1.0: {row['Shapiro-Wilk p']}"
+    assert "正态" in str(row["正态性"]), f"常量列被判定为: {row['正态性']}"
+    assert result.metadata["normal_count"] == 1
+
+
+def test_outlier_consensus_constant_column():
+    """边界定向（Round-2 批次D #6）：outlier_consensus 常量列 → 明确中文错误（IQR=0）。"""
+    from smartsuite.engine.detection import outlier_consensus
+
+    df = _make_df({"y": [5.0] * 30})
+    result = outlier_consensus(AnalysisRequest(task="outlier_consensus", data=df, target_col="y"))
+    assert result.status == "error", f"常量列应报错: {result.messages}"
+    assert any("IQR" in m or "变化" in m or "异常" in m for m in result.messages), (
+        f"应给出明确中文消息: {result.messages}"
+    )
+
+
+def test_trend_forecast_constant_y():
+    """边界定向（Round-2 批次D #6）：trend_forecast 常量 y → error（防 R²=1.0 假完美）。"""
+    from smartsuite.engine.detection import trend_forecast
+
+    df = _make_df({"t": list(range(30)), "y": [5.0] * 30})
+    result = trend_forecast(AnalysisRequest(task="trend_forecast", data=df, target_col="y"))
+    assert result.status == "error", f"常量 y 应报错而非 R²=1.0: {result.messages}"
+    assert any("常量" in m for m in result.messages), f"应提示常量列: {result.messages}"
+
+
+def test_ewma_partial_mu_sigma_rejected():
+    """Round-2 批次D #4a：EWMA 只传 mu 或 sigma 应 error（此前静默忽略两个参数）。"""
+    from smartsuite.engine.spc_charts import ewma_chart
+
+    np.random.seed(3)
+    df = _make_df({"y": np.random.normal(0, 1, 30)})
+    r_mu = ewma_chart(AnalysisRequest(task="spc_ewma", data=df, target_col="y",
+                                      params={"lam": 0.2, "L": 2.7, "mu": 0.0}))
+    assert r_mu.status == "error", f"只传 mu 应报错: {r_mu.messages}"
+    assert any("mu/sigma" in m for m in r_mu.messages), f"应提示 mu/sigma 同传: {r_mu.messages}"
+    r_sigma = ewma_chart(AnalysisRequest(task="spc_ewma", data=df, target_col="y",
+                                         params={"lam": 0.2, "L": 2.7, "sigma": 1.0}))
+    assert r_sigma.status == "error", f"只传 sigma 应报错: {r_sigma.messages}"
+    assert any("mu/sigma" in m for m in r_sigma.messages)
+    # 回归：两者都传仍可用
+    r_both = ewma_chart(AnalysisRequest(task="spc_ewma", data=df, target_col="y",
+                                        params={"lam": 0.2, "L": 2.7, "mu": 0.0, "sigma": 1.0}))
+    assert r_both.status == "ok", f"mu/sigma 同传应 ok: {r_both.messages}"
+def test_weco_rules_7_and_8_detected():
+    """Round-2 #A2r：交替升降（规则7）与连续8点在±1σ外（规则8）应被检出。"""
+    from smartsuite.engine.spc_charts import _we_rules_xbar
+
+    # 规则7：交替升降
+    alt = [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
+    v7 = _we_rules_xbar(np.array(alt, dtype=float), cl=0.5, sigma=0.6)
+    assert any("交替" in k for k in v7), f"规则7未检出: {list(v7.keys())}"
+    # 规则8：连续8点在±1σ外
+    outside = [2.0] * 8 + [0.0] * 4
+    v8 = _we_rules_xbar(np.array(outside, dtype=float), cl=0.0, sigma=0.5)
+    assert any("±1σ外" in k or "1σ外" in k for k in v8), f"规则8未检出: {list(v8.keys())}"
+
+
+def test_change_point_min_segment_half_n_rejected():
+    """Round-2 #A2q：min_segment*2 > n（含偶数 n//2 边界）应报错而非静默无变点。"""
+    from smartsuite.engine.detection import change_point_detect
+
+    np.random.seed(42)
+    df = pd.DataFrame({"x": np.random.normal(10, 0.5, 40)})
+    r = change_point_detect(AnalysisRequest(task="change_point", data=df, target_col="x",
+                                            params={"min_segment": 20, "n_changepoints": 3}))
+    assert r.status == "error"
+    assert any("min_segment" in m for m in r.messages)
 

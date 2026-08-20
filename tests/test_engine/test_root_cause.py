@@ -108,7 +108,13 @@ def test_mcnemar_numeric_binary_data():
 
 
 def test_cronbach_zero_variance_item():
-    """验证 Cronbach's α 对零方差题项不崩溃（修复 P2 Bug F2.10）。"""
+    """Cronbach's α 对零方差题项：精确断言（Round-2 批次D #2c）。
+
+    实测引擎行为（已验证）：零方差题项被排除出方差和但参与题项数 k，
+    α=(k/(k-1))*(1-Σvar_i/var_total) 仍可计算 → status=ok，α≈0.75，
+    且该题项的项总相关标记为 "N/A (零方差)"。此前 assert in ("ok","error")
+    恒真——任何结果都通过。
+    """
     from smartsuite.core.contracts import AnalysisRequest
 
     # 一个题项零方差（所有值相同）
@@ -120,8 +126,17 @@ def test_cronbach_zero_variance_item():
     req = AnalysisRequest(task="cronbach_alpha", data=df, target_col="item1",
                           feature_cols=["item1", "item2", "item3"])
     result = cronbach_alpha(req)
-    # 不应崩溃，status 为 ok（α 可计算或返回错误均可，但不能崩溃）
-    assert result.status in ("ok", "error")
+    assert result.status == "ok", f"零方差题项应可计算 α: {result.messages}"
+    alpha = result.metadata["alpha"]
+    assert 0.7 < alpha < 0.8, f"α 应为 0.75 左右（k=3, 一个零方差项），实际 {alpha:.4f}"
+    assert result.metadata["k"] == 3 and result.metadata["n"] == 5
+    item_tbl = result.tables["item_analysis"]
+    zero_row = item_tbl[item_tbl["题项"] == "item1"]
+    assert len(zero_row) == 1
+    assert "零方差" in str(zero_row.iloc[0]["项总相关"]), (
+        f"零方差题项应标记 'N/A (零方差)': {zero_row.iloc[0]['项总相关']}"
+    )
+    assert float(zero_row.iloc[0]["方差"]) == 0.0
 def test_hypothesis_kruskal_group_col_none_injection(sample_two_group_data):
     """审查 2026-08-19 #1.1：orchestrator 注入 group_col=None 时 kruskal 分支不得 KeyError，
     应回退到 feature_cols[0]。"""
@@ -172,3 +187,38 @@ def test_hypothesis_kruskal_group_col_missing_column():
     assert result.status == "error"
     assert any("不存在的列" in m for m in result.messages)
 
+
+def test_hypothesis_ks_group_col_none_injection():
+    """Round-2 批次D #4c：orchestrate 路径不传 group_col（DEFAULT_PARAMS 注入 None）
+    时 KS 双样本不得 KeyError，应回退 feature_cols[0] 正常执行。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    np.random.seed(7)
+    df = pd.DataFrame({
+        "y": np.concatenate([np.random.normal(10, 1, 50), np.random.normal(12, 1, 50)]),
+        "g": ["A"] * 50 + ["B"] * 50,
+    })
+    req = AnalysisRequest(task="hypothesis_test", data=df, target_col="y",
+                          feature_cols=["g"], params={"test": "ks", "alpha": 0.05})
+    result = orchestrate(req)
+    assert result.status == "ok", f"KS group_col=None 注入应正常: {result.messages}"
+    assert "Kolmogorov-Smirnov" in result.metadata.get("test", ""), (
+        f"应执行 KS 检验: {result.metadata.get('test')}"
+    )
+    assert 0 <= result.metadata["p_value"] <= 1
+
+
+def test_hypothesis_ttest_ind_group_col_none_injection():
+    """Round-2 批次D #4c：独立双样本 t 检验同样不得因 group_col=None KeyError。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    np.random.seed(7)
+    df = pd.DataFrame({
+        "y": np.concatenate([np.random.normal(10, 1, 50), np.random.normal(12, 1, 50)]),
+        "g": ["A"] * 50 + ["B"] * 50,
+    })
+    req = AnalysisRequest(task="hypothesis_test", data=df, target_col="y",
+                          feature_cols=["g"], params={"test": "ttest_ind", "alpha": 0.05})
+    result = orchestrate(req)
+    assert result.status == "ok", f"ttest_ind group_col=None 注入应正常: {result.messages}"
+    assert result.metadata.get("p_value") is not None

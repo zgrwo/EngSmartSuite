@@ -8,6 +8,9 @@
 - 异常捕获与翻译
 - NO_TARGET_TASKS 行为
 """
+import numpy as np
+import pandas as pd
+
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import (
     DEFAULT_PARAMS,
@@ -20,13 +23,35 @@ from smartsuite.services.orchestrator import (
 # ── 基础路由测试 ──
 
 def test_orchestrate_anova(sample_doe_data):
+    """Round-2 批次D #2a：ANOVA 路由测试改为前置硬断言（此前 status in (...) 恒真）。
+
+    用正确的因子数据类型（类别因子列 + 数值目标列）跑 ANOVA，消除把连续列
+    当因子导致的 NaN/虚假显著问题；断言 status=='ok' + 具体统计量存在。
+    """
+    np.random.seed(42)
+    n = 30
+    df_anova = pd.DataFrame({
+        "组别": np.repeat(["A", "B", "C"], n),
+        "强度": np.concatenate([
+            np.random.normal(45, 3, n),
+            np.random.normal(48, 3, n),
+            np.random.normal(51, 3, n),
+        ]),
+    })
     req = AnalysisRequest(
-        task="anova", data=sample_doe_data,
-        target_col="强度", feature_cols=["料温", "模温", "注射压力", "保压时间"],
+        task="anova", data=df_anova,
+        target_col="强度", feature_cols=["组别"],
+        params={"alpha": 0.05},
     )
     result = orchestrate(req)
     assert result.task == "anova"
-    assert result.status in ("ok", "warning", "error")
+    assert result.status == "ok", f"ANOVA 应成功: {result.messages}"
+    assert "anova_enhanced" in result.tables
+    assert "r_squared" in result.metadata, "ANOVA 应输出 R²"
+    assert 0 <= result.metadata["r_squared"] <= 1, (
+        f"R² 应在 [0,1]: {result.metadata['r_squared']}"
+    )
+    assert len(result.summary) > 0, "summary 不应为空"
 
 
 def test_orchestrate_correlation(sample_doe_data):
