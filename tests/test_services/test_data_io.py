@@ -6,6 +6,7 @@ auto_generate_subgroup_col / infer_group_col / preprocess_for_task
 （read_excel_range 依赖 xlwings/Excel 环境，豁免，见 test_quality_guard.py）
 """
 
+import numpy as np
 import pandas as pd
 
 from smartsuite.services.data_io import (
@@ -64,3 +65,15 @@ def test_preprocess_for_task_encodes_without_raw_cat():
     enc, cols, _, _ = preprocess_for_task(df, ["批次"], "regression")
     assert "批次" not in cols  # 被 one-hot 编码替换
     assert len(enc) == 3  # 行数不变
+def test_preprocess_for_task_removes_inf():
+    """审查 2026-08-19 #1.5：预处理应把 ±Inf 转为 NaN（dropna 不过滤 Inf）。"""
+    from smartsuite.services.data_io import preprocess_for_task
+
+    df = pd.DataFrame({"a": [1.0, np.inf, -np.inf, np.nan, 5.0], "g": ["A", "A", "B", "B", "B"]})
+    out, feat, log, _ = preprocess_for_task(df, ["a"], "regression", None)
+    assert np.isinf(out["a"]).sum() == 0, "预处理后不应残留 Inf"
+    # RAW_CAT 分支同样清洗
+    out2, feat2, _, _ = preprocess_for_task(df, ["a", "g"], "box_chart", None,
+                                            raw_cat_tasks={"box_chart"})
+    assert np.isinf(out2["a"]).sum() == 0, "RAW_CAT 路径也不应残留 Inf"
+

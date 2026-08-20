@@ -441,11 +441,12 @@ def test_cli_web_specific_parity():
 
     assert r_cli_reg.status == web_r_reg.get("status"), \
         f"regression status: CLI={r_cli_reg.status}, Web={web_r_reg.get('status')}"
-    if r_cli_reg.status == "ok":
-        assert abs(r_cli_reg.metadata["r_squared"] -
-                   float(web_r_reg.get("metadata", {}).get("r_squared", 0))) < 1e-4, \
-            f"regression R² 不一致: CLI={r_cli_reg.metadata['r_squared']}, " \
-            f"Web={web_r_reg.get('metadata', {}).get('r_squared')}"
+    # 审查 2026-08-19 #3.4：守卫改前置硬断言（数据完好时两条路径都必须 ok）
+    assert r_cli_reg.status == "ok", f"regression CLI 失败: {r_cli_reg.messages}"
+    assert abs(r_cli_reg.metadata["r_squared"] -
+               float(web_r_reg.get("metadata", {}).get("r_squared", 0))) < 1e-4, \
+        f"regression R² 不一致: CLI={r_cli_reg.metadata['r_squared']}, " \
+        f"Web={web_r_reg.get('metadata', {}).get('r_squared')}"
 
     # ── ANOVA ──
     df_anova = pd.DataFrame({
@@ -463,8 +464,9 @@ def test_cli_web_specific_parity():
 
     assert r_cli_a.status == web_r_a.get("status"), \
         f"anova status: CLI={r_cli_a.status}, Web={web_r_a.get('status')}"
-    if r_cli_a.status == "ok":
-        cli_p = float(r_cli_a.metadata.get("p_value", 0))
-        web_p = float(web_r_a.get("metadata", {}).get("p_value", 0))
-        assert abs(cli_p - web_p) < 1e-4 or abs(cli_p - web_p) / (abs(cli_p) + 1e-10) < 0.01, \
-            f"anova p 值不一致: CLI={cli_p}, Web={web_p}"
+    # 审查 2026-08-19 #3.4：守卫改前置硬断言
+    assert r_cli_a.status == "ok", f"anova CLI 失败: {r_cli_a.messages}"
+    cli_p = float(r_cli_a.metadata.get("p_value", 0))
+    web_p = float(web_r_a.get("metadata", {}).get("p_value", 0))
+    assert abs(cli_p - web_p) < 1e-4 or abs(cli_p - web_p) / (abs(cli_p) + 1e-10) < 0.01, \
+        f"anova p 值不一致: CLI={cli_p}, Web={web_p}"

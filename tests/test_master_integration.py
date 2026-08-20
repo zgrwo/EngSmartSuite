@@ -97,16 +97,17 @@ def test_all_registered_tasks(df, task, target, features, params):
     req = AnalysisRequest(task=task, data=df, target_col=target,
                           feature_cols=features, params=params)
     result = orchestrate(req)
-    assert result.status in ("ok", "error"), f"{task}: unexpected status {result.status}"
+    # 审查 2026-08-19 #3.4：移除恒真 status in (ok,error) 断言；
+    # 结构性检查（tables/figures/metadata 契约）无条件执行，不因 status 分支跳过
     assert result.task == task, f"{task}: task mismatch {result.task}"
+    assert isinstance(result.tables, dict), f"{task}: tables 不是 dict"
+    assert isinstance(result.figures, list), f"{task}: figures 不是 list"
+    assert isinstance(result.metadata, dict), f"{task}: metadata 不是 dict"
 
     if result.status == "ok":
         # 成功结果必须包含有意义的输出
         assert isinstance(result.summary, str) and len(result.summary) > 0, (
             f"{task}: summary 为空")
-        assert isinstance(result.tables, dict), f"{task}: tables 不是 dict"
-        assert isinstance(result.figures, list), f"{task}: figures 不是 list"
-        assert isinstance(result.metadata, dict), f"{task}: metadata 不是 dict"
     else:
         # 错误结果必须包含错误消息
         assert len(result.messages) > 0, f"{task}: error 但没有 messages"

@@ -122,3 +122,53 @@ def test_cronbach_zero_variance_item():
     result = cronbach_alpha(req)
     # 不应崩溃，status 为 ok（α 可计算或返回错误均可，但不能崩溃）
     assert result.status in ("ok", "error")
+def test_hypothesis_kruskal_group_col_none_injection(sample_two_group_data):
+    """审查 2026-08-19 #1.1：orchestrator 注入 group_col=None 时 kruskal 分支不得 KeyError，
+    应回退到 feature_cols[0]。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    req = AnalysisRequest(
+        task="hypothesis_test", data=sample_two_group_data,
+        target_col="强度", feature_cols=["工艺"],
+        params={"test": "kruskal", "alpha": 0.05},  # 不传 group_col → orchestrator 注入 None
+    )
+    result = orchestrate(req)
+    assert result.status == "ok", f"kruskal 失败: {result.messages}"
+    assert result.metadata.get("test") == "Kruskal-Wallis H 检验 (非参数 ANOVA)"
+
+
+def test_hypothesis_jonckheere_group_col_none_injection():
+    """审查 2026-08-19 #1.1：jonckheere 分支同样不得 KeyError。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    rng = np.random.RandomState(7)
+    df = pd.DataFrame({
+        "val": np.concatenate([
+            rng.normal(10, 1, 12), rng.normal(12, 1, 12), rng.normal(14, 1, 12),
+        ]),
+        "level": ["低"] * 12 + ["中"] * 12 + ["高"] * 12,
+    })
+    req = AnalysisRequest(
+        task="hypothesis_test", data=df,
+        target_col="val", feature_cols=["level"],
+        params={"test": "jonckheere", "alpha": 0.05},
+    )
+    result = orchestrate(req)
+    assert result.status == "ok", f"jonckheere 失败: {result.messages}"
+    assert "Jonckheere" in result.metadata.get("test", "")
+
+
+def test_hypothesis_kruskal_group_col_missing_column():
+    """审查 2026-08-19 #2.10：group_col 指向不存在的列应返回明确中文错误而非 KeyError。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    df = pd.DataFrame({"val": np.random.RandomState(1).normal(0, 1, 30)})
+    req = AnalysisRequest(
+        task="hypothesis_test", data=df,
+        target_col="val", feature_cols=[],
+        params={"test": "kruskal", "group_col": "不存在的列", "alpha": 0.05},
+    )
+    result = orchestrate(req)
+    assert result.status == "error"
+    assert any("不存在的列" in m for m in result.messages)
+

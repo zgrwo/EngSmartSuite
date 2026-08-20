@@ -1,7 +1,8 @@
-"""R 交叉验证测试 — 关键 5 方法与 R 输出对比。
+"""关键方法交叉验证测试 — 5 方法（ANOVA/回归/SPC/能力/Gage R&R）。
 
-参考值来源：R 4.3+ (base stats / car / qcc / MSA 包)
-容差：统计量 ±1e-4, p 值 ±1e-4, 效应量 ±1e-3
+审查 2026-08-19 #3.2：本文件此前声称"与 R 4.3+ 输出对比（容差 ±1e-4）"，
+但实际不含任何 R 参考数值——现如实标注为 手工公式/已知性质 交叉验证。
+后续录入真实 R 输出数值后，可改回"R 参考对比"并逐项比对。
 
 运行方式：pytest tests/crossval_r/ -v
 """
@@ -235,10 +236,9 @@ class TestCapabilityCrossVal:
             feature_cols=[], params={"usl": 11.5, "lsl": 8.5}
         ))
         assert r.status == "ok"
-        # 检查 CI 存在
-        cp_ci = r.metadata.get("cp_ci")
-        cpk_ci = r.metadata.get("cpk_ci")
-        assert cp_ci is not None or cpk_ci is not None
+        # 检查 CI 存在（审查 2026-08-19 #3.2：键缺失即通过的弱断言已改硬断言）
+        assert "cp_ci" in r.metadata or "cpk_ci" in r.metadata, \
+            f"应报告过程能力 CI，metadata 键: {list(r.metadata.keys())}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -257,9 +257,9 @@ class TestGageRRCrossVal:
             params={"part_col": "part", "operator_col": "operator"}
         ))
         assert r.status == "ok"
-        # 应有方差分量或 %Study Var
+        # 应有方差分量或 %Study Var（审查 2026-08-19 #3.2：删除恒真 or r.status == "ok" 兜底）
         assert "repeatability" in r.summary.lower() or "重复性" in r.summary or \
-               "GRR" in r.summary or "gage" in r.summary.lower() or r.status == "ok"
+               "GRR" in r.summary or "gage" in r.summary.lower()
 
     def test_gage_rr_total_variation(self):
         """总变异应 > 重复性变异"""
@@ -271,6 +271,9 @@ class TestGageRRCrossVal:
         ))
         assert r.status == "ok"
         # 零件间变异应占主导（我们设了 σ_part=2, σ_gage=0.3）
-        metadata = r.metadata
-        if "part_variation_pct" in metadata:
-            assert metadata["part_variation_pct"] > 50  # 零件变异 >50%
+        # 审查 2026-08-19 #3.2：原条件断言（键缺失即通过）改硬断言；
+        # 实际键为 pv/grr（σ 分量），零件变异应明显大于量具变异
+        assert "pv" in r.metadata and "grr" in r.metadata, \
+            f"缺少 pv/grr，metadata 键: {list(r.metadata.keys())}"
+        assert r.metadata["pv"] > r.metadata["grr"], \
+            "零件变异应大于量具变异（σ_part=2 vs σ_gage=0.3）"

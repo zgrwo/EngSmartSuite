@@ -47,10 +47,10 @@ def test_correlation_matrix_bounds():
                               feature_cols=["x1", "x2", "x3"],
                               params={"method": method})
         result = correlation_analysis(req)
-        if result.status == "ok":
-            corr_mat = result.tables["correlation_matrix"]
-            assert ((corr_mat >= -1.01) & (corr_mat <= 1.01)).all().all(), \
-                f"{method}: 相关性系数超出 [-1, 1]"
+        assert result.status == "ok", result.messages
+        corr_mat = result.tables["correlation_matrix"]
+        assert ((corr_mat >= -1.01) & (corr_mat <= 1.01)).all().all(), \
+            f"{method}: 相关性系数超出 [-1, 1]"
 
 
 def test_correlation_diagonal_is_one():
@@ -87,9 +87,10 @@ def test_anova_r_squared_bounds():
     req = AnalysisRequest(task="anova", data=df, target_col="val",
                           feature_cols=["group"])
     result = anova_analysis(req)
-    if result.status == "ok" and "r_squared" in result.metadata:
-        rsq = result.metadata["r_squared"]
-        assert 0 <= rsq <= 1, f"R²={rsq:.3f} 不在 [0,1]"
+    assert result.status == "ok", result.messages
+    assert "r_squared" in result.metadata
+    rsq = result.metadata["r_squared"]
+    assert 0 <= rsq <= 1, f"R²={rsq:.3f} 不在 [0,1]"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -105,15 +106,15 @@ def test_cpk_leq_cp():
     req = AnalysisRequest(task="process_capability", data=df, target_col="val",
                           params={"usl": 13.0, "lsl": 7.0})
     result = process_capability_analysis(req)
-    if result.status == "ok":
-        cp = result.metadata.get("cp")
-        cpk = result.metadata.get("cpk")
-        pp = result.metadata.get("pp")
-        ppk = result.metadata.get("ppk")
-        if cp is not None and cpk is not None:
-            assert cpk <= cp + 0.001, f"Cpk={cpk:.3f} > Cp={cp:.3f}"
-        if pp is not None and ppk is not None:
-            assert ppk <= pp + 0.001, f"Ppk={ppk:.3f} > Pp={pp:.3f}"
+    assert result.status == "ok", result.messages
+    cp = result.metadata.get("cp")
+    cpk = result.metadata.get("cpk")
+    pp = result.metadata.get("pp")
+    ppk = result.metadata.get("ppk")
+    if cp is not None and cpk is not None:
+        assert cpk <= cp + 0.001, f"Cpk={cpk:.3f} > Cp={cp:.3f}"
+    if pp is not None and ppk is not None:
+        assert ppk <= pp + 0.001, f"Ppk={ppk:.3f} > Pp={pp:.3f}"
 
 
 def test_cpk_single_sided_spec():
@@ -124,19 +125,19 @@ def test_cpk_single_sided_spec():
     req = AnalysisRequest(task="process_capability", data=df, target_col="val",
                           params={"usl": 13.0})
     result = process_capability_analysis(req)
-    if result.status == "ok":
-        cpk = result.metadata.get("cpk")
-        assert cpk is not None, "单侧公差 (USL only) 应能计算 Cpk"
-        assert cpk > 0, f"单侧 Cpk 应为正值, got {cpk}"
+    assert result.status == "ok", result.messages
+    cpk = result.metadata.get("cpk")
+    assert cpk is not None, "单侧公差 (USL only) 应能计算 Cpk"
+    assert cpk > 0, f"单侧 Cpk 应为正值, got {cpk}"
 
     # 仅下公差
     req2 = AnalysisRequest(task="process_capability", data=df, target_col="val",
                            params={"lsl": 7.0})
     result2 = process_capability_analysis(req2)
-    if result2.status == "ok":
-        cpk2 = result2.metadata.get("cpk")
-        assert cpk2 is not None, "单侧公差 (LSL only) 应能计算 Cpk"
-        assert cpk2 > 0, f"单侧 Cpk 应为正值, got {cpk2}"
+    assert result2.status == "ok", result2.messages
+    cpk2 = result2.metadata.get("cpk")
+    assert cpk2 is not None, "单侧公差 (LSL only) 应能计算 Cpk"
+    assert cpk2 > 0, f"单侧 Cpk 应为正值, got {cpk2}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -154,12 +155,12 @@ def test_regression_r_squared_non_negative():
     req = AnalysisRequest(task="regression", data=df, target_col="y",
                           feature_cols=["x"])
     result = regression_analysis(req)
-    if result.status == "ok":
-        for _, row in result.tables["diagnostics"].iterrows():
-            if row["指标"] == "R²":
-                val = float(row["值"])
-                assert val >= 0, f"R² 为负: {val:.3f}"
-            # 调整 R² 可以为负 — 不检查
+    assert result.status == "ok", result.messages
+    for _, row in result.tables["diagnostics"].iterrows():
+        if row["指标"] == "R²":
+            val = float(row["值"])
+            assert val >= 0, f"R² 为负: {val:.3f}"
+        # 调整 R² 可以为负 — 不检查
 
 
 # ═══════════════════════════════════════════════════════════
@@ -179,10 +180,10 @@ def test_ttest_p_value_range():
     req = AnalysisRequest(task="hypothesis_test", data=df, target_col="val",
                           feature_cols=["group"], params={"group_col": "group"})
     result = hypothesis_test(req)
-    if result.status == "ok":
-        p = result.metadata.get("p_value")
-        if p is not None:
-            assert 0 <= p <= 1, f"p 值无效: {p}"
+    assert result.status == "ok", result.messages
+    p = result.metadata.get("p_value")
+    if p is not None:
+        assert 0 <= p <= 1, f"p 值无效: {p}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -200,11 +201,11 @@ def test_xbar_control_limits_order():
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
                           feature_cols=["子组"], params={})
     result = xbar_r_chart(req)
-    if result.status == "ok":
-        cl = result.metadata["xbar_mean"]
-        ucl = result.metadata["ucl_x"]
-        lcl = result.metadata["lcl_x"]
-        assert lcl < cl < ucl, f"控制限顺序错误: LCL={lcl:.3f}, CL={cl:.3f}, UCL={ucl:.3f}"
+    assert result.status == "ok", result.messages
+    cl = result.metadata["xbar_mean"]
+    ucl = result.metadata["ucl_x"]
+    lcl = result.metadata["lcl_x"]
+    assert lcl < cl < ucl, f"控制限顺序错误: LCL={lcl:.3f}, CL={cl:.3f}, UCL={ucl:.3f}"
 
 
 def test_r_chart_control_limits_non_negative():
@@ -218,9 +219,9 @@ def test_r_chart_control_limits_non_negative():
     req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
                           feature_cols=["子组"], params={})
     result = xbar_r_chart(req)
-    if result.status == "ok":
-        assert result.metadata["lcl_r"] >= 0, \
-            f"R 图 LCL 不应为负: {result.metadata['lcl_r']:.3f}"
+    assert result.status == "ok", result.messages
+    assert result.metadata["lcl_r"] >= 0, \
+        f"R 图 LCL 不应为负: {result.metadata['lcl_r']:.3f}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -237,14 +238,14 @@ def test_survival_km_monotonic():
     req = AnalysisRequest(task="survival_analysis", data=df, target_col="time",
                           feature_cols=["event"])
     result = survival_analysis(req)
-    if result.status == "ok":
-        surv_table = result.tables.get("km_survival")
-        if surv_table is not None and "生存概率" in surv_table.columns:
-            surv_values = surv_table["生存概率"].values
-            # KM 生存概率必须单调非增
-            assert all(float(surv_values[i]) >= float(surv_values[i + 1]) - 0.001
-                       for i in range(len(surv_values) - 1)), \
-                "KM 生存概率不是单调递减"
+    assert result.status == "ok", result.messages
+    surv_table = result.tables.get("km_survival")
+    if surv_table is not None and "生存概率" in surv_table.columns:
+        surv_values = surv_table["生存概率"].values
+        # KM 生存概率必须单调非增
+        assert all(float(surv_values[i]) >= float(surv_values[i + 1]) - 0.001
+                   for i in range(len(surv_values) - 1)), \
+            "KM 生存概率不是单调递减"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -272,16 +273,16 @@ def test_gage_rr_variance_decomposition():
                           feature_cols=["零件", "操作员"],
                           params={"part_col": "零件", "operator_col": "操作员"})
     result = gage_rr(req)
-    if result.status == "ok":
-        grr_pct = result.metadata.get("grr_pct")
-        ev_pct = result.metadata.get("ev_pct")
-        av_pct = result.metadata.get("av_pct")
-        pv_pct = result.metadata.get("pv_pct")
-        # 所有百分比分量应非负
-        for name, val in [("GRR%", grr_pct), ("EV%", ev_pct),
-                          ("AV%", av_pct), ("PV%", pv_pct)]:
-            if val is not None:
-                assert val >= 0, f"{name} 不应该为负: {val:.1f}"
+    assert result.status == "ok", result.messages
+    grr_pct = result.metadata.get("grr_pct")
+    ev_pct = result.metadata.get("ev_pct")
+    av_pct = result.metadata.get("av_pct")
+    pv_pct = result.metadata.get("pv_pct")
+    # 所有百分比分量应非负
+    for name, val in [("GRR%", grr_pct), ("EV%", ev_pct),
+                      ("AV%", av_pct), ("PV%", pv_pct)]:
+        if val is not None:
+            assert val >= 0, f"{name} 不应该为负: {val:.1f}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -299,10 +300,10 @@ def test_attribute_chart_center_line_positive():
         req = AnalysisRequest(task="spc_attribute", data=df_p, target_col=col,
                               params={"chart_type": chart_type, "subgroup_col": "batch"})
         result = attribute_chart(req)
-        if result.status == "ok":
-            cl = result.metadata.get("center_line")
-            if cl is not None:
-                assert cl > 0, f"{chart_type}-chart CL={cl} ≤ 0"
+        assert result.status == "ok", result.messages
+        cl = result.metadata.get("center_line")
+        if cl is not None:
+            assert cl > 0, f"{chart_type}-chart CL={cl} ≤ 0"
 
 
 # ── 散点图不变量 ──
@@ -428,15 +429,15 @@ def test_p_value_range_all_tests():
     req = AnalysisRequest(task="hypothesis_test", data=df, target_col="y",
                           feature_cols=["g"], params={"test": "ttest_ind"})
     result = hypothesis_test(req)
-    if result.status == "ok":
-        p = result.metadata.get("p_value")
-        if p is not None:
-            assert 0 <= p <= 1, f"p={p} 超出 [0,1]"
+    assert result.status == "ok", result.messages
+    p = result.metadata.get("p_value")
+    if p is not None:
+        assert 0 <= p <= 1, f"p={p} 超出 [0,1]"
     # anova
     req2 = AnalysisRequest(task="anova", data=df, target_col="y",
                            feature_cols=["g"], params={"alpha": 0.05})
     result2 = anova_analysis(req2)
-    if result2.status == "ok":
-        p2 = result2.metadata.get("p_value")
-        if p2 is not None:
-            assert 0 <= p2 <= 1, f"ANOVA p={p2} 超出 [0,1]"
+    assert result2.status == "ok", result2.messages
+    p2 = result2.metadata.get("p_value")
+    if p2 is not None:
+        assert 0 <= p2 <= 1, f"ANOVA p={p2} 超出 [0,1]"

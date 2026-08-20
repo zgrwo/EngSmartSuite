@@ -44,9 +44,26 @@ _STRONG_ASSERT_RE = re.compile(
     r"|assert\s+\w+\s*is\s+False"
     r"|assert\s+len\([^)]*\)\s*[=!]=\s*\S+"  # assert len(x) == N / != N
     r"|pytest\.raises"  # 异常断言
+    # 审查 2026-08-19 #3.5：补充常见强断言形态（此前误报为弱）
+    r"|assert\s+(?:all|any)\("  # assert all(...) / any(...)
+    r"|assert\s+not\s+"  # assert not ...
+    r"|assert\s+['\"]"  # assert "..." in / 与字面量比较
+    r"|assert\s+\w+\.\w+\("  # assert x.isna()... 方法调用
 )
 # 无意义测试名：test_<纯数字/序号/caseN>
 _BAD_NAME_RE = re.compile(r"test_(?:\d+|case\d+|test\d+|a|b|c|foo|bar|dummy)$")
+
+# 审查 2026-08-19 #3.5 新增三类检测：
+# 1) 仅状态断言：assert x.status == "ok"（带引号值，旧正则既不弱也不强 → 漏检）
+_STATUS_ONLY_ASSERT_RE = re.compile(
+    r"assert\s+\w+(?:\[[^\]]*\]|\.\w+)*\s*==\s*(?:['\"](?:ok|error|warning)['\"]|[A-Z_]+)"
+)
+# 2) 恒真断言：assert status in ("ok","error") —— 任何结果都通过
+_ALWAYS_TRUE_STATUS_RE = re.compile(
+    r"assert\s+\w+(?:\.\w+)*\s+in\s+\(\s*(?:['\"]ok['\"])\s*,\s*(?:['\"](?:error|warning)['\"])"
+)
+# 3) 守卫架空：if result.status == "ok": 内嵌断言（引擎报错时测试空转通过）
+_STATUS_GUARD_RE = re.compile(r"if\s+\w+(?:\.\w+)*\.status\s*==\s*(?:['\"]ok['\"]|OK):")
 
 # 自测夹具文件：刻意含弱断言以验证守卫逻辑，不应触发自 WARN（告警疲劳）
 SELF_TEST_FILES = {"test_test_quality_guard.py"}
@@ -105,6 +122,71 @@ def _method_is_weak_only(src: str) -> bool:
     """方法只有弱断言（且无强断言）→ 视为弱。"""
     code = "\n".join(line.split("#", 1)[0] for line in src.splitlines())
     return bool(_WEAK_ASSERT_RE.search(code)) and not _method_has_strong_assert(src)
+
+
+def _assert_lines(code_lines: list[str]) -> list[tuple[str, str]]:
+    """返回 [(assert 行原文, 缩进)]。"""
+    out = []
+    for line in code_lines:
+        stripped = line.strip()
+        if stripped.startswith("assert"):
+            indent = len(line) - len(line.lstrip())
+            out.append((stripped, indent))
+    return out
+
+
+def check_status_only_asserts(tests_dir: Path) -> list[str]:
+    """检测三类隐蔽弱断言（审查 2026-08-19 #3.5，WARN 不阻断）：
+    1) assert x.status == "ok" 仅状态断言（旧正则漏检）
+    2) assert status in ("ok","error") 恒真断言
+    3) if status=="ok": 守卫架空（引擎报错时空转通过）
+    """
+    problems: list[str] = []
+    if not tests_dir.is_dir():
+        return problems
+    for p in sorted(tests_dir.rglob("test_*.py")):
+        if p.name in SELF_TEST_FILES:
+            continue
+        for name, src in _extract_test_methods(p):
+            code_lines = [line.split("#", 1)[0] for line in src.splitlines()]
+            code = "\n".join(code_lines)
+            rel = _rel(p)
+            if _ALWAYS_TRUE_STATUS_RE.search(code):
+                problems.append(
+                    f"[WARN] {rel}:{name} 恒真断言（status in (ok,error)）——任何结果都能通过，"
+                    "请断言具体数值/状态"
+                )
+            # 守卫行缩进：逐行匹配（search 的 start() 是拼接串索引，不可用于行定位）
+            guard_indent = None
+            for _line in code_lines:
+                if _STATUS_GUARD_RE.search(_line):
+                    guard_indent = len(_line) - len(_line.lstrip())
+                    break
+            if guard_indent is not None:
+                # 守卫块内是否存在更深缩进的断言
+                has_guarded_assert = any(
+                    stripped.startswith("assert") and indent > guard_indent
+                    for stripped, indent in _assert_lines(code_lines)
+                )
+                if has_guarded_assert:
+                    problems.append(
+                        f"[WARN] {rel}:{name} 断言被 if status=='ok' 守卫架空——"
+                        "引擎报错时测试空转通过，应改为前置硬断言"
+                    )
+            asserts = _assert_lines(code_lines)
+            if not asserts:
+                continue
+            has_strong = _method_has_strong_assert(src)
+            only_status = all(
+                _STATUS_ONLY_ASSERT_RE.search(stripped) or _WEAK_ASSERT_RE.search(stripped)
+                for stripped, _ in asserts
+            )
+            if asserts and not has_strong and only_status:
+                problems.append(
+                    f"[WARN] {rel}:{name} 仅状态/弱断言（status=='ok' 或 is not None）——"
+                    "不验证具体值，请补真实断言"
+                )
+    return problems
 
 
 def check_weak_asserts(tests_dir: Path) -> list[str]:
@@ -179,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
 
     problems: list[str] = []
     problems += check_weak_asserts(tests_dir)
+    problems += check_status_only_asserts(tests_dir)
     problems += check_naming(tests_dir)
     problems += check_missing_tests(src_dir, tests_dir)
 

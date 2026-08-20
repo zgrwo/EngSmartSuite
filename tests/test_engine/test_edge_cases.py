@@ -371,3 +371,223 @@ def test_survival_minimal():
     r = survival_analysis(req)
     assert r.status == "ok"
     assert r.metadata["n_censored"] > 0
+
+def test_bootstrap_ci_ci_level_out_of_range():
+    """审查 2026-08-19 #1.3：ci_level 越界应返回中文错误而非崩溃/荒谬输出。"""
+    from smartsuite.engine.exploratory import bootstrap_ci
+
+    np.random.seed(1)
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 50)})
+    req = AnalysisRequest(task="bootstrap_ci", data=df, target_col="v",
+                          params={"ci_level": 1.5, "n_bootstrap": 200})
+    result = bootstrap_ci(req)
+    assert result.status == "error"
+    assert any("ci_level" in m for m in result.messages)
+
+
+def test_median_ci_ci_level_out_of_range():
+    """审查 2026-08-19 #1.3：median_ci 的 ci_level=2 不得输出 "200% CI"。"""
+    from smartsuite.engine.exploratory import median_ci
+
+    np.random.seed(1)
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 50)})
+    req = AnalysisRequest(task="median_ci", data=df, target_col="v",
+                          params={"ci_level": 2})
+    result = median_ci(req)
+    assert result.status == "error"
+    assert any("ci_level" in m for m in result.messages)
+
+
+def test_median_ci_valid_level_still_works():
+    """回归：合法 ci_level 正常工作。"""
+    from smartsuite.engine.exploratory import median_ci
+
+    np.random.seed(1)
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 50)})
+    req = AnalysisRequest(task="median_ci", data=df, target_col="v",
+                          params={"ci_level": 0.90})
+    result = median_ci(req)
+    assert result.status == "ok"
+    assert result.metadata["ci_level"] == 0.90
+
+
+def test_power_analysis_effect_size_zero_rejected():
+    """审查 2026-08-19 #1.4：effect_size=0 应返回中文错误而非 statsmodels ValueError。"""
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"v": [1.0]})
+    req = AnalysisRequest(task="power_analysis", data=df, target_col="v",
+                          params={"effect_size": 0, "test_type": "ttest"})
+    result = power_analysis(req)
+    assert result.status == "error"
+    assert any("effect_size" in m for m in result.messages)
+
+
+def test_power_analysis_string_p0_p1_rejected():
+    """审查 2026-08-19 #1.4：字符串 p0/p1 应返回中文错误而非 TypeError。"""
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"v": [1.0]})
+    req = AnalysisRequest(task="power_analysis", data=df, target_col="v",
+                          params={"test_type": "proportion", "p0": "0.3", "p1": "oops"})
+    result = power_analysis(req)
+    assert result.status == "error"
+    assert any("p0/p1" in m for m in result.messages)
+
+
+def test_power_analysis_string_n_groups_convertible():
+    """审查 2026-08-19 #1.4：n_groups='3' 应被安全转换而非 statsmodels TypeError。"""
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"v": [1.0]})
+    req = AnalysisRequest(task="power_analysis", data=df, target_col="v",
+                          params={"test_type": "anova", "n_groups": "3", "effect_size": 0.5})
+    result = power_analysis(req)
+    assert result.status == "ok", f"n_groups='3' 应可转换: {result.messages}"
+    assert result.metadata["required_n"] > 0
+
+
+def test_power_analysis_proportion_mode_works():
+    """回归：proportion 模式计算与曲线（审查 #2.10 不再误用 ANOVA 曲线）。"""
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"v": [1.0]})
+    req = AnalysisRequest(task="power_analysis", data=df, target_col="v",
+                          params={"test_type": "proportion", "p0": 0.3, "p1": 0.5,
+                                  "effect_size": 0.2, "target_power": 0.8})
+    result = power_analysis(req)
+    assert result.status == "ok", f"proportion 模式失败: {result.messages}"
+    assert result.metadata["required_n"] > 0
+    assert len(result.figures) == 1
+
+
+def test_anomaly_grubbs_string_params_rejected():
+    """审查 2026-08-19 #1.4：grubbs 分支字符串参数应返回中文错误而非 TypeError。"""
+    from smartsuite.engine.detection import anomaly_detect
+
+    np.random.seed(3)
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 30)})
+    req = AnalysisRequest(task="anomaly_detect", data=df, target_col="v",
+                          params={"method": "grubbs", "alpha": "oops", "max_outliers": "5"})
+    result = anomaly_detect(req)
+    assert result.status == "error"
+    assert any("alpha" in m for m in result.messages)
+
+    req2 = AnalysisRequest(task="anomaly_detect", data=df, target_col="v",
+                           params={"method": "grubbs", "alpha": "0.05", "max_outliers": "2"})
+    result2 = anomaly_detect(req2)
+    assert result2.status == "ok", f"合法字符串参数应可用: {result2.messages}"
+
+
+# ── 审查 2026-08-19 #3.7 边界矩阵补齐 ──
+import matplotlib.pyplot as _plt
+
+
+def _close_result_figs(res):
+    """释放分析结果中的 Figure，避免长循环下 matplotlib 内存累积（审查 #3.7）。"""
+    for fig in getattr(res, "figures", []) or []:
+        try:
+            fig.clear()
+            _plt.close(fig)
+        except Exception:
+            pass
+    _plt.close("all")
+
+
+
+def test_empty_dataframe_all_tasks_return_result():
+    """空数据（0 行）：全部 40 任务不得抛异常（返回 ok 或带中文消息的 error）。"""
+    from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
+
+    df = pd.DataFrame({"x": pd.Series(dtype=float), "y": pd.Series(dtype=float),
+                       "g": pd.Series(dtype=object)})
+    for task in sorted(TASK_REGISTRY.keys()):
+        try:
+            res = orchestrate(AnalysisRequest(
+                task=task, data=df, target_col="y", feature_cols=["x", "g"]))
+            assert res.task == task
+            if res.status != "ok":
+                assert len(res.messages) > 0, f"{task}: error 无消息"
+            _close_result_figs(res)
+        except Exception as exc:
+            raise AssertionError(f"{task}: 空数据抛异常 {type(exc).__name__}: {exc}")
+
+
+def test_all_nan_column_all_tasks_graceful():
+    """全 NaN 列：全部 40 任务不得抛异常。"""
+    from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
+
+    df = pd.DataFrame({"x": [np.nan] * 10, "y": [np.nan] * 10, "g": ["A"] * 10})
+    for task in sorted(TASK_REGISTRY.keys()):
+        try:
+            res = orchestrate(AnalysisRequest(
+                task=task, data=df, target_col="y", feature_cols=["x", "g"]))
+            assert res.task == task
+            _close_result_figs(res)
+        except Exception as exc:
+            raise AssertionError(f"{task}: 全 NaN 抛异常 {type(exc).__name__}: {exc}")
+
+
+def test_single_row_all_tasks_graceful():
+    """单行数据：全部 40 任务不得抛异常。"""
+    from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
+
+    df = pd.DataFrame({"x": [1.0], "y": [2.0], "g": ["A"]})
+    for task in sorted(TASK_REGISTRY.keys()):
+        try:
+            res = orchestrate(AnalysisRequest(
+                task=task, data=df, target_col="y", feature_cols=["x", "g"]))
+            assert res.task == task
+            _close_result_figs(res)
+        except Exception as exc:
+            raise AssertionError(f"{task}: 单行抛异常 {type(exc).__name__}: {exc}")
+
+
+def test_large_n_6000_all_tasks_graceful():
+    """n>5000：全部 40 任务不得抛异常（性能哨兵）。"""
+    from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
+
+    np.random.seed(7)
+    n = 6000
+    df = pd.DataFrame({
+        "a": np.random.normal(0, 1, n),
+        "b": np.random.normal(0, 1, n),
+        "c": np.random.normal(0, 1, n),
+        "y": np.random.normal(0, 1, n),
+        "yb": np.random.choice([0, 1], n),
+        "g": np.random.choice(["A", "B"], n),
+    })
+    for task in sorted(TASK_REGISTRY.keys()):
+        try:
+            target = "yb" if task in ("logistic_regression", "roc_analysis",
+                                      "proportion_ci", "spc_attribute") else "y"
+            features = ["g"] if task == "hypothesis_test" else ["a", "b", "c"]
+            params = {"group_col": "g"} if task in ("hypothesis_test", "variance_test",
+                                                    "box_chart") else {}
+            res = orchestrate(AnalysisRequest(
+                task=task, data=df, target_col=target, feature_cols=features, params=params))
+            assert res.task == task
+            _close_result_figs(res)
+        except Exception as exc:
+            raise AssertionError(f"{task}: n=6000 抛异常 {type(exc).__name__}: {exc}")
+
+
+def test_anova_high_cardinality_factor_guarded():
+    """审查 2026-08-19 #1.4：连续特征（数千水平）此前致 matplotlib 原生崩溃，
+    现应返回明确中文错误。"""
+    from smartsuite.engine.root_cause import anova_analysis
+
+    np.random.seed(7)
+    n = 6000
+    df = pd.DataFrame({
+        "a": np.random.normal(0, 1, n),
+        "y": np.random.normal(0, 1, n),
+    })
+    req = AnalysisRequest(task="anova", data=df, target_col="y", feature_cols=["a"])
+    result = anova_analysis(req)
+    assert result.status == "error"
+    assert any("水平数过多" in m or "分箱" in m for m in result.messages)
+
+
+
+

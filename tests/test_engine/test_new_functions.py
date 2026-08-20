@@ -154,3 +154,44 @@ def test_missing_pattern_analysis():
     assert result["cols_with_missing"] >= 1
     assert "summary" in result
     assert "column_missing_stats" in result
+def test_change_point_min_segment_zero_rejected():
+    """审查 2026-08-19 #1.3：min_segment=0/负值应返回中文错误，不得产生位于 0 的伪变点。"""
+    from smartsuite.engine.detection import change_point_detect
+
+    np.random.seed(42)
+    df = pd.DataFrame({"x": np.random.normal(10, 0.5, 150)})
+    for bad in (0, -3):
+        req = AnalysisRequest(task="change_point", data=df, target_col="x",
+                              params={"min_segment": bad, "n_changepoints": 3})
+        r = change_point_detect(req)
+        assert r.status == "error", f"min_segment={bad} 应被拒绝"
+        assert any("min_segment" in m for m in r.messages)
+
+
+def test_change_point_min_segment_too_large_rejected():
+    """审查 2026-08-19 #2.21：min_segment > n/2 应报错而非静默"未检测到变点"。"""
+    from smartsuite.engine.detection import change_point_detect
+
+    np.random.seed(42)
+    df = pd.DataFrame({"x": np.random.normal(10, 0.5, 40)})
+    req = AnalysisRequest(task="change_point", data=df, target_col="x",
+                          params={"min_segment": 30, "n_changepoints": 3})
+    r = change_point_detect(req)
+    assert r.status == "error"
+    assert any("min_segment" in m for m in r.messages)
+
+
+def test_change_point_no_change_on_noise():
+    """审查 2026-08-19 #2.6：纯噪声数据不得产生伪变点（标准化阈值修复）。"""
+    from smartsuite.engine.detection import change_point_detect
+
+    np.random.seed(42)
+    df = pd.DataFrame({"x": np.random.normal(10, 0.5, 150)})
+    req = AnalysisRequest(task="change_point", data=df, target_col="x",
+                          params={"min_segment": 20, "n_changepoints": 5})
+    r = change_point_detect(req)
+    assert r.status == "ok"
+    assert r.metadata["n_changepoints"] == 0, (
+        f"纯噪声不应检测到变点，实际: {r.metadata['changepoints']}"
+    )
+

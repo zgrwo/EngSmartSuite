@@ -32,6 +32,17 @@ def test_safe_float_invalid_returns_default():
     assert safe_float("abc", 0.5) == 0.5
 
 
+def test_safe_float_nan_returns_default():
+    # 审查 2026-08-19 #2.6：float("nan") 不抛异常，但 NaN 视为转换失败
+    assert safe_float("nan", 0.5) == 0.5
+    assert safe_float(float("nan"), 0.5) == 0.5
+
+
+def test_safe_float_inf_returns_default():
+    assert safe_float("inf", 0.5) == 0.5
+    assert safe_float(float("inf"), 0.5) == 0.5
+
+
 # ── threshold_label（效应量等级标签）──
 
 THRESHOLDS = [0.01, 0.06, 0.14]

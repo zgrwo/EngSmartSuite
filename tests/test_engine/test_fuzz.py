@@ -58,12 +58,9 @@ def test_correlation_constant_column():
                           feature_cols=["x"])
     result = correlation_analysis(req)
     _assert_no_crash(result, "correlation", "constant")
-    if result.status == "ok":
-        corr_mat = result.tables["correlation_matrix"]
-        r = corr_mat.loc["y", "x"]
-        # 常量列与任何变量的相关为 NaN 或接近 0
-        assert pd.isna(r) or abs(r) < 0.99, \
-            f"常量列不应产生高相关: r={r}"
+    # 审查 2026-08-19 #3.4：守卫改硬断言——常量特征列应返回明确中文错误
+    assert result.status == "error", f"常量特征列应报错: {result.status}"
+    assert any("常量" in m for m in result.messages), f"错误消息应指向常量列: {result.messages}"
 
 
 # ── ANOVA ──

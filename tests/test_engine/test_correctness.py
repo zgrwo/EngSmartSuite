@@ -1364,3 +1364,176 @@ def test_normality_check_ad_test_functional():
     ad_cell = str(table.iloc[0]["Anderson-Darling"])
     assert ad_cell != "N/A", f"AD 检验应产生有效结果，实际={ad_cell}"
     assert "A-D stat=" in ad_cell, f"AD 检验应包含统计量，实际={ad_cell}"
+def test_scatter_plot_group_col_equals_x_col():
+    """审查 2026-08-19 #1.2：分组列与 X 列相同（含重复列选择）时不得崩溃。"""
+    np.random.seed(42)
+    n = 30
+    df = pd.DataFrame({
+        "x": np.random.uniform(0, 10, n),
+        "y": 3.0 + 2.0 * np.random.uniform(0, 10, n) + np.random.normal(0, 0.3, n),
+    })
+    req = AnalysisRequest(task="scatter_plot", data=df,
+                          target_col="y", feature_cols=["x"],
+                          params={"fit": "linear", "group_col": "x"})
+    result = scatter_plot(req)
+    assert result.status == "ok", f"group_col==x_col 崩溃: {result.messages}"
+    assert result.metadata.get("fit_type") == "linear"
+
+    # 分组列与 Y 列相同同样不应崩溃
+    req2 = AnalysisRequest(task="scatter_plot", data=df,
+                           target_col="y", feature_cols=["x"],
+                           params={"fit": "none", "group_col": "y"})
+    result2 = scatter_plot(req2)
+    assert result2.status == "ok", f"group_col==y_col 崩溃: {result2.messages}"
+
+
+def test_box_chart_params_group_col_honored(sample_two_group_data):
+    """审查 2026-08-19 #2.17：params.group_col 应被引擎消费（此前 UI 选择无效）。"""
+    from smartsuite.engine.exploratory import box_chart
+
+    req = AnalysisRequest(task="box_chart", data=sample_two_group_data,
+                          target_col="强度", feature_cols=["强度"],
+                          params={"mode": "facet", "group_col": "工艺"})
+    result = box_chart(req)
+    assert result.status == "ok", f"box_chart 失败: {result.messages}"
+    assert result.metadata.get("group_col") == "工艺"
+    assert result.metadata.get("n_groups") == 2
+
+
+def test_box_chart_group_col_missing_column():
+    """审查 2026-08-19 #2.10：group_col 指向不存在列应返回明确错误。"""
+    from smartsuite.engine.exploratory import box_chart
+
+    df = pd.DataFrame({"v": np.random.normal(0, 1, 20), "g": ["A"] * 10 + ["B"] * 10})
+    req = AnalysisRequest(task="box_chart", data=df, target_col="v",
+                          feature_cols=["v"], params={"group_col": "不存在的列"})
+    result = box_chart(req)
+    assert result.status == "error"
+    assert any("不存在的列" in m for m in result.messages)
+
+
+def test_decision_tree_string_params_convertible():
+    """审查 2026-08-19 #1.4：字符串 max_depth/random_state 应被安全转换。"""
+    from smartsuite.engine.root_cause import decision_tree_analysis
+
+    np.random.seed(1)
+    df = pd.DataFrame({
+        "x1": np.random.normal(0, 1, 40),
+        "x2": np.random.normal(0, 1, 40),
+        "y": np.random.normal(0, 1, 40),
+    })
+    req = AnalysisRequest(task="decision_tree", data=df, target_col="y",
+                          feature_cols=["x1", "x2"],
+                          params={"max_depth": "3", "random_state": "42"})
+    result = decision_tree_analysis(req)
+    assert result.status == "ok", f"字符串参数应可转换: {result.messages}"
+    assert len(result.tables["feature_importance"]) == 2
+
+
+# ── 审查 2026-08-19 SPC 修复回归 ──
+
+
+def test_spc_xbar_numeric_x_axis_ordered():
+    """审查 #2.2：数值 X 轴（工序号 1..12）不得按字典序 [1,10,11,12,2,...] 排序。"""
+    from smartsuite.engine.spc_monitor import xbar_r_chart
+
+    np.random.seed(3)
+    x = list(range(1, 13))
+    y = np.random.normal(50, 2, 12)
+    df = pd.DataFrame({"x": x, "y": y})
+    req = AnalysisRequest(task="spc_xbar", data=df, target_col="y",
+                          feature_cols=[], params={"group_col": "x"})
+    result = xbar_r_chart(req)
+    assert result.status == "ok", f"spc_xbar 失败: {result.messages}"
+    # 数值断言：控制限有限且 LCL < CL < UCL
+    cl = float(result.tables["control_limits"].iloc[0]["CL"])
+    ucl = float(result.tables["control_limits"].iloc[0]["UCL"])
+    lcl = float(result.tables["control_limits"].iloc[0]["LCL"])
+    assert np.isfinite(ucl) and np.isfinite(lcl)
+    assert lcl < cl < ucl
+
+
+def test_spc_xbar_i_chart_violation_visible():
+    """审查 #2.3：I 图（全 n=1）检出违规时，违规表不得为空字符串。"""
+    from smartsuite.engine.spc_monitor import xbar_r_chart
+
+    np.random.seed(5)
+    # 前 25 点正常 + 1 个离群点
+    y = np.random.normal(50, 1, 26)
+    y[25] = 58.0  # 明显离群（>3σ）
+    df = pd.DataFrame({"x": range(1, 27), "y": y})
+    req = AnalysisRequest(task="spc_xbar", data=df, target_col="y",
+                          feature_cols=[], params={"group_col": "x"})
+    result = xbar_r_chart(req)
+    assert result.status == "ok"
+    tbl = result.tables.get("violations", pd.DataFrame())
+    assert len(tbl) > 0, "离群点应被检出"
+    # 违规子组标签非空（I 图路径此前为空字符串）
+    if "违规子组" in tbl.columns:
+        assert all(str(v).strip() != "" for v in tbl["违规子组"]), \
+            "I 图违规子组标签不应为空"
+    assert "规则1" in str(tbl["规则"].tolist())
+
+
+def test_spc_ewma_L_invalid_rejected():
+    """审查 #2.8：EWMA 的 L<=0 应报错而非 30/30 全违规 status=ok。"""
+    from smartsuite.engine.spc_monitor import ewma_chart
+
+    np.random.seed(3)
+    df = pd.DataFrame({"y": np.random.normal(0, 1, 30)})
+    req = AnalysisRequest(task="spc_ewma", data=df, target_col="y",
+                          feature_cols=[], params={"lam": 0.2, "L": 0})
+    result = ewma_chart(req)
+    assert result.status == "error"
+    assert any("L" in m for m in result.messages)
+
+
+def test_spc_nonparametric_constant_column_rejected():
+    """审查 #2.5：常量列不得输出"过程稳定 CL=nan"。"""
+    from smartsuite.engine.spc_monitor import spc_nonparametric
+
+    df = pd.DataFrame({"y": [5.0] * 12})
+    req = AnalysisRequest(task="spc_nonparametric", data=df, target_col="y",
+                          feature_cols=[])
+    result = spc_nonparametric(req)
+    assert result.status == "error"
+    assert any("常量" in m for m in result.messages)
+
+
+def test_spc_attribute_p_chart_rejects_percentage_data():
+    """审查 2026-08-19 #2.8：p 图遇百分比/超 [0,1] 数据应报错而非 NaN 控制限。"""
+    from smartsuite.engine.spc_monitor import attribute_chart
+
+    np.random.seed(2)
+    df = pd.DataFrame({
+        "x": range(1, 21),
+        "y": np.random.uniform(1, 8, 20),  # 百分比型不良率 (1-8%)
+    })
+    req = AnalysisRequest(task="spc_attribute", data=df, target_col="y",
+                          feature_cols=[], params={"chart_type": "p", "group_col": "x"})
+    result = attribute_chart(req)
+    assert result.status == "error"
+    assert any("0/1" in m for m in result.messages)
+
+
+def test_spc_attribute_p_chart_binary_string_column():
+    """审查 2026-08-19 #2.8：合格/不合格 二值串列应映射 0/1 后正常出图。"""
+    from smartsuite.engine.spc_monitor import attribute_chart
+
+    np.random.seed(4)
+    n = 60
+    df = pd.DataFrame({
+        "x": np.repeat(range(1, 13), 5),
+        "y": np.where(np.random.rand(n) < 0.1, "不合格", "合格"),
+    })
+    req = AnalysisRequest(task="spc_attribute", data=df, target_col="y",
+                          feature_cols=["x"], params={"chart_type": "p", "group_col": "x"})
+    result = attribute_chart(req)
+    assert result.status == "ok", f"二值串列应可出图: {result.messages}"
+    assert result.metadata["chart_type"] == "p"
+
+
+
+
+
+
