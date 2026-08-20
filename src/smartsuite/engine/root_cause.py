@@ -3588,6 +3588,10 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             continue
 
         _, sw_p = sp_stats.shapiro(d) if n <= 5000 else (None, None)
+        # scipy>=1.18 对常量/退化输入返回 NaN（旧版返回 p=1.0）；固定为确定性语义：
+        # 无方差数据 SW 统计量 W=1 → p=1.0（正态性检验不拒绝）
+        if sw_p is not None and np.isnan(sw_p):
+            sw_p = 1.0
         # Anderson-Darling (更稳健的大样本检验)
         # scipy >= 1.16: method="interpolate" 返回 SignificanceResult (statistic + pvalue)
         # scipy <  1.16: 不支持 method 参数，需回退到 critical_values 判定
