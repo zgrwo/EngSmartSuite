@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.data_io import preprocess_data
+from smartsuite.services.data_io import auto_generate_subgroup_col, preprocess_data
 from smartsuite.services.orchestrator import (
     DEFAULT_PARAMS,
     TASK_GROUPS,
@@ -30,6 +30,11 @@ def run_via_cli(task, df, target_col, feature_cols, params=None, raw_cat=False):
     params = params or {}
     defaults = DEFAULT_PARAMS.get(task, {})
     merged = {**defaults, **params}
+    # Round-2 P3：与 run_analysis 同步的 SPC 自动子组逻辑
+    # 注意：DEFAULT_PARAMS 注入 group_col=None（键存在值为 None），须按值判断
+    if task in ("spc_cusum", "spc_ewma") and not merged.get("group_col"):
+        df, merged = auto_generate_subgroup_col(df, dict(merged))
+        merged["group_col"] = merged["subgroup_col"]
     if raw_cat:
         df_enc = df.copy()
         feat_enc = list(feature_cols)

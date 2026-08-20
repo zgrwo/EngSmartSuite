@@ -2,15 +2,21 @@
 import os
 import tempfile
 
+import numpy as np
+
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 from smartsuite.services.reporter import to_pdf, to_ppt
 
 
 def test_full_pipeline_anova_to_pdf(sample_doe_data):
+    # Round-2 P3：数值连续列当因子现被拒绝，使用真实类别因子
+    np.random.seed(42)
+    df = sample_doe_data.copy()
+    df["水平"] = np.random.choice(["低", "中", "高"], len(df))
     req = AnalysisRequest(
-        task="anova", data=sample_doe_data,
-        target_col="强度", feature_cols=["料温", "模温", "注射压力", "保压时间"],
+        task="anova", data=df,
+        target_col="强度", feature_cols=["水平"],
         params={"alpha": 0.05},
     )
     result = orchestrate(req)

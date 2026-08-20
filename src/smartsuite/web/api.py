@@ -12,6 +12,7 @@ import pandas as pd
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import ValidationError
 from smartsuite.services.data_io import (
+    auto_generate_subgroup_col,
     infer_group_col,
     preprocess_for_task,
     validate_data,
@@ -129,6 +130,15 @@ def run_analysis(
         except ValidationError as e:
             logger.warning("数据校验未通过（不阻塞分析）: %s", e)
             data_warnings = [f"数据校验提示: {e}"]
+
+    # Round-2 P3：CUSUM/EWMA 缺 group_col 时自动生成子组列（接线 auto_generate_subgroup_col）
+    # 注意：xbar 的子组走宽格式（feature_cols 多列），不适用长格式子组列，保持引擎回退
+    if task in ("spc_cusum", "spc_ewma") and not params.get("group_col"):
+        try:
+            df, params = auto_generate_subgroup_col(df, dict(params))
+            params["group_col"] = params["subgroup_col"]  # CUSUM/EWMA 消费 group_col
+        except Exception:
+            logger.debug("自动子组列生成失败，回退默认行为", exc_info=True)
 
     # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
     from smartsuite.services.orchestrator import RAW_CAT_TASKS

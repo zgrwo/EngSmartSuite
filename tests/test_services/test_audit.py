@@ -93,13 +93,18 @@ def test_export_workbook_basic(sample_doe_data):
 
 def test_export_workbook_custom_tasks(sample_doe_data):
     """验证 export_workbook 自定义 tasks 列表。"""
+    import numpy as np
+
+    # Round-2 P3：anova 需要类别因子（数值连续列现被拒绝）
+    df = sample_doe_data.copy()
+    df["水平"] = np.random.choice(["低", "中", "高"], len(df))
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         path = f.name
     try:
         out = export_workbook(
-            sample_doe_data,
+            df,
             target_col="强度",
-            feature_cols=["料温", "模温", "注射压力"],
+            feature_cols=["水平"],
             output_path=path,
             tasks=["anova"],
         )

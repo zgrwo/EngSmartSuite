@@ -381,6 +381,14 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     control_vars = req.params.get("control_vars")
     if control_vars is None:
         control_vars = []
+    # Round-2 P3：字符串 control_vars 此前被逐字符过滤静默变 []
+    if isinstance(control_vars, str):
+        control_vars = [c.strip() for c in control_vars.split(",") if c.strip()]
+    if not isinstance(control_vars, list):
+        return AnalysisResult(
+            task="correlation", status="error",
+            messages=["control_vars 必须是列名列表或逗号分隔字符串"],
+        )
     control_vars = [
         c
         for c in control_vars
@@ -609,6 +617,16 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                 + "。若为连续变量请改用 regression 分析，或先对数据分箱。"
             ],
         )
+    # Round-2 P3：30-200 水平空洞——水平数中等但每组样本不足（<2）时
+    # 统计量无意义且常产生 NaN p 值；显式拒绝
+    for _c in cols:
+        _vc = req.data[_c].value_counts(dropna=True)
+        if len(_vc) >= 2 and _vc.min() < 2:
+            return AnalysisResult(
+                task="anova", status="error",
+                messages=[f"因子列「{_c}」存在样本量不足 2 的水平（{len(_vc)} 个水平），"
+                          "ANOVA 结果不可靠。请检查数据或减少因子水平数。"],
+            )
 
     # 构建公式：可选两两交互项
     # Round-2 #A2o：patsy Q() 不支持 SQL 式 '' 转义——含单引号列名必然解析失败，
@@ -2641,6 +2659,12 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
                     task="power_analysis", status="error",
                     messages=[f"p0/p1 必须在 (0, 1) 区间内，当前: p0={p0}, p1={p1}"],
                 )
+            # Round-2 P3：p0==p1 时 required_n 爆炸到 3.9e10
+            if abs(p1 - p0) < 1e-9:
+                return AnalysisResult(
+                    task="power_analysis", status="error",
+                    messages=["p0 与 p1 不能相等（无法检测零比例差），请调整假设比例"],
+                )
             z_alpha = abs(sp_stats.norm.ppf(alpha / 2))
             z_beta = abs(sp_stats.norm.ppf(1 - target_power))
             d = abs(p1 - p0)
@@ -3534,6 +3558,14 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
     cols = [c for c in ([req.target_col] + req.feature_cols) if c in req.data.columns]
     if not cols:
         return AnalysisResult(task="normality_check", status="error", messages=["没有可分析的列"])
+
+    # Round-2 P3：非数值列 → shapiro TypeError；显式拒绝并提示
+    _non_num = [c for c in cols if not pd.api.types.is_numeric_dtype(req.data[c])]
+    if _non_num:
+        return AnalysisResult(
+            task="normality_check", status="error",
+            messages=[f"列「{_non_num[0]}」为非数值列，正态性检验需要数值数据。"],
+        )
 
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
 

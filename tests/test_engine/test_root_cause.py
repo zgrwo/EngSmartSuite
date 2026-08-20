@@ -32,11 +32,17 @@ def test_correlation_analysis_basic(sample_doe_data):
 
 
 def test_anova_basic(sample_doe_data):
+    # Round-2 P3：数值连续列当因子（每水平 1 样本）现被明确拒绝；
+    # 正确用法是用类别列（构造 3 水平因子）
+    np.random.seed(42)
+    n = len(sample_doe_data)
+    df = sample_doe_data.copy()
+    df["水平"] = np.random.choice(["低", "中", "高"], n)
     req = AnalysisRequest(
         task="anova",
-        data=sample_doe_data,
+        data=df,
         target_col="强度",
-        feature_cols=["料温", "模温", "注射压力", "保压时间"],
+        feature_cols=["水平"],
         params={"alpha": 0.05},
     )
     result = anova_analysis(req)

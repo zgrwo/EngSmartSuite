@@ -77,3 +77,16 @@ def test_preprocess_for_task_removes_inf():
                                             raw_cat_tasks={"box_chart"})
     assert np.isinf(out2["a"]).sum() == 0, "RAW_CAT 路径也不应残留 Inf"
 
+
+def test_preprocess_data_cat_map_roundtrip():
+    """Round-2 P3：cat_map 回填 known_cat_map 不得产生全 NaN 参照列。"""
+    from smartsuite.services.data_io import preprocess_data
+
+    df = pd.DataFrame({"city": ["A", "B", "C", "A", "B"] * 2, "y": [1.0] * 10})
+    enc1, cols1, cat_map, _, _ = preprocess_data(df, ["city"], categorical_cols={"city"})
+    enc2, cols2, _, _, _ = preprocess_data(df, ["city"], categorical_cols={"city"},
+                                           known_cat_map=cat_map)
+    assert not enc2.isna().any().any(), f"回填产生 NaN 列: {list(enc2.columns)}"
+    assert len(cols1) == len(cols2), f"列数不一致: {cols1} vs {cols2}"
+
+

@@ -13,6 +13,7 @@ import yaml
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import SmartSuiteError
 from smartsuite.services.data_io import (
+    auto_generate_subgroup_col,
     infer_group_col,
     preprocess_for_task,
     validate_data,
@@ -132,6 +133,13 @@ def main():
         features = config.get("feature_cols", [])
         categoricals = config.get("categoricals", [])
         params = config.get("params", {})
+        # Round-2 P3：SPC 缺 group_col 时自动生成子组（与 Web 路径 api.py 保持一致）
+        if task in ("spc_cusum", "spc_ewma") and not params.get("group_col"):
+            try:
+                raw, params = auto_generate_subgroup_col(raw, dict(params))
+                params["group_col"] = params["subgroup_col"]
+            except Exception:
+                logger.debug("自动子组列生成失败，回退默认行为", exc_info=True)
         # 数据校验：提前发现列存在性、类型、缺失值问题
         if task not in NO_TARGET_TASKS:
             try:

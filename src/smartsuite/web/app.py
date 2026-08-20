@@ -151,7 +151,21 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 # Session 安全配置
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = False  # 本地工具默认 HTTP；部署 HTTPS 时应开启
 app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 小时后过期，限制 CSRF token 重用窗口
+
+
+@app.after_request
+def _security_headers(resp):
+    """Round-2 P3：CSP 纵深防御（模板含内联 style/onclick → 需 unsafe-inline）。"""
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+    )
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    return resp
 
 
 @app.before_request
@@ -212,6 +226,11 @@ def upload():
         df = None
         for encoding in ["utf-8-sig", "utf-8", "gbk", "latin-1"]:
             try:
+                # Round-2 P3：先探测行数（只读 max_rows+1 行），超限直接拒绝，
+                # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒
+                probe = pd.read_csv(io.BytesIO(f_bytes), encoding=encoding, nrows=100_001)
+                if len(probe) > 100_000:
+                    return jsonify({"error": "数据行数超过限制 (100000行)，请减少数据量"}), 400
                 df = pd.read_csv(io.BytesIO(f_bytes), encoding=encoding)
                 break
             except UnicodeError:

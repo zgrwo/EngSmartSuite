@@ -118,7 +118,12 @@ def preprocess_data(
             dummies = pd.get_dummies(col_str, prefix=col, drop_first=_drop_first)
             # 对齐已知类别映射
             if known_cat_map and col in known_cat_map:
-                expected = set(known_cat_map[col])
+                # Round-2 P3：cat_map 输出含 "_(参照) X" 标记元素，非真实列名——
+                # 回填为 known_cat_map 时若不过滤会产生全 NaN 参照列
+                expected = {
+                    e for e in known_cat_map[col]
+                    if not str(e).startswith("_(参照)")
+                }
                 actual = set(dummies.columns)
                 # 缺失的已知类别 → 补 0 列
                 for missing_col in expected - actual:
@@ -136,7 +141,7 @@ def preprocess_data(
                         n_affected,
                         extra,
                     )
-                dummies = dummies[known_cat_map[col]]
+                dummies = dummies[sorted(expected, key=lambda x: str(x))]
             for dc in dummies.columns:
                 # 检测列名冲突 — One-Hot 编码列名可能与已有列重名 (P2-2 fix)
                 if dc in df.columns and dc not in encoded_cols:

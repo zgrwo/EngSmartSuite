@@ -13,6 +13,7 @@ import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import (
+    auto_generate_subgroup_col,
     infer_group_col,
     preprocess_for_task,
 )
@@ -146,8 +147,13 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
     try:
         feat_a = list(features)
         params_a = dict(params)
+        # Round-2 P3：与 run_analysis 同步的 SPC 自动子组逻辑
+        df_a_work = df
+        if task in ("spc_cusum", "spc_ewma") and not params_a.get("group_col"):
+            df_a_work, params_a = auto_generate_subgroup_col(df, dict(params_a))
+            params_a["group_col"] = params_a["subgroup_col"]
         df_enc, feat_enc, _, _ = preprocess_for_task(
-            df, feat_a, task, categoricals, RAW_CAT_TASKS,
+            df_a_work, feat_a, task, categoricals, RAW_CAT_TASKS,
         )
         if task == "hypothesis_test" and "group_col" not in params_a:
             extra = infer_group_col(df, feat_a, categoricals)

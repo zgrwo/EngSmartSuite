@@ -155,17 +155,18 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         if transformed is not None:
             data = pd.Series(transformed, name=data.name)
             boxcox_lambda = lam
-            # 对规格限和目标值同样做 Box-Cox 变换（全量或全不：避免混合尺度）
-            spec_positive = (usl is not None and usl > 0) and (lsl is not None and lsl > 0)
-            if spec_positive:
+            # 对规格限和目标值同样做 Box-Cox 变换（逐个独立判断，单侧规格也有效）
+            # Round-2 P3：此前要求 USL/LSL 同时为正才变换，单侧正规格被整体丢弃
+            if usl is not None and usl > 0:
                 usl = sp_stats.boxcox(np.array([usl]), lmbda=lam)[0]
+            if lsl is not None and lsl > 0:
                 lsl = sp_stats.boxcox(np.array([lsl]), lmbda=lam)[0]
-                if target is not None and target > 0:
-                    target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
-            elif usl is not None or lsl is not None:
+            if target is not None and target > 0:
+                target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
+            if (usl is not None and usl <= 0) or (lsl is not None and lsl <= 0):
                 warn_msgs.append(
-                    "⚠ Box-Cox 变换要求规格限均为正值，规格限无法变换，"
-                    "已跳过过程能力指数计算，请使用原始数据分析"
+                    "⚠ Box-Cox 变换要求规格限为正值，非正规格限无法变换，"
+                    "相应单侧能力指数可能不可用"
                 )
                 usl, lsl, target = None, None, None  # 阻止混合尺度计算
         else:

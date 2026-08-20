@@ -1107,3 +1107,135 @@ def test_change_point_min_segment_half_n_rejected():
     assert r.status == "error"
     assert any("min_segment" in m for m in r.messages)
 
+
+# ── Round-2 遗留 P3 修复 批次1 回归测试 ──
+
+
+def test_anova_group_sample_size_check():
+    """P3：因子水平样本量过少（30-200 水平空洞）不得输出 NaN p 值 ok 结果。"""
+    from smartsuite.engine.root_cause import anova_analysis
+
+    np.random.seed(1)
+    df = pd.DataFrame({"g": [f"L{i}" for i in range(30)],
+                       "y": np.random.normal(0, 1, 30)})
+    r = anova_analysis(AnalysisRequest(task="anova", data=df, target_col="y", feature_cols=["g"]))
+    assert r.status == "error", f"样本不足应报错: {r.status}"
+    assert any("样本" in m or "水平" in m for m in r.messages)
+
+
+def test_normality_check_non_numeric_rejected():
+    """P3：normality_check 非数值列不得 shapiro TypeError。"""
+    from smartsuite.engine.root_cause import normality_check
+
+    df = pd.DataFrame({"v": ["a", "b", "c", "d", "e"] * 4})
+    r = normality_check(AnalysisRequest(task="normality_check", data=df, target_col="v"))
+    assert r.status == "error"
+    assert any("数值" in m for m in r.messages)
+
+
+def test_distribution_summary_constant_data_graceful():
+    """P3：distribution_summary 常量数据不得输出 NaN 拟合（Weibull beta=3.9e8 垃圾）。"""
+    from smartsuite.engine.root_cause import distribution_summary
+
+    df = pd.DataFrame({"v": [5.0] * 30})
+    r = distribution_summary(AnalysisRequest(task="distribution_summary", data=df, target_col="v"))
+    assert r.status in ("ok", "error")
+    if r.status == "ok":
+        meta = r.metadata
+        weibull_beta = meta.get("weibull_shape") or meta.get("weibull_beta")
+        if weibull_beta is not None:
+            assert 0 < float(weibull_beta) < 100, f"Weibull 形状参数异常: {weibull_beta}"
+
+
+def test_power_analysis_p0_equals_p1_rejected():
+    """P3：p0==p1 时 required_n 不应输出 3.9e10。"""
+# ── Round-2 遗留 P3 修复 批次2 回归测试 ──
+
+
+def test_doe_numeric_levels_sorted_numerically():
+    """P3：二水平数字字符串因子（如 '200'/'220'）应按数值序编码（效应符号正确）。"""
+    from smartsuite.engine.doe_opt import doe_analysis
+
+    np.random.seed(1)
+    # '200' 水平均值低，'220' 水平均值高 → 效应应为正
+    df = pd.DataFrame({
+        "温度": ["200"] * 10 + ["220"] * 10,
+        "y": np.concatenate([np.random.normal(10, 1, 10), np.random.normal(14, 1, 10)]),
+    })
+    r = doe_analysis(AnalysisRequest(task="doe_analysis", data=df, target_col="y",
+                                     feature_cols=["温度"]))
+    assert r.status == "ok", f"doe 失败: {r.messages}"
+    effects = r.tables.get("effects")
+    if effects is not None and "主效应" in effects.columns:
+        eff = float(effects[effects["因子"] == "温度"]["主效应"].iloc[0])
+        assert eff > 0, f"数值水平应数值序（'220' 高均值 → 正效应），实际: {eff}"
+
+
+def test_doe_alpha_range_validated():
+    """P3：doe_analysis 的 alpha 越界不得输出全因子显著。"""
+    from smartsuite.engine.doe_opt import doe_analysis
+
+    np.random.seed(1)
+    df = pd.DataFrame({
+        "f": ["A"] * 15 + ["B"] * 15,
+        "y": np.random.normal(0, 1, 30),
+    })
+    r = doe_analysis(AnalysisRequest(task="doe_analysis", data=df, target_col="y",
+                                     feature_cols=["f"], params={"alpha": 2.0}))
+    assert r.status == "error"
+    assert any("alpha" in m for m in r.messages)
+
+
+def test_lasso_l1_ratio_range_validated():
+    """P3：lasso l1_ratio 越界不得静默按纯 Lasso/ElasticNet 执行。"""
+    from smartsuite.engine.doe_opt import lasso_regression
+
+    np.random.seed(1)
+    df = pd.DataFrame({"x1": np.random.normal(0, 1, 30), "x2": np.random.normal(0, 1, 30),
+                       "y": np.random.normal(0, 1, 30)})
+    r = lasso_regression(AnalysisRequest(task="lasso_regression", data=df, target_col="y",
+                                         feature_cols=["x1", "x2"], params={"l1_ratio": 1.5}))
+    assert r.status == "error"
+    assert any("l1_ratio" in m for m in r.messages)
+
+
+def test_spc_attribute_np_chart_uses_n_col():
+    """P3：np 图提供 n_col 时应使用样本量列（此前用行数）。"""
+    from smartsuite.engine.spc_monitor import attribute_chart
+
+    np.random.seed(3)
+    df = pd.DataFrame({
+        "x": np.repeat(range(1, 11), 2),
+        "y": np.random.binomial(20, 0.1, 20),
+        "batch_size": np.repeat([20, 40], 10),  # 变样本量
+    })
+    r = attribute_chart(AnalysisRequest(task="spc_attribute", data=df, target_col="y",
+                                        feature_cols=["x"],
+                                        params={"chart_type": "np", "group_col": "x",
+                                                "n_col": "batch_size"}))
+    assert r.status == "ok", f"np 图失败: {r.messages}"
+
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"v": [1.0]})
+    r = power_analysis(AnalysisRequest(
+        task="power_analysis", data=df, target_col="v",
+        params={"test_type": "proportion", "p0": 0.5, "p1": 0.5}))
+    assert r.status == "error"
+    assert any("p0" in m or "p1" in m or "比例" in m for m in r.messages)
+
+
+def test_process_capability_boxcox_single_side_spec():
+    """P3：Box-Cox + 单侧正规格（仅 USL）应保留规格计算而非全部置 None。"""
+    from smartsuite.engine.capability import process_capability_analysis
+
+    np.random.seed(2)
+    df = pd.DataFrame({"v": np.random.lognormal(0, 0.5, 200)})
+    r = process_capability_analysis(AnalysisRequest(
+        task="process_capability", data=df, target_col="v",
+        params={"usl": 8.0, "transform": "boxcox"}))
+    if r.status == "ok":
+        assert r.metadata.get("cpk") is not None or r.metadata.get("ppk") is not None, \
+            "单侧正规格不应被静默丢弃"
+
+

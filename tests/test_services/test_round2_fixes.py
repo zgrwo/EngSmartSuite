@@ -386,3 +386,17 @@ def test_setup_logging_makedirs_fallback(root_handlers_backup, monkeypatch):
     setup_logging(log_dir=os.path.join(tempfile.gettempdir(), "logs"))
     handlers = _managed_handlers(root)
     assert len(handlers) >= 1, "即使文件 handler 降级，控制台 handler 仍应存在"
+def test_run_analysis_spc_auto_subgroup():
+    """Round-2 P3：Web 路径 cusum/ewma 无 group_col 时自动生成子组列。"""
+    import numpy as np
+    import pandas as pd
+
+    from smartsuite.web.api import run_analysis
+
+    np.random.seed(3)
+    df = pd.DataFrame({"y": np.random.normal(50, 2, 100)})
+    res = run_analysis("spc_cusum", df, targets=["y"], features=[], categoricals=[], params={})
+    assert res and res[0]["status"] == "ok", f"spc_cusum 失败: {res[0].get('messages')}"
+    assert res[0]["metadata"].get("n_groups", 0) > 1, \
+        f"应自动生成多子组系列，实际 n_groups: {res[0]['metadata'].get('n_groups')}"
+

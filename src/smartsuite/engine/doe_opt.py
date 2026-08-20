@@ -1122,6 +1122,12 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             abs(effect) / (abs(grand_mean) + EPSILON) if abs(grand_mean) > EPSILON else 0.0
         )
         alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+        # Round-2 P3：alpha 越界（如 2.0）→ 全因子"显著"
+        if not 0 < alpha < 1:
+            return AnalysisResult(
+                task="doe_analysis", status="error",
+                messages=[f"alpha 必须在 (0, 1) 区间内，当前: {alpha!r}"],
+            )
         effects.append(
             {
                 "因子": col,
@@ -1567,6 +1573,12 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     l1_ratio = _safe_float(
         req.params.get("l1_ratio", 1.0), 1.0
     )  # 1.0 = pure Lasso, <1 = ElasticNet
+    # Round-2 P3：l1_ratio 越界此前静默按纯 Lasso/ElasticNet 执行
+    if not 0 <= l1_ratio <= 1:
+        return AnalysisResult(
+            task="lasso_regression", status="error",
+            messages=[f"l1_ratio 必须在 [0, 1] 区间内，当前: {l1_ratio!r}"],
+        )
 
     _lasso_max_iter = 5000
     if alpha is not None:
