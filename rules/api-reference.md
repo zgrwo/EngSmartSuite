@@ -226,7 +226,7 @@ class AnalysisResult:
 ### attribute_chart
 - **Task Key**: `spc_attribute`
 - **描述**: 计数型控制图 — p (不良率), np (不良数), c (缺陷数), u (单位缺陷率)
-- **params**: `chart_type` ("p"|"np"|"c"|"u"), `subgroup_col`, `n_col` (p/u 图样本量列)
+- **params**: `chart_type` ("p"|"np"|"c"|"u"), `group_col` (分组依据，空→单一序列), `n_col` (p/u 图样本量列；未在 DEFAULT_PARAMS 注册默认值，不传时默认取每点子组样本量)
 - **返回**: `control_stats`
 - **图**: 属性控制图 + 控制限
 
@@ -247,7 +247,7 @@ class AnalysisResult:
 ### process_capability_analysis
 - **Task Key**: `process_capability`
 - **描述**: 过程能力分析 — Cp/Cpk/Pp/Ppk/Cpm + 95%CI + Sigma Level + DPMO
-- **params**: `usl`, `lsl`, `target` (Cpm 目标), `transform` ("boxcox", 要求数据和规格限均为正值)
+- **params**: `usl`, `lsl`, `target` (Cpm 目标), `transform` ("boxcox"：可选 Box-Cox 正态化转换，默认不转换；要求数据为正)
 - **返回**: `capability_indices`, `descriptive_stats`
 - **图**: 直方图 + 正态拟合 + 规格限
 
@@ -261,14 +261,14 @@ class AnalysisResult:
 ### anomaly_detect
 - **Task Key**: `anomaly_detect`
 - **描述**: 异常检测 — IQR / Z-score (单变量) 或 Isolation Forest (多变量) 或 Grubbs 检验
-- **params**: `method` ("iqr"|"zscore"|"grubbs"|"isolation_forest"), `contamination` (IsoForest, 默认 0.05), `max_outliers` (Grubbs 迭代最大异常数, 默认 5)
+- **params**: `method` ("iqr"|"zscore"|"grubbs"|"isolation_forest"), `contamination` (Isolation Forest 污染率, 默认 0.05), `alpha` (Grubbs 显著性水平, 默认 0.05), `max_outliers` (Grubbs 迭代最大异常数, 默认 5)
 - **返回**: `anomalies`
 - **图**: 异常点标记散点图 + 阈值线
 
 ### change_point_detect
 - **Task Key**: `change_point`
 - **描述**: 变点检测 — 基于 CUSUM 的二元分割法
-- **params**: `min_segment`, `n_changepoints` (默认 5)
+- **params**: `min_segment` (最小段长度；不传时自适应取 max(10, n//20)), `n_changepoints` (默认 5)
 - **返回**: `segment_statistics` (含分段均值+标准差+变化方向)
 - **图**: 数据 + 分段均值线 + 变点标注
 
@@ -282,7 +282,7 @@ class AnalysisResult:
 ### box_chart
 - **Task Key**: `box_chart`
 - **描述**: 分组箱线图 — 按类别因子展示数值分布，支持主分类 + 次分类分面，自动附 ANOVA/Kruskal-Wallis 或 t 检验/MWU 统计检验
-- **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签)
+- **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签), `group_col` (分组列), `usl`/`lsl` (规格上/下限, 红色实线), `ucl`/`lcl`/`cl` (控制上/下限/中心线, 黄色虚线), `target` (目标值, 灰色点线)
 - **feature_cols**: `[主分类列]` 或 `[主分类列, 次分类列]`
 - **返回**: `group_statistics` (含各分组均值/中位数/标准差/IQR)；统计检验结果嵌入 summary
 - **图**: 分组箱线图 + 散点叠加；次分类 ≤ 8 水平时分面展示

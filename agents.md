@@ -66,7 +66,7 @@
 ## 架构分层
 
 ```
-smartsuite/core/       ← ① 数据契约层：零依赖，仅 dataclass
+smartsuite/core/       ← ① 数据契约层：仅 pandas+pydantic（AnalysisRequest 为 Pydantic BaseModel）
 smartsuite/engine/     ← ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
 smartsuite/services/   ← ② 应用服务层：唯一桥接层
 smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/

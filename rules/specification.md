@@ -1,6 +1,6 @@
 # EngSmartSuite — 项目规格文档
 
-> 版本：v1.0 | 最后更新：2026-07-23 | 状态：功能完备，Web UI 稳定
+> 版本：v1.1 | 最后更新：2026-08-19 | 状态：功能完备，Web UI 稳定
 
 ## 1. 项目概述
 
@@ -25,46 +25,46 @@
 
 | 领域 | 方法 | 说明 |
 |------|------|------|
-| **要因分析** | correlation | Pearson/Spearman 相关矩阵 |
+| **要因筛选** | correlation | Pearson/Spearman 相关矩阵 |
 | | anova | 单因素/多因素方差分析 + Tukey HSD |
-| | hypothesis_test | t 检验/Mann-Whitney/Wilcoxon |
-| | contingency | 卡方检验/Fisher 精确检验 |
-| | vif | 方差膨胀因子（多重共线性） |
+| | hypothesis_test | t 检验/Mann-Whitney/Wilcoxon 等 |
 | | decision_tree | 决策树特征重要性 |
-| **DOE/优化** | regression | 多元线性回归 + 诊断 |
-| | rsm | 响应曲面方法 |
-| | grid_search | 网格搜索最优参数 |
+| | vif | 方差膨胀因子（多重共线性） |
+| | contingency | 卡方检验/Fisher 精确检验 |
+| | proportion_ci | 比例置信区间 |
+| | variance_test | 方差齐性检验（Levene/Bartlett） |
+| **信度诊断** | cohens_kappa | 评定者一致性（Cohen's κ） |
+| | cronbach_alpha | 信度分析（Cronbach α） |
+| | distribution_summary | 分布特征摘要 |
+| | normality_check | 正态性评估（Shapiro-Wilk/AD/KS） |
+| | power_analysis | 统计功效分析 |
+| **建模优化** | regression | 多元线性回归（OLS）+ 诊断 |
+| | response_surface | 响应曲面分析 |
+| | grid_search | 网格搜索寻优 |
 | | multi_objective | 多目标优化（Pareto） |
-| | doe | 实验设计（全因子/部分因子） |
-| **SPC 控制图** | spc_xbar | X-bar R/S 控制图 |
+| | doe_analysis | DOE 效应估计（全因子/部分因子） |
+| | roc_analysis | ROC/AUC 分析 |
+| | logistic_regression | Logistic 回归 |
+| | lasso_regression | Lasso 回归 |
+| | robust_regression | 稳健回归（Huber） |
+| | quantile_regression | 分位数回归 |
+| **过程监控** | spc_xbar | X-bar R/S 控制图 |
 | | spc_attribute | p/np/c/u 计数控制图 |
 | | spc_cusum | CUSUM 累积和控制图 |
 | | spc_ewma | EWMA 指数加权控制图 |
-| | spc_nonparametric | 非参数控制图 |
-| **过程能力** | capability | Cp/Cpk/Pp/Ppk + Sigma Level |
-| | box_cox | Box-Cox 正态化转换 |
-| **异常检测** | trend_forecast | 趋势预测（线性/移动平均） |
-| | change_point | 变点检测（PELT/BinSeg） |
-| | anomaly | 异常检测（Isolation Forest/LOF） |
-| | outlier_consensus | 离群值共识（多方法投票） |
-| **可靠性/MSA** | gage_rr | 量具 R&R（交叉/嵌套） |
-| | tolerance | 公差分析 |
-| | survival | 生存分析（KM/Cox） |
-| **探索性分析** | box_chart | 分组箱线图 |
-| | scatter_plot | 散点图 + 回归线 |
-| | bootstrap_ci | Bootstrap 置信区间 |
+| | process_capability | 过程能力 Cp/Cpk/Pp/Ppk（可选 Box-Cox 转换） |
+| | trend_forecast | 趋势预测（线性/移动平均） |
+| | anomaly_detect | 异常检测（IQR/Z-score/Grubbs/Isolation Forest） |
+| | change_point | 变点检测（CUSUM 二元分割） |
+| | outlier_consensus | 异常共识（多方法投票） |
+| | box_chart | 分组箱线图 |
+| | scatter_plot | 散点图（含拟合） |
+| | spc_nonparametric | 非参数控制图（分布拟合法） |
+| **高级分析** | bootstrap_ci | Bootstrap 置信区间 |
 | | median_ci | 中位数置信区间 |
-| | proportion_ci | 比例置信区间 |
-| | variance_test | 方差齐性检验 |
-| | normality_test | 正态性检验（Shapiro/KS/AD） |
-| | durbin_watson | Durbin-Watson 自相关检验 |
-| | cochran_q | Cochran Q 检验 |
-| | friedman | Friedman 检验 |
-| | kruskal | Kruskal-Wallis 检验 |
-| | mann_kendall | Mann-Kendall 趋势检验 |
-| | levene | Levene 方差齐性 |
-| | bartlett | Bartlett 方差齐性 |
-| | wilcoxon_signed | Wilcoxon 符号秩检验 |
+| | gage_rr | 量具 R&R（MSA） |
+| | tolerance_interval | 统计容许区间 |
+| | survival_analysis | 生存分析（Kaplan-Meier） |
 
 ### 2.2 关键技术特性
 
@@ -80,7 +80,7 @@
 
 ```
 smartsuite/
-├── core/          # ① 数据契约层：零依赖，仅 dataclass
+├── core/          # ① 数据契约层：仅 pandas+pydantic（AnalysisRequest 为 Pydantic BaseModel）
 │   ├── contracts.py    # AnalysisRequest / AnalysisResult
 │   └── exceptions.py   # 分层异常体系（3 层）
 │
@@ -150,5 +150,5 @@ smartsuite/
 | Web 框架 | Flask | 轻量，适合单用户本地使用 |
 | 可视化 | matplotlib | 工艺图表标准化，非交互式 |
 | 统计库 | scipy + statsmodels | 覆盖全部 40 方法 |
-| 数据契约 | dataclass | 类型安全，IDE 支持好 |
+| 数据契约 | Pydantic v2 BaseModel | 数据验证 + 类型安全 |
 | 配置驱动 | YAML 模板 | 重复分析可复用，不硬编码 |

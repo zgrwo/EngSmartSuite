@@ -333,7 +333,7 @@ result_b = results_b[0]
 | "数据中缺少必要的列" | 99% 不是缺列 — 是引擎内部 `KeyError` 或 `ValueError` | 检查 orchestrator 日志中的原始异常类型 |
 | 图表不显示参考线 | 参数未传到引擎 / `float()` 转换失败静默跳过 | 验证 `getParams()` 是否正确提取数值 → JSON → `orchestrate()` |
 | JS 修改不生效 | 浏览器缓存了旧版 app.js | 重启 Flask + 浏览器 `Ctrl+Shift+R` |
-| Python 修改不生效 | Flask 未重启 | 重启 `python smartsuite/web/app.py` |
+| Python 修改不生效 | Flask 未重启 | 重启 `python src/smartsuite/web/app.py` |
 | `ruff` N806 报错 | 函数内常量用了大写名 | 改名 `_lowercase` 或提升到模块级 |
 | 测试失败但代码正确 | 检查是否是 statsmodels/pandas 版本差异 | 查看 CI 日志中的版本号 |
 | 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 11 步清单 |
@@ -357,7 +357,7 @@ ruff check src/smartsuite/ scripts/
 python scripts/verify_consistency.py
 
 # 启动 Web UI
-python smartsuite/web/app.py
+python src/smartsuite/web/app.py
 
 # 列出所有分析方法
 python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len(TASK_REGISTRY), 'tasks')"

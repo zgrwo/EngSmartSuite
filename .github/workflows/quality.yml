@@ -95,6 +95,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ruff
-        run: pip install ruff==0.15.20
+        run: pip install ruff==0.16.2
       - name: Ruff format check
         run: ruff format --check src/smartsuite/ scripts/

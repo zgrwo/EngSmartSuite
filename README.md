@@ -10,7 +10,7 @@
 
 ```bash
 # Windows：双击运行
-start.bat
+run_smartsuite.bat
 
 # 自动检测 Python → 创建虚拟环境 → 安装依赖 → 启动 Web UI
 ```
@@ -26,12 +26,12 @@ pip install -e ".[dev]"
 ### 验证安装
 
 ```bash
-# 命令行验证
-python -m smartsuite.cli normality --data test_data.csv
+# 命令行验证（列出全部支持的分析方法）
+python -m smartsuite.cli list
 
 # 或启动 Web UI
 python run_server.py
-# → 浏览器打开 http://localhost:5000
+# → 浏览器打开 http://localhost:5050
 ```
 
 ---
@@ -64,20 +64,19 @@ python run_server.py
 ```
 
 1. 浏览器打开 → 选择分析方法 → 上传数据 → 填写参数 → 查看报表
-2. 导出：PDF 报告 / PNG 图表 / CSV 数据
-3. 所有计算在本地完成，无数据上传
+2. 图表以 PNG 内嵌展示；所有计算在本地完成，数据不上传
 
 ### CLI（命令行批量）
 
 ```bash
-# 正态性检验
-python -m smartsuite.cli normality --data measurements.csv --methods all
+# 列出支持的分析方法
+python -m smartsuite.cli list
 
-# 过程能力分析
-python -m smartsuite.cli capability --data process.csv --usl 10 --lsl 2
+# 按 YAML 模板运行正态性评估（模板声明 task / target_col / params）
+python -m smartsuite.cli run templates/example_normality_check.yaml --input data.csv
 
-# 导出 JSON 结果
-python -m smartsuite.cli weibull --data life.csv --output results.json
+# 按 YAML 模板运行过程能力分析
+python -m smartsuite.cli run templates/example_process_capability.yaml --input process.csv
 ```
 
 ### Python API（编程调用）
@@ -98,7 +97,7 @@ print(result.summary)
 ## 架构特点
 
 ```
-smartsuite/core/       ← 数据契约层：零依赖，仅 dataclass
+smartsuite/core/       ← 数据契约层：仅 pandas/pydantic，AnalysisRequest 为 Pydantic BaseModel
 smartsuite/engine/     ← 分析引擎层：纯 Python，零 flask/xlwings 依赖
 smartsuite/services/   ← 应用服务层：唯一桥接层
 smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
@@ -140,7 +139,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 ## 已知限制
 
-- **Python ≥ 3.10**：依赖 dataclass 新特性
+- **Python ≥ 3.10**：依赖 Pydantic v2 数据验证
 - **Windows 平台**：Excel 交互功能仅 Windows 可用
 - **scipy 版本**：锁定下限，API 变更需回归测试
 - **matplotlib**：CLI 模式需指定非交互后端（`agg`）

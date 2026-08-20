@@ -18,11 +18,13 @@
 | 脚本 | 用途 |
 |------|------|
 | `generate_test_data.py` | 生成通用测试数据集 |
-| `generate_chemical_data.py` | 生成化工场景测试数据 |
-| `generate_assembly_data.py` | 生成装配场景测试数据 |
-| `generate_pharma_data.py` | 生成制药场景测试数据 |
-| `generate_reliability_data.py` | 生成可靠性测试数据 |
-| `generate_warranty_data.py` | 生成保修分析测试数据 |
+| `generate_images.py` | 生成用户手册示例图片（rules/images/） |
+
+## 依赖管理
+
+| 脚本 | 用途 |
+|------|------|
+| `gen_requirements.py` | 从 `packages/` 离线安装包生成 `requirements.txt` |
 
 ## 验证与治理
 
@@ -31,7 +33,7 @@
 | `verify_all.py` | 一键全量验证（构建+测试+文档+审计+守卫，`--quick` 跳过文档） | 本地 |
 | `doctor.py` | 环境就绪性诊断（Python/工具/目录/文件，给出修复指引） | 本地 |
 | `verify_consistency.py` | 验证文档与代码一致性 | ✅ full |
-| `verify_cross_consistency.py` | Web/CLI 分析一致性交叉验证（需运行中 Flask server） | 手动 |
+| `verify_cross_consistency.py` | Web/CLI 分析一致性交叉验证（纯 Python 直接调用，无需服务器） | 手动 |
 | `verify_manual_claims.py` | 手册数值实跑验证（CLAIM 标记 → 实际输出） | 手动 |
 | `verify_docs.py` | 文档一致性：断链/目录树/裸异常/版本漂移（`--strict` 含未声明文件） | ✅ quality |
 | `falsy_audit.py` | Falsy 模式静态审计（0/空/False 误判风险） | ✅ quality |
@@ -51,14 +53,3 @@
 | `validate-commit-msg.sh` | Conventional Commits 校验（SSOT 规则，CI 与本地 hook 共用） |
 | `git-hooks/commit-msg` | 本地 git hook：`git config core.hooksPath scripts/git-hooks` 安装 |
 
-## 演示
-
-| 脚本 | 用途 |
-|------|------|
-| `demo_all_analyses.py` | 运行全部 40 个分析方法的集成演示 |
-
-## GUI
-
-| 脚本 | 用途 |
-|------|------|
-| `smartsuite_gui.py` | SmartSuite 桌面 GUI 启动器（实验性） |

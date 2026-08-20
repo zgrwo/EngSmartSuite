@@ -32,7 +32,7 @@ EngSmartSuite/
 │       ├── __init__.py             #   包初始化 + __version__ + check_core_deps()
 │       ├── cli.py                  #   CLI 入口: smartsuite run / list
 │       │
-│       ├── core/                   # ① 数据契约层：零依赖，仅 dataclass
+│       ├── core/                   # ① 数据契约层：仅 pandas+pydantic（AnalysisRequest 为 Pydantic BaseModel）
 │       │   ├── __init__.py
 │       │   ├── contracts.py        #   AnalysisRequest / AnalysisResult
 │       │   └── exceptions.py       #   分层异常体系（3 层）
@@ -43,10 +43,10 @@ EngSmartSuite/
 │       │   ├── _constants.py       #   统计分析常量（阈值/乘数/效应量判定）
 │       │   ├── _utils.py           #   共享工具函数 (safe_float, threshold_label)
 │       │   ├── root_cause.py       #   要因分析 (correlation, anova, hypothesis_test...)
-│       │   ├── doe_opt.py          #   DOE/优化 (regression, rsm, grid_search...)
+│       │   ├── doe_opt.py          #   DOE/优化 (regression, response_surface, grid_search...)
 │       │   ├── spc_charts.py       #   SPC 控制图 (xbar_r, cusum, ewma, attribute...)
 │       │   ├── spc_monitor.py      #   SPC 统一入口（向后兼容，委托至子模块）
-│       │   ├── capability.py       #   过程能力 (Cp/Cpk, Sigma Level, Box-Cox)
+│       │   ├── capability.py       #   过程能力 (Cp/Cpk, Sigma Level, 统计容许区间)
 │       │   ├── detection.py        #   异常检测 (trend_forecast, changepoint...)
 │       │   ├── reliability.py      #   可靠性/MSA (gage_rr, tolerance, survival)
 │       │   └── exploratory.py      #   探索性分析 (box_chart, scatter_plot...)
@@ -184,7 +184,7 @@ smartsuite/services/  ← ② 应用服务层：唯一桥接层
     ↓ 调用
 smartsuite/engine/    ← ③ 分析引擎层：纯 Python，零外部依赖
     ↓ 使用
-smartsuite/core/      ← ① 数据契约层：零依赖，仅 dataclass
+smartsuite/core/      ← ① 数据契约层：仅 pandas+pydantic（AnalysisRequest 为 Pydantic BaseModel）
 ```
 
 > 注：所有源码位于 `src/` 目录下（src 布局），以上路径相对于 `src/`。
