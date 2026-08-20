@@ -2,6 +2,36 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.1](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.0...v1.1.1) (2026-08-20)
+
+
+### 🐛 Bug 修复
+
+* **ci:** quality job 安装 web extras，修复 flask 缺失导致的覆盖率步骤失败 ([8a63590](https://github.com/zgrwo/EngSmartSuite/commit/8a6359055bbf4732027149b5bcb739b46eb67086))
+* **ci:** quick/full/consistency job 安装 web extras（flask） ([cd424a5](https://github.com/zgrwo/EngSmartSuite/commit/cd424a55f6ecc7c9c4d340b93065d485b7311e9f))
+* **engine,web,services:** Round-2 遗留 P3 项修复（2026-08-20） ([99a7ebd](https://github.com/zgrwo/EngSmartSuite/commit/99a7ebd218e3afacd22fa24d19a08259334a1830))
+* **engine:** normality_check 在 scipy&lt;1.16 无 A-D p 值时不再用 5% 临界值近似判定（alpha 参数失效），A-D 仅展示统计量 ([ea5b403](https://github.com/zgrwo/EngSmartSuite/commit/ea5b403550274c73c4ec5629dc1e038310c67689))
+* **engine:** normality_check 常量列 SW p 在 scipy&gt;=1.18 返回 NaN，固定为确定性 1.0 ([d603511](https://github.com/zgrwo/EngSmartSuite/commit/d60351173cadb39dc8fc0376ab64a792df7a6da6))
+* **engine:** Round-2 审查修复（2026-08-20） ([79b7afa](https://github.com/zgrwo/EngSmartSuite/commit/79b7afa4454585e7c4e96dc7bef3c3eaff7e0b6b))
+* **engine:** 修复审查发现的崩溃与静默错误 (2026-08-19 第三轮) ([22a9041](https://github.com/zgrwo/EngSmartSuite/commit/22a90410188bba7ae995c877f5148cf26a686f08))
+* **scripts:** Round-2 治理脚本与 CI 修复（2026-08-20） ([17c3b1b](https://github.com/zgrwo/EngSmartSuite/commit/17c3b1b01603cb2603feb2e2a6fe8ba75acce412))
+* **scripts:** verify_consistency TASK_SPEC 的 anova 改用类别因子 ([3095fdf](https://github.com/zgrwo/EngSmartSuite/commit/3095fdf882bbed66949a96b23a37408491d407bd))
+* **scripts:** verify_consistency 门禁升级为 status=ok + Windows basetemp 规避 ([0eeab78](https://github.com/zgrwo/EngSmartSuite/commit/0eeab789c35a2987dd14f7998b9a9b88fc6bb0d2))
+* **web:** grid_search ranges 解析器对齐与前端 M/L 级问题修复 ([90085c3](https://github.com/zgrwo/EngSmartSuite/commit/90085c336c9002fdd855a5121e8501df7b991567))
+* **web:** Round-2 前端/CLI/服务层修复（2026-08-20） ([7050c3c](https://github.com/zgrwo/EngSmartSuite/commit/7050c3c355a992fcb3cc3848097a8a884325afac))
+
+
+### 📄 文档
+
+* Round-2 文档修复（2026-08-20） ([964a71e](https://github.com/zgrwo/EngSmartSuite/commit/964a71e8d70f1a0e36fba2084c65ea6bda7842fb))
+* 文档一致性修复 (2026-08-19 第三轮) ([3ea75c6](https://github.com/zgrwo/EngSmartSuite/commit/3ea75c6d97477409edbe653c7ca9e74e683159de))
+
+
+### ✅ 测试
+
+* **quality:** Round-2 测试加固（2026-08-20） ([14aa345](https://github.com/zgrwo/EngSmartSuite/commit/14aa34554dee3632c3df64a40d5b41f3e99ef041))
+* **quality:** 测试门禁升级 (2026-08-19 第三轮) ([8d51539](https://github.com/zgrwo/EngSmartSuite/commit/8d51539493e2a744490ce4562c0210212fa13d69))
+
 ## [Unreleased]
 
 ### 🐛 Bug 修复
