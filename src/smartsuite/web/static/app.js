@@ -5,14 +5,30 @@ let csrfToken = '';
 const escHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 // CSRF token 获取
-async function getCsrfToken() {
-  if (csrfToken) return csrfToken;
+async function getCsrfToken(force) {
+  if (csrfToken && !force) return csrfToken;
   try {
     const r = await fetch('/api/csrf-token');
     const d = await r.json();
     csrfToken = d.token || '';
   } catch(e) { /* 网络错误时留空 */ }
   return csrfToken;
+}
+// 审查 2026-08-19 M5：会话过期后 403 → 刷新 token 重试一次
+async function fetchWithCsrf(url, options) {
+  const doFetch = async (token) => {
+    return fetch(url, { ...options, headers: {
+      'X-CSRF-Token': token,
+      ...(options.headers || {}),
+    }});
+  };
+  let r = await doFetch(await getCsrfToken());
+  if (r.status === 403) {
+    csrfToken = '';
+    const fresh = await getCsrfToken(true);
+    if (fresh) r = await doFetch(fresh);
+  }
+  return r;
 }
 // 页面加载时预取
 getCsrfToken();
@@ -26,13 +42,22 @@ document.getElementById('file-input').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   document.getElementById('filename').textContent = f.name;
   document.getElementById('shape').textContent = '上传中...';
+  // 审查 2026-08-19 M3：前端预检 50MB，避免 413 HTML 响应导致"网络错误"误报
+  if (f.size > 50 * 1024 * 1024) {
+    alert('文件超过 50MB 限制，请减少数据量后重试');
+    document.getElementById('filename').textContent = '未选择文件';
+    document.getElementById('shape').textContent = '';
+    e.target.value = '';
+    return;
+  }
   const fd = new FormData(); fd.append('file', f);
   try {
     const r = await fetch('/api/upload', { method: 'POST', body: fd,
       headers: { 'X-CSRF-Token': await getCsrfToken() } });
-    const d = await r.json();
+    let d = {};
+    try { d = await r.json(); } catch(err) { /* 非 JSON 响应（如 413 HTML） */ }
     if (!r.ok) {
-      alert('上传失败: ' + (d.error || '未知错误'));
+      alert('上传失败: ' + (d.error || (r.status === 413 ? '文件超过 50MB 限制' : '未知错误')));
       document.getElementById('filename').textContent = '未选择文件';
       document.getElementById('shape').textContent = '';
       return;
@@ -119,9 +144,9 @@ const TASK_PARAMS = {
   process_capability:{ usl: '', lsl: '' },
   hypothesis_test:   { test: 'ttest_ind', alpha: 0.05 },
   trend_forecast:    { forecast_steps: 5 },
-  anomaly_detect:    { method: 'iqr' },
+  anomaly_detect:    { method: 'iqr', max_outliers: 5 },
   response_surface:  { direction: 'maximize' },
-  multi_objective:   { objectives: '' },
+  multi_objective:   { objectives: '', weights: '' },
   decision_tree:     { max_depth: 5 },
   anova:             { alpha: 0.05, interactions: 0 },
   spc_nonparametric: { side: 'two-sided' },
@@ -143,7 +168,7 @@ const TASK_PARAMS = {
   variance_test:     { group_col: '', alpha: 0.05 },
   box_chart:         { mode: 'facet', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
   scatter_plot:      { fit: 'none', show_ci: 'true', group_col: '' },
-  correlation:       { method: 'pearson' },
+  correlation:       { method: 'pearson', control_vars: '' },
   contingency:       { alpha: 0.05 },
   outlier_consensus: {},
   roc_analysis:      {},
@@ -153,7 +178,7 @@ const TASK_PARAMS = {
   cronbach_alpha:    {},
   normality_check:   { alpha: 0.05 },
   distribution_summary: { bins: 15 },
-  proportion_ci:     { ci_level: 0.95 },
+  proportion_ci:     { ci_level: 0.95, success_value: '' },
   vif:               { threshold: 5 },
 };
 
@@ -274,6 +299,7 @@ const PARAM_LABELS = {
   operator_col: '操作员列', group_col: '分组依据', alpha_lasso: 'α (正则化强度)',
   model_type: '模型类型', min_segment: '最小段长', n_changepoints: '变点数',
   max_depth: '最大深度',
+  max_outliers: '最多异常点数', control_vars: '控制变量(逗号分隔)', success_value: '成功值', weights: '权重(逗号分隔)',
   sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
@@ -346,12 +372,31 @@ function getParams(task) {
     if (v === '') return;
 
     if (k === 'ranges') {
-      try { v = v.split(';').filter(Boolean).reduce((o, s) => { const [ky, lo, hi] = s.split(':'); o[ky.trim()] = [+lo, +hi]; return o; }, {}); if (!Object.keys(v).length) return; }
+      // 审查 2026-08-19 H1：提示格式为"料温:180,220"（逗号分隔上下限），
+      // 旧解析器按三段冒号拆分产生 [NaN,NaN]；同时拒绝 NaN/Inf 边界
+      try { v = v.split(';').filter(Boolean).reduce((o, s) => {
+        const parts = s.split(':');
+        const ky = (parts[0] || '').trim();
+        const bounds = (parts[1] || '').split(',');
+        const lo = +bounds[0], hi = +bounds[1];
+        if (ky && isFinite(lo) && isFinite(hi) && lo < hi) o[ky] = [lo, hi];
+        return o;
+      }, {}); if (!Object.keys(v).length) return; }
       catch(e) { return; }
     } else if (k === 'objectives') {
       try { v = v.split(';').filter(Boolean).map(s => { const [col, dir] = s.trim().split(':'); return {col:col.trim(), direction:dir?.trim()||'maximize'}; }); if (!v.length) return; }
       catch(e) { return; }
-    } else if (!isNaN(v)) {
+    } else if (k === 'weights') {
+      // 逗号分隔权重 → 数值列表（审查 2026-08-19 L1）
+      try { v = v.split(',').map(s => Number(s.trim())).filter(x => isFinite(x)); if (!v.length) return; }
+      catch(e) { return; }
+    } else if (k === 'control_vars') {
+      // 逗号分隔列名 → 列表（审查 2026-08-19 L1）
+      v = v.split(',').map(s => s.trim()).filter(Boolean);
+      if (!v.length) return;
+    } else if (el.tagName === 'INPUT' && !isNaN(v)) {
+      // 审查 2026-08-19 M1：仅对 input 控件做数值转换；
+      // select（列选择器）的值是列名，数字列名被 Number() 后 pandas 查不到
       v = Number(v);
     }
     p[k] = v;
@@ -446,6 +491,7 @@ async function executeRequest(task) {
 
 // 兼容: param面板中的"运行"按钮调用
 function executeAnalysis() {
+  if (_running) return;  // 审查 2026-08-19 L6：防双击并发
   executeRequest(_pendingTask);
 }
 
@@ -469,8 +515,14 @@ async function refetchWithFilter() {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
     body: JSON.stringify(req)
   });
-  const d = await r.json();
+  let d = {};
+  try { d = await r.json(); } catch(err) { /* 非 JSON 响应 */ }
   if (r.ok) { renderResults(d.results || []); }
+  else {
+    // 审查 2026-08-19 L2：筛选重取失败不再静默
+    document.getElementById('results').innerHTML =
+      `<div class="empty-hint" style="color:#c62828">${escHtml(d.error || '筛选重取失败，请重试')}</div>`;
+  }
 }
 
 // Result rendering
@@ -513,9 +565,11 @@ function renderResults(results) {
   let html = '';
 
   // ── 合并相关矩阵：独立显示在顶部 ──
+  // 审查 2026-08-19 M2：先于排序捕获（排序后 results[0] 可能不再是携带矩阵的目标）
   const mergedKey = '_merged_correlation';
-  if (results[0]?.tables?.[mergedKey]) {
-    const tbl = results[0].tables[mergedKey];
+  const mergedTbl = results[0]?.tables?.[mergedKey] || null;
+  if (mergedTbl) {
+    const tbl = mergedTbl;
     const hdr = '<th></th>' + tbl.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
     const rows = tbl.data.map((row, i) =>
       `<tr><td><b>${escHtml(String(tbl.index[i]||''))}</b></td>${row.map(v =>
@@ -541,7 +595,7 @@ function renderResults(results) {
         `<tr><td>${escHtml(String(tbl.index[i]||''))}</td>${row.map(v =>
           `<td>${typeof v==='number'?v.toFixed(4):escHtml(String(v))}</td>`).join('')}</tr>`
       ).join('');
-      tHtml += `<div class="table-wrap"><h4>${tn} (${tbl.shape[0]}×${tbl.shape[1]})</h4>
+      tHtml += `<div class="table-wrap"><h4>${escHtml(String(tn))} (${String(tbl.shape[0])}×${String(tbl.shape[1])})</h4>
         <table><thead><tr><th></th>${hdr}</tr></thead><tbody>${rows}</tbody></table></div>`;
     }
     let cHtml = (r.charts||[]).map(b => `<div class="chart-wrap"><img src="data:image/png;base64,${b}"></div>`).join('');
