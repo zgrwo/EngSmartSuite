@@ -3610,8 +3610,9 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             if ad_p is not None:
                 ad_normal = ad_p > alpha
             else:
-                # critical_values 对应 [15%, 10%, 5%, 2.5%, 1%] 显著性水平
-                ad_normal = ad_stat < ad_result.critical_values[2]
+                # scipy < 1.16 无 pvalue：临界值近似固定 5% 会让 alpha 参数失效
+                # （Round-2 批次D #2e），A-D 不参与判定，仅展示统计量；SW 已提供 p 值
+                ad_normal = None
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)
             ad_stat, ad_p, ad_normal = None, None, None
