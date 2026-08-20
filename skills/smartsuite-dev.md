@@ -78,7 +78,7 @@ color=PALETTE["anomaly"]["primary"]    # 红色异常线
 3. 该函数 X 列可选吗？→ 如果是，应加入 `_xOptionalTasks`
 4. 手册协同要求与 `_yOnlyTasks` / `_noTargetNeeded` / `_xOptionalTasks` 一致吗？
 
-**关键代码位置**：`app.js` 第 360-382 行
+**关键代码位置**：`app.js` 第 418-439 行
 
 ```javascript
 // _noTargetNeeded: 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
@@ -93,6 +93,7 @@ const _yOnlyTasks = new Set([
     'distribution_summary', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
     'spc_cusum', 'spc_ewma',
+    'grid_search',
 ]);
 
 // _xOptionalTasks: X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
@@ -373,7 +374,7 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 领域术语 | `CONTEXT.md` | 中文术语定义 |
 | 决策知识 | `skills/analysis-decision-tree.md` | 分析方法决策树 + 工作流 |
 | API 参考 | `rules/api-reference.md` | 40 个函数完整签名 |
-| 用户手册 | `rules/user-manual.md` | 操作说明 + 六段式示例 |
+| 用户手册 | `rules/user-manual.md` | 操作说明 + 五段式示例 |
 | 架构决策 | `rules/0001-*.md` / `rules/0002-*.md` | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel |
 | 防错契约 | `rules/sentinel-contract.md` | L1-L5 哨兵 + NaN/Inf 守卫清单（新增/修改引擎函数必查） |
 | 配色方案 | `smartsuite/engine/_palette.py` | PALETTE 字典完整定义 |

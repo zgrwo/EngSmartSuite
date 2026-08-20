@@ -187,7 +187,7 @@ class AnalysisResult:
 ### logistic_regression
 - **Task Key**: `logistic_regression`
 - **描述**: Logistic 回归 — 二分类建模，输出 Odds Ratio + 分类指标
-- **params**: 无
+- **params**: threshold (默认 0.5)
 - **返回**: `coefficients` (含 OR + 95%CI), `classification_metrics`
 - **图**: OR 森林图
 
@@ -233,14 +233,14 @@ class AnalysisResult:
 ### cusum_chart
 - **Task Key**: `spc_cusum`
 - **描述**: CUSUM 累积和控制图 — 对小偏移 (±0.5σ~2σ) 敏感
-- **params**: `k` (默认 0.5), `h` (默认 5.0)
+- **params**: `k` (默认 0.5), `h` (默认 5.0), `mu`/`sigma` (需同时提供，指定已知受控状态参数；缺省从数据估计)
 - **返回**: `cusum_stats`
 - **图**: 原始数据 (上) + C+/C- 累积和 (下)
 
 ### ewma_chart
 - **Task Key**: `spc_ewma`
 - **描述**: EWMA 指数加权移动平均控制图 — 时变控制限
-- **params**: `lam` (默认 0.2), `L` (默认 2.7)
+- **params**: `lam` (默认 0.2), `L` (默认 2.7), `mu`/`sigma` (需同时提供，引擎强制成对校验；缺省从数据估计)
 - **返回**: `ewma_stats`
 - **图**: EWMA + 时变控制限 + 渐近控制限
 
@@ -268,7 +268,7 @@ class AnalysisResult:
 ### change_point_detect
 - **Task Key**: `change_point`
 - **描述**: 变点检测 — 基于 CUSUM 的二元分割法
-- **params**: `min_segment` (最小段长度；不传时自适应取 max(10, n//20)), `n_changepoints` (默认 5)
+- **params**: `min_segment` (最小段长度；不传时自适应取 max(10, n//20)), `n_changepoints` (默认 5), `min_peak_ratio` (标准化峰值阈值，不传默认 2.0；灵敏度建议 1.2-1.5)
 - **返回**: `segment_statistics` (含分段均值+标准差+变化方向)
 - **图**: 数据 + 分段均值线 + 变点标注
 

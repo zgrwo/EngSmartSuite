@@ -34,7 +34,7 @@
   → ⑦ templates/ 创建 YAML 模板
   → ⑧ 测试：test_correctness + test_invariants
   → ⑨ rules/api-reference.md 更新
-  → ⑩ rules/user-manual.md 更新（六段式）
+  → ⑩ rules/user-manual.md 更新（五段式）
   → ⑪ skill.md 决策树更新（如引入新场景）
 ```
 

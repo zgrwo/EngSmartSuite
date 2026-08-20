@@ -87,7 +87,7 @@ from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import orchestrate
 
 df = pd.read_csv("life.csv")
-request = AnalysisRequest(task="normality", data=df, target_col="measure", params={"methods": ["ad", "sw"]})
+request = AnalysisRequest(task="normality_check", data=df, target_col="measure", params={"alpha": 0.05})
 result = orchestrate(request)
 print(result.summary)
 ```
@@ -128,11 +128,11 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 ## 质量保证
 
 - **4 层测试防线**：
-  ① 数值正确性（与 scipy/statsmodels 比对，40/40 验证通过）
+  ① 数值正确性（已知答案 + 手工公式交叉验证，40/40 验证通过）
   ② 数学不变量（p∈[0,1]、Cpk≤Cp、R²≥0）
   ③ 边界模糊（空数据/单行/全NaN/常量列/共线/n>5000）
   ④ 差分测试（CLI 输出 = Web API 输出）
-- **交叉验证**：每个分析方法与 Python 科学计算栈独立实现比对
+- **交叉验证**：每个分析方法用已知答案 + 手工公式独立交叉验证
 - **快速 + 全量 CI**：PR 秒级 check + 矩阵全量测试
 
 ---
@@ -140,9 +140,8 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 ## 已知限制
 
 - **Python ≥ 3.10**：依赖 Pydantic v2 数据验证
-- **Windows 平台**：Excel 交互功能仅 Windows 可用
 - **scipy 版本**：锁定下限，API 变更需回归测试
-- **matplotlib**：CLI 模式需指定非交互后端（`agg`）
+- **matplotlib**：引擎自动使用 Agg 后端（engine/__init__.py 自动配置）
 
 ---
 

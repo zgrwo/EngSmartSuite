@@ -50,6 +50,7 @@
 | 21 | **winreg ImportError**（Linux 上未捕获 Windows API） | `import winreg` 包 `try/except ImportError`，或延迟到 Windows 分支 |
 | 22 | **matplotlib 后端冲突**（CLI 模式下 pyplot 提前导入 → Agg 后端报错） | CLI 入口在导入 pyplot 前 `matplotlib.use("Agg")`；engine/__init__.py 集中配置（见 pyproject.toml per-file-ignores 注释） |
 | 23 | **GBK 控制台输出乱码**（Windows 终端默认 GBK，UTF-8 中文输出乱码） | 脚本入口 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`（本仓 scripts/ 统一约定） |
+| 24 | **pytest-current junction 残留**（Windows 上嵌套 pytest 会话的 `pytest-of-<user>/pytest-current` junction 清理阶段 PermissionError → sessionfinish 报错、进程退出码 1，verify_all/CI 误判失败） | 嵌套 pytest 与 verify_all 调用显式加 `--basetemp` 隔离；或清理 `%TEMP%\pytest-of-zgrwo` 残留目录 |
 
 ## 提交前自查
 

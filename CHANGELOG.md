@@ -2,6 +2,22 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 🐛 Bug 修复
+
+* **engine:** 修复审查发现的崩溃与静默错误 (2026-08-19 第三轮) ([22a9041](https://github.com/zgrwo/EngSmartSuite/commit/22a90410188bba7ae995c877f5148cf26a686f08))
+* **web:** grid_search ranges 解析器对齐与前端 M/L 级问题修复 ([90085c3](https://github.com/zgrwo/EngSmartSuite/commit/90085c336c9002fdd855a5121e8501df7b991567))
+* **scripts:** verify_consistency 门禁升级为 status=ok + Windows basetemp 规避 ([0eeab78](https://github.com/zgrwo/EngSmartSuite/commit/0eeab789c35a2987dd14f7998b9a9b88fc6bb0d2))
+
+### 🧪 测试质量
+
+* **quality:** 测试门禁升级 (2026-08-19 第三轮) ([8d51539](https://github.com/zgrwo/EngSmartSuite/commit/8d51539493e2a744490ce4562c0210212fa13d69))
+
+### 📄 文档
+
+* 文档一致性修复 (2026-08-19 第三轮) ([3ea75c6](https://github.com/zgrwo/EngSmartSuite/commit/3ea75c6d97477409edbe653c7ca9e74e683159de))
+
 ## [1.1.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.0.1...v1.1.0) (2026-08-16)
 
 

@@ -48,7 +48,7 @@ EngSmartSuite/
 │       │   ├── spc_monitor.py      #   SPC 统一入口（向后兼容，委托至子模块）
 │       │   ├── capability.py       #   过程能力 (Cp/Cpk, Sigma Level, 统计容许区间)
 │       │   ├── detection.py        #   异常检测 (trend_forecast, changepoint...)
-│       │   ├── reliability.py      #   可靠性/MSA (gage_rr, tolerance, survival)
+│       │   ├── reliability.py      #   可靠性/MSA (gage_rr, tolerance_interval, survival_analysis)
 │       │   └── exploratory.py      #   探索性分析 (box_chart, scatter_plot...)
 │       │
 │       ├── services/               # ② 应用服务层：唯一桥接层
@@ -68,7 +68,12 @@ EngSmartSuite/
 │               └── style.css       #   前端样式
 │
 ├── tests/                          # 测试
+│   ├── __init__.py
 │   ├── conftest.py                 #   共享 fixtures
+│   ├── test_data.xlsx              #   通用测试数据
+│   ├── test_chemical_data.xlsx     #   化工批次数据
+│   ├── test_reliability_data.xlsx  #   可靠性数据
+│   ├── test_warranty_data.xlsx     #   保修数据
 │   ├── test_integration.py         #   通用集成测试
 │   ├── test_integration_chemical.py#   化工场景
 │   ├── test_integration_reliability.py # 可靠性场景
@@ -76,22 +81,30 @@ EngSmartSuite/
 │   ├── test_master_integration.py  #   40 方法全量集成
 │   ├── test_web_e2e.py             #   Web UI E2E
 │   ├── test_workflows.py           #   工作流串联测试
-│   ├── verify_all_modules.py       #   模块导入验证
+│   ├── crossval_r/                 #   R 交叉验证参考实现
+│   │   └── test_r_reference.py
 │   ├── test_engine/                #   引擎层单元测试
+│   │   ├── __init__.py
 │   │   ├── test_root_cause.py
 │   │   ├── test_doe_opt.py
 │   │   ├── test_spc_monitor.py
+│   │   ├── test_utils.py
 │   │   ├── test_correctness.py     #   数值正确性 — 40/40 全覆盖
 │   │   ├── test_edge_cases.py      #   边界情况
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_fuzz.py            #   模糊测试
 │   │   └── test_new_functions.py   #   新函数验证
 │   ├── test_services/              #   服务层单元测试
+│   │   ├── __init__.py
 │   │   ├── test_orchestrator.py
+│   │   ├── test_data_io.py
+│   │   ├── test_audit.py
 │   │   ├── test_reporter.py
 │   │   ├── test_differential.py    #   CLI vs Web 路径一致性
+│   │   ├── test_diff_cli_web.py    #   CLI/Web 差分一致性
 │   │   └── test_manual_parity.py   #   Web/CLI/Python/手册 四路一致性
 │   └── scripts/                    #   治理脚本测试
+│       ├── test_retry.py
 │       ├── test_run_affected_tests.py
 │       ├── test_validate_commit_msg.py
 │       ├── test_verify_docs.py
@@ -128,6 +141,51 @@ EngSmartSuite/
 │   └── subagent-driven-development/
 │
 ├── templates/                      # YAML 分析模板 (43 个) + new_analysis.py + README.md
+│   ├── README.md                   #   模板目录说明
+│   ├── new_analysis.py             #   新方法脚手架（11 步注册链模板）
+│   ├── example_anomaly_detect.yaml
+│   ├── example_anova.yaml
+│   ├── example_bootstrap_ci.yaml
+│   ├── example_box_chart.yaml
+│   ├── example_change_point.yaml
+│   ├── example_cohens_kappa.yaml
+│   ├── example_contingency.yaml
+│   ├── example_correlation.yaml
+│   ├── example_cronbach_alpha.yaml
+│   ├── example_decision_tree.yaml
+│   ├── example_distribution_summary.yaml
+│   ├── example_doe_analysis.yaml
+│   ├── example_gage_rr.yaml
+│   ├── example_grid_search.yaml
+│   ├── example_hypothesis_test.yaml
+│   ├── example_hypothesis_test_kruskal.yaml
+│   ├── example_hypothesis_test_mcnemar.yaml
+│   ├── example_lasso_regression.yaml
+│   ├── example_logistic_regression.yaml
+│   ├── example_median_ci.yaml
+│   ├── example_multi_objective.yaml
+│   ├── example_normality_check.yaml
+│   ├── example_outlier_consensus.yaml
+│   ├── example_power_analysis.yaml
+│   ├── example_process_capability.yaml
+│   ├── example_proportion_ci.yaml
+│   ├── example_quantile_regression.yaml
+│   ├── example_regression.yaml
+│   ├── example_response_surface.yaml
+│   ├── example_robust_regression.yaml
+│   ├── example_roc_analysis.yaml
+│   ├── example_scatter_plot.yaml
+│   ├── example_spc_attribute.yaml
+│   ├── example_spc_cusum.yaml
+│   ├── example_spc_ewma.yaml
+│   ├── example_spc_nonparametric.yaml
+│   ├── example_spc_xbar.yaml
+│   ├── example_survival_analysis.yaml
+│   ├── example_tolerance_interval.yaml
+│   ├── example_trend_forecast.yaml
+│   ├── example_variance_test.yaml
+│   ├── example_vif.yaml
+│   └── example_workflow_guide.yaml
 ├── scripts/                        # 开发辅助脚本
 │   ├── README.md
 │   ├── common.py

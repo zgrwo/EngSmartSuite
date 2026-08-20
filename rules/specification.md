@@ -118,14 +118,14 @@ smartsuite/
 
 | 层 | 文件 | 验证内容 | 覆盖率 |
 |---|---|---|---|
-| ① 数值正确性 | test_correctness.py | 与 scipy/statsmodels 对比 | 40/40 (100%) |
+| ① 数值正确性 | test_correctness.py | 已知答案 + 手工公式交叉验证 | 40/40 (100%) |
 | ② 数学不变量 | test_invariants.py | p∈[0,1]、Cpk≤Cp、R²≥0 | 关键函数 |
 | ③ 边界模糊 | test_fuzz.py | 空数据/单行/全NaN/常量列 | 全部 |
 | ④ 差分测试 | test_differential.py | CLI vs Web 数值一致 | 全部 |
 
 ### 4.2 已知限制
 
-- matplotlib 后端：CLI 需延迟导入，避免 Agg 后端冲突
+- matplotlib 后端：engine/__init__.py 自动配置 Agg 后端，CLI 无需手动指定
 - scipy 兼容性：kstest 字符串分布名需改为 frozen dist cdf
 - pandas FutureWarning：sum(axis=None) 需改为 sum().sum()
 - statsmodels 警告：含 'failed' 单词导致 verify_consistency 误判
@@ -138,7 +138,7 @@ smartsuite/
 | 引擎开发 | ~20 | 40 个分析方法实现 |
 | Web UI | ~15 | Flask + 前端参数面板 |
 | 审查修复期 | ~50 | 15+ 轮代码审查，falsy 陷阱/统计修正 |
-| 文档完善 | ~20 | 用户手册 39 方法六段式结构 |
+| 文档完善 | ~20 | 用户手册 40 方法五段式结构 |
 | CI/CD | ~10 | 分层 pipeline（quick/full/quality/consistency） |
 
 **总计**：~120 commits
