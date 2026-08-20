@@ -86,7 +86,7 @@ else:
     check("excel/ has zero sklearn/statsmodels references", True, "目录不存在 (已按 ADR-001 移除)")
 
 # ============================================================
-section("2. All Engine Functions Runnable")
+section("2. All Engine Functions Runnable (status=ok)")
 # ============================================================
 np.random.seed(42)
 data = pd.DataFrame(
@@ -97,30 +97,53 @@ data = pd.DataFrame(
         "target": np.random.normal(20, 2, 50),
     }
 )
+# 按任务裁剪的辅助列：二值目标 / 二/三水平分组 / 子组 / 量具零件与操作员
+data["yb"] = (data["a"] > data["a"].median()).astype(int)
+data["g2"] = np.where(data["a"] > data["a"].median(), "高", "低")
+data["g3"] = pd.qcut(data["a"], 3, labels=["低", "中", "高"])
+data["sub"] = np.repeat(np.arange(1, 11), 5)
+data["part"] = np.repeat(np.arange(1, 11), 5)
+data["operator"] = np.tile(["甲", "乙", "丙", "甲", "乙"], 10)
+
+# 任务专用调用（审查 2026-08-19 #3.1：原通用参数对多数任务不适用，
+# 门禁判定升级为 status==ok，每个任务跑各自规范路径）
+TASK_SPEC = {
+    "box_chart": ("target", ["b"], {"mode": "facet", "group_col": "g3"}),
+    "hypothesis_test": ("target", ["g2"], {"test": "ttest_ind", "group_col": "g2"}),
+    # 避免完美分离（yb 由 a 的切分生成，a 作特征会精确预测）
+    "logistic_regression": ("yb", ["b", "c"], {}),
+    "roc_analysis": ("yb", ["a", "b"], {}),
+    "proportion_ci": ("yb", [], {}),
+    # group_col == x_col 场景（审查 #1.2 回归场景）
+    "scatter_plot": ("target", ["a"], {"fit": "linear", "group_col": "a"}),
+    "spc_xbar": ("target", [], {"group_col": "sub"}),
+    "spc_attribute": ("yb", [], {"chart_type": "p"}),
+    "spc_cusum": ("target", [], {"group_col": "sub"}),
+    "spc_ewma": ("target", [], {"group_col": "sub"}),
+    "variance_test": ("target", ["g3"], {"group_col": "g3"}),
+    "survival_analysis": ("target", ["g2"], {"group_col": "g2"}),
+    "gage_rr": ("target", ["part", "operator"], {"part_col": "part", "operator_col": "operator"}),
+    "grid_search": ("target", ["a", "b"], {"ranges": {"a": [80, 120], "b": [40, 60]}, "n_points": 5, "direction": "maximize"}),
+    "multi_objective": ("target", ["a", "b"], {"objectives": [{"col": "target", "direction": "maximize"}]}),
+}
 for task_id in sorted(TASK_REGISTRY.keys()):
+    spec = TASK_SPEC.get(task_id)
+    if spec is not None:
+        target_col, feature_cols, params = spec
+    else:
+        target_col, feature_cols, params = "target", ["a", "b", "c"], {}
     req = AnalysisRequest(
-        task=task_id,
-        data=data,
-        target_col="target",
-        feature_cols=["a", "b", "c"],
-        params={
-            "alpha": 0.05,
-            "max_depth": 3,
-            "forecast_steps": 3,
-            "ranges": {"a": [80, 120], "b": [40, 60]},
-            "objectives": [{"col": "target", "direction": "maximize"}],
-            "group_col": "a",
-            "usl": 30,
-            "lsl": 10,
-            "subgroup_col": "a",
-            "direction": "maximize",
-        },
+        task=task_id, data=data, target_col=target_col, feature_cols=feature_cols, params=params
     )
     try:
         result = orchestrate(req)
-        check(f"  {task_id} -> AnalysisResult", result.task == task_id, f"status={result.status}")
+        check(
+            f"  {task_id} -> AnalysisResult(status=ok)",
+            result.task == task_id and result.status == "ok",
+            f"status={result.status}, messages={result.messages[:1]}",
+        )
     except Exception as e:
-        check(f"  {task_id} -> AnalysisResult", False, str(e)[:80])
+        check(f"  {task_id} -> AnalysisResult(status=ok)", False, str(e)[:80])
 
 # ============================================================
 section("3. Determinism (Same Input = Same Output)")
@@ -307,8 +330,11 @@ check(
 # ============================================================
 section("8. Test Suite (pytest)")
 # ============================================================
+# --basetemp 固定独立临时目录：避免 Windows 上 pytest-current junction
+# 残留导致 sessionfinish 清理 PermissionError（审查 2026-08-19 #5.2）
+_verify_basetemp = os.path.join(tempfile.gettempdir(), "ss-verify-basetmp")
 r = subprocess.run(
-    [sys.executable, "-m", "pytest", "tests/", "--tb=line", "-q"],
+    [sys.executable, "-m", "pytest", "tests/", "--tb=line", "-q", f"--basetemp={_verify_basetemp}"],
     capture_output=True,
     text=True,
     encoding="utf-8",

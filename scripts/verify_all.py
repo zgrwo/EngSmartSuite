@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,9 +61,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quick", action="store_true", help="仅构建 + 测试（跳过文档检查）")
     args = parser.parse_args(argv)
 
+    # 审查 2026-08-19 #5.2：--basetemp 固定独立临时目录，
+    # 避免 Windows 上 pytest-current junction 残留导致 sessionfinish 清理失败
+    import tempfile as _tempfile
+
+    _pytest_base = [PYTHON, "-m", "pytest", "tests/", "-q",
+                    f"--basetemp={os.path.join(_tempfile.gettempdir(), 'ss-verifyall-basetmp')}"]
     steps: list[tuple[str, list[str]]] = [
         ("构建（语法检查）", [PYTHON, "-m", "compileall", "-q", "src"]),
-        ("测试", [PYTHON, "-m", "pytest", "tests/", "-q"]),
+        ("测试", _pytest_base),
     ]
     if not args.quick:
         steps += [
