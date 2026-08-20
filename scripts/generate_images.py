@@ -4,9 +4,10 @@
     python scripts/generate_images.py [--output-dir rules/images]
 
 产出：
-    rules/images/{method_name}.png — 每个分析方法的示例输出图
+    rules/images/{method_name}_1.png — 每个分析方法的示例输出图
+    （命名对齐手册约定：{method}_1.png 为第 1 张示例图）
 
-验收标准：39 方法图片全覆盖
+验收标准：40 方法图片全覆盖
 """
 
 import sys
@@ -96,6 +97,24 @@ METHOD_CONFIGS: dict[str, dict] = {
     "tolerance_interval": {"target": "y", "features": [], "params": {}},
     "cohens_kappa": {"target": "group", "features": ["binary"], "params": {}},
     "cronbach_alpha": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
+    # 第二轮 #12：补齐 9 个缺失方法配置（此前走默认参数，示例图与手册声明不符）
+    "roc_analysis": {"target": "binary", "features": ["x1", "x2"], "params": {}},
+    "logistic_regression": {"target": "binary", "features": ["x1", "x2", "x3"], "params": {}},
+    "lasso_regression": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
+    "grid_search": {
+        "target": "y",
+        "features": ["x1"],
+        "params": {"ranges": {"x1": [40, 60]}, "n_points": 5},
+    },
+    "multi_objective": {
+        "target": "y",
+        "features": ["x1", "x2"],
+        "params": {"objectives": [{"col": "y", "direction": "maximize"}]},
+    },
+    "doe_analysis": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
+    "response_surface": {"target": "y", "features": ["x1", "x2"], "params": {}},
+    "robust_regression": {"target": "y", "features": ["x1", "x2"], "params": {}},
+    "quantile_regression": {"target": "y", "features": ["x1"], "params": {"quantile": 0.5}},
 }
 
 
@@ -125,7 +144,8 @@ def generate_images(output_dir: Path):
 
             if result.status == "ok" and result.figures:
                 fig = result.figures[0]
-                out_path = output_dir / f"{method_name}.png"
+                # 命名对齐仓库约定 {method}_1.png（第二轮 #12）
+                out_path = output_dir / f"{method_name}_1.png"
                 fig.savefig(out_path, dpi=100, bbox_inches="tight")
                 success += 1
                 print(f"  ✅ {method_name}")

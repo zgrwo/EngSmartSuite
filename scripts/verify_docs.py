@@ -9,7 +9,8 @@ verify_docs.py — 文档一致性验证（源自 VibeCodingTemplate verify-docs
   4. AGENTS.md 与 project-structure.md 的目录树顶层条目集合一致（双目录树防漂移）
   5. 语义交叉检查：裸 except 捕获 / 文档 TODO/FIXME 残留 / verify_* 脚本裸 input 调用
   6. 版本一致性门禁：.release-please-manifest.json == pyproject.toml == CHANGELOG 最新发布
-  7. （--strict）根级未声明文件/目录 + rules/、skills/ 子目录文件未登记
+  7. （--strict）根级未声明文件/目录 + rules/、skills/、tests/、scripts/、templates/
+     子目录直接文件未登记（.gitignore 忽略的本地生成产物豁免）
 
 规则：
   - 含占位符（{{...}} / {Name} / <...>）的引用跳过（模式串而非真实路径）
@@ -27,6 +28,7 @@ import argparse
 import contextlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,7 +55,8 @@ EXCLUDED_DIRS = {
 }
 
 # 需核对"目录内文件已登记"的关键子目录（目录树即契约）
-_SUBDIR_CHECK = ("rules", "skills")
+# 审查 2026-08-19 第二轮 #5：从 rules/skills 扩展至 tests/、scripts/、templates/
+_SUBDIR_CHECK = ("rules", "skills", "tests", "scripts", "templates")
 
 # 反引号路径检查：仅检查以已知根目录前缀开头的引用（语义明确指向仓库内路径）
 _KNOWN_ROOT_PREFIXES = (
@@ -387,11 +390,50 @@ def check_undeclared(root: Path, strict: bool) -> list[str]:
     return problems
 
 
+def _git_ignored_files(root: Path, paths: list[Path]) -> set[str]:
+    """返回被 .gitignore 忽略的文件名集合（本地生成产物不要求登记目录树）。
+
+    非 git 仓库（如测试用迷你仓库）或 git 不可用时返回空集——
+    此时所有文件都要求登记，保证严格模式在 CI checkout 中生效。
+    """
+    if not paths:
+        return set()
+    try:
+        # --stdin -z：NUL 分隔输入/输出，不做引号转义
+        # （中文路径下 git 默认 core.quotePath 会对输出加引号，splitlines 会失效）
+        payload = ("\x00".join(str(p) for p in paths) + "\x00").encode("utf-8")
+        r = subprocess.run(
+            ["git", "check-ignore", "-z", "--stdin"],
+            input=payload,
+            capture_output=True,
+            cwd=root,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return set()
+    if r.returncode not in (0, 1):
+        return set()
+    return {
+        Path(line).name
+        for line in r.stdout.decode("utf-8", "replace").split("\x00")
+        if line.strip()
+    }
+
+
 def check_subdir_undeclared(root: Path, strict: bool) -> list[str]:
     if not strict:
         return []
     problems: list[str] = []
     nested = _parse_nested_files(root)
+    check_files = [
+        p
+        for sub in _SUBDIR_CHECK
+        if (root / sub).is_dir()
+        for p in (root / sub).iterdir()
+        if p.is_file()
+    ]
+    # .gitignore 忽略的生成产物（如 scripts/verify_manual_claims_output.txt）豁免登记
+    ignored = _git_ignored_files(root, check_files)
     for sub in _SUBDIR_CHECK:
         base = root / sub
         if not base.exists():
@@ -400,7 +442,7 @@ def check_subdir_undeclared(root: Path, strict: bool) -> list[str]:
         for p in sorted(base.iterdir()):
             if p.is_dir() or p.name == ".gitkeep":
                 continue
-            if p.name in declared:
+            if p.name in declared or p.name in ignored:
                 continue
             problems.append(f"[未声明文件] {sub}/{p.name}（请同步 project-structure.md 目录树）")
     return problems

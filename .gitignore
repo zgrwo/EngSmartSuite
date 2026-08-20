@@ -55,6 +55,13 @@ tests/demo_output/
 docs/code-review-report-*.md
 docs/known-issues.md
 
+# 审查/临时产物（第二轮 #11：审查轮次的临时脚本与探测文件）
+_rev_*.py
+_tmp_*.py
+_audit_tmp/
+_rev_check*.py
+smoke_test_tmp.py
+
 # AI 审查文档（5S：不入库；本地如需使用可手动保留）
 rules/code-review-prompt.md
 rules/statistics-review.md

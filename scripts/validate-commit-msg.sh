@@ -41,6 +41,10 @@ esac
 # 匹配 Conventional Commits 格式（scope 允许中文与常见分隔符）
 # 冒号后必须至少一个非空白字符（防 `fix(engine):  ` 纯空格 subject 通过）
 if printf '%s' "$subject" | grep -Eq '^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert|release)(\([^) ]+\))?(!)?: \S.*$'; then
+    # 第二轮 #16：固定 UTF-8 locale 再按"字符"计数（wc -m 在非 UTF-8 locale 下
+    # 对中文按字节计数，30 字中文标题会被误判为 ~90 超限）。C.UTF-8 在 glibc
+    # 全系可用；不可用（如部分 macOS）时回退系统默认，不影响 ASCII 计数。
+    export LC_ALL=C.UTF-8
     len=$(printf '%s' "$subject" | wc -m)
     if [ "$len" -gt 72 ]; then
         echo "❌ 提交标题过长（${len} 字符，上限 72）：${subject}" >&2

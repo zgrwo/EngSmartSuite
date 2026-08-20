@@ -373,12 +373,16 @@ status_mismatch = sum(1 for r in results if r["status_a"] != r["status_b"])
 tables_mismatch = sum(1 for r in results if not r["tables_match"])
 figs_mismatch = sum(1 for r in results if not r["figs_match"])
 
+manual_failed = manual_checks_total - manual_checks_passed
 print(f"  总计: {len(results)} 方法")
 print(f"  ok: {ok_count}  error: {error_count}")
 print(f"  status 不一致: {status_mismatch}")
 print(f"  tables 不一致: {tables_mismatch}")
 print(f"  figures 不一致: {figs_mismatch}")
-print(f"  用户手册验证: {manual_checks_passed}/{manual_checks_total} passed")
+manual_msg = f"  用户手册验证: {manual_checks_passed}/{manual_checks_total} passed"
+if manual_failed:
+    manual_msg += f"（{manual_failed} 项失败）"
+print(manual_msg)
 print()
 
 if issues:
@@ -389,6 +393,9 @@ else:
     print("  *** ALL PASSED ***")
 print("=" * 70)
 
-# 返回状态码
-exit_code = 1 if (status_mismatch > 0 or tables_mismatch > 5 or figs_mismatch > 3) else 0
+# 返回状态码（第二轮 #3：手册数值检查失败也计入退出码，不再被静默吞掉）
+# 注：CI consistency job 以 2>&1 | tail -5 调用会掩码退出码——判定依赖 issues 输出
+exit_code = 1 if (
+    status_mismatch > 0 or tables_mismatch > 5 or figs_mismatch > 3 or manual_failed > 0
+) else 0
 sys.exit(exit_code)

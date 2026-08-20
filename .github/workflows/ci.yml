@@ -23,6 +23,12 @@ on:
       - "pyproject.toml"
       - ".pre-commit-config.yaml"
       - ".release-please-manifest.json"
+      # 根级启动/安装脚本（第二轮 #9）：改动这些也必须触发 CI
+      - "run_server.py"
+      - "run_smartsuite.bat"
+      - "run_smartsuite.sh"
+      - "setup_offline.bat"
+      - "setup_offline.sh"
   workflow_dispatch:
 
 # 自动取消同一 PR 的旧运行，节省 runner 资源
@@ -77,21 +83,24 @@ jobs:
         run: ruff check src/smartsuite/ scripts/
 
       - name: 引擎层核心测试
-        run: pytest tests/test_engine/ -x -q --tb=short
+        # 第二轮 #8：--basetemp 固定独立临时目录（Windows junction 防护，见 verify_consistency.py #5.2）
+        run: pytest tests/test_engine/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-engine
 
       - name: 服务层测试
-        run: pytest tests/test_services/ -x -q --tb=short
+        run: pytest tests/test_services/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-services
 
       - name: 治理脚本测试
-        run: pytest tests/scripts/ -q --tb=short
+        run: pytest tests/scripts/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-scripts
 
       - name: 集成测试
-        run: pytest tests/test_integration.py tests/test_master_integration.py -x -q --tb=short
+        run: pytest tests/test_integration.py tests/test_master_integration.py -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-integration
 
       # 审查 2026-08-19 #5.3：全量一致性门禁此前只在 main push 的 full job 跑，
       # 引擎崩溃（如 scatter_plot 重复列）可在 PR 阶段静默合入；纳入 PR 门禁
-      - name: 全量一致性校验（40 任务 status=ok）
-        run: python scripts/verify_consistency.py
+      # 第二轮 #8：--skip-pytest 跳过脚本内嵌套的全量 pytest（上方已逐层跑过），
+      # 只保留 40 任务 status=ok 冒烟判定，避免重复跑完整套件
+      - name: 全量一致性校验（40 任务 status=ok 冒烟门禁）
+        run: python scripts/verify_consistency.py --skip-pytest
 
   # ── Web E2E（审查 2026-08-19 #3.6：test_web_e2e 需运行中服务器，
   #     CI 此前从不启动服务器 → 40 个 Web 路径测试永远跳过）──
@@ -117,13 +126,28 @@ jobs:
         run: |
           python run_server.py > /tmp/smartsuite-server.log 2>&1 &
           SERVER_PID=$!
+          READY=0
           for i in $(seq 1 30); do
             if curl -s http://127.0.0.1:5050/api/tasks > /dev/null 2>&1; then
-              echo "服务器就绪"
+              echo "服务器就绪（第 ${i} 次探测）"
+              READY=1
               break
             fi
             sleep 1
           done
+          # 第二轮 #7：服务器起不来时不再"全绿跳过"——30 次探测失败即红
+          if [ "$READY" != "1" ]; then
+            echo "❌ 服务器 30 次探测未就绪"
+            if kill -0 $SERVER_PID 2>/dev/null; then
+              echo "服务器进程仍存活但未响应——服务日志尾部："
+              tail -40 /tmp/smartsuite-server.log
+            else
+              echo "服务器进程已退出——启动失败，完整日志："
+              cat /tmp/smartsuite-server.log
+            fi
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
           python -m pytest tests/test_web_e2e.py -q --tb=short
           RC=$?
           kill $SERVER_PID 2>/dev/null || true
@@ -166,9 +190,11 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
 
       - name: 全量测试
-        run: pytest tests/ -q --tb=short
+        # 第二轮 #8：--basetemp 固定独立临时目录（Windows junction 防护）
+        run: pytest tests/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-full
 
       - name: 一致性校验
+        # 第二轮 #8：full job 保留完整嵌套 pytest（矩阵上再跑一次全量）
         run: python scripts/verify_consistency.py
 
   # ── 代码质量分析（仅 main push 或手动触发）──

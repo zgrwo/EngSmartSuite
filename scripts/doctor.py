@@ -13,6 +13,7 @@ doctor.py — 环境就绪性诊断（Environment Doctor）
   - Python 版本（>=3.10）
   - git 仓库状态
   - 必需工具（ruff / pytest）
+  - 运行时依赖（pandas / numpy / scipy / statsmodels / sklearn / matplotlib / flask）
   - 关键目录（src / tests / rules / skills / scripts / templates / .github）
   - 关键文件（agents.md / pyproject.toml）
 
@@ -38,6 +39,17 @@ REQUIRED_FILES = ["agents.md", "pyproject.toml", "README.md"]
 REQUIRED_TOOLS = [
     ("ruff", "ruff"),
     ("pytest", "pytest"),
+]
+# 运行时依赖（import 名 + 说明）——复用 common.IMPORT_CHECK 的导入探测思路
+# （第二轮 #13：verify_all/run 前先确认分析引擎与 Web UI 依赖齐备）
+RUNTIME_DEPS = [
+    ("pandas", "数据表（pandas）"),
+    ("numpy", "数值计算（numpy）"),
+    ("scipy", "统计检验（scipy）"),
+    ("statsmodels", "统计建模（statsmodels）"),
+    ("sklearn", "机器学习（scikit-learn）"),
+    ("matplotlib", "可视化（matplotlib）"),
+    ("flask", "Web UI（flask）"),
 ]
 
 
@@ -73,6 +85,20 @@ def check_tool(import_name: str, package: str) -> tuple[bool, str]:
         return False, f"{package} 未安装 — 运行: pip install {package}"
 
 
+def check_runtime_deps() -> list[tuple[str, tuple[bool, str]]]:
+    """运行时依赖导入探测：缺任一依赖即 FAIL 并给出安装指引。"""
+    checks = []
+    for import_name, label in RUNTIME_DEPS:
+        try:
+            __import__(import_name)
+            checks.append((f"依赖 {label}", (True, f"{import_name} 可导入")))
+        except ImportError:
+            checks.append(
+                (f"依赖 {label}", (False, f"{import_name} 缺失 — 运行: pip install -e '.[dev,report,web]'"))
+            )
+    return checks
+
+
 def check_dir(path: str) -> tuple[bool, str]:
     ok = (ROOT / path).is_dir()
     return ok, (f"{path}/ 存在" if ok else f"{path}/ 缺失（{ROOT / path}）")
@@ -93,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     for import_name, package in REQUIRED_TOOLS:
         checks.append((f"工具 {package}", check_tool(import_name, package)))
+    checks.extend(check_runtime_deps())
     for d in REQUIRED_DIRS:
         checks.append((f"目录 {d}/", check_dir(d)))
     for f in REQUIRED_FILES:

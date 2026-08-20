@@ -1,7 +1,9 @@
 """分析方法脚手架 — 新增方法的完整模板。
 
 用法：
-    1. 复制此文件到 src/smartsuite/engine/ 并重命名
+    1. 复制此文件到 src/smartsuite/engine/ 并重命名（建议按 {task_name}.py 命名，
+       如 doe_analysis.py；函数名 new_method_analysis 与 task="new_method" 一并改为
+       实际方法名，否则 orchestrator 路由与 TASK_REGISTRY 注册对不上）
     2. 按 11 步注册链完成集成（见 CONTRIBUTING.md）
     3. 运行 python scripts/falsy_audit.py 确认零 HIGH 风险
 
@@ -20,7 +22,6 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
-from smartsuite.engine._constants import EPSILON
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import safe_float as _safe_float
 

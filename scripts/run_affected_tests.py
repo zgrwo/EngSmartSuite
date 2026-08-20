@@ -12,8 +12,10 @@ run_affected_tests.py — 影响范围测试路由（git-diff → 受影响测�
   - src/smartsuite/core/*.py        → tests/test_services/
   - src/smartsuite/web/*.py         → E2E + 集成测试（web 变更影响面最大）
   - src/smartsuite/cli.py           → 集成 + 差分测试
-  - scripts/*.py / *.sh             → tests/scripts/ 下 stem 子串匹配
-  - templates/*.yaml                → 服务层 + 工作流测试
+  - scripts/*.py / *.sh             → tests/scripts/ 下 stem 子串匹配；
+                                      无匹配时 *.md/*.sh/*.yaml 等文档/配置类 → SKIP
+  - templates/*.yaml                → 服务层 + 工作流测试；
+                                      new_analysis.py/README.md 脚手架 → SKIP
   - tests/**                        → 直接运行变更的测试文件
   - 文档/配置变更（*.md / .github/）→ SKIP（无测试）
   - 无匹配 → FAIL（提示"可能缺测"，不静默跳过，防门禁说谎）
@@ -157,9 +159,18 @@ def map_source_to_tests(rel_path: str) -> tuple[str, list[str]]:
         if hit:
             return "run", [hit]
         stem = Path(p).name
-        return ("skip", []) if stem in _EXEMPT_SCRIPTS else ("fail", [])
-    if p.startswith("templates/") and p.endswith(".yaml"):
-        return "run", ["tests/test_services", "tests/test_workflows.py"]
+        # 文档/配置类脚本（README.md / *.sh / *.yaml）无对应测试 → SKIP；
+        # 其余无测试的脚本视为缺测（fail），防门禁说谎
+        if stem in _EXEMPT_SCRIPTS or p.endswith(_SKIP_SUFFIXES):
+            return "skip", []
+        return "fail", []
+    if p.startswith("templates/"):
+        if p.endswith(".yaml"):
+            return "run", ["tests/test_services", "tests/test_workflows.py"]
+        # new_analysis.py 脚手架 / README.md：无直接测试（11 步注册链由一致性门禁覆盖）→ SKIP
+        if p.endswith((".py", ".md")):
+            return "skip", []
+        return "fail", []
     if p.startswith("src/"):
         for prefix, targets in _SRC_TEST_MAP:
             if p == prefix.rstrip("/") or p.startswith(prefix):

@@ -405,9 +405,17 @@ p("=" * 100)
 p()
 
 
-def rpt(analysis, value_name, manual, actual, tolerance=0.001):
-    """Report a single comparison."""
-    if actual is None:
+def rpt(analysis, value_name, manual, actual=None, tolerance=0.001, ok=None):
+    """Report a single comparison.
+
+    ok 由调用方判定（True/False）时优先采用——VIF 的手册记录是区间声明
+    （"~1.002-1.004"），字符串全等比较恒 DIFF（第二轮 #1 修复）；
+    未传 ok 时回退旧逻辑（字符串全等 / 数值容差）。
+    """
+    if ok is not None:
+        match = "OK" if ok else "DIFF"
+        disp = f"{float(actual):.4f}" if isinstance(actual, (int, float)) else str(actual)
+    elif actual is None:
         disp, match = "N/A", "N/A"
     elif isinstance(manual, str):
         match = "OK" if str(actual) == str(manual) else "DIFF"
@@ -473,7 +481,7 @@ for factor, short in [
     actual = vif_vals.get(factor)
     if actual is not None:
         ok = 1.0 <= actual <= 1.005
-        rpt("vif", short, "~1.002-1.004", actual, 0.01)
+        rpt("vif", short, "~1.002-1.004", actual, 0.01, ok=ok)
 
 p()
 p("--- 4.6 CONTINGENCY ---")
