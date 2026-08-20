@@ -118,7 +118,8 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
             c.setFont(_title_font, 10)
             c.drawString(50, y, name)
             y -= 18
-            c.setFont("Courier", 7)
+            # 审查 2026-08-19 Round-2：表格行改用 CJK 字体，避免 Courier 中文静默丢失
+            c.setFont(_body_font, 7)
             # 格式化表格行输出
             for _, row in df.head(15).iterrows():
                 line = "  ".join(f"{k}={v}" for k, v in row.items())

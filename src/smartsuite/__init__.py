@@ -2,6 +2,7 @@
 
 import logging
 import os
+import tempfile
 from logging.handlers import RotatingFileHandler
 
 __version__ = "1.1.0"
@@ -13,40 +14,62 @@ def setup_logging(log_dir: str | None = None, console_level: int = logging.INFO)
     Args:
         log_dir: 日志目录，默认项目根目录下的 logs/
         console_level: 控制台最低级别，默认 INFO
+
+    审查 2026-08-19 Round-2：
+    - 幂等守卫基于本包 handler 标记（此前任何 root.handlers 都会跳过，干扰其他包）；
+    - log_dir 做 normpath 归一化；
+    - 日志目录创建失败时降级到系统临时目录，仍失败则仅保留控制台日志。
     """
     if log_dir is None:
         # 项目根目录相对于 __init__.py 是 ../../（src/ 布局）
         log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
-
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "smartsuite.log")
+    log_dir = os.path.normpath(log_dir)
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)  # 全局最低为 DEBUG，各 handler 自行过滤
 
-    # 避免重复添加（多次调用 setup_logging 时幂等）
-    if root.handlers:
+    # 幂等守卫：仅当本包已添加过 handler 时跳过（不因其他包添加到 root 的 handler 而静默失败）
+    if any(getattr(h, "_smartsuite_managed", False) for h in root.handlers):
         return
 
-    # 文件 handler — DEBUG 全量，自动轮转（单文件 ≤ 1MB，保留 5 个）
-    fh = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5, encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(
-        logging.Formatter(
-            "%(asctime)s [%(levelname)-7s] %(name)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
+    # 日志文件：目录创建失败 → 降级到系统临时目录；再失败 → 仅控制台
+    log_file = None
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "smartsuite.log")
+    except OSError as e:
+        logging.getLogger(__name__).warning("日志目录创建失败 (%s)，降级到系统临时目录", e)
+        try:
+            os.makedirs(tempfile.gettempdir(), exist_ok=True)
+            log_file = os.path.join(tempfile.gettempdir(), "smartsuite.log")
+        except OSError as e2:
+            logging.getLogger(__name__).warning("临时目录创建也失败 (%s)，仅使用控制台日志", e2)
+            log_file = None
+
+    if log_file is not None:
+        # 文件 handler — DEBUG 全量，自动轮转（单文件 ≤ 1MB，保留 5 个）
+        fh = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(
+            logging.Formatter(
+                "%(asctime)s [%(levelname)-7s] %(name)s | %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
         )
-    )
-    root.addHandler(fh)
+        fh._smartsuite_managed = True
+        root.addHandler(fh)
 
     # 控制台 handler — INFO 以上，紧凑格式
     ch = logging.StreamHandler()
     ch.setLevel(console_level)
     ch.setFormatter(logging.Formatter("[%(levelname)-5s] %(name)s | %(message)s"))
+    ch._smartsuite_managed = True
     root.addHandler(ch)
 
     logging.getLogger(__name__).info(
-        "日志已配置（文件=%s, 控制台=%s）", log_file, logging.getLevelName(console_level)
+        "日志已配置（文件=%s, 控制台=%s）",
+        log_file or "无（仅控制台）",
+        logging.getLevelName(console_level),
     )
 
 

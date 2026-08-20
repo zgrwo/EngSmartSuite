@@ -3,8 +3,10 @@
 import base64
 import io
 import logging
+import math
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
@@ -36,6 +38,66 @@ def column_info(df: pd.DataFrame) -> list[dict]:
     return info
 
 
+def _serialize_meta(val, _depth=0):
+    """递归序列化 metadata：DataFrame/Series/ndarray 显式转列表，Inf/NaN → None。
+
+    审查 2026-08-19 Round-2：此前 DataFrame/Series/ndarray 落入 str() 兜底，
+    产生巨型字符串响应；Inf/NaN 也需转为合法 JSON 的 null。
+    """
+    if _depth > 10:  # 循环引用保护
+        return str(val)
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, pd.DataFrame):
+        return val.values.tolist()
+    if isinstance(val, pd.Series):
+        return val.values.tolist()
+    if isinstance(val, np.ndarray):
+        return val.tolist()
+    if isinstance(val, np.integer):
+        return int(val)
+    if isinstance(val, np.floating):
+        v = float(val)
+        return v if math.isfinite(v) else None  # Inf/NaN → null (合法 JSON)
+    if isinstance(val, int):
+        return val  # Python int 保持原样，不丢失精度
+    if isinstance(val, float):
+        return val if math.isfinite(val) else None  # Inf/NaN → null
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        return {str(k): _serialize_meta(v, _depth + 1) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [_serialize_meta(v, _depth + 1) for v in val]
+    return str(val)
+
+
+def _serialize_table(tbl: pd.DataFrame) -> dict:
+    """将 DataFrame 序列化为 JSON 安全 dict。
+
+    审查 2026-08-19 Round-2：round(4) 前把 ±Inf 替换为 NaN（否则 inf 经
+    json.dumps 输出为 Infinity，破坏浏览器 JSON.parse）。NaN 最终填充为 ""。
+    """
+    data = (
+        tbl.apply(
+            lambda col: (
+                col.replace([np.inf, -np.inf], np.nan).round(4)
+                if pd.api.types.is_numeric_dtype(col)
+                and not pd.api.types.is_datetime64_any_dtype(col)
+                else col
+            )
+        )
+        .fillna("")
+        .values.tolist()
+    )
+    return {
+        "columns": [str(c) for c in tbl.columns],
+        "index": [str(i) for i in tbl.index],
+        "data": data,
+        "shape": list(tbl.shape),
+    }
+
+
 def run_analysis(
     task: str,
     df: pd.DataFrame,
@@ -47,6 +109,9 @@ def run_analysis(
     """执行分析并返回 JSON 可序列化的结果列表。"""
     if params is None:
         params = {}
+    # 审查 2026-08-19 Round-2：categoricals 必须为字符串列表，否则 One-Hot 编码会异常
+    if not isinstance(categoricals, list):
+        raise ValidationError("categoricals 参数必须是字符串列表")
 
     # 无需目标列的任务：VIF/一致性/信度/功效分析仅依赖 X 列或参数
     if not targets and task in NO_TARGET_TASKS:
@@ -68,9 +133,16 @@ def run_analysis(
     # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
     from smartsuite.services.orchestrator import RAW_CAT_TASKS
 
-    df_enc, feat_enc, imputation_log, unknown_cat_warnings = preprocess_for_task(
-        df, features, task, categoricals, RAW_CAT_TASKS
-    )
+    # 审查 2026-08-19 Round-2：preprocess 失败（如 One-Hot 列名冲突 / 缺列）
+    # 转为 ValidationError → 由 Web 层返回 400 中文，而非 500
+    try:
+        df_enc, feat_enc, imputation_log, unknown_cat_warnings = preprocess_for_task(
+            df, features, task, categoricals, RAW_CAT_TASKS
+        )
+    except KeyError as e:
+        raise ValidationError(
+            f"数据预处理失败：列「{e}」不存在于数据中，请检查特征/类别列与数据列名是否一致"
+        ) from e
     # 将数据预处理日志转换为用户可见的警告
     for col, n_coerced in imputation_log.items():
         data_warnings.append(f"列「{col}」中 {n_coerced} 个缺失值已自动填充")
@@ -130,29 +202,10 @@ def run_analysis(
             tables = {}
             for tname, tbl in result.tables.items():
                 # correlation/p_values 保持全矩阵，不裁剪
-                tables[tname] = {
-                    "columns": [str(c) for c in tbl.columns],
-                    "index": [str(i) for i in tbl.index],
-                    "data": tbl.apply(
-                        lambda col: (
-                            col.round(4)
-                            if pd.api.types.is_numeric_dtype(col)
-                            and not pd.api.types.is_datetime64_any_dtype(col)
-                            else col
-                        )
-                    )
-                    .fillna("")
-                    .values.tolist(),
-                    "shape": list(tbl.shape),
-                }
+                tables[tname] = _serialize_table(tbl)
             # 附加合并矩阵到第一个结果
             if merged_corr is not None and target == targets[0]:
-                tables["_merged_correlation"] = {
-                    "columns": [str(c) for c in merged_corr.columns],
-                    "index": [str(i) for i in merged_corr.index],
-                    "data": merged_corr.round(4).fillna("").values.tolist(),
-                    "shape": list(merged_corr.shape),
-                }
+                tables["_merged_correlation"] = _serialize_table(merged_corr)
 
             charts = []
             for fig in result.figures:
@@ -162,37 +215,7 @@ def run_analysis(
                 charts.append(base64.b64encode(buf.read()).decode())
                 plt.close(fig)
 
-            # 序列化 metadata：递归处理嵌套结构，标量转为可序列化类型
-            def _serialize_meta(val, _depth=0):
-                import math as _math
-
-                import numpy as _np
-
-                if _depth > 10:  # 循环引用保护
-                    return str(val)
-                if isinstance(val, bool):
-                    return val
-                if isinstance(val, (_np.integer,)):
-                    return int(val)
-                if isinstance(val, (_np.floating,)):
-                    v = float(val)
-                    if _math.isfinite(v):
-                        return v
-                    return None  # Inf/NaN → null (合法 JSON)
-                if isinstance(val, int):
-                    return val  # Python int 保持原样，不丢失精度
-                if isinstance(val, float):
-                    if _math.isfinite(val):
-                        return val
-                    return None  # Inf/NaN → null
-                if isinstance(val, str):
-                    return val
-                if isinstance(val, dict):
-                    return {str(k): _serialize_meta(v, _depth + 1) for k, v in val.items()}
-                if isinstance(val, (list, tuple)):
-                    return [_serialize_meta(v, _depth + 1) for v in val]
-                return str(val)
-
+            # 序列化 metadata（模块级 _serialize_meta：DataFrame/Series/ndarray → list）
             meta = {str(k): _serialize_meta(v) for k, v in result.metadata.items()}
             results.append(
                 {

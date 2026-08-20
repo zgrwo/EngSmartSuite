@@ -43,6 +43,16 @@ def _read_data_file(filepath: str, sheet=0) -> pd.DataFrame:
         return pd.read_excel(filepath, sheet_name=sheet, engine="openpyxl")
 
 
+def _parse_sheet(sheet) -> int | str | None:
+    """Sheet 参数解析：'0'/'01' 等纯数字字符串按索引转 int；其余原样（Sheet 名）。
+
+    审查 2026-08-19 Round-2：--sheet '0' 字符串此前被 pandas 当作 Sheet 名查找而报错。
+    """
+    if isinstance(sheet, str) and sheet.strip().isdigit():
+        return int(sheet.strip())
+    return sheet
+
+
 def main():
     from smartsuite import setup_logging
 
@@ -82,9 +92,18 @@ def main():
             print(f"错误: YAML 模板解析失败: {e}", file=sys.stderr)
             sys.exit(1)
 
+        # 空 YAML（config=None）→ 中文错误，而非 TypeError
+        if config is None:
+            print("错误: YAML 模板内容为空，请检查模板文件是否包含有效配置", file=sys.stderr)
+            sys.exit(1)
+
         # 验证必需字段 (NO_TARGET_TASKS 方法无需 target_col)
         required = ["task"]
-        if config["task"] not in NO_TARGET_TASKS:
+        if "task" not in config:
+            print("错误: YAML 模板缺少必需字段: ['task']", file=sys.stderr)
+            sys.exit(1)
+        task = config["task"]
+        if task not in NO_TARGET_TASKS:
             required.append("target_col")
         missing = [k for k in required if k not in config]
         if missing:
@@ -99,7 +118,7 @@ def main():
             sys.exit(1)
 
         try:
-            raw = _read_data_file(args.input, sheet=args.sheet)
+            raw = _read_data_file(args.input, sheet=_parse_sheet(args.sheet))
         except FileNotFoundError:
             print(f"错误: 找不到输入文件「{args.input}」，请检查文件路径是否正确", file=sys.stderr)
             sys.exit(1)
@@ -113,7 +132,6 @@ def main():
         features = config.get("feature_cols", [])
         categoricals = config.get("categoricals", [])
         params = config.get("params", {})
-        task = config["task"]
         # 数据校验：提前发现列存在性、类型、缺失值问题
         if task not in NO_TARGET_TASKS:
             try:
@@ -127,9 +145,18 @@ def main():
                 logger.warning("数据校验意外异常: %s", e, exc_info=True)
                 print(f"  ⚠ 数据校验跳过: {type(e).__name__}: {e}，分析将继续执行", file=sys.stderr)
         # 任务感知的数据预处理（与 Web 路径保持一致）
-        df, feature_cols, imputation_log, unknown_cat_warnings = preprocess_for_task(
-            raw, features, task, categoricals=categoricals, raw_cat_tasks=RAW_CAT_TASKS
-        )
+        # 审查 2026-08-19 Round-2：模板引用的列不存在时给出中文错误，而非 KeyError 裸奔
+        try:
+            df, feature_cols, imputation_log, unknown_cat_warnings = preprocess_for_task(
+                raw, features, task, categoricals=categoricals, raw_cat_tasks=RAW_CAT_TASKS
+            )
+        except KeyError as e:
+            print(
+                f"错误: 数据预处理失败：模板引用的列「{e}」不存在于数据中。"
+                f"请检查模板的 feature_cols/target_col 与数据列名是否一致",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         # 输出数据预处理警告
         for col, n_coerced in imputation_log.items():
             print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")

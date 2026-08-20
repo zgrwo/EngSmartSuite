@@ -14,13 +14,14 @@ async function getCsrfToken(force) {
   } catch(e) { /* 网络错误时留空 */ }
   return csrfToken;
 }
-// 审查 2026-08-19 M5：会话过期后 403 → 刷新 token 重试一次
+// 审查 2026-08-19 M5（Round-2 接线）：会话过期后 403 → 刷新 token 重试一次
 async function fetchWithCsrf(url, options) {
   const doFetch = async (token) => {
-    return fetch(url, { ...options, headers: {
-      'X-CSRF-Token': token,
-      ...(options.headers || {}),
-    }});
+    const headers = { 'X-CSRF-Token': token, ...(options.headers || {}) };
+    // 仅对 JSON 字符串 body 设置 Content-Type；
+    // FormData 由浏览器自动生成 multipart boundary，显式设置会破坏上传
+    if (typeof options.body === 'string') headers['Content-Type'] = 'application/json';
+    return fetch(url, { ...options, headers });
   };
   let r = await doFetch(await getCsrfToken());
   if (r.status === 403) {
@@ -52,8 +53,7 @@ document.getElementById('file-input').addEventListener('change', async e => {
   }
   const fd = new FormData(); fd.append('file', f);
   try {
-    const r = await fetch('/api/upload', { method: 'POST', body: fd,
-      headers: { 'X-CSRF-Token': await getCsrfToken() } });
+    const r = await fetchWithCsrf('/api/upload', { method: 'POST', body: fd });
     let d = {};
     try { d = await r.json(); } catch(err) { /* 非 JSON 响应（如 413 HTML） */ }
     if (!r.ok) {
@@ -78,7 +78,7 @@ function renderCols() {
     const safeName = escHtml(c.name);
     return `
     <div class="col-row">
-      <span class="col-name" title="${safeName} (${c.dtype}, ${c.nunique} unique, ${c.missing} NA)">${safeName}</span>
+      <span class="col-name" title="${safeName} (${escHtml(c.dtype)}, ${escHtml(c.nunique)} unique, ${escHtml(c.missing)} NA)">${safeName}</span>
       <input type="checkbox" id="cat${i}" data-col="${safeName}" data-role="cat"
         ${selectedCat.has(c.name)?'checked':''}>
       <span class="tag cat">类</span>
@@ -144,7 +144,7 @@ const TASK_PARAMS = {
   process_capability:{ usl: '', lsl: '' },
   hypothesis_test:   { test: 'ttest_ind', alpha: 0.05 },
   trend_forecast:    { forecast_steps: 5 },
-  anomaly_detect:    { method: 'iqr', max_outliers: 5 },
+  anomaly_detect:    { method: 'iqr', alpha: 0.05, max_outliers: 5 },
   response_surface:  { direction: 'maximize' },
   multi_objective:   { objectives: '', weights: '' },
   decision_tree:     { max_depth: 5 },
@@ -163,7 +163,8 @@ const TASK_PARAMS = {
   logistic_regression:{ threshold: 0.5 },
   lasso_regression:  { alpha_lasso: '', l1_ratio: 1.0 },
   regression:        { model_type: 'linear' },
-  change_point:      { min_segment: 10, n_changepoints: 5 },
+  // 审查 2026-08-19 Round-2：min_segment 引擎自适应，前端不再下发
+  change_point:      { n_changepoints: 5 },
   doe_analysis:      { alpha: 0.05 },
   variance_test:     { group_col: '', alpha: 0.05 },
   box_chart:         { mode: 'facet', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
@@ -255,9 +256,9 @@ const PARAM_META = {
   },
   test_type: {
     type: 'select', label: '检验类型',
+    // 审查 2026-08-19 Round-2：仅保留引擎支持的 ttest/anova/proportion（移除 chi2/correlation）
     options: [
-      ['ttest', 't 检验'], ['anova', 'ANOVA'],
-      ['chi2', '卡方检验'], ['correlation', '相关性检验']
+      ['ttest', 't 检验'], ['anova', 'ANOVA'], ['proportion', '比例检验']
     ]
   },
   'mode@power_analysis': {
@@ -469,14 +470,15 @@ async function executeRequest(task) {
     _lastRequest = { task, targets: [...selectedY], features: [...selectedX], categoricals: [...selectedCat], params };
     _pendingGroupFilter = !!(params.group_col) || (task === 'box_chart');  // 有分组依据时启用筛选栏（box_chart 始终有分组）
     if (!_pendingGroupFilter) { _allGroups = []; _activeGroups.clear(); }  // 无分组时重置
-    const r = await fetch('/api/analyze', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': await getCsrfToken() },
-      body: JSON.stringify(_lastRequest)
-    });
-    const d = await r.json();
+    const r = await fetchWithCsrf('/api/analyze', { method: 'POST', body: JSON.stringify(_lastRequest) });
+    let d = {};
+    try { d = await r.json(); } catch(err) { /* 非 JSON 响应（如 413 HTML / 502 网关错误页） */ }
     if (!r.ok) {
+      // 审查 2026-08-19 M5（Round-2）：413/502 给中文提示，避免 "not json" 误报
+      const statusMsg = r.status === 413 ? '请求数据过大（超过服务器限制），请减少数据量或列数'
+        : r.status === 502 ? '服务器暂时不可用（502 Bad Gateway），请稍后重试' : '';
       document.getElementById('results').innerHTML =
-        `<div class="empty-hint" style="color:#c62828">${escHtml(d.error || '分析请求失败')}</div>`;
+        `<div class="empty-hint" style="color:#c62828">${escHtml(d.error || statusMsg || '分析请求失败')}</div>`;
       return;
     }
     renderResults(d.results || []);
@@ -510,11 +512,7 @@ async function refetchWithFilter() {
     delete req.params.filter_groups;
   }
   _pendingGroupFilter = true;
-  const token = await getCsrfToken();
-  const r = await fetch('/api/analyze', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
-    body: JSON.stringify(req)
-  });
+  const r = await fetchWithCsrf('/api/analyze', { method: 'POST', body: JSON.stringify(req) });
   let d = {};
   try { d = await r.json(); } catch(err) { /* 非 JSON 响应 */ }
   if (r.ok) { renderResults(d.results || []); }
@@ -548,6 +546,12 @@ function renderResults(results) {
     filterHtml += '<button class="btn-sm" id="apply-filter-btn">应用</button></div>';
   }
 
+  // ── 合并相关矩阵：独立显示在顶部 ──
+  // 审查 2026-08-19 M2（Round-2 真修复）：必须在排序前捕获。
+  // 排序会改变 results 顺序，而矩阵只挂在排序前 results[0]（首个目标）的结果上
+  const mergedKey = '_merged_correlation';
+  const mergedTbl = results[0]?.tables?.[mergedKey] || null;
+
   // 排序
   results.sort((a, b) => {
     const getScore = (r) => {
@@ -565,9 +569,6 @@ function renderResults(results) {
   let html = '';
 
   // ── 合并相关矩阵：独立显示在顶部 ──
-  // 审查 2026-08-19 M2：先于排序捕获（排序后 results[0] 可能不再是携带矩阵的目标）
-  const mergedKey = '_merged_correlation';
-  const mergedTbl = results[0]?.tables?.[mergedKey] || null;
   if (mergedTbl) {
     const tbl = mergedTbl;
     const hdr = '<th></th>' + tbl.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');

@@ -21,6 +21,19 @@ def _close_figures(result):
             fig.clear()
 
 
+def _clean_inf(df: pd.DataFrame) -> pd.DataFrame:
+    """数值列 ±Inf → NaN 清洗（审查 2026-08-19 Round-2）。
+
+    audit 入口直接以原始 df 调 orchestrate（不经 preprocess_data 的 Inf 清洗），
+    因此各入口需在分析前统一替换，防止 Inf 穿透 dropna 系统性污染引擎计算。
+    """
+    df = df.copy()
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    if len(numeric_cols):
+        df[numeric_cols] = df[numeric_cols].replace([np.inf, -np.inf], np.nan)
+    return df
+
+
 def process_audit(
     df,
     target_col: str,
@@ -35,12 +48,19 @@ def process_audit(
     自动执行：数据质量 → 要因分析 → 过程能力 → 异常检测 → 趋势分析。
     返回结构化结果和建议列表。
     """
+    # 审查 2026-08-19 Round-2：统一 ±Inf → NaN 清洗后再分析
+    df = _clean_inf(df)
     results: dict[str, dict] = {}
     health_checks: list[dict] = []
-    numeric_features = [c for c in feature_cols if pd.api.types.is_numeric_dtype(df[c])]
+    # 审查 2026-08-19 Round-2：列存在性检查（此前 df[c] 在 try 外 KeyError 崩溃）
+    numeric_features = [
+        c for c in feature_cols
+        if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
+    ]
 
     # ── 1. 数据质量 ──
-    missing_pct = df[feature_cols + [target_col]].isna().mean().max() * 100
+    present_cols = [c for c in feature_cols + [target_col] if c in df.columns]
+    missing_pct = df[present_cols].isna().mean().max() * 100 if present_cols else 0.0
     if missing_pct > 5:
         health_checks.append(
             {"检查项": "数据完整性", "状态": "⚠ 警告", "详情": f"最高缺失率 {missing_pct:.1f}%"}
@@ -57,27 +77,37 @@ def process_audit(
             r = orchestrate(req)
             _close_figures(r)
             results["correlation"] = {"status": r.status, "summary": r.summary}
-            target_corr = r.metadata.get("target_correlations", {})
-            corr_values = list(target_corr.values())
-            # 安全提取第一个数值型相关值，非数值视为 0
-            first_val = corr_values[0] if corr_values else 0
-            top_r = (
-                abs(first_val)
-                if isinstance(first_val, (int, float)) and math.isfinite(first_val)
-                else 0
-            )
-            if top_r > 0.5:
+            if r.status != "ok":
+                # 审查 2026-08-19 Round-2：分析失败要如实反映，而非误导为"无强相关因子"
                 health_checks.append(
                     {
                         "检查项": "关键因子识别",
-                        "状态": "✓ 良好",
-                        "详情": f"存在 |r|>{top_r:.2f} 的相关因子",
+                        "状态": "✗ 失败",
+                        "详情": f"相关性分析失败: {(r.summary or '')[:50]}",
                     }
                 )
             else:
-                health_checks.append(
-                    {"检查项": "关键因子识别", "状态": "⚠ 注意", "详情": "无强相关因子 (|r|≤0.5)"}
+                target_corr = r.metadata.get("target_correlations", {})
+                corr_values = list(target_corr.values())
+                # 安全提取第一个数值型相关值，非数值视为 0
+                first_val = corr_values[0] if corr_values else 0
+                top_r = (
+                    abs(first_val)
+                    if isinstance(first_val, (int, float)) and math.isfinite(first_val)
+                    else 0
                 )
+                if top_r > 0.5:
+                    health_checks.append(
+                        {
+                            "检查项": "关键因子识别",
+                            "状态": "✓ 良好",
+                            "详情": f"存在 |r|>{top_r:.2f} 的相关因子",
+                        }
+                    )
+                else:
+                    health_checks.append(
+                        {"检查项": "关键因子识别", "状态": "⚠ 注意", "详情": "无强相关因子 (|r|≤0.5)"}
+                    )
         except Exception as e:
             logger.warning("关键因子识别失败", exc_info=True)
             health_checks.append(
@@ -97,15 +127,24 @@ def process_audit(
             r = orchestrate(req)
             _close_figures(r)
             results["vif"] = {"status": r.status, "summary": r.summary}
-            high_vif = r.metadata.get("high_vif_count", 0)
-            if high_vif == 0:
+            if r.status != "ok":
                 health_checks.append(
-                    {"检查项": "共线性诊断", "状态": "✓ 正常", "详情": "VIF 均 ≤ 5"}
+                    {
+                        "检查项": "共线性诊断",
+                        "状态": "✗ 失败",
+                        "详情": f"VIF 分析失败: {(r.summary or '')[:50]}",
+                    }
                 )
             else:
-                health_checks.append(
-                    {"检查项": "共线性诊断", "状态": "⚠ 警告", "详情": f"{high_vif} 个因子 VIF>5"}
-                )
+                high_vif = r.metadata.get("high_vif_count", 0)
+                if high_vif == 0:
+                    health_checks.append(
+                        {"检查项": "共线性诊断", "状态": "✓ 正常", "详情": "VIF 均 ≤ 5"}
+                    )
+                else:
+                    health_checks.append(
+                        {"检查项": "共线性诊断", "状态": "⚠ 警告", "详情": f"{high_vif} 个因子 VIF>5"}
+                    )
         except Exception as e:
             logger.warning("共线性诊断失败", exc_info=True)
             health_checks.append(
@@ -124,29 +163,38 @@ def process_audit(
             r = orchestrate(req)
             _close_figures(r)
             results["capability"] = {"status": r.status, "summary": r.summary}
-            cpk = r.metadata.get("cpk")
-            if cpk is not None and cpk >= CPK_GOOD:
-                health_checks.append(
-                    {"检查项": "过程能力", "状态": "✓ 合格", "详情": f"Cpk={cpk:.3f} ≥ {CPK_GOOD}"}
-                )
-            elif cpk is not None and cpk >= CPK_MINIMUM:
+            if r.status != "ok":
                 health_checks.append(
                     {
                         "检查项": "过程能力",
-                        "状态": "⚠ 勉强",
-                        "详情": f"Cpk={cpk:.3f} ({CPK_MINIMUM}~{CPK_GOOD})",
-                    }
-                )
-            elif cpk is not None:
-                health_checks.append(
-                    {
-                        "检查项": "过程能力",
-                        "状态": "✗ 不合格",
-                        "详情": f"Cpk={cpk:.3f} < {CPK_MINIMUM}",
+                        "状态": "✗ 失败",
+                        "详情": f"过程能力分析失败: {(r.summary or '')[:50]}",
                     }
                 )
             else:
-                health_checks.append({"检查项": "过程能力", "状态": "—", "详情": "未计算"})
+                cpk = r.metadata.get("cpk")
+                if cpk is not None and cpk >= CPK_GOOD:
+                    health_checks.append(
+                        {"检查项": "过程能力", "状态": "✓ 合格", "详情": f"Cpk={cpk:.3f} ≥ {CPK_GOOD}"}
+                    )
+                elif cpk is not None and cpk >= CPK_MINIMUM:
+                    health_checks.append(
+                        {
+                            "检查项": "过程能力",
+                            "状态": "⚠ 勉强",
+                            "详情": f"Cpk={cpk:.3f} ({CPK_MINIMUM}~{CPK_GOOD})",
+                        }
+                    )
+                elif cpk is not None:
+                    health_checks.append(
+                        {
+                            "检查项": "过程能力",
+                            "状态": "✗ 不合格",
+                            "详情": f"Cpk={cpk:.3f} < {CPK_MINIMUM}",
+                        }
+                    )
+                else:
+                    health_checks.append({"检查项": "过程能力", "状态": "—", "详情": "未计算"})
         except Exception as e:
             logger.warning("过程能力分析失败", exc_info=True)
             health_checks.append(
@@ -162,19 +210,28 @@ def process_audit(
             r = orchestrate(req)
             _close_figures(r)
             results["trend"] = {"status": r.status, "summary": r.summary}
-            dw = r.metadata.get("durbin_watson", 2)
-            if DW_SAFE_LOWER <= dw <= DW_SAFE_UPPER:
-                health_checks.append(
-                    {"检查项": "过程稳定性", "状态": "✓ 稳定", "详情": f"DW={dw:.3f} (无自相关)"}
-                )
-            else:
+            if r.status != "ok":
                 health_checks.append(
                     {
                         "检查项": "过程稳定性",
-                        "状态": "⚠ 注意",
-                        "详情": f"DW={dw:.3f} (存在自相关或趋势)",
+                        "状态": "✗ 失败",
+                        "详情": f"趋势分析失败: {(r.summary or '')[:50]}",
                     }
                 )
+            else:
+                dw = r.metadata.get("durbin_watson", 2)
+                if DW_SAFE_LOWER <= dw <= DW_SAFE_UPPER:
+                    health_checks.append(
+                        {"检查项": "过程稳定性", "状态": "✓ 稳定", "详情": f"DW={dw:.3f} (无自相关)"}
+                    )
+                else:
+                    health_checks.append(
+                        {
+                            "检查项": "过程稳定性",
+                            "状态": "⚠ 注意",
+                            "详情": f"DW={dw:.3f} (存在自相关或趋势)",
+                        }
+                    )
         except Exception as e:
             logger.warning("过程稳定性分析失败", exc_info=True)
             health_checks.append(
@@ -192,15 +249,24 @@ def process_audit(
         r = orchestrate(req)
         _close_figures(r)
         results["outliers"] = {"status": r.status, "summary": r.summary}
-        high_conf = r.metadata.get("high_confidence_count", 0)
-        if high_conf == 0:
+        if r.status != "ok":
             health_checks.append(
-                {"检查项": "异常值检测", "状态": "✓ 正常", "详情": "未发现高置信异常"}
+                {
+                    "检查项": "异常值检测",
+                    "状态": "✗ 失败",
+                    "详情": f"异常检测失败: {(r.summary or '')[:50]}",
+                }
             )
         else:
-            health_checks.append(
-                {"检查项": "异常值检测", "状态": "⚠ 注意", "详情": f"{high_conf} 个高置信异常点"}
-            )
+            high_conf = r.metadata.get("high_confidence_count", 0)
+            if high_conf == 0:
+                health_checks.append(
+                    {"检查项": "异常值检测", "状态": "✓ 正常", "详情": "未发现高置信异常"}
+                )
+            else:
+                health_checks.append(
+                    {"检查项": "异常值检测", "状态": "⚠ 注意", "详情": f"{high_conf} 个高置信异常点"}
+                )
     except Exception as e:
         logger.warning("异常值检测失败", exc_info=True)
         health_checks.append(
@@ -244,6 +310,7 @@ def batch_analyze(df, target_col, feature_cols, tasks=None, **kwargs):
         ]
 
     results = {}
+    df = _clean_inf(df)
     for task in tasks:
         try:
             req = AnalysisRequest(
@@ -289,6 +356,9 @@ def auto_report(
     import os
 
     from smartsuite.services.reporter import to_html
+
+    # 审查 2026-08-19 Round-2：统一 ±Inf → NaN 清洗后再分析
+    df = _clean_inf(df)
 
     if feature_cols is None:
         feature_cols = [
@@ -363,6 +433,9 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
     import os
 
     import openpyxl
+
+    # 审查 2026-08-19 Round-2：统一 ±Inf → NaN 清洗后再分析
+    df = _clean_inf(df)
 
     # 确保输出目录存在 (与 reporter.to_pdf/to_ppt/to_html 保持一致)
     out_dir = os.path.dirname(os.path.abspath(output_path))

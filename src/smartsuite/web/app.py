@@ -27,6 +27,7 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
+from smartsuite.core.exceptions import ValidationError
 from smartsuite.services.orchestrator import (
     GROUP_COLORS,
     NO_TARGET_TASKS,
@@ -151,6 +152,15 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 小时后过期，限制 CSRF token 重用窗口
+
+
+@app.before_request
+def _make_session_permanent():
+    """配合 PERMANENT_SESSION_LIFETIME：使会话 cookie 具有固定过期时间。
+
+    审查 2026-08-19 Round-2：未设置 permanent 时 PERMANENT_SESSION_LIFETIME 不生效。
+    """
+    session.permanent = True
 
 
 @app.route("/")
@@ -280,7 +290,10 @@ def upload():
 def analyze():
     _periodic_cleanup()
     try:
-        body = request.get_json()
+        # 审查 2026-08-19 Round-2：silent=True 使非法/缺失 JSON 返回 None → 400 中文
+        body = request.get_json(silent=True)
+        if body is None:
+            return jsonify({"error": "请求体必须是合法 JSON 对象"}), 400
         task = body.get("task")
         targets = body.get("targets", [])
         features = body.get("features", [])
@@ -292,6 +305,8 @@ def analyze():
             return jsonify({"error": "targets 必须是字符串列表"}), 400
         if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
             return jsonify({"error": "features 必须是字符串列表"}), 400
+        if not isinstance(categoricals, list) or not all(isinstance(c, str) for c in categoricals):
+            return jsonify({"error": "categoricals 必须是字符串列表"}), 400
         if not isinstance(params, dict):
             return jsonify({"error": "params 必须是字典"}), 400
         if task not in TASK_REGISTRY:
@@ -304,6 +319,10 @@ def analyze():
         df = pd.read_parquet(path)
         results = run_analysis(task, df, targets, features, categoricals, params)
         return jsonify({"results": results})
+    except ValidationError as e:
+        # 审查 2026-08-19 Round-2：数据预处理失败（One-Hot 冲突/缺列）→ 400 中文
+        logger.warning("分析请求校验失败: %s", e)
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.exception("分析请求处理失败: %s", str(e)[:200])
         return jsonify({"error": "分析处理失败，请检查数据格式后重试"}), 500
