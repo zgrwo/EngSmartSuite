@@ -97,16 +97,20 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
     _const_feats = [c for c in cols if df[c].nunique(dropna=True) <= 1]
     if _const_feats:
         return AnalysisResult(
-            task="regression", status="error",
-            messages=[f"特征列「{_const_feats[0]}」为常量列（无变异），无法估计回归系数。"
-                      "请移除该列或检查数据。"],
+            task="regression",
+            status="error",
+            messages=[
+                f"特征列「{_const_feats[0]}」为常量列（无变异），无法估计回归系数。"
+                "请移除该列或检查数据。"
+            ],
         )
 
     # 审查 2026-08-19 #1.4：常量目标列 → R²=0/0=-inf 且误报异方差/自相关诊断
     # Round-2 #A2l：用 nunique 替代绝对阈值（微尺度数据不误报）
     if df[req.target_col].nunique(dropna=True) <= 1:
         return AnalysisResult(
-            task="regression", status="error",
+            task="regression",
+            status="error",
             messages=[f"目标列「{req.target_col}」为常量列（方差为 0），回归模型无意义"],
         )
 
@@ -117,7 +121,8 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 审查 2026-08-19 #1.4：输出守卫——R² 非有限时替换为哨兵 N/A
         if not np.isfinite(model.rsquared):
             return AnalysisResult(
-                task="regression", status="error",
+                task="regression",
+                status="error",
                 messages=["R² 计算为非有限值（数据可能为常量或退化），回归结果不可用"],
             )
         residuals = model.resid
@@ -375,7 +380,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-08-19 #1.4：常量目标列 → R²=-inf 且误报诊断
     if df[req.target_col].nunique(dropna=True) <= 1:
         return AnalysisResult(
-            task="response_surface", status="error",
+            task="response_surface",
+            status="error",
             messages=[f"目标列「{req.target_col}」为常量列（方差为 0），响应面模型无意义"],
         )
 
@@ -428,7 +434,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-08-19 #2.6：direction 白名单校验（拼写错误静默反转方向）
     if direction not in ("maximize", "minimize"):
         return AnalysisResult(
-            task="response_surface", status="error",
+            task="response_surface",
+            status="error",
             messages=[f"方向参数 direction 无效: {direction!r}，请使用 'maximize' 或 'minimize'"],
         )
     # colormap 方向适配: maximize→绿高红低, minimize→红低绿高(RdYlGn反转)
@@ -599,20 +606,23 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-08-19 #2.6：direction 白名单校验
     if direction not in ("maximize", "minimize"):
         return AnalysisResult(
-            task="grid_search", status="error",
+            task="grid_search",
+            status="error",
             messages=[f"方向参数 direction 无效: {direction!r}，请使用 'maximize' 或 'minimize'"],
         )
     _gs_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
 
     # 审查 2026-08-19 #2.1：isinstance 校验对 NaN 恒真、NaN>=NaN 恒假，
     # [NaN, NaN] 能穿透校验并产生全 NaN 网格 → 显式 isfinite 兜底
-    _nan_bounds = [c for c, (lo, hi) in ranges.items()
-                   if not (np.isfinite(lo) and np.isfinite(hi))]
+    _nan_bounds = [c for c, (lo, hi) in ranges.items() if not (np.isfinite(lo) and np.isfinite(hi))]
     if _nan_bounds:
         return AnalysisResult(
-            task="grid_search", status="error",
-            messages=[f"搜索范围包含无效数值 (NaN/Inf): {_nan_bounds}，"
-                      "请检查 ranges 格式，正确格式如 料温:180,220"],
+            task="grid_search",
+            status="error",
+            messages=[
+                f"搜索范围包含无效数值 (NaN/Inf): {_nan_bounds}，"
+                "请检查 ranges 格式，正确格式如 料温:180,220"
+            ],
         )
 
     grids = {col: np.linspace(lo, hi, n_points) for col, (lo, hi) in ranges.items()}
@@ -640,7 +650,8 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     _target_series = df[req.target_col]
     if _target_series.nunique(dropna=True) <= 1:
         return AnalysisResult(
-            task="grid_search", status="error",
+            task="grid_search",
+            status="error",
             messages=[f"目标列「{req.target_col}」为常量列，网格搜索最优参数无意义"],
         )
 
@@ -798,7 +809,8 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         weights = [float(w) for w in weights]
     except (ValueError, TypeError):
         return AnalysisResult(
-            task="multi_objective", status="error",
+            task="multi_objective",
+            status="error",
             messages=["权重列表必须全部为数值"],
         )
     weight_sum = np.sum(weights)
@@ -1079,10 +1091,13 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             # Round-2 #A3c：多水平/连续因子需 z-score，字符串列无法运算
             if not pd.api.types.is_numeric_dtype(col_vals):
                 return AnalysisResult(
-                    task="doe_analysis", status="error",
-                    messages=[f"因子列「{col}」含 {len(unique_vals)} 个非数值水平，"
-                              "DOE 效应估计仅支持二水平类别或数值因子。"
-                              "请先 One-Hot 编码或转为数值。"],
+                    task="doe_analysis",
+                    status="error",
+                    messages=[
+                        f"因子列「{col}」含 {len(unique_vals)} 个非数值水平，"
+                        "DOE 效应估计仅支持二水平类别或数值因子。"
+                        "请先 One-Hot 编码或转为数值。"
+                    ],
                 )
             # 多水平/连续因子：标准化后作为线性效应
             coded = (col_vals - col_vals.mean()) / (col_vals.std(ddof=1) + EPSILON)
@@ -1125,7 +1140,8 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         # Round-2 P3：alpha 越界（如 2.0）→ 全因子"显著"
         if not 0 < alpha < 1:
             return AnalysisResult(
-                task="doe_analysis", status="error",
+                task="doe_analysis",
+                status="error",
                 messages=[f"alpha 必须在 (0, 1) 区间内，当前: {alpha!r}"],
             )
         effects.append(
@@ -1259,7 +1275,8 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-08-19 #1.4：目标/预测列全 NaN 时 sub 为空 → sorted([])[-1] IndexError
     if len(unique_labels) < 2:
         return AnalysisResult(
-            task="roc_analysis", status="error",
+            task="roc_analysis",
+            status="error",
             messages=["目标列需要至少 2 个类别（当前有效样本不足或类别数 <2）"],
         )
     if len(unique_labels) > 2:
@@ -1576,7 +1593,8 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 P3：l1_ratio 越界此前静默按纯 Lasso/ElasticNet 执行
     if not 0 <= l1_ratio <= 1:
         return AnalysisResult(
-            task="lasso_regression", status="error",
+            task="lasso_regression",
+            status="error",
             messages=[f"l1_ratio 必须在 [0, 1] 区间内，当前: {l1_ratio!r}"],
         )
 
@@ -1605,9 +1623,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         train_r2 = float(model.score(X_scaled, y))
     else:
         _cv = max(2, min(5, len(sub) // 3))
-        model = LassoCV(cv=_cv, max_iter=_lasso_max_iter, random_state=42).fit(
-            X_scaled, y
-        )
+        model = LassoCV(cv=_cv, max_iter=_lasso_max_iter, random_state=42).fit(X_scaled, y)
         best_alpha = float(model.alpha_)
         train_r2 = float(model.score(X_scaled, y))
 

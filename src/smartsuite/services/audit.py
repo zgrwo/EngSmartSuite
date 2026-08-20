@@ -54,8 +54,7 @@ def process_audit(
     health_checks: list[dict] = []
     # 审查 2026-08-19 Round-2：列存在性检查（此前 df[c] 在 try 外 KeyError 崩溃）
     numeric_features = [
-        c for c in feature_cols
-        if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
+        c for c in feature_cols if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
     ]
 
     # ── 1. 数据质量 ──
@@ -106,7 +105,11 @@ def process_audit(
                     )
                 else:
                     health_checks.append(
-                        {"检查项": "关键因子识别", "状态": "⚠ 注意", "详情": "无强相关因子 (|r|≤0.5)"}
+                        {
+                            "检查项": "关键因子识别",
+                            "状态": "⚠ 注意",
+                            "详情": "无强相关因子 (|r|≤0.5)",
+                        }
                     )
         except Exception as e:
             logger.warning("关键因子识别失败", exc_info=True)
@@ -143,7 +146,11 @@ def process_audit(
                     )
                 else:
                     health_checks.append(
-                        {"检查项": "共线性诊断", "状态": "⚠ 警告", "详情": f"{high_vif} 个因子 VIF>5"}
+                        {
+                            "检查项": "共线性诊断",
+                            "状态": "⚠ 警告",
+                            "详情": f"{high_vif} 个因子 VIF>5",
+                        }
                     )
         except Exception as e:
             logger.warning("共线性诊断失败", exc_info=True)
@@ -175,7 +182,11 @@ def process_audit(
                 cpk = r.metadata.get("cpk")
                 if cpk is not None and cpk >= CPK_GOOD:
                     health_checks.append(
-                        {"检查项": "过程能力", "状态": "✓ 合格", "详情": f"Cpk={cpk:.3f} ≥ {CPK_GOOD}"}
+                        {
+                            "检查项": "过程能力",
+                            "状态": "✓ 合格",
+                            "详情": f"Cpk={cpk:.3f} ≥ {CPK_GOOD}",
+                        }
                     )
                 elif cpk is not None and cpk >= CPK_MINIMUM:
                     health_checks.append(
@@ -222,7 +233,11 @@ def process_audit(
                 dw = r.metadata.get("durbin_watson", 2)
                 if DW_SAFE_LOWER <= dw <= DW_SAFE_UPPER:
                     health_checks.append(
-                        {"检查项": "过程稳定性", "状态": "✓ 稳定", "详情": f"DW={dw:.3f} (无自相关)"}
+                        {
+                            "检查项": "过程稳定性",
+                            "状态": "✓ 稳定",
+                            "详情": f"DW={dw:.3f} (无自相关)",
+                        }
                     )
                 else:
                     health_checks.append(
@@ -265,7 +280,11 @@ def process_audit(
                 )
             else:
                 health_checks.append(
-                    {"检查项": "异常值检测", "状态": "⚠ 注意", "详情": f"{high_conf} 个高置信异常点"}
+                    {
+                        "检查项": "异常值检测",
+                        "状态": "⚠ 注意",
+                        "详情": f"{high_conf} 个高置信异常点",
+                    }
                 )
     except Exception as e:
         logger.warning("异常值检测失败", exc_info=True)

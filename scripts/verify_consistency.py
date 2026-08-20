@@ -140,8 +140,16 @@ TASK_SPEC = {
     "variance_test": ("target", ["g3"], {"group_col": "g3"}),
     "survival_analysis": ("target", ["g2"], {"group_col": "g2"}),
     "gage_rr": ("target", ["part", "operator"], {"part_col": "part", "operator_col": "operator"}),
-    "grid_search": ("target", ["a", "b"], {"ranges": {"a": [80, 120], "b": [40, 60]}, "n_points": 5, "direction": "maximize"}),
-    "multi_objective": ("target", ["a", "b"], {"objectives": [{"col": "target", "direction": "maximize"}]}),
+    "grid_search": (
+        "target",
+        ["a", "b"],
+        {"ranges": {"a": [80, 120], "b": [40, 60]}, "n_points": 5, "direction": "maximize"},
+    ),
+    "multi_objective": (
+        "target",
+        ["a", "b"],
+        {"objectives": [{"col": "target", "direction": "maximize"}]},
+    ),
 }
 for task_id in sorted(TASK_REGISTRY.keys()):
     spec = TASK_SPEC.get(task_id)
@@ -356,7 +364,15 @@ else:
     # 残留导致 sessionfinish 清理 PermissionError（审查 2026-08-19 #5.2）
     _verify_basetemp = os.path.join(tempfile.gettempdir(), "ss-verify-basetmp")
     r = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/", "--tb=line", "-q", f"--basetemp={_verify_basetemp}"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "--tb=line",
+            "-q",
+            f"--basetemp={_verify_basetemp}",
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",

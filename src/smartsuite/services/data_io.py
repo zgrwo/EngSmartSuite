@@ -120,10 +120,7 @@ def preprocess_data(
             if known_cat_map and col in known_cat_map:
                 # Round-2 P3：cat_map 输出含 "_(参照) X" 标记元素，非真实列名——
                 # 回填为 known_cat_map 时若不过滤会产生全 NaN 参照列
-                expected = {
-                    e for e in known_cat_map[col]
-                    if not str(e).startswith("_(参照)")
-                }
+                expected = {e for e in known_cat_map[col] if not str(e).startswith("_(参照)")}
                 actual = set(dummies.columns)
                 # 缺失的已知类别 → 补 0 列
                 for missing_col in expected - actual:

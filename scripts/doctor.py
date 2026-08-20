@@ -94,7 +94,10 @@ def check_runtime_deps() -> list[tuple[str, tuple[bool, str]]]:
             checks.append((f"依赖 {label}", (True, f"{import_name} 可导入")))
         except ImportError:
             checks.append(
-                (f"依赖 {label}", (False, f"{import_name} 缺失 — 运行: pip install -e '.[dev,report,web]'"))
+                (
+                    f"依赖 {label}",
+                    (False, f"{import_name} 缺失 — 运行: pip install -e '.[dev,report,web]'"),
+                )
             )
     return checks
 

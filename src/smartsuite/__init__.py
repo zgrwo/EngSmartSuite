@@ -48,7 +48,9 @@ def setup_logging(log_dir: str | None = None, console_level: int = logging.INFO)
 
     if log_file is not None:
         # 文件 handler — DEBUG 全量，自动轮转（单文件 ≤ 1MB，保留 5 个）
-        fh = RotatingFileHandler(log_file, maxBytes=1 * 1024 * 1024, backupCount=5, encoding="utf-8")
+        fh = RotatingFileHandler(
+            log_file, maxBytes=1 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        )
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(
             logging.Formatter(

@@ -76,7 +76,8 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
     if float(np.std(data.values, ddof=1)) <= 1e-12:
         return AnalysisResult(
-            task="trend_forecast", status="error",
+            task="trend_forecast",
+            status="error",
             messages=["目标列为常量列（无变异），趋势预测无意义。"],
         )
 
@@ -86,12 +87,14 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         steps = int(steps)
     except (ValueError, TypeError):
         return AnalysisResult(
-            task="trend_forecast", status="error",
+            task="trend_forecast",
+            status="error",
             messages=[f"forecast_steps 必须是正整数，当前: {steps!r}"],
         )
     if steps < 1 or steps > 1000:
         return AnalysisResult(
-            task="trend_forecast", status="error",
+            task="trend_forecast",
+            status="error",
             messages=[f"forecast_steps 必须在 1~1000 之间，当前: {steps}"],
         )
     try:
@@ -373,17 +376,18 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     # 参数范围校验（审查 2026-08-19 #1.3）
     if min_segment < 1:
         return AnalysisResult(
-            task="change_point", status="error",
+            task="change_point",
+            status="error",
             messages=[f"min_segment 必须 ≥ 1，当前: {min_segment}"],
         )
     # Round-2 #A2q：2*min_segment >= n 时搜索区间为空（[ms, n-ms] 无位置）
     # → 静默无变点；边界用 >=
     if min_segment * 2 >= n:
         return AnalysisResult(
-            task="change_point", status="error",
+            task="change_point",
+            status="error",
             messages=[
-                f"min_segment({min_segment}) 过大（2×min_segment > n={n}），"
-                "无法在段内搜索变点"
+                f"min_segment({min_segment}) 过大（2×min_segment > n={n}），无法在段内搜索变点"
             ],
         )
 
@@ -715,7 +719,8 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 #A2p：未知 method 此前静默按 Z-score 执行
     if method not in ("isolation_forest", "grubbs", "iqr", "zscore"):
         return AnalysisResult(
-            task="anomaly_detect", status="error",
+            task="anomaly_detect",
+            status="error",
             messages=[f"不支持的检测方法: {method!r}，可选 isolation_forest/grubbs/iqr/zscore"],
         )
 
@@ -857,17 +862,20 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             max_outliers = int(req.params.get("max_outliers", 5))
         except (ValueError, TypeError):
             return AnalysisResult(
-                task="anomaly_detect", status="error",
+                task="anomaly_detect",
+                status="error",
                 messages=["Grubbs 检验参数格式错误：alpha 需为数值，max_outliers 需为整数"],
             )
         if not 0 < alpha_g < 1:
             return AnalysisResult(
-                task="anomaly_detect", status="error",
+                task="anomaly_detect",
+                status="error",
                 messages=[f"alpha 必须在 (0, 1) 区间内，当前: {alpha_g!r}"],
             )
         if max_outliers < 1:
             return AnalysisResult(
-                task="anomaly_detect", status="error",
+                task="anomaly_detect",
+                status="error",
                 messages=[f"max_outliers 必须 ≥ 1，当前: {max_outliers}"],
             )
         vals = data.values.copy()

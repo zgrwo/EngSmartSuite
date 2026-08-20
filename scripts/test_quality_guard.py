@@ -171,9 +171,7 @@ def _has_guarded_assert(src: str) -> bool:
             continue
         test = node.test
         if not (
-            isinstance(test, ast.Compare)
-            and len(test.ops) == 1
-            and isinstance(test.ops[0], ast.Eq)
+            isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)
         ):
             continue
         left = test.left
@@ -185,9 +183,7 @@ def _has_guarded_assert(src: str) -> bool:
             continue
 
         def _has_assert(stmts: list) -> bool:
-            return any(
-                isinstance(sub, ast.Assert) for stmt in stmts for sub in ast.walk(stmt)
-            )
+            return any(isinstance(sub, ast.Assert) for stmt in stmts for sub in ast.walk(stmt))
 
         if not _has_assert(node.body):
             continue

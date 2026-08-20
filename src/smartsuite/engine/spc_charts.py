@@ -499,7 +499,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     _scale = abs(xbar_bar) if abs(xbar_bar) > 1e-12 else 1.0
     if sigma_xbar <= 1e-12 * _scale:
         return AnalysisResult(
-            task="spc_xbar", status="error",
+            task="spc_xbar",
+            status="error",
             messages=[f"目标列「{y_col}」为常量列（标准差为 0），控制图无意义。"],
         )
 
@@ -1056,19 +1057,33 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-08-19 #2.8：常见中文二值串（合格/不合格、是/否）映射为 0/1，
     # 使 p/np 图可直接用于质量记录列（此前只能吃数值列）
     if y_col in data.columns and not pd.api.types.is_numeric_dtype(data[y_col]):
-        _bin_map = {"合格": 1, "不合格": 0, "是": 1, "否": 0,
-                    "TRUE": 1, "FALSE": 0, "True": 1, "False": 0, "true": 1, "false": 0}
+        _bin_map = {
+            "合格": 1,
+            "不合格": 0,
+            "是": 1,
+            "否": 0,
+            "TRUE": 1,
+            "FALSE": 0,
+            "True": 1,
+            "False": 0,
+            "true": 1,
+            "false": 0,
+        }
         _mapped = data[y_col].map(_bin_map)
         if _mapped.notna().sum() == data[y_col].notna().sum() and _mapped.notna().sum() > 0:
             data[y_col] = _mapped.astype(float)
         else:
             # Round-2 #A2k：部分值无法映射（如"待检"）→ 明确报错而非下游深层异常
             _unmapped = sorted(
-                {str(v) for v in data[y_col].dropna().unique()
-                 if _bin_map.get(v) is None and v not in _bin_map}
+                {
+                    str(v)
+                    for v in data[y_col].dropna().unique()
+                    if _bin_map.get(v) is None and v not in _bin_map
+                }
             )[:5]
             return AnalysisResult(
-                task="spc_attribute", status="error",
+                task="spc_attribute",
+                status="error",
                 messages=[
                     "目标列为文本但包含无法识别的类别值: "
                     + ", ".join(_unmapped)
@@ -1146,10 +1161,13 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         # （如 0-100 的不良率列），p_bar>1 → sqrt(负) → UCL/LCL=NaN 静默污染
         if not 0 <= p_bar <= 1:
             return AnalysisResult(
-                task="spc_attribute", status="error",
-                messages=["p 图要求目标列为 0/1 不良比例数据；"
-                          f"当前总体不良率={p_bar:.4f} 超出 [0,1]，"
-                          "请检查数据是否为 0/1 编码（百分比需除以 100）"],
+                task="spc_attribute",
+                status="error",
+                messages=[
+                    "p 图要求目标列为 0/1 不良比例数据；"
+                    f"当前总体不良率={p_bar:.4f} 超出 [0,1]，"
+                    "请检查数据是否为 0/1 编码（百分比需除以 100）"
+                ],
             )
         cl = p_bar
         ucl_const = None
@@ -1886,7 +1904,8 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 #A2p：未知 side 此前静默按双侧执行
     if side not in ("two-sided", "upper", "lower"):
         return AnalysisResult(
-            task="spc_nonparametric", status="error",
+            task="spc_nonparametric",
+            status="error",
             messages=[f"不支持的 side: {side!r}，可选 two-sided/upper/lower"],
         )
     values = data.values
@@ -1894,7 +1913,8 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-08-19 #2.5：常量列 → 所有 KS p 为 nan → 假"过程稳定 ✓ CL=nan"
     if float(np.std(values, ddof=1)) <= 1e-12:
         return AnalysisResult(
-            task="spc_nonparametric", status="error",
+            task="spc_nonparametric",
+            status="error",
             messages=["目标列为常量列（方差为 0），无法进行分布拟合与控制限计算"],
         )
 

@@ -65,8 +65,14 @@ def main(argv: list[str] | None = None) -> int:
     # 避免 Windows 上 pytest-current junction 残留导致 sessionfinish 清理失败
     import tempfile as _tempfile
 
-    _pytest_base = [PYTHON, "-m", "pytest", "tests/", "-q",
-                    f"--basetemp={os.path.join(_tempfile.gettempdir(), 'ss-verifyall-basetmp')}"]
+    _pytest_base = [
+        PYTHON,
+        "-m",
+        "pytest",
+        "tests/",
+        "-q",
+        f"--basetemp={os.path.join(_tempfile.gettempdir(), 'ss-verifyall-basetmp')}",
+    ]
     steps: list[tuple[str, list[str]]] = [
         ("构建（语法检查）", [PYTHON, "-m", "compileall", "-q", "src"]),
         ("测试", _pytest_base),
