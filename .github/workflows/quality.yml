@@ -83,7 +83,7 @@ jobs:
           python-version: "3.12"
       - name: Install
         # Round-2：verify_consistency 内嵌全量 pytest，含 Web 层测试（flask）
-        run: pip install -e ".[dev,web]"
+        run: pip install -e ".[dev,web,report]"
       - name: Verify architecture
         run: python scripts/verify_consistency.py
 
