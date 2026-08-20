@@ -231,9 +231,11 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 审查 2026-08-19 #2.6/#3.4：原消息一律指向目标列，但常量特征列
         # （或有效样本不足）同样会导致 top_value=NaN，消息须指向真实原因
         const_cols = [
-            c for c in cols if req.data[c].nunique(dropna=True) <= 1
+            c for c in cols if c != req.target_col and req.data[c].nunique(dropna=True) <= 1
         ]
-        if const_cols:
+        # Round-2 #A2m：目标列本身为常量时消息应指向目标列而非误称"特征列"
+        target_const = req.data[req.target_col].nunique(dropna=True) <= 1
+        if const_cols and not target_const:
             msg = (
                 f"特征列「{const_cols[0]}」为常量列（无变异），无法计算相关性分析。"
                 f"请移除该列或检查数据。"
@@ -586,6 +588,13 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             task="anova", status="error", messages=["没有可用于 ANOVA 分析的特征列"]
         )
 
+    # Round-2 #A2：常量目标列 → R²=-inf 且浮点噪声被当显著效应（虚假 p<0.05）
+    if req.data[req.target_col].nunique(dropna=True) <= 1:
+        return AnalysisResult(
+            task="anova", status="error",
+            messages=[f"目标列「{req.target_col}」为常量列（无变异），ANOVA 无意义。"],
+        )
+
     # 审查 2026-08-19 #1.4：连续特征被当因子时水平数 = 唯一值数，
     # n=6000 连续数据 → 数千个箱体 → matplotlib 原生崩溃（进程被杀，无 traceback）。
     # 水平数超限时明确报错，引导用户改用回归或先分箱。
@@ -602,7 +611,13 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 构建公式：可选两两交互项
-    # 对列名中的单引号做 SQL-style 转义（patsy Q() 语法要求）
+    # Round-2 #A2o：patsy Q() 不支持 SQL 式 '' 转义——含单引号列名必然解析失败，
+    # 直接拒绝并提示重命名（此前失败被通用错误掩盖）
+    if chr(39) in req.target_col or any(chr(39) in c for c in cols):
+        return AnalysisResult(
+            task="anova", status="error",
+            messages=["列名包含单引号（'），patsy 公式无法解析。请重命名相关列后重试。"],
+        )
     _escaped = [c.replace(chr(39), chr(39) + chr(39)) for c in cols]
     _escaped_target = req.target_col.replace(chr(39), chr(39) + chr(39))
     terms = [f"Q('{ec}')" for ec in _escaped]
@@ -1241,9 +1256,23 @@ _HYPOTHESIS_DISPATCH = {
 }
 
 
+# Round-2 #A2d：合法 test_type 白名单（此前未知类型静默落入独立双样本分支）
+_HYPOTHESIS_TEST_TYPES = {
+    "ttest_ind", "ttest_1samp", "ttest_paired", "wilcoxon_1samp", "wilcoxon_paired",
+    "mannwhitney", "kruskal_wallis", "kruskal", "jonckheere", "mcnemar", "mann_kendall",
+    "auto", "cochran_q", "ks", "friedman", "cohens_d", "correlation",
+}
+
+
 def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     """假设检验：独立样本、配对样本、单样本 t 检验 / Mann-Whitney U，含效应量。"""
     test_type = req.params.get("test", "ttest_ind")
+    if not isinstance(test_type, str) or test_type not in _HYPOTHESIS_TEST_TYPES:
+        return AnalysisResult(
+            task="hypothesis_test", status="error",
+            messages=[f"不支持的检验类型: {test_type!r}，可选: "
+                      + ", ".join(sorted(_HYPOTHESIS_TEST_TYPES))],
+        )
 
     # 调度到独立分支函数（新增检验类型只需在 _HYPOTHESIS_DISPATCH 注册）
     if test_type in _HYPOTHESIS_DISPATCH:
@@ -1555,6 +1584,19 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
         groups = sub[group_col].unique()
+        # Round-2 #A2e：无分组列时回退到连续特征列 → 每观测一组、η²_H=1.000 误导
+        if len(groups) > 20:
+            return AnalysisResult(
+                task="hypothesis_test", status="error",
+                messages=[f"分组列「{group_col}」水平数过多（{len(groups)} 个，上限 20），"
+                          "可能是连续变量被当作分组。请指定有效的分组列。"],
+            )
+        if any((sub[group_col] == g).sum() < 3 for g in groups):
+            return AnalysisResult(
+                task="hypothesis_test", status="error",
+                messages=["存在样本量小于 3 的分组，Kruskal-Wallis 结果不可靠。"
+                          "请检查分组列或增加数据量。"],
+            )
         if len(groups) < 2:
             return AnalysisResult(
                 task="hypothesis_test", status="error", messages=["至少需要 2 个分组"]
@@ -1860,6 +1902,13 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
         groups = sub[group_col].unique()
+        # Round-2 #A2e：同 kruskal——连续列回退产生伪分组
+        if len(groups) > 20:
+            return AnalysisResult(
+                task="hypothesis_test", status="error",
+                messages=[f"分组列「{group_col}」水平数过多（{len(groups)} 个，上限 20），"
+                          "可能是连续变量被当作分组。请指定有效的分组列。"],
+            )
         if len(groups) < 3:
             return AnalysisResult(
                 task="hypothesis_test",
@@ -2232,6 +2281,12 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     # InvalidParameterError，此处安全转换
     max_depth = _safe_int(req.params.get("max_depth", 5), 5)
     random_state = _safe_int(req.params.get("random_state", 42), 42)
+    # Round-2 #A2g：max_depth<=0 → sklearn ValueError → 通用错误
+    if max_depth is not None and max_depth < 1:
+        return AnalysisResult(
+            task="decision_tree", status="error",
+            messages=[f"max_depth 必须 ≥ 1，当前: {max_depth}"],
+        )
 
     tree = DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
     tree.fit(X, y)
@@ -2391,6 +2446,15 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
     if len(df) < len(cols) + 2:
         return AnalysisResult(task="vif", status="error", messages=[f"有效样本({len(df)})不足"])
 
+    # Round-2 #A2b：常量特征列使 add_constant 静默跳过截距 → VIF 算出有限伪值
+    _const_feats = [c for c in cols if df[c].nunique(dropna=True) <= 1]
+    if _const_feats:
+        return AnalysisResult(
+            task="vif", status="error",
+            messages=[f"特征列「{_const_feats[0]}」为常量列（无变异），VIF 无法定义。"
+                      "请移除该列或检查数据。"],
+        )
+
     # 用户可通过 params 自定义阈值，fallback 到全局常量
     threshold = _safe_float(req.params.get("threshold", VIF_THRESHOLD), VIF_THRESHOLD)
 
@@ -2493,6 +2557,22 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
     effect_size = float(effect_size)
     alpha = float(alpha)
     target_power = float(target_power)
+    # Round-2 #A2f：NaN/Inf 与区间校验（此前 "nan" 穿透 float() 顶层校验）
+    if not all(np.isfinite(x) for x in (effect_size, alpha, target_power)):
+        return AnalysisResult(
+            task="power_analysis", status="error",
+            messages=["effect_size/alpha/target_power 必须为有限数值"],
+        )
+    if not 0 < alpha < 1:
+        return AnalysisResult(
+            task="power_analysis", status="error",
+            messages=[f"alpha 必须在 (0, 1) 区间内，当前: {alpha!r}"],
+        )
+    if not 0 < target_power < 1:
+        return AnalysisResult(
+            task="power_analysis", status="error",
+            messages=[f"target_power 必须在 (0, 1) 区间内，当前: {target_power!r}"],
+        )
     # 审查 2026-08-19 #1.4：effect_size=0 时 statsmodels solve_power 抛 ValueError
     if effect_size == 0:
         return AnalysisResult(
@@ -2601,7 +2681,12 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
                     for n in n_range
                 ]
             else:
-                n_groups = _safe_int(req.params.get("n_groups", 3)) or 3
+                n_groups = _safe_int(req.params.get("n_groups", 3))
+                if n_groups is None or n_groups < 2:
+                    return AnalysisResult(
+                        task="power_analysis", status="error",
+                        messages=["n_groups 必须为 ≥2 的整数"],
+                    )
                 powers = [
                     FTestAnovaPower().power(
                         effect_size=abs(effect_size), nobs=n * n_groups, k_groups=n_groups, alpha=alpha
@@ -2664,7 +2749,12 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
                 TTestIndPower().power(effect_size=abs(effect_size), nobs1=current_n, alpha=alpha)
             )
         elif test_type == "anova":
-            n_groups = req.params.get("n_groups", 3)
+            n_groups = _safe_int(req.params.get("n_groups", 3))
+            if n_groups is None or n_groups < 2:
+                return AnalysisResult(
+                    task="power_analysis", status="error",
+                    messages=["n_groups 必须为 ≥2 的整数"],
+                )
             from statsmodels.stats.power import FTestAnovaPower
 
             power = float(
@@ -2940,10 +3030,11 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(6, 3))
     ax = fig.add_subplot(111)
     methods = ["Wilson Score", "Clopper-Pearson"]
-    uppers = [wilson_upper - p_hat, cp_upper - p_hat]
+    # Round-2 #A2i：宽度必须为 upper-lower（此前 width=upper-p_hat → 条右端错位）
+    widths = [wilson_upper - wilson_lower, cp_upper - cp_lower]
     ax.barh(
         methods,
-        uppers,
+        widths,
         left=[wilson_lower, cp_lower],
         height=0.3,
         color=[PALETTE["data"]["secondary"], PALETTE["data"]["primary"]],
@@ -3104,6 +3195,13 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
     row_sums = ctab.sum(axis=1).values
     col_sums = ctab.sum(axis=0).values
     p_e = np.sum(row_sums * col_sums) / n**2
+    # Round-2 #A2h：p_e≈1（全一致/单类别表）时 kappa 无定义——
+    # 分母≈0 产生 kappa=0 并被误判为"低于随机一致"
+    if p_e >= 1 - 1e-9:
+        return AnalysisResult(
+            task="cohens_kappa", status="error",
+            messages=["评定者间一致性过高（期望一致率 p_e≈1），Kappa 统计量无定义。"],
+        )
     # Kappa
     kappa = (p_o - p_e) / (1 - p_e + EPSILON)
     # 标准误 (Fleiss-Cohen-Everitt 公式，适用于大样本)

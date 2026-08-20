@@ -65,6 +65,20 @@ def _xbar_s_constants(n: int) -> tuple[float, float, float, float]:
     return c4, A3, B3, B4
 
 
+def _natural_sort_key(v):
+    """数值优先的自然排序键（Round-2 #A5）。
+
+    numpy>=2.0 下 np.int64/np.float64 不再是 int/float 子类，
+    isinstance(v, (int, float)) 会漏判 → 数值列退回字符串字典序（1,10,11,2）。
+    用 numbers.Number 覆盖全部数值类型；bool 视为字符串（避免 True/1 混淆）。
+    """
+    import numbers
+
+    if isinstance(v, numbers.Number) and not isinstance(v, bool):
+        return (0, float(v))
+    return (1, str(v))
+
+
 def _we_rules_xbar(values, cl, sigma):
     """Western Electric 规则检测 X-bar 图。返回违规子组索引字典。"""
     violations: dict[str, list[int]] = {}
@@ -126,6 +140,27 @@ def _we_rules_xbar(values, cl, sigma):
             r6.update(range(i, i + 15))
     if r6:
         violations["规则6: 连续15点在±1σ内"] = sorted(r6)
+
+    # Rule 7（Round-2 #A2r）：连续14点交替升降
+    r7: set[int] = set()
+    for i in range(n - 13):
+        diffs = np.diff(vals[i : i + 14])
+        if np.all(diffs > 0) or np.all(diffs < 0):
+            continue  # 单调不算交替
+        if (np.all(diffs[::2] > 0) and np.all(diffs[1::2] < 0)) or (
+            np.all(diffs[::2] < 0) and np.all(diffs[1::2] > 0)
+        ):
+            r7.update(range(i, i + 14))
+    if r7:
+        violations["规则7: 连续14点交替升降"] = sorted(r7)
+
+    # Rule 8（Round-2 #A2r）：连续8点在 ±1σ 外（任一侧）
+    r8: set[int] = set()
+    for i in range(n - 7):
+        if all(abs(vals[i + j] - cl) >= 1 * sigma for j in range(8)):
+            r8.update(range(i, i + 8))
+    if r8:
+        violations["规则8: 连续8点在±1σ外"] = sorted(r8)
 
     return violations
 
@@ -460,7 +495,9 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"目标列「{y_col}」的所有值均为缺失值或不可计算，无法估计控制限。"],
         )
     # 常量列：σ=0 → 控制图无意义（审查 #2.8）
-    if sigma_xbar <= 1e-12:
+    # Round-2 #A2l：绝对阈值 1e-12 误报微尺度数据 → 相对阈值
+    _scale = abs(xbar_bar) if abs(xbar_bar) > 1e-12 else 1.0
+    if sigma_xbar <= 1e-12 * _scale:
         return AnalysisResult(
             task="spc_xbar", status="error",
             messages=[f"目标列「{y_col}」为常量列（标准差为 0），控制图无意义。"],
@@ -477,11 +514,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # 构建统一索引 — 按 X 值排序，同一 X 值下按分组排
     # 审查 2026-08-19 #2.2：数值 X 按字符串字典序排序（1,10,11,2,...）导致图表顺序错乱
-    x_unique = sorted(
-        agg["x_val"].unique(),
-        key=lambda v: ((0, float(v)) if isinstance(v, (int, float)) and not isinstance(v, bool)
-                       else (1, str(v))),
-    )
+    # Round-2 #A5：np.int64 非 int 子类，key 用 _natural_sort_key 覆盖全部数值类型
+    x_unique = sorted(agg["x_val"].unique(), key=_natural_sort_key)
     x_to_idx = {v: i for i, v in enumerate(x_unique)}
     agg["_idx"] = agg["x_val"].map(x_to_idx)
 
@@ -843,10 +877,12 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     if has_groups and per_group_violations:
         for gname, gv in per_group_violations.items():
             # 审查 #2.3：I 图分组模式下 multi 帧为空，取组内行帧
+            # Round-2 M1：multi 分组模式此前用全局 agg[agg["multi"]] 取组内索引 →
+            # 标签错行（B 组违规显示为 A 组首行）；组内违规索引对应组内 multi 帧
             if chart_subtype == "i_chart":
                 _gframe = agg[agg["group_val"] == gname]
             else:
-                _gframe = agg[agg["multi"]]
+                _gframe = agg[(agg["group_val"] == gname) & agg["multi"]]
             for rule_name, idxs in gv["xbar"].items():
                 v_labels = [str(_gframe.iloc[i]["x_val"]) for i in idxs if i < len(_gframe)]
                 violation_rows.append(
@@ -860,11 +896,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 )
             lower_chart_label = "S" if use_s_chart else "R"
             for rule_name, idxs in gv["disp"].items():
-                v_labels = [
-                    str(agg[agg["multi"]].iloc[i]["x_val"])
-                    for i in idxs
-                    if i < len(agg[agg["multi"]])
-                ]
+                v_labels = [str(_gframe.iloc[i]["x_val"]) for i in idxs if i < len(_gframe)]
                 violation_rows.append(
                     {
                         "分组": str(gname),
@@ -1029,6 +1061,20 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         _mapped = data[y_col].map(_bin_map)
         if _mapped.notna().sum() == data[y_col].notna().sum() and _mapped.notna().sum() > 0:
             data[y_col] = _mapped.astype(float)
+        else:
+            # Round-2 #A2k：部分值无法映射（如"待检"）→ 明确报错而非下游深层异常
+            _unmapped = sorted(
+                {str(v) for v in data[y_col].dropna().unique()
+                 if _bin_map.get(v) is None and v not in _bin_map}
+            )[:5]
+            return AnalysisResult(
+                task="spc_attribute", status="error",
+                messages=[
+                    "目标列为文本但包含无法识别的类别值: "
+                    + ", ".join(_unmapped)
+                    + "。计数型控制图需要数值列或 合格/不合格、是/否 二值列。"
+                ],
+            )
 
     # X 列
     x_col = req.feature_cols[0] if req.feature_cols else None
@@ -1161,12 +1207,8 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     below = agg_viol["stat"].values < agg_viol["lcl"].values
     violations = int((above | below).sum())
 
-    # 图表
-    x_unique = sorted(
-        agg["x_val"].unique(),
-        key=lambda v: ((0, float(v)) if isinstance(v, (int, float)) and not isinstance(v, bool)
-                       else (1, str(v))),
-    )
+    # 图表（Round-2 #A5：与 xbar 同款 _natural_sort_key）
+    x_unique = sorted(agg["x_val"].unique(), key=_natural_sort_key)
     x_to_idx = {v: i for i, v in enumerate(x_unique)}
     agg["_idx"] = agg["x_val"].map(x_to_idx)
 
@@ -1386,6 +1428,13 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
             )
+    # Round-2 #A2j：与 EWMA 一致——只传一个时此前静默忽略两个
+    if (user_mu is None) != (user_sigma is None):
+        return AnalysisResult(
+            task="spc_cusum",
+            status="error",
+            messages=["mu/sigma 必须同时提供或同时省略（当前只提供了一个）"],
+        )
 
     # 分组处理
     group_results = []
@@ -1834,6 +1883,12 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         )
 
     side = req.params.get("side", "two-sided")
+    # Round-2 #A2p：未知 side 此前静默按双侧执行
+    if side not in ("two-sided", "upper", "lower"):
+        return AnalysisResult(
+            task="spc_nonparametric", status="error",
+            messages=[f"不支持的 side: {side!r}，可选 two-sided/upper/lower"],
+        )
     values = data.values
 
     # 审查 2026-08-19 #2.5：常量列 → 所有 KS p 为 nan → 假"过程稳定 ✓ CL=nan"

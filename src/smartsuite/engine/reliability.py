@@ -13,6 +13,48 @@ from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
 
+# ── AIAG MSA 4th d2* 表（Round-2 #A3f）──
+# 行 = g（操作员数），列 = m（零件数×重复次数）；超表范围取最近值/∞列近似。
+# AV 分量必须用 d2*（g=操作员数行）；PV 的 g=1 行即普通 d2。
+_D2_STAR_ROWS: dict[int, list[tuple[int, float]]] = {
+    2: [(2, 1.19), (3, 1.24), (4, 1.26), (5, 1.27), (6, 1.28), (8, 1.29),
+        (10, 1.30), (15, 1.31), (20, 1.31), (25, 1.32), (100, 1.41)],
+    3: [(2, 1.55), (3, 1.72), (4, 1.78), (5, 1.81), (6, 1.83), (8, 1.85),
+        (10, 1.87), (15, 1.88), (20, 1.89), (25, 1.89), (100, 1.91)],
+    4: [(2, 1.68), (3, 1.92), (4, 2.04), (5, 2.10), (6, 2.14), (8, 2.18),
+        (10, 2.20), (15, 2.23), (20, 2.24), (25, 2.25), (100, 2.24)],
+    5: [(2, 1.75), (3, 2.04), (4, 2.21), (5, 2.31), (6, 2.37), (8, 2.44),
+        (10, 2.48), (15, 2.52), (20, 2.54), (25, 2.55), (100, 2.48)],
+    6: [(2, 1.79), (3, 2.12), (4, 2.32), (5, 2.45), (6, 2.54), (8, 2.64),
+        (10, 2.70), (15, 2.76), (20, 2.79), (25, 2.81), (100, 2.67)],
+    7: [(2, 1.82), (3, 2.17), (4, 2.40), (5, 2.55), (6, 2.66), (8, 2.79),
+        (10, 2.87), (15, 2.95), (20, 2.99), (25, 3.02), (100, 2.83)],
+    8: [(2, 1.84), (3, 2.20), (4, 2.46), (5, 2.63), (6, 2.75), (8, 2.91),
+        (10, 3.00), (15, 3.10), (20, 3.15), (25, 3.19), (100, 2.96)],
+    9: [(2, 1.86), (3, 2.23), (4, 2.50), (5, 2.69), (6, 2.82), (8, 3.01),
+        (10, 3.12), (15, 3.24), (20, 3.30), (25, 3.35), (100, 3.08)],
+    10: [(2, 1.87), (3, 2.26), (4, 2.54), (5, 2.74), (6, 2.88), (8, 3.09),
+         (10, 3.22), (15, 3.36), (20, 3.43), (25, 3.49), (100, 3.18)],
+}
+
+
+def _d2_star(g: int, m: int) -> float:
+    """AIAG d2* 查表：g=操作员数，m=零件数×重复次数；超表范围用最近行/∞列近似。"""
+    if g < 2:
+        # g=1（单组）即普通 d2 语义——由调用方处理
+        return float(g)
+    row = _D2_STAR_ROWS.get(min(g, 10), _D2_STAR_ROWS[10])
+    if g > 10:
+        # 操作员 >10 时按 10 行近似（差异 <1%），调用方记录日志
+        logger.info("操作员数 g=%d > 10，d2* 按 g=10 行近似", g)
+    best = row[0]
+    for col_m, val in row:
+        if col_m >= m:
+            best = (col_m, val)
+            break
+        best = (col_m, val)
+    return float(best[1])
+
 
 def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     """测量系统分析 (Gage R&R) — 评估量具的重复性和再现性。
@@ -141,7 +183,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
 
     # Reproducibility (AV)
     n_obs = n_parts * r
-    d2_o = d2_table.get(k, 1.128)
+    # Round-2 #A3f：AIAG MSA 要求操作员分量用 d2*（g=操作员数 行）而非普通 d2——
+    # 普通 d2 使 AV 系统性高估（k=2 时约 25%）；PV 的 g=1 行即普通 d2，无需改
+    d2_o = _d2_star(k, n_obs)
     av = np.sqrt(max(0, (x_bar_diff / d2_o) ** 2 - ev**2 / n_obs))
     av_pct = av * sigma_mult
 
@@ -323,6 +367,12 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"置信水平 confidence 须在 (0, 1) 之间，当前值: {confidence}"],
         )
     side = req.params.get("side", "two-sided")
+    # Round-2 #A2p：未知 side 此前静默按单侧下限计算
+    if side not in ("two-sided", "upper", "lower"):
+        return AnalysisResult(
+            task="tolerance_interval", status="error",
+            messages=[f"不支持的 side: {side!r}，可选 two-sided/upper/lower"],
+        )
     mu = float(data.mean())
     sigma = float(data.std(ddof=1))
     if sigma < EPSILON:

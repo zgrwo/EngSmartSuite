@@ -93,8 +93,18 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"有效样本量({len(df)})不足，需要至少{len(cols) + 2}条"],
         )
 
+    # Round-2 #A2a：常量特征列 → 系数 t=inf/NaN 且 inf 进入 Web JSON 链
+    _const_feats = [c for c in cols if df[c].nunique(dropna=True) <= 1]
+    if _const_feats:
+        return AnalysisResult(
+            task="regression", status="error",
+            messages=[f"特征列「{_const_feats[0]}」为常量列（无变异），无法估计回归系数。"
+                      "请移除该列或检查数据。"],
+        )
+
     # 审查 2026-08-19 #1.4：常量目标列 → R²=0/0=-inf 且误报异方差/自相关诊断
-    if df[req.target_col].std() <= 1e-12:
+    # Round-2 #A2l：用 nunique 替代绝对阈值（微尺度数据不误报）
+    if df[req.target_col].nunique(dropna=True) <= 1:
         return AnalysisResult(
             task="regression", status="error",
             messages=[f"目标列「{req.target_col}」为常量列（方差为 0），回归模型无意义"],
@@ -363,7 +373,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 审查 2026-08-19 #1.4：常量目标列 → R²=-inf 且误报诊断
-    if df[req.target_col].std() <= 1e-12:
+    if df[req.target_col].nunique(dropna=True) <= 1:
         return AnalysisResult(
             task="response_surface", status="error",
             messages=[f"目标列「{req.target_col}」为常量列（方差为 0），响应面模型无意义"],
@@ -617,7 +627,8 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"搜索参数列不存在于数据中: {missing_cols}"],
         )
 
-    df = req.data[col_names + [req.target_col]].dropna()
+    # Round-2 #A4：ranges 键可能 == 目标列 → 重复列名；去重后再取目标列
+    df = req.data[list(dict.fromkeys(col_names + [req.target_col]))].dropna()
     if len(df) < 5:
         return AnalysisResult(
             task="grid_search",
@@ -626,7 +637,8 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 审查 2026-08-19 #2.6：常量目标列时 CV R² 恒为 1.000、最优参数无意义
-    if df[req.target_col].std() <= 1e-12:
+    _target_series = df[req.target_col]
+    if _target_series.nunique(dropna=True) <= 1:
         return AnalysisResult(
             task="grid_search", status="error",
             messages=[f"目标列「{req.target_col}」为常量列，网格搜索最优参数无意义"],
@@ -837,15 +849,10 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         desirability = _desirability(vals, direction)
         scores[valid_rows] += w * desirability
 
-    valid_idx = req.data.index[valid_rows]
     best_pos = np.argmax(scores[valid_rows])
-    # 审查 2026-08-19 #1.4：重复且非连续 index 时 get_loc 返回布尔掩码，
-    # list(掩码)[0]=False → iloc[False] TypeError；改为 flatnonzero 取首个命中位置
-    if req.data.index.has_duplicates:
-        dup_positions = np.flatnonzero(req.data.index == valid_idx[best_pos])
-        best_row_iloc = int(dup_positions[0])
-    else:
-        best_row_iloc = int(req.data.index.get_loc(valid_idx[best_pos]))
+    # Round-2 #A1：重复索引时经标签中转会取到'标签首现'位置——若首现行被 NaN
+    # 排除（valid_mask=False），会静默返回被排除行。直接取有效行的位置索引。
+    best_row_iloc = int(np.flatnonzero(valid_mask)[best_pos])
     best_params = {
         c: req.data.iloc[best_row_iloc][c] for c in req.feature_cols if c in req.data.columns
     }
@@ -1069,6 +1076,14 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             _lo, hi = s[0], s[-1]
             coded = np.where(col_vals == hi, 1, -1)
         else:
+            # Round-2 #A3c：多水平/连续因子需 z-score，字符串列无法运算
+            if not pd.api.types.is_numeric_dtype(col_vals):
+                return AnalysisResult(
+                    task="doe_analysis", status="error",
+                    messages=[f"因子列「{col}」含 {len(unique_vals)} 个非数值水平，"
+                              "DOE 效应估计仅支持二水平类别或数值因子。"
+                              "请先 One-Hot 编码或转为数值。"],
+                )
             # 多水平/连续因子：标准化后作为线性效应
             coded = (col_vals - col_vals.mean()) / (col_vals.std(ddof=1) + EPSILON)
 

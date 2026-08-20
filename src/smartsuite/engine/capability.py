@@ -100,6 +100,13 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
             ],
         )
 
+    # Round-2 #A2n：常量数据 → Cp/Cpk/Pp 全 None 且 status=ok，误导
+    if data.nunique() <= 1:
+        return AnalysisResult(
+            task="process_capability", status="error",
+            messages=["目标列为常量列（标准差为 0），过程能力无法估计。"],
+        )
+
     usl = req.params.get("usl")
     lsl = req.params.get("lsl")
     target = req.params.get("target")  # Cpm 目标值

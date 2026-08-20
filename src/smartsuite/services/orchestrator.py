@@ -191,7 +191,14 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # ── 集中列存在性检查：在分派到引擎函数之前验证 target_col ──
-    if req.target_col and req.target_col not in req.data.columns:
+    # Round-2 #A2c：空 target_col（''）此前被 falsy 检查放行 → 引擎 KeyError
+    if req.task not in NO_TARGET_TASKS and (not req.target_col
+                                            or req.target_col not in req.data.columns):
+        if not req.target_col:
+            return AnalysisResult(
+                task=req.task, status="error",
+                messages=["未指定目标列 (target_col)，该分析方法需要 Y 列"],
+            )
         logger.warning("目标列不存在: %s (可用列: %s)", req.target_col, list(req.data.columns)[:10])
         return AnalysisResult(
             task=req.task,

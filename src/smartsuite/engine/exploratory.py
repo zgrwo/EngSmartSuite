@@ -124,6 +124,11 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
         )
 
     statistic = req.params.get("statistic", "mean")
+    if statistic not in ("mean", "median", "std", "var"):
+        return AnalysisResult(
+            task="bootstrap_ci", status="error",
+            messages=[f"不支持的 statistic: {statistic!r}，可选 mean/median/std/var"],
+        )
     n_boot_raw = req.params.get("n_bootstrap", 2000)
     try:
         n_boot = max(100, min(int(n_boot_raw), 10000))
@@ -281,6 +286,11 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"分组列「{group_col}」不存在于数据中。可用列: {list(req.data.columns)[:10]}"],
         )
     sub_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
+    # Round-2 #A3：group_col 可能与 target/sub_col 同列（UI 可触发），
+    # 去重列名避免 sub[col] 返回 DataFrame → .unique() AttributeError
+    _cols_needed = list(dict.fromkeys(
+        [req.target_col, group_col] + ([sub_col] if sub_col else [])
+    ))
     mode = req.params.get("mode", "facet")  # "facet" | "nested"
 
     # ── 规格限与控制限（可选参考线）──
@@ -312,7 +322,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         except (ValueError, TypeError):
             pass
 
-    sub = req.data[[req.target_col, group_col] + ([sub_col] if sub_col else [])].dropna()
+    sub = req.data[_cols_needed].dropna()
     if len(sub) < 5:
         return AnalysisResult(
             task="box_chart", status="error", messages=["有效数据不足(至少5个点)"]

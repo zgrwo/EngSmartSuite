@@ -30,12 +30,16 @@ def _ljung_box(residuals, lags=None):
     if lags is None:
         lags = min(10, n // 5)
     lags = max(1, min(lags, n // 2))
-    # 简化计算：对每个滞后计算自相关，然后 Q = n*(n+2)*sum(r_k^2/(n-k))
+    # Round-2 #A3a：np.corrcoef 对两段残差分别减各自均值 → 自相关系统性偏大
+    # （白噪声 p≈0.04 可翻转 0.05 阈值）；改用全样本均值的标准自相关定义
+    _mean = float(np.mean(residuals))
+    _denom = float(np.sum((residuals - _mean) ** 2))
     acf_sum = 0.0
     for k in range(1, lags + 1):
-        r_k = np.corrcoef(residuals[k:], residuals[:-k])[0, 1]
-        if np.isnan(r_k):  # P1 fix: 零方差子段导致 np.corrcoef 返回 NaN
-            r_k = 0.0
+        if _denom <= 1e-12:
+            r_k = 0.0  # 零方差残差
+        else:
+            r_k = float(np.sum((residuals[:-k] - _mean) * (residuals[k:] - _mean)) / _denom)
         acf_sum += r_k**2 / (n - k)
     q_stat = n * (n + 2) * acf_sum
     p_val = float(sp_stats.chi2.sf(q_stat, lags))
@@ -69,7 +73,27 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效数据不足(至少3个点)"],
         )
 
+    # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
+    if float(np.std(data.values, ddof=1)) <= 1e-12:
+        return AnalysisResult(
+            task="trend_forecast", status="error",
+            messages=["目标列为常量列（无变异），趋势预测无意义。"],
+        )
+
+    # Round-2 #A3b：forecast_steps 类型/范围校验（字符串/浮点此前 TypeError）
     steps = req.params.get("forecast_steps", 5)
+    try:
+        steps = int(steps)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="trend_forecast", status="error",
+            messages=[f"forecast_steps 必须是正整数，当前: {steps!r}"],
+        )
+    if steps < 1 or steps > 1000:
+        return AnalysisResult(
+            task="trend_forecast", status="error",
+            messages=[f"forecast_steps 必须在 1~1000 之间，当前: {steps}"],
+        )
     try:
         n = len(data)
         X = np.arange(n).reshape(-1, 1)
@@ -352,11 +376,13 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
             task="change_point", status="error",
             messages=[f"min_segment 必须 ≥ 1，当前: {min_segment}"],
         )
-    if min_segment > n // 2:
+    # Round-2 #A2q：2*min_segment >= n 时搜索区间为空（[ms, n-ms] 无位置）
+    # → 静默无变点；边界用 >=
+    if min_segment * 2 >= n:
         return AnalysisResult(
             task="change_point", status="error",
             messages=[
-                f"min_segment({min_segment}) 超过数据长度的一半({n // 2})，"
+                f"min_segment({min_segment}) 过大（2×min_segment > n={n}），"
                 "无法在段内搜索变点"
             ],
         )
@@ -686,6 +712,12 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
 def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     """异常检测：IQR / Z-score (单变量) 或 Isolation Forest (多变量)。"""
     method = req.params.get("method", "iqr")
+    # Round-2 #A2p：未知 method 此前静默按 Z-score 执行
+    if method not in ("isolation_forest", "grubbs", "iqr", "zscore"):
+        return AnalysisResult(
+            task="anomaly_detect", status="error",
+            messages=[f"不支持的检测方法: {method!r}，可选 isolation_forest/grubbs/iqr/zscore"],
+        )
 
     # ── 多变量异常检测 (Isolation Forest) ──
     if method == "isolation_forest":
