@@ -123,6 +123,8 @@ data["operator"] = np.tile(["甲", "乙", "丙", "甲", "乙"], 10)
 # 静默通过而不暴露真实行为问题——spec 变更必须同步 api-reference.md 与手册，
 # 并靠 tests/ 的 4 层防线兜底（本表只做冒烟，不做深度行为验证）。
 TASK_SPEC = {
+    # Round-2 P3：anova 需真实类别因子（数值连续列每水平 1 样本现被拒绝）
+    "anova": ("target", ["g3"], {}),
     "box_chart": ("target", ["b"], {"mode": "facet", "group_col": "g3"}),
     "hypothesis_test": ("target", ["g2"], {"test": "ttest_ind", "group_col": "g2"}),
     # 避免完美分离（yb 由 a 的切分生成，a 作特征会精确预测）
