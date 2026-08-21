@@ -2,6 +2,13 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.6](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.5...v1.1.6) (2026-08-21)
+
+
+### 🐛 Bug 修复
+
+* **scripts,ci:** verify_docs 双目录树检查改用小写 agents.md（修复 Linux CI 恒失败）；Quality Gate manual-parity 安装 report extras（openpyxl） ([5f7567d](https://github.com/zgrwo/EngSmartSuite/commit/5f7567d6e77606428e1c5ef75c0df9e71a11438e))
+
 ## [1.1.5](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.4...v1.1.5) (2026-08-21)
 
 
