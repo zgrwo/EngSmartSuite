@@ -467,9 +467,14 @@ async function executeRequest(task) {
     '<div class="empty-hint"><div class="spinner"></div> 分析中...</div>';
   try {
     const params = getParams(task);
+    // 2026-08-21 #F1：换分类列(group_col)后，旧的常驻分组列表失效。
+    // 不重置会残留旧分组名 → 筛选栏显示旧分组、点"应用"时过滤组名与当前数据
+    // 不匹配被引擎回退全量 → 界面看起来"应用不刷新"。
+    const prevParams = _lastRequest ? _lastRequest.params : {};
+    const groupChanged = String(prevParams.group_col || '') !== String(params.group_col || '');
     _lastRequest = { task, targets: [...selectedY], features: [...selectedX], categoricals: [...selectedCat], params };
     _pendingGroupFilter = !!(params.group_col) || (task === 'box_chart');  // 有分组依据时启用筛选栏（box_chart 始终有分组）
-    if (!_pendingGroupFilter) { _allGroups = []; _activeGroups.clear(); }  // 无分组时重置
+    if (!_pendingGroupFilter || groupChanged) { _allGroups = []; _activeGroups.clear(); }  // 无分组或分类列变化 → 重置分组上下文
     const r = await fetchWithCsrf('/api/analyze', { method: 'POST', body: JSON.stringify(_lastRequest) });
     let d = {};
     try { d = await r.json(); } catch(err) { /* 非 JSON 响应（如 413 HTML / 502 网关错误页） */ }
