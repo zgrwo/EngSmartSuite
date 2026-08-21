@@ -2,6 +2,13 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.5](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.4...v1.1.5) (2026-08-21)
+
+
+### 🐛 Bug 修复
+
+* **engine,scripts:** survival_analysis 防重复列（group_col==event_col 去重并跳过 Log-rank）；TASK_SPEC 改用独立事件/分组列 ([1289888](https://github.com/zgrwo/EngSmartSuite/commit/1289888f6c69db0c905e1b0139840ed4c6e9995f))
+
 ## [1.1.4](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.3...v1.1.4) (2026-08-21)
 
 
