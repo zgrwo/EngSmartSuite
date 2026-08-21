@@ -45,7 +45,7 @@ def build_repo(tmp_path: Path) -> Path:
     for d in ("src", "tests", "rules", "skills"):
         (root / d).mkdir(parents=True)
     (root / "rules" / "project-structure.md").write_text(TREE_OK, encoding="utf-8")
-    (root / "AGENTS.md").write_text(TREE_AGENTS_OK, encoding="utf-8")
+    (root / "agents.md").write_text(TREE_AGENTS_OK, encoding="utf-8")
     (root / "rules" / "api-reference.md").write_text("# API\n\n见 [README](README.md)\n", encoding="utf-8")
     (root / "README.md").write_text(
         "# Mini\n\n参考 [rules/api-reference.md](rules/api-reference.md)\n", encoding="utf-8"
@@ -106,7 +106,7 @@ def test_check_dirs_reports_missing_declared_dir(tmp_path):
 def test_check_agents_tree_reports_drift(tmp_path):
     root = build_repo(tmp_path)
     assert verify_docs.check_agents_tree(root) == []
-    (root / "AGENTS.md").write_text(
+    (root / "agents.md").write_text(
         "```\nMini/\n├── src/\n├── rules/\n└── README.md\n```\n", encoding="utf-8"
     )
     problems = verify_docs.check_agents_tree(root)

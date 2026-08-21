@@ -58,7 +58,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[dev]"
+        # 2026-08-21 CI 修复：verify_cross_consistency 读 tests/test_data.xlsx，
+        # 需要 openpyxl（report extras）；此前 [dev] 缺依赖 → pd.read_excel ImportError
+        run: pip install -e ".[dev,report]"
       - name: Verify manual parity
         run: python scripts/verify_cross_consistency.py
 

@@ -220,17 +220,19 @@ def check_dirs(root: Path) -> list[str]:
 def check_agents_tree(root: Path) -> list[str]:
     problems: list[str] = []
     ps_entries = set(_parse_top_entries(root, "rules/project-structure.md"))
-    agents_entries = set(_parse_top_entries(root, "AGENTS.md"))
+    # 2026-08-21 CI 修复：实际文件名为小写 agents.md；Windows 大小写不敏感掩盖了
+    # 该不一致，Linux CI 上 open("AGENTS.md") 不存在 → 双目录树检查恒失败
+    agents_entries = set(_parse_top_entries(root, "agents.md"))
     if not ps_entries or not agents_entries:
         if not agents_entries:
-            problems.append("[配置错误] 无法从 AGENTS.md 目录树解析顶层条目（格式异常？）")
+            problems.append("[配置错误] 无法从 agents.md 目录树解析顶层条目（格式异常？）")
         return problems
     for e in sorted(ps_entries - agents_entries):
         problems.append(
-            f"[目录树漂移] project-structure.md 声明 {e}，AGENTS.md 未收录（请同步 AGENTS.md）"
+            f"[目录树漂移] project-structure.md 声明 {e}，agents.md 未收录（请同步 agents.md）"
         )
     for e in sorted(agents_entries - ps_entries):
-        problems.append(f"[目录树漂移] AGENTS.md 声明 {e}，project-structure.md 未收录")
+        problems.append(f"[目录树漂移] agents.md 声明 {e}，project-structure.md 未收录")
     return problems
 
 
