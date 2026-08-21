@@ -390,12 +390,16 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         except (ValueError, RuntimeError):
             logger.debug("ANOVA/Kruskal-Wallis test failed in box_chart", exc_info=True)
     else:
-        try:
-            _, t_p = sp_stats.ttest_ind(*group_data)
-            _, mw_p = sp_stats.mannwhitneyu(*group_data)
-            test_note = f"t检验 p={t_p:.4f}, MWU p={mw_p:.4f}"
-        except (ValueError, RuntimeError):
-            logger.debug("t-test/Mann-Whitney test failed in box_chart", exc_info=True)
+        if len(groups) >= 2:
+            try:
+                _, t_p = sp_stats.ttest_ind(*group_data)
+                _, mw_p = sp_stats.mannwhitneyu(*group_data)
+                test_note = f"t检验 p={t_p:.4f}, MWU p={mw_p:.4f}"
+            except (ValueError, RuntimeError):
+                logger.debug("t-test/Mann-Whitney test failed in box_chart", exc_info=True)
+        else:
+            # 2026-08-21 #F1：filter_groups 筛选后仅剩 1 组时，跳过组间检验
+            test_note = "仅 1 组，未做组间差异检验"
 
     # ── 箱线图 ──
     has_sub = sub_col and sub[sub_col].nunique() >= 2 and sub[sub_col].nunique() <= 8
