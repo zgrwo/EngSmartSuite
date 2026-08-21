@@ -611,8 +611,10 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
                 f"分组列「{group_col}」不存在于数据中。可用列: {list(req.data.columns)[:10]}"
             ],
         )
-
-    sub = req.data[[time_col, event_col] + ([group_col] if group_col else [])].dropna()
+    # 2026-08-21 CI 修复：group_col 可能与 event_col 同列（误配场景），
+    # 去重列名避免重复列索引产生 DataFrame（与 box_chart 的 _cols_needed 同模式）
+    cols = list(dict.fromkeys([time_col, event_col] + ([group_col] if group_col else [])))
+    sub = req.data[cols].dropna()
     if len(sub) == 0:
         return AnalysisResult(
             task="survival_analysis",
@@ -687,9 +689,9 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             f"建议使用支持删失数据的专业可靠性软件（如 Minitab、JMP、R/survival）进行精确分析。"
         )
 
-    # Log-rank 检验 (分组比较)
+    # Log-rank 检验 (分组比较)；group_col == event_col 时分组即事件本身，无比较意义
     logrank_result = None
-    if group_col and group_col in sub.columns:
+    if group_col and group_col != event_col and group_col in sub.columns:
         groups = sub[group_col].unique()
         if len(groups) == 2:
             g1 = sub[sub[group_col] == groups[0]]

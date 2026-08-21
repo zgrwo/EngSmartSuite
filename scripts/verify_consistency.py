@@ -138,7 +138,7 @@ TASK_SPEC = {
     "spc_cusum": ("target", [], {"group_col": "sub"}),
     "spc_ewma": ("target", [], {"group_col": "sub"}),
     "variance_test": ("target", ["g3"], {"group_col": "g3"}),
-    "survival_analysis": ("target", ["g2"], {"group_col": "g2"}),
+    "survival_analysis": ("target", ["yb", "g2"], {"group_col": "g2"}),
     "gage_rr": ("target", ["part", "operator"], {"part_col": "part", "operator_col": "operator"}),
     "grid_search": (
         "target",
