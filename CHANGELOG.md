@@ -2,6 +2,21 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.4](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.3...v1.1.4) (2026-08-21)
+
+
+### 🐛 Bug 修复
+
+* **engine:** survival_analysis 分组列统一为 params.group_col 优先（回退 feature_cols[1]）+ 分组列存在性防护 ([e116212](https://github.com/zgrwo/EngSmartSuite/commit/e1162126c940b025f6967075573bc5e634b94541))
+* **engine:** 分组筛选任务 metadata.groups 统一返回全量分组（scatter/xbar/attribute/cusum/ewma 此前返回过滤后列表） ([c8178c5](https://github.com/zgrwo/EngSmartSuite/commit/c8178c515210c0bc561ec4b8c4cf57f83c758081))
+* **web:** 任务切换时重置分组筛选上下文（不同任务同 group_col 时旧分组列表残留） ([cf1d96d](https://github.com/zgrwo/EngSmartSuite/commit/cf1d96d61ddd9f2696a9fefbeffa047fa394635c))
+
+
+### ✅ 测试
+
+* **engine:** survival group_col 优先回归测试；加固 2 个被 if 守卫架空的断言（distribution_summary 常量/Box-Cox 单侧） ([833c4b6](https://github.com/zgrwo/EngSmartSuite/commit/833c4b6a67d875d0a463c45d4f8686a16270625a))
+* **engine:** 全部分组筛选任务的分组筛选契约参数化测试（groups 恒全量/单组/不匹配回退） ([a7dc606](https://github.com/zgrwo/EngSmartSuite/commit/a7dc60645e88bae28b4fb28b13f1c1548b4aa165))
+
 ## [1.1.3](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.2...v1.1.3) (2026-08-21)
 
 
