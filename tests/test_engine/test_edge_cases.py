@@ -736,6 +736,58 @@ def test_box_chart_filter_groups_contract():
     assert r2.metadata["groups"] == ["早", "晚"], r2.metadata["groups"]
 
 
+def test_group_filter_contract_all_tasks():
+    """2026-08-21 #F2：全部分组筛选任务的分组筛选契约（前端筛选栏依赖）。
+
+    支持 filter_groups 的任务（box_chart/scatter_plot/spc_xbar/spc_attribute/
+    spc_cusum/spc_ewma）必须满足：
+      1) 无筛选时正常返回全量分组；
+      2) filter_groups 筛选单组不崩溃，且 metadata.groups 恒为全量分组
+         （前端筛选栏的常驻列表来源，此前各任务返回过滤后的列表，契约不一致）；
+      3) 过滤组名与当前分组不匹配时回退全量（防御路径，避免空图）。
+    """
+    from smartsuite.engine.exploratory import box_chart, scatter_plot
+    from smartsuite.engine.spc_charts import (
+        attribute_chart, cusum_chart, ewma_chart, xbar_r_chart,
+    )
+
+    np.random.seed(11)
+    df = pd.DataFrame({
+        "g": ["A"] * 12 + ["B"] * 12 + ["C"] * 12,
+        "x": list(range(12)) * 3,
+        "y": np.random.normal(50, 3, 36).round(2),
+        "bad": [0, 1] * 18,
+    })
+    cases = [
+        ("box_chart", box_chart, "y", ["g"], {"group_col": "g"}),
+        ("scatter_plot", scatter_plot, "y", ["x"], {"group_col": "g"}),
+        ("spc_xbar", xbar_r_chart, "y", [], {"group_col": "g"}),
+        ("spc_attribute", attribute_chart, "bad", [], {"group_col": "g", "chart_type": "p"}),
+        ("spc_cusum", cusum_chart, "y", [], {"group_col": "g"}),
+        ("spc_ewma", ewma_chart, "y", [], {"group_col": "g"}),
+    ]
+    for name, fn, target, feats, base in cases:
+        # 1) 无筛选：全量
+        r0 = fn(AnalysisRequest(task=name, data=df, target_col=target,
+                                feature_cols=feats, params=dict(base)))
+        assert r0.status == "ok", f"{name} 全量失败: {r0.messages}"
+        assert r0.metadata.get("groups") == ["A", "B", "C"], f"{name} 全量 groups: {r0.metadata.get('groups')}"
+        # 2) 筛选单组：不崩溃 + groups 恒全量
+        p1 = dict(base); p1["filter_groups"] = ["A"]
+        r1 = fn(AnalysisRequest(task=name, data=df, target_col=target,
+                                feature_cols=feats, params=p1))
+        assert r1.status == "ok", f"{name} 单组筛选失败: {r1.messages}"
+        assert r1.metadata.get("groups") == ["A", "B", "C"], (
+            f"{name} 筛选后 groups 应恒为全量: {r1.metadata.get('groups')}")
+        # 3) 不匹配：回退全量
+        p2 = dict(base); p2["filter_groups"] = ["ZZZ"]
+        r2 = fn(AnalysisRequest(task=name, data=df, target_col=target,
+                                feature_cols=feats, params=p2))
+        assert r2.status == "ok", f"{name} 不匹配回退失败: {r2.messages}"
+        assert r2.metadata.get("groups") == ["A", "B", "C"], (
+            f"{name} 不匹配应回退全量: {r2.metadata.get('groups')}")
+
+
 def test_spc_xbar_int64_x_axis_ordered():
     """Round-2 #A5：np.int64 X 列（Excel/CSV 默认类型）必须按数值序而非字典序。"""
     from smartsuite.engine.spc_charts import _natural_sort_key
