@@ -2,6 +2,19 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.3](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.2...v1.1.3) (2026-08-21)
+
+
+### 🐛 Bug 修复
+
+* **engine:** box_chart 筛选至单组时跳过组间检验，避免 ttest_ind 崩溃 ([81c73fc](https://github.com/zgrwo/EngSmartSuite/commit/81c73fc7712ca1bfcdf4381576ee995d692bccf1))
+* **web:** 切换分类列后重置分组筛选上下文，修复筛选栏残留旧分组导致点" 应用\不刷新 ([4958d12](https://github.com/zgrwo/EngSmartSuite/commit/4958d129ea2f5af6301108b99fddcaaa107bd7a2))
+
+
+### ✅ 测试
+
+* **engine:** box_chart 分组筛选契约（metadata.groups 恒为全量/单组筛选/不匹配回退） ([6593ca5](https://github.com/zgrwo/EngSmartSuite/commit/6593ca5c911c7625a26f1d381e2b73b9511c0b67))
+
 ## [1.1.2](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.1...v1.1.2) (2026-08-20)
 
 
