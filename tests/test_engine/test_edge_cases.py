@@ -698,6 +698,44 @@ def test_grid_search_ranges_key_equals_target():
     assert r.status == "ok", f"ranges==target 失败: {r.status} {r.messages[:1]}"
 
 
+def test_box_chart_filter_groups_contract():
+    """2026-08-21 #F1：box_chart 分组筛选契约（前端筛选栏常驻依赖）。
+
+    筛选栏的分组列表来自 metadata.groups（必须始终为全量分组，不受 filter_groups 影响）；
+    filter_groups 过滤后统计行只含所选组；过滤组名与当前分组不匹配（旧分类残留）
+    时回退全量（防御路径，避免空图）。
+    """
+    from smartsuite.engine.exploratory import box_chart
+
+    np.random.seed(7)
+    df = pd.DataFrame({
+        "y": np.random.normal(50, 5, 60),
+        "设备": ["A"] * 20 + ["B"] * 20 + ["C"] * 20,
+        "班次": ["早"] * 30 + ["晚"] * 30,
+    })
+
+    # 1) 无筛选：3 组全量
+    r0 = box_chart(AnalysisRequest(task="box_chart", data=df, target_col="y",
+                                   feature_cols=["设备", "班次"], params={"group_col": "设备"}))
+    assert r0.status == "ok" and r0.metadata["n_groups"] == 3, r0.messages
+
+    # 2) 筛选单组：统计行只含该组，但 metadata.groups 保持全量（筛选栏常驻）
+    r1 = box_chart(AnalysisRequest(task="box_chart", data=df, target_col="y",
+                                   feature_cols=["设备", "班次"],
+                                   params={"group_col": "设备", "filter_groups": ["A"]}))
+    assert r1.status == "ok", r1.messages
+    assert r1.metadata["n_groups"] == 1, f"筛选后应为1组: {r1.metadata['n_groups']}"
+    assert list(r1.tables["group_statistics"]["分组"]) == ["A"]
+    assert r1.metadata["groups"] == ["A", "B", "C"], "metadata.groups 必须是全量分组"
+
+    # 3) 过滤组名与新分类不匹配（旧分类残留场景）→ 回退全量，不空图
+    r2 = box_chart(AnalysisRequest(task="box_chart", data=df, target_col="y",
+                                   feature_cols=["设备", "班次"],
+                                   params={"group_col": "班次", "filter_groups": ["A"]}))
+    assert r2.status == "ok" and r2.metadata["n_groups"] == 2, f"不匹配应回退全量: {r2.metadata}"
+    assert r2.metadata["groups"] == ["早", "晚"], r2.metadata["groups"]
+
+
 def test_spc_xbar_int64_x_axis_ordered():
     """Round-2 #A5：np.int64 X 列（Excel/CSV 默认类型）必须按数值序而非字典序。"""
     from smartsuite.engine.spc_charts import _natural_sort_key
