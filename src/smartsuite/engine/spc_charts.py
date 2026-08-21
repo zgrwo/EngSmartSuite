@@ -284,6 +284,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     if has_groups:
         group_vals = data[group_col]
         group_names = sorted(group_vals.dropna().unique())
+        all_group_names = list(group_names)  # 2026-08-21 #F2：全量分组（metadata 供筛选栏常驻）
         # 支持前端筛选：仅显示指定分组
         filter_groups = req.params.get("filter_groups")
         if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
@@ -1024,7 +1025,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # 分组信息（用于前端筛选按钮）
     if has_groups:
-        metadata["groups"] = [str(g) for g in group_names if g != "_default"]
+        metadata["groups"] = [str(g) for g in all_group_names if g != "_default"]
 
     return AnalysisResult(
         task="spc_xbar",
@@ -1104,9 +1105,11 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     if has_groups:
         data["_g"] = data[group_col].values
         group_names = sorted(data["_g"].dropna().unique())
+        all_group_names = list(group_names)  # 2026-08-21 #F2：全量分组（metadata 供筛选栏常驻）
     else:
         data["_g"] = "_default"
         group_names = ["_default"]
+        all_group_names = []
 
     # ── 前端分组筛选支持 ──
     filter_groups = req.params.get("filter_groups")
@@ -1366,12 +1369,12 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
             "cl": float(cl),
             "n_points": m,
             "n_violations": violations,
-            "groups": [str(g) for g in group_names if g != "_default"],
+            "groups": [str(g) for g in all_group_names if g != "_default"],
         },
     )
 
 
-def _resolve_groups(req: AnalysisRequest) -> tuple[pd.Series, list, bool, str]:
+def _resolve_groups(req: AnalysisRequest) -> tuple[pd.Series, list, bool, str, list]:
     """解析分组参数，返回 (group_vals, group_names, has_groups, y_col)。
 
     CUSUM 和 EWMA 共享的分组解析逻辑，消除 ~15 行重复代码。
@@ -1389,6 +1392,7 @@ def _resolve_groups(req: AnalysisRequest) -> tuple[pd.Series, list, bool, str]:
         group_names = ["_default"]
 
     # ── 前端分组筛选支持 ──
+    all_group_names = list(group_names)  # 2026-08-21 #F2：全量分组（metadata 供筛选栏常驻）
     filter_groups = req.params.get("filter_groups")
     if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
         filter_set = set(str(f) for f in filter_groups)
@@ -1396,7 +1400,7 @@ def _resolve_groups(req: AnalysisRequest) -> tuple[pd.Series, list, bool, str]:
         if not group_names:
             group_names = sorted(group_vals.dropna().unique())
 
-    return group_vals, group_names, has_groups, y_col
+    return group_vals, group_names, has_groups, y_col, all_group_names
 
 
 def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -1409,7 +1413,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         sigma: 过程标准差 (如未提供，从数据估计；建议使用已知受控状态的 σ)
         group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
     """
-    group_vals, group_names, has_groups, y_col = _resolve_groups(req)
+    group_vals, group_names, has_groups, y_col, _all_groups_meta = _resolve_groups(req)
 
     # 公共参数 (cusum)
     k = req.params.get("k", 0.5)
@@ -1653,7 +1657,7 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             "h": h,
             "total_alarms": total_alarms,
             "n_groups": len(group_results),
-            "groups": [str(g) for g in all_group_names if g != "_default"],
+            "groups": [str(g) for g in _all_groups_meta if g != "_default"],
         },
     )
 
@@ -1668,7 +1672,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         sigma: 过程标准差 (如未提供，从数据估计)
         group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
     """
-    group_vals, group_names, has_groups, y_col = _resolve_groups(req)
+    group_vals, group_names, has_groups, y_col, _all_groups_meta = _resolve_groups(req)
 
     # 公共参数 (ewma)
     lam = req.params.get("lam", 0.2)
@@ -1859,7 +1863,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         "L": L,
         "total_violations": total_violations,
         "n_groups": len(group_results),
-        "groups": [str(g) for g in all_group_names if g != "_default"],
+        "groups": [str(g) for g in _all_groups_meta if g != "_default"],
     }
     if len(group_results) == 1:
         meta["mu"] = group_results[0]["mu"]

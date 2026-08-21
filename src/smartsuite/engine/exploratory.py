@@ -552,6 +552,7 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     if has_groups:
         group_vals = sub[group_col]
         group_names = sorted(group_vals.dropna().unique())
+        all_group_names = list(group_names)  # 2026-08-21 #F2：全量分组（metadata 供筛选栏常驻）
         # 支持前端筛选
         filter_groups = req.params.get("filter_groups")
         if filter_groups and isinstance(filter_groups, list) and len(filter_groups) > 0:
@@ -562,6 +563,7 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     else:
         group_vals = pd.Series("_default", index=sub.index)
         group_names = ["_default"]
+        all_group_names = []
 
     # ── 图表渲染 ──
     fig = Figure(figsize=(10, 7))
@@ -714,6 +716,6 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
             "x_col": x_col,
             "fit_type": fit_type,
             "r_squared": r_squared,
-            "groups": [str(g) for g in group_names if g != "_default"],
+            "groups": [str(g) for g in all_group_names if g != "_default"],
         },
     )
