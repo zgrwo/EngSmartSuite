@@ -936,6 +936,38 @@ def test_survival_event_column_validation():
         assert any("事件" in m for m in r.messages)
 
 
+def test_survival_group_col_param_priority():
+    """2026-08-21 发行前审查 #1：survival_analysis 分组列应优先 params.group_col。
+
+    此前仅支持 feature_cols[1]（与其余方法不一致）；params.group_col 提供时
+    必须生效（Log-rank 结果包含该列分组），且不存在的分组列返回明确中文错误。
+    """
+    from smartsuite.engine.reliability import survival_analysis
+
+    np.random.seed(5)
+    df = pd.DataFrame({
+        "t": np.random.exponential(100, 60).round(1),
+        "e": np.random.choice([0, 1], 60),
+        "组1": ["A"] * 30 + ["B"] * 30,
+        "组2": ["X"] * 40 + ["Y"] * 20,
+    })
+    # 1) params.group_col 优先于 feature_cols[1]：两组数据都要有失效事件
+    df.loc[df["组2"] == "Y", "e"] = 1
+    r = survival_analysis(AnalysisRequest(task="survival_analysis", data=df, target_col="t",
+                                          feature_cols=["e", "组1"],
+                                          params={"group_col": "组2"}))
+    assert r.status == "ok", f"params.group_col 应生效: {r.messages}"
+    lr = r.tables.get("logrank_test")
+    assert lr is not None and len(lr) > 0, f"两组均含失效事件，应生成 Log-rank 表: {list(r.tables.keys())}"
+    assert any("X vs Y" in str(row) for row in lr["分组"]), f"应比较组2(而非组1): {lr}"
+    # 2) 不存在的分组列 → 明确中文错误（不 KeyError）
+    r2 = survival_analysis(AnalysisRequest(task="survival_analysis", data=df, target_col="t",
+                                           feature_cols=["e"],
+                                           params={"group_col": "不存在列"}))
+    assert r2.status == "error"
+    assert any("分组列" in m for m in r2.messages), f"应提示分组列缺失: {r2.messages}"
+
+
 def test_ljung_box_q_matches_statsmodels():
     """Round-2 #A3a：Ljung-Box Q 与 statsmodels 参考一致（旧 np.corrcoef 偏大）。"""
     import statsmodels.stats.diagnostic as sm_diag
@@ -1229,12 +1261,11 @@ def test_distribution_summary_constant_data_graceful():
 
     df = pd.DataFrame({"v": [5.0] * 30})
     r = distribution_summary(AnalysisRequest(task="distribution_summary", data=df, target_col="v"))
-    assert r.status in ("ok", "error")
-    if r.status == "ok":
-        meta = r.metadata
-        weibull_beta = meta.get("weibull_shape") or meta.get("weibull_beta")
-        if weibull_beta is not None:
-            assert 0 < float(weibull_beta) < 100, f"Weibull 形状参数异常: {weibull_beta}"
+    # 2026-08-21 发行前审查：此前 if status=='ok' 守卫架空断言（引擎报错时测试空转通过）
+    assert r.status == "ok", f"常量数据应可评估: {r.messages}"
+    meta = r.metadata
+    weibull_beta = meta.get("weibull_shape") or meta.get("weibull_beta")
+    assert weibull_beta is None, f"常量数据不应输出拟合形状参数: {weibull_beta}"
 
 
 def test_power_analysis_p0_equals_p1_rejected():
@@ -1324,8 +1355,9 @@ def test_process_capability_boxcox_single_side_spec():
     r = process_capability_analysis(AnalysisRequest(
         task="process_capability", data=df, target_col="v",
         params={"usl": 8.0, "transform": "boxcox"}))
-    if r.status == "ok":
-        assert r.metadata.get("cpk") is not None or r.metadata.get("ppk") is not None, \
-            "单侧正规格不应被静默丢弃"
+    # 2026-08-21 发行前审查：此前 if status=='ok' 守卫架空断言
+    assert r.status == "ok", f"Box-Cox 单侧规格应可计算: {r.messages}"
+    assert r.metadata.get("cpk") is not None or r.metadata.get("ppk") is not None, \
+        "单侧正规格不应被静默丢弃"
 
 
