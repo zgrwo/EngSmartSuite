@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # 对比 PR 前后依赖清单（pyproject.toml），检测已知漏洞/恶意包
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@v5
 
   test-quality-guard:
     name: 测试质量守卫（弱断言/缺测/命名）
