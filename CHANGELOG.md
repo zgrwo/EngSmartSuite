@@ -2,6 +2,13 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.8](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.7...v1.1.8) (2026-08-23)
+
+
+### 🧹 维护
+
+* **deps:** bump actions/upload-artifact from 4 to 7 ([#13](https://github.com/zgrwo/EngSmartSuite/issues/13)) ([6550402](https://github.com/zgrwo/EngSmartSuite/commit/6550402fd3350785fa5cc0ab938f13aedde2543f))
+
 ## [1.1.7](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.6...v1.1.7) (2026-08-23)
 
 
