@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smartsuite"
-version = "1.1.6"
+version = "1.1.7"
 description = "SmartSuite — 工艺数据分析工具箱 (Flask Web UI + CLI + Python API)"
 readme = "README.md"
 requires-python = ">=3.10"
