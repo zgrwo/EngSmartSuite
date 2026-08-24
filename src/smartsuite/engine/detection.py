@@ -24,23 +24,32 @@ from smartsuite.engine._utils import durbin_watson
 logger = logging.getLogger(__name__)
 
 
+def _acf_values(residuals, max_lag):
+    """标准自相关序列 r_0..r_max_lag（全样本均值定义）。
+
+    Round-2 #A3a：np.corrcoef 对两段残差分别减各自均值 → 自相关系统性偏大
+    （白噪声 p≈0.04 可翻转 0.05 阈值）；此处统一采用全样本均值的标准自相关定义，
+    与 Ljung-Box 检验、statsmodels acf 一致。r_0 恒为 1.0；零方差残差除 r_0 外返回 0。
+    """
+    x = np.asarray(residuals, dtype=float)
+    mean = float(x.mean())
+    denom = float(np.sum((x - mean) ** 2))
+    if denom <= 1e-12:
+        return [1.0] + [0.0] * max_lag  # 零方差残差：除 lag0 外自相关无定义
+    return [1.0] + [
+        float(np.sum((x[:-k] - mean) * (x[k:] - mean)) / denom) for k in range(1, max_lag + 1)
+    ]
+
+
 def _ljung_box(residuals, lags=None):
     """Ljung-Box 检验 — 残差自相关的整体显著性检验。"""
     n = len(residuals)
     if lags is None:
         lags = min(10, n // 5)
     lags = max(1, min(lags, n // 2))
-    # Round-2 #A3a：np.corrcoef 对两段残差分别减各自均值 → 自相关系统性偏大
-    # （白噪声 p≈0.04 可翻转 0.05 阈值）；改用全样本均值的标准自相关定义
-    _mean = float(np.mean(residuals))
-    _denom = float(np.sum((residuals - _mean) ** 2))
-    acf_sum = 0.0
-    for k in range(1, lags + 1):
-        if _denom <= 1e-12:
-            r_k = 0.0  # 零方差残差
-        else:
-            r_k = float(np.sum((residuals[:-k] - _mean) * (residuals[k:] - _mean)) / _denom)
-        acf_sum += r_k**2 / (n - k)
+    # Round-2 #A3a：使用全样本均值的标准自相关定义（见 _acf_values）
+    acfs = _acf_values(residuals, lags)
+    acf_sum = sum(acfs[k] ** 2 / (n - k) for k in range(1, lags + 1))
     q_stat = n * (n + 2) * acf_sum
     p_val = float(sp_stats.chi2.sf(q_stat, lags))
     return float(q_stat), p_val, lags
@@ -191,16 +200,10 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
         trend_dir = "上升" if model.coef_[0] > 0 else "下降"
 
-        # ── ACF 计算 ──
+        # ── ACF 计算（Round-2 #A3a：全样本均值标准自相关，与 Ljung-Box 一致）──
         max_lag = min(20, n // 4)
-        acf_vals = []
+        acf_vals = _acf_values(residuals, max_lag)
         acf_conf = float(sp_stats.norm.ppf(0.975)) / np.sqrt(n)  # 95% 置信限
-        for lag in range(max_lag + 1):
-            if lag == 0:
-                acf_vals.append(1.0)
-            else:
-                r = np.corrcoef(residuals[lag:], residuals[:-lag])[0, 1]
-                acf_vals.append(float(r))
 
         # ── 增强图表：2×2 布局 ──
         fig = Figure(figsize=(13, 9))
