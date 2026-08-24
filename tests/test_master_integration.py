@@ -1,4 +1,5 @@
 """主集成测试 — 验证所有 TASK_REGISTRY 函数可被调用并返回合理结果。"""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,23 +12,25 @@ from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 def df():
     np.random.seed(42)
     n = 100
-    return pd.DataFrame({
-        "x1": np.random.normal(10, 2, n),
-        "x2": np.random.normal(20, 3, n),
-        "x3": np.random.normal(5, 1, n),
-        "y": np.random.normal(50, 10, n),
-        "group": np.random.choice(["A", "B", "C"], n),
-        "binary": np.random.choice([0, 1], n),
-        "cat1": np.random.choice(["X", "Y"], n),
-        "cat2": np.random.choice(["P", "Q"], n),
-        "before": np.random.normal(30, 5, n),
-        "after": np.random.normal(30, 5, n) + 3,
-        "item1": np.random.normal(5, 1, n),
-        "item2": np.random.normal(5, 1, n),
-        "item3": np.random.normal(5, 1, n),
-        "time": np.arange(n),
-        "event": np.random.choice([0, 1], n, p=[0.7, 0.3]),
-    })
+    return pd.DataFrame(
+        {
+            "x1": np.random.normal(10, 2, n),
+            "x2": np.random.normal(20, 3, n),
+            "x3": np.random.normal(5, 1, n),
+            "y": np.random.normal(50, 10, n),
+            "group": np.random.choice(["A", "B", "C"], n),
+            "binary": np.random.choice([0, 1], n),
+            "cat1": np.random.choice(["X", "Y"], n),
+            "cat2": np.random.choice(["P", "Q"], n),
+            "before": np.random.normal(30, 5, n),
+            "after": np.random.normal(30, 5, n) + 3,
+            "item1": np.random.normal(5, 1, n),
+            "item2": np.random.normal(5, 1, n),
+            "item3": np.random.normal(5, 1, n),
+            "time": np.arange(n),
+            "event": np.random.choice([0, 1], n, p=[0.7, 0.3]),
+        }
+    )
 
 
 # Test every registered task at least once
@@ -66,7 +69,12 @@ TASKS_TO_TEST = [
     ("normality_check", "y", ["x1", "x2", "x3"]),
     ("distribution_summary", "y", [], {}),
     ("power_analysis", "", [], {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5}),
-    ("power_analysis", "", [], {"mode": "achieved", "test_type": "proportion", "current_n": 50, "p0": 0.5, "p1": 0.6}),
+    (
+        "power_analysis",
+        "",
+        [],
+        {"mode": "achieved", "test_type": "proportion", "current_n": 50, "p0": 0.5, "p1": 0.6},
+    ),
     ("contingency", "cat1", ["cat2"]),
     ("proportion_ci", "binary", [], {}),
     ("variance_test", "y", ["group"], {"group_col": "group"}),
@@ -89,13 +97,15 @@ TASKS_TO_TEST = [
 ]
 
 
-@pytest.mark.parametrize("task,target,features,params", [
-    (t[0], t[1], t[2], t[3] if len(t) > 3 else {}) for t in TASKS_TO_TEST
-])
+@pytest.mark.parametrize(
+    "task,target,features,params",
+    [(t[0], t[1], t[2], t[3] if len(t) > 3 else {}) for t in TASKS_TO_TEST],
+)
 def test_all_registered_tasks(df, task, target, features, params):
     """参数化测试: 每个注册任务 + 参数变体至少运行一次。"""
-    req = AnalysisRequest(task=task, data=df, target_col=target,
-                          feature_cols=features, params=params)
+    req = AnalysisRequest(
+        task=task, data=df, target_col=target, feature_cols=features, params=params
+    )
     result = orchestrate(req)
     # 审查 2026-08-19 #3.4：移除恒真 status in (ok,error) 断言；
     # 结构性检查（tables/figures/metadata 契约）无条件执行，不因 status 分支跳过
@@ -106,8 +116,7 @@ def test_all_registered_tasks(df, task, target, features, params):
 
     if result.status == "ok":
         # 成功结果必须包含有意义的输出
-        assert isinstance(result.summary, str) and len(result.summary) > 0, (
-            f"{task}: summary 为空")
+        assert isinstance(result.summary, str) and len(result.summary) > 0, f"{task}: summary 为空"
     else:
         # 错误结果必须包含错误消息
         assert len(result.messages) > 0, f"{task}: error 但没有 messages"
@@ -117,8 +126,16 @@ def test_all_registered_tasks(df, task, target, features, params):
 def test_all_tasks_registered_count():
     """验证任务注册表完整性。"""
     assert len(TASK_REGISTRY) == 40, f"Expected 40 tasks, got {len(TASK_REGISTRY)}"
-    required = ["correlation", "anova", "regression", "hypothesis_test",
-               "decision_tree", "vif", "normality_check", "distribution_summary"]
+    required = [
+        "correlation",
+        "anova",
+        "regression",
+        "hypothesis_test",
+        "decision_tree",
+        "vif",
+        "normality_check",
+        "distribution_summary",
+    ]
     for t in required:
         assert t in TASK_REGISTRY, f"Missing: {t}"
 

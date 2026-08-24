@@ -29,24 +29,26 @@ from smartsuite.engine.spc_monitor import (
 # 通用崩溃测试: 任何输入都不能导致未处理异常
 # ═══════════════════════════════════════════════════════════
 
+
 def _assert_no_crash(result, func_name, context=""):
     """分析结果必须 status in ('ok', 'error') — 不能抛出未处理异常。"""
-    assert result.status in ("ok", "error"), \
-        f"{func_name} ({context}): 未知状态 '{result.status}'"
+    assert result.status in ("ok", "error"), f"{func_name} ({context}): 未知状态 '{result.status}'"
 
 
 # ── 相关性 ──
 
+
 def test_correlation_with_nan():
     """NaN 数据不应使相关性分析崩溃。"""
     np.random.seed(42)
-    df = pd.DataFrame({
-        "x": np.random.normal(0, 1, 30),
-        "y": np.random.normal(0, 1, 30),
-    })
+    df = pd.DataFrame(
+        {
+            "x": np.random.normal(0, 1, 30),
+            "y": np.random.normal(0, 1, 30),
+        }
+    )
     df.loc[0, "x"] = np.nan
-    req = AnalysisRequest(task="correlation", data=df, target_col="y",
-                          feature_cols=["x"])
+    req = AnalysisRequest(task="correlation", data=df, target_col="y", feature_cols=["x"])
     result = correlation_analysis(req)
     _assert_no_crash(result, "correlation", "NaN")
 
@@ -54,8 +56,7 @@ def test_correlation_with_nan():
 def test_correlation_constant_column():
     """常数列（标准差 0）的相关系数应合理处理。"""
     df = pd.DataFrame({"x": [5.0] * 20, "y": np.random.normal(0, 1, 20)})
-    req = AnalysisRequest(task="correlation", data=df, target_col="y",
-                          feature_cols=["x"])
+    req = AnalysisRequest(task="correlation", data=df, target_col="y", feature_cols=["x"])
     result = correlation_analysis(req)
     _assert_no_crash(result, "correlation", "constant")
     # 审查 2026-08-19 #3.4：守卫改硬断言——常量特征列应返回明确中文错误
@@ -65,23 +66,24 @@ def test_correlation_constant_column():
 
 # ── ANOVA ──
 
+
 def test_anova_two_rows():
     """只有 2 行数据时 ANOVA 不应崩溃。"""
     df = pd.DataFrame({"group": ["A", "B"], "val": [1.0, 2.0]})
-    req = AnalysisRequest(task="anova", data=df, target_col="val",
-                          feature_cols=["group"])
+    req = AnalysisRequest(task="anova", data=df, target_col="val", feature_cols=["group"])
     result = anova_analysis(req)
     _assert_no_crash(result, "anova", "2 rows")
 
 
 def test_anova_constant_target():
     """目标列全部相同时 ANOVA 不应崩溃。"""
-    df = pd.DataFrame({
-        "group": ["A"] * 10 + ["B"] * 10,
-        "val": [5.0] * 20,
-    })
-    req = AnalysisRequest(task="anova", data=df, target_col="val",
-                          feature_cols=["group"])
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * 10 + ["B"] * 10,
+            "val": [5.0] * 20,
+        }
+    )
+    req = AnalysisRequest(task="anova", data=df, target_col="val", feature_cols=["group"])
     result = anova_analysis(req)
     _assert_no_crash(result, "anova", "constant target")
 
@@ -90,23 +92,24 @@ def test_anova_large_n():
     """大样本 (n>5000) ANOVA 不应崩溃 + 应提示 Shapiro-Wilk 不适用。"""
     np.random.seed(42)
     n = 6000
-    df = pd.DataFrame({
-        "group": ["A"] * (n // 3) + ["B"] * (n // 3) + ["C"] * (n - 2 * (n // 3)),
-        "val": np.random.normal(10, 1, n),
-    })
-    req = AnalysisRequest(task="anova", data=df, target_col="val",
-                          feature_cols=["group"])
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * (n // 3) + ["B"] * (n // 3) + ["C"] * (n - 2 * (n // 3)),
+            "val": np.random.normal(10, 1, n),
+        }
+    )
+    req = AnalysisRequest(task="anova", data=df, target_col="val", feature_cols=["group"])
     result = anova_analysis(req)
     _assert_no_crash(result, "anova", "large n")
 
 
 # ── 回归 ──
 
+
 def test_regression_single_row():
     """单行回归不应崩溃。"""
     df = pd.DataFrame({"x": [1.0], "y": [2.0]})
-    req = AnalysisRequest(task="regression", data=df, target_col="y",
-                          feature_cols=["x"])
+    req = AnalysisRequest(task="regression", data=df, target_col="y", feature_cols=["x"])
     result = regression_analysis(req)
     _assert_no_crash(result, "regression", "1 row")
 
@@ -116,24 +119,27 @@ def test_regression_perfect_collinear():
     np.random.seed(42)
     n = 50
     x1 = np.random.normal(0, 1, n)
-    df = pd.DataFrame({
-        "x1": x1,
-        "x2": x1 * 2,  # 完全共线
-        "y": np.random.normal(0, 1, n),
-    })
-    req = AnalysisRequest(task="regression", data=df, target_col="y",
-                          feature_cols=["x1", "x2"])
+    df = pd.DataFrame(
+        {
+            "x1": x1,
+            "x2": x1 * 2,  # 完全共线
+            "y": np.random.normal(0, 1, n),
+        }
+    )
+    req = AnalysisRequest(task="regression", data=df, target_col="y", feature_cols=["x1", "x2"])
     result = regression_analysis(req)
     _assert_no_crash(result, "regression", "collinear")
 
 
 # ── 过程能力 ──
 
+
 def test_capability_zero_variance():
     """标准差为 0 的过程能力分析不应崩溃。"""
     df = pd.DataFrame({"val": [10.0] * 100})
-    req = AnalysisRequest(task="process_capability", data=df, target_col="val",
-                          params={"usl": 12.0, "lsl": 8.0})
+    req = AnalysisRequest(
+        task="process_capability", data=df, target_col="val", params={"usl": 12.0, "lsl": 8.0}
+    )
     result = process_capability_analysis(req)
     _assert_no_crash(result, "process_capability", "zero variance")
 
@@ -142,13 +148,15 @@ def test_capability_inverted_specs():
     """LSL > USL 时应优雅处理。"""
     np.random.seed(42)
     df = pd.DataFrame({"val": np.random.normal(10, 1, 100)})
-    req = AnalysisRequest(task="process_capability", data=df, target_col="val",
-                          params={"usl": 8.0, "lsl": 12.0})  # 倒置
+    req = AnalysisRequest(
+        task="process_capability", data=df, target_col="val", params={"usl": 8.0, "lsl": 12.0}
+    )  # 倒置
     result = process_capability_analysis(req)
     _assert_no_crash(result, "process_capability", "inverted specs")
 
 
 # ── SPC 控制图 ──
+
 
 def test_xbar_single_subgroup():
     """单个子组时 X-bar 图不应崩溃。"""
@@ -156,8 +164,9 @@ def test_xbar_single_subgroup():
     for _ in range(5):
         data.append({"子组": 1, "val": np.random.normal(10, 1)})
     df = pd.DataFrame(data)
-    req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
-                          feature_cols=["子组"], params={})
+    req = AnalysisRequest(
+        task="spc_xbar", data=df, target_col="val", feature_cols=["子组"], params={}
+    )
     result = xbar_r_chart(req)
     _assert_no_crash(result, "xbar_r", "1 subgroup")
 
@@ -171,19 +180,20 @@ def test_xbar_unequal_subgroups():
         for _ in range(n_samples):
             data.append({"子组": sg, "val": np.random.normal(10, 1)})
     df = pd.DataFrame(data)
-    req = AnalysisRequest(task="spc_xbar", data=df, target_col="val",
-                          feature_cols=["子组"], params={})
+    req = AnalysisRequest(
+        task="spc_xbar", data=df, target_col="val", feature_cols=["子组"], params={}
+    )
     result = xbar_r_chart(req)
     _assert_no_crash(result, "xbar_r", "unequal subgroups")
 
 
 # ── CUSUM/EWMA ──
 
+
 def test_cusum_two_points():
     """2 个数据点 CUSUM 不应崩溃。"""
     df = pd.DataFrame({"val": [10.0, 10.5]})
-    req = AnalysisRequest(task="spc_cusum", data=df, target_col="val",
-                          params={"k": 0.5, "h": 5.0})
+    req = AnalysisRequest(task="spc_cusum", data=df, target_col="val", params={"k": 0.5, "h": 5.0})
     result = cusum_chart(req)
     _assert_no_crash(result, "cusum", "2 points")
 
@@ -191,64 +201,82 @@ def test_cusum_two_points():
 def test_ewma_constant_data():
     """常量数据 EWMA 不应崩溃 + 控制限应包含 CL。"""
     df = pd.DataFrame({"val": [10.0] * 50})
-    req = AnalysisRequest(task="spc_ewma", data=df, target_col="val",
-                          params={"lam": 0.2, "L": 2.7})
+    req = AnalysisRequest(task="spc_ewma", data=df, target_col="val", params={"lam": 0.2, "L": 2.7})
     result = ewma_chart(req)
     _assert_no_crash(result, "ewma", "constant")
 
 
 # ── 假设检验 ──
 
+
 def test_ttest_two_values():
     """每组 1 个数据点的 t 检验不应崩溃。"""
     df = pd.DataFrame({"group": ["A", "B"], "val": [1.0, 2.0]})
-    req = AnalysisRequest(task="hypothesis_test", data=df, target_col="val",
-                          feature_cols=["group"], params={"group_col": "group"})
+    req = AnalysisRequest(
+        task="hypothesis_test",
+        data=df,
+        target_col="val",
+        feature_cols=["group"],
+        params={"group_col": "group"},
+    )
     result = hypothesis_test(req)
     _assert_no_crash(result, "hypothesis_test", "2 values")
 
 
 # ── 列联表 ──
 
+
 def test_contingency_all_same():
     """所有数据在同一单元格的列联表不应崩溃。"""
-    df = pd.DataFrame({
-        "x": ["A"] * 50,
-        "y": ["X"] * 50,
-    })
-    req = AnalysisRequest(task="contingency", data=df, target_col="x",
-                          feature_cols=["y"])
+    df = pd.DataFrame(
+        {
+            "x": ["A"] * 50,
+            "y": ["X"] * 50,
+        }
+    )
+    req = AnalysisRequest(task="contingency", data=df, target_col="x", feature_cols=["y"])
     result = contingency_analysis(req)
     _assert_no_crash(result, "contingency", "all same")
 
 
 # ── 生存分析 ──
 
+
 def test_survival_all_censored():
     """全部删失的生存分析不应崩溃。"""
     np.random.seed(42)
-    df = pd.DataFrame({
-        "time": np.random.exponential(10, 50),
-        "event": [0] * 50,  # 全部删失
-    })
-    req = AnalysisRequest(task="survival_analysis", data=df, target_col="time",
-                          feature_cols=["event"])
+    df = pd.DataFrame(
+        {
+            "time": np.random.exponential(10, 50),
+            "event": [0] * 50,  # 全部删失
+        }
+    )
+    req = AnalysisRequest(
+        task="survival_analysis", data=df, target_col="time", feature_cols=["event"]
+    )
     result = survival_analysis(req)
     _assert_no_crash(result, "survival", "all censored")
 
 
 # ── 网格搜索 ──
 
+
 def test_grid_search_five_points():
     """只有 5 个数据点的网格搜索 (边界 cv=1 → 现在已修复为 cv=2) 不应崩溃。"""
     np.random.seed(42)
     n = 5
-    df = pd.DataFrame({
-        "x": np.random.uniform(0, 10, n),
-        "y": np.random.normal(0, 1, n),
-    })
-    req = AnalysisRequest(task="grid_search", data=df, target_col="y",
-                          feature_cols=["x"],
-                          params={"ranges": {"x": (0, 10)}, "n_points": 3})
+    df = pd.DataFrame(
+        {
+            "x": np.random.uniform(0, 10, n),
+            "y": np.random.normal(0, 1, n),
+        }
+    )
+    req = AnalysisRequest(
+        task="grid_search",
+        data=df,
+        target_col="y",
+        feature_cols=["x"],
+        params={"ranges": {"x": (0, 10)}, "n_points": 3},
+    )
     result = grid_search(req)
     _assert_no_crash(result, "grid_search", "5 points")

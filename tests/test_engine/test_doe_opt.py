@@ -90,19 +90,23 @@ def test_doe_factorial_analysis(sample_doe_data):
     result = doe_analysis(req)
     assert result.status == "ok"
     assert "effect_estimates" in result.tables
+
+
 def test_lasso_cv_floor_small_sample():
     """审查 2026-08-19 #1.4：dropna 后仅 4-5 行时 LassoCV cv 不得为 1（InvalidParameterError）。"""
-    from smartsuite.engine.doe_opt import lasso_regression
 
     np.random.seed(1)
-    df = pd.DataFrame({
-        "x1": np.random.normal(0, 1, 6),
-        "x2": np.random.normal(0, 1, 6),
-        "y": np.random.normal(0, 1, 6),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": np.random.normal(0, 1, 6),
+            "x2": np.random.normal(0, 1, 6),
+            "y": np.random.normal(0, 1, 6),
+        }
+    )
     df.loc[0:1, "x1"] = np.nan  # dropna 后剩 4 行
-    req = AnalysisRequest(task="lasso_regression", data=df, target_col="y",
-                          feature_cols=["x1", "x2"])
+    req = AnalysisRequest(
+        task="lasso_regression", data=df, target_col="y", feature_cols=["x1", "x2"]
+    )
     result = lasso_regression(req)
     # 不再抛 InvalidParameterError（可能因样本过少返回 error，但必须是明确消息而非异常冒泡）
     assert result.status in ("ok", "error")
@@ -111,11 +115,9 @@ def test_lasso_cv_floor_small_sample():
 
 def test_roc_all_nan_target():
     """审查 2026-08-19 #1.4：目标/预测列全 NaN → 中文错误而非 IndexError。"""
-    from smartsuite.engine.doe_opt import roc_analysis
 
     df = pd.DataFrame({"score": [np.nan] * 5, "label": [np.nan] * 5})
-    req = AnalysisRequest(task="roc_analysis", data=df, target_col="label",
-                          feature_cols=["score"])
+    req = AnalysisRequest(task="roc_analysis", data=df, target_col="label", feature_cols=["score"])
     result = roc_analysis(req)
     assert result.status == "error"
     assert any("2 个类别" in m or "类别" in m for m in result.messages)
@@ -126,13 +128,19 @@ def test_grid_search_nan_ranges_rejected():
     from smartsuite.engine.doe_opt import grid_search
 
     np.random.seed(1)
-    df = pd.DataFrame({
-        "料温": np.random.uniform(170, 190, 30),
-        "强度": np.random.normal(50, 5, 30),
-    })
-    req = AnalysisRequest(task="grid_search", data=df, target_col="强度",
-                          feature_cols=["料温"],
-                          params={"ranges": {"料温": [float("nan"), float("nan")]}})
+    df = pd.DataFrame(
+        {
+            "料温": np.random.uniform(170, 190, 30),
+            "强度": np.random.normal(50, 5, 30),
+        }
+    )
+    req = AnalysisRequest(
+        task="grid_search",
+        data=df,
+        target_col="强度",
+        feature_cols=["料温"],
+        params={"ranges": {"料温": [float("nan"), float("nan")]}},
+    )
     result = grid_search(req)
     assert result.status == "error"
     assert any("NaN" in m or "无效" in m for m in result.messages)
@@ -143,13 +151,19 @@ def test_grid_search_invalid_direction_rejected():
     from smartsuite.engine.doe_opt import grid_search
 
     np.random.seed(1)
-    df = pd.DataFrame({
-        "料温": np.random.uniform(170, 190, 30),
-        "强度": np.random.normal(50, 5, 30),
-    })
-    req = AnalysisRequest(task="grid_search", data=df, target_col="强度",
-                          feature_cols=["料温"],
-                          params={"ranges": {"料温": [170, 190]}, "direction": "max"})
+    df = pd.DataFrame(
+        {
+            "料温": np.random.uniform(170, 190, 30),
+            "强度": np.random.normal(50, 5, 30),
+        }
+    )
+    req = AnalysisRequest(
+        task="grid_search",
+        data=df,
+        target_col="强度",
+        feature_cols=["料温"],
+        params={"ranges": {"料温": [170, 190]}, "direction": "max"},
+    )
     result = grid_search(req)
     assert result.status == "error"
     assert any("direction" in m for m in result.messages)
@@ -171,11 +185,13 @@ def test_multi_objective_weights_strings_rejected():
     from smartsuite.engine.doe_opt import multi_objective_opt
 
     df = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [3.0, 2.0, 1.0]})
-    req = AnalysisRequest(task="multi_objective", data=df, target_col="",
-                          feature_cols=["a"],
-                          params={"objectives": [{"col": "a", "direction": "maximize"}],
-                                  "weights": ["1.0", "oops"]})
+    req = AnalysisRequest(
+        task="multi_objective",
+        data=df,
+        target_col="",
+        feature_cols=["a"],
+        params={"objectives": [{"col": "a", "direction": "maximize"}], "weights": ["1.0", "oops"]},
+    )
     result = multi_objective_opt(req)
     assert result.status == "error"
     assert any("权重" in m for m in result.messages)
-

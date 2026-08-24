@@ -27,9 +27,7 @@ def sample_spc_data() -> pd.DataFrame:
     rows = []
     for subgroup in range(1, 31):
         for sample in range(1, 6):
-            rows.append(
-                {"子组": subgroup, "样本": sample, "测量值": np.random.normal(10.0, 0.5)}
-            )
+            rows.append({"子组": subgroup, "样本": sample, "测量值": np.random.normal(10.0, 0.5)})
     return pd.DataFrame(rows)
 
 
@@ -40,5 +38,3 @@ def sample_two_group_data() -> pd.DataFrame:
     old = pd.DataFrame({"工艺": "旧工艺", "强度": np.random.normal(44, 3, 20)})
     new = pd.DataFrame({"工艺": "新工艺", "强度": np.random.normal(47, 3, 20)})
     return pd.concat([old, new], ignore_index=True)
-
-

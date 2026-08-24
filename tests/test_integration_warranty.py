@@ -1,4 +1,5 @@
 """保修数据集集成测试。"""
+
 import os
 
 import pandas as pd
@@ -22,41 +23,62 @@ def test_warranty_data_loaded(war_df):
 
 
 def test_logistic_warranty(war_df):
-    r = orchestrate(AnalysisRequest(
-        task="logistic_regression", data=war_df, target_col="保修索赔",
-        feature_cols=["环境温度", "湿度", "每日循环", "运行小时"],
-    ))
+    r = orchestrate(
+        AnalysisRequest(
+            task="logistic_regression",
+            data=war_df,
+            target_col="保修索赔",
+            feature_cols=["环境温度", "湿度", "每日循环", "运行小时"],
+        )
+    )
     assert r.status == "ok"
     assert r.metadata["accuracy"] > 0.5
 
 
 def test_correlation_warranty(war_df):
-    r = orchestrate(AnalysisRequest(
-        task="correlation", data=war_df, target_col="满意度",
-        feature_cols=["维修费用", "维修工时", "运行小时", "环境温度"],
-    ))
+    r = orchestrate(
+        AnalysisRequest(
+            task="correlation",
+            data=war_df,
+            target_col="满意度",
+            feature_cols=["维修费用", "维修工时", "运行小时", "环境温度"],
+        )
+    )
     assert r.status == "ok"
 
 
 def test_contingency_warranty(war_df):
-    r = orchestrate(AnalysisRequest(
-        task="contingency", data=war_df, target_col="保修索赔",
-        feature_cols=["粉尘等级"],
-    ))
+    r = orchestrate(
+        AnalysisRequest(
+            task="contingency",
+            data=war_df,
+            target_col="保修索赔",
+            feature_cols=["粉尘等级"],
+        )
+    )
     assert r.status == "ok"
 
 
 def test_proportion_warranty(war_df):
-    r = orchestrate(AnalysisRequest(
-        task="proportion_ci", data=war_df, target_col="保修索赔",
-        feature_cols=[], params={"success_value": 1},
-    ))
+    r = orchestrate(
+        AnalysisRequest(
+            task="proportion_ci",
+            data=war_df,
+            target_col="保修索赔",
+            feature_cols=[],
+            params={"success_value": 1},
+        )
+    )
     assert r.status == "ok"
 
 
 def test_anova_warranty(war_df):
-    r = orchestrate(AnalysisRequest(
-        task="anova", data=war_df, target_col="满意度",
-        feature_cols=["产品型号", "区域"],
-    ))
+    r = orchestrate(
+        AnalysisRequest(
+            task="anova",
+            data=war_df,
+            target_col="满意度",
+            feature_cols=["产品型号", "区域"],
+        )
+    )
     assert r.status == "ok"

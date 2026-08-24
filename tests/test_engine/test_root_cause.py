@@ -56,8 +56,10 @@ def test_anova_basic(sample_doe_data):
 
 def test_hypothesis_test_two_sample(sample_two_group_data):
     req = AnalysisRequest(
-        task="hypothesis_test", data=sample_two_group_data,
-        target_col="强度", feature_cols=["工艺"],
+        task="hypothesis_test",
+        data=sample_two_group_data,
+        target_col="强度",
+        feature_cols=["工艺"],
         params={"test": "ttest_ind", "group_col": "工艺"},
     )
     result = hypothesis_test(req)
@@ -68,7 +70,8 @@ def test_hypothesis_test_two_sample(sample_two_group_data):
 
 def test_decision_tree(sample_doe_data):
     req = AnalysisRequest(
-        task="decision_tree", data=sample_doe_data,
+        task="decision_tree",
+        data=sample_doe_data,
         target_col="不良率",
         feature_cols=["料温", "模温", "注射压力", "保压时间", "强度"],
         params={"max_depth": 3},
@@ -83,7 +86,8 @@ def test_decision_tree(sample_doe_data):
 
 def test_vif_analysis(sample_doe_data):
     req = AnalysisRequest(
-        task="vif", data=sample_doe_data,
+        task="vif",
+        data=sample_doe_data,
         target_col="不良率",
         feature_cols=["料温", "模温", "注射压力", "保压时间"],
     )
@@ -103,14 +107,20 @@ def test_mcnemar_numeric_binary_data():
     after = np.array([1] * 22 + [0] * 3 + [0] * 3 + [1] * 22)
     df = pd.DataFrame({"before": before, "after": after})
 
-    req = AnalysisRequest(task="hypothesis_test", data=df, target_col="before",
-                          feature_cols=["before", "after"],
-                          params={"test": "mcnemar"})
+    req = AnalysisRequest(
+        task="hypothesis_test",
+        data=df,
+        target_col="before",
+        feature_cols=["before", "after"],
+        params={"test": "mcnemar"},
+    )
     result = hypothesis_test(req)
     assert result.status == "ok"
     # b≈3, c≈22 → McNemar 应高度显著（p << 0.001）
     p_val = result.metadata["p_value"]
-    assert p_val < 0.001, f"McNemar should detect significant change, got p={p_val:.4f} (bug: all counts may be zero)"
+    assert p_val < 0.001, (
+        f"McNemar should detect significant change, got p={p_val:.4f} (bug: all counts may be zero)"
+    )
 
 
 def test_cronbach_zero_variance_item():
@@ -124,13 +134,16 @@ def test_cronbach_zero_variance_item():
     from smartsuite.core.contracts import AnalysisRequest
 
     # 一个题项零方差（所有值相同）
-    df = pd.DataFrame({
-        "item1": [5.0, 5.0, 5.0, 5.0, 5.0],  # 零方差
-        "item2": [1.0, 3.0, 2.0, 4.0, 3.0],
-        "item3": [2.0, 4.0, 3.0, 5.0, 4.0],
-    })
-    req = AnalysisRequest(task="cronbach_alpha", data=df, target_col="item1",
-                          feature_cols=["item1", "item2", "item3"])
+    df = pd.DataFrame(
+        {
+            "item1": [5.0, 5.0, 5.0, 5.0, 5.0],  # 零方差
+            "item2": [1.0, 3.0, 2.0, 4.0, 3.0],
+            "item3": [2.0, 4.0, 3.0, 5.0, 4.0],
+        }
+    )
+    req = AnalysisRequest(
+        task="cronbach_alpha", data=df, target_col="item1", feature_cols=["item1", "item2", "item3"]
+    )
     result = cronbach_alpha(req)
     assert result.status == "ok", f"零方差题项应可计算 α: {result.messages}"
     alpha = result.metadata["alpha"]
@@ -143,14 +156,18 @@ def test_cronbach_zero_variance_item():
         f"零方差题项应标记 'N/A (零方差)': {zero_row.iloc[0]['项总相关']}"
     )
     assert float(zero_row.iloc[0]["方差"]) == 0.0
+
+
 def test_hypothesis_kruskal_group_col_none_injection(sample_two_group_data):
     """审查 2026-08-19 #1.1：orchestrator 注入 group_col=None 时 kruskal 分支不得 KeyError，
     应回退到 feature_cols[0]。"""
     from smartsuite.services.orchestrator import orchestrate
 
     req = AnalysisRequest(
-        task="hypothesis_test", data=sample_two_group_data,
-        target_col="强度", feature_cols=["工艺"],
+        task="hypothesis_test",
+        data=sample_two_group_data,
+        target_col="强度",
+        feature_cols=["工艺"],
         params={"test": "kruskal", "alpha": 0.05},  # 不传 group_col → orchestrator 注入 None
     )
     result = orchestrate(req)
@@ -163,15 +180,23 @@ def test_hypothesis_jonckheere_group_col_none_injection():
     from smartsuite.services.orchestrator import orchestrate
 
     rng = np.random.RandomState(7)
-    df = pd.DataFrame({
-        "val": np.concatenate([
-            rng.normal(10, 1, 12), rng.normal(12, 1, 12), rng.normal(14, 1, 12),
-        ]),
-        "level": ["低"] * 12 + ["中"] * 12 + ["高"] * 12,
-    })
+    df = pd.DataFrame(
+        {
+            "val": np.concatenate(
+                [
+                    rng.normal(10, 1, 12),
+                    rng.normal(12, 1, 12),
+                    rng.normal(14, 1, 12),
+                ]
+            ),
+            "level": ["低"] * 12 + ["中"] * 12 + ["高"] * 12,
+        }
+    )
     req = AnalysisRequest(
-        task="hypothesis_test", data=df,
-        target_col="val", feature_cols=["level"],
+        task="hypothesis_test",
+        data=df,
+        target_col="val",
+        feature_cols=["level"],
         params={"test": "jonckheere", "alpha": 0.05},
     )
     result = orchestrate(req)
@@ -185,8 +210,10 @@ def test_hypothesis_kruskal_group_col_missing_column():
 
     df = pd.DataFrame({"val": np.random.RandomState(1).normal(0, 1, 30)})
     req = AnalysisRequest(
-        task="hypothesis_test", data=df,
-        target_col="val", feature_cols=[],
+        task="hypothesis_test",
+        data=df,
+        target_col="val",
+        feature_cols=[],
         params={"test": "kruskal", "group_col": "不存在的列", "alpha": 0.05},
     )
     result = orchestrate(req)
@@ -200,12 +227,19 @@ def test_hypothesis_ks_group_col_none_injection():
     from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(7)
-    df = pd.DataFrame({
-        "y": np.concatenate([np.random.normal(10, 1, 50), np.random.normal(12, 1, 50)]),
-        "g": ["A"] * 50 + ["B"] * 50,
-    })
-    req = AnalysisRequest(task="hypothesis_test", data=df, target_col="y",
-                          feature_cols=["g"], params={"test": "ks", "alpha": 0.05})
+    df = pd.DataFrame(
+        {
+            "y": np.concatenate([np.random.normal(10, 1, 50), np.random.normal(12, 1, 50)]),
+            "g": ["A"] * 50 + ["B"] * 50,
+        }
+    )
+    req = AnalysisRequest(
+        task="hypothesis_test",
+        data=df,
+        target_col="y",
+        feature_cols=["g"],
+        params={"test": "ks", "alpha": 0.05},
+    )
     result = orchestrate(req)
     assert result.status == "ok", f"KS group_col=None 注入应正常: {result.messages}"
     assert "Kolmogorov-Smirnov" in result.metadata.get("test", ""), (
@@ -219,12 +253,19 @@ def test_hypothesis_ttest_ind_group_col_none_injection():
     from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(7)
-    df = pd.DataFrame({
-        "y": np.concatenate([np.random.normal(10, 1, 50), np.random.normal(12, 1, 50)]),
-        "g": ["A"] * 50 + ["B"] * 50,
-    })
-    req = AnalysisRequest(task="hypothesis_test", data=df, target_col="y",
-                          feature_cols=["g"], params={"test": "ttest_ind", "alpha": 0.05})
+    df = pd.DataFrame(
+        {
+            "y": np.concatenate([np.random.normal(10, 1, 50), np.random.normal(12, 1, 50)]),
+            "g": ["A"] * 50 + ["B"] * 50,
+        }
+    )
+    req = AnalysisRequest(
+        task="hypothesis_test",
+        data=df,
+        target_col="y",
+        feature_cols=["g"],
+        params={"test": "ttest_ind", "alpha": 0.05},
+    )
     result = orchestrate(req)
     assert result.status == "ok", f"ttest_ind group_col=None 注入应正常: {result.messages}"
     assert result.metadata.get("p_value") is not None

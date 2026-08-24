@@ -98,8 +98,9 @@ def test_xbar_constants_correct_limits():
     # 引擎输出的控制限字符串 → float 比较
     xbar_row = limits[limits["统计量"] == "X-bar"].iloc[0]
     r_row = limits[limits["统计量"] == "R"].iloc[0]
-    assert abs(float(xbar_row["UCL"]) - expected_ucl_x) < 0.01, \
+    assert abs(float(xbar_row["UCL"]) - expected_ucl_x) < 0.01, (
         f"X-bar UCL mismatch: {xbar_row['UCL']} vs {expected_ucl_x:.4f}"
+    )
     assert abs(float(xbar_row["LCL"]) - expected_lcl_x) < 0.01
     # R 图下控制限（n=5 时 D3=0）
     assert abs(float(r_row["LCL"])) < 0.01
@@ -120,10 +121,11 @@ def test_ewma_first_data_point_included():
     lam = 0.2
     expected_ewma_0 = lam * data_vals[0] + (1 - lam) * mu
     # 首个 EWMA 值应反映极端点 50.0
-    assert expected_ewma_0 > mu, f"首个 EWMA 值 {expected_ewma_0:.2f} 应 > 均值 {mu:.2f}（反映异常点）"
+    assert expected_ewma_0 > mu, (
+        f"首个 EWMA 值 {expected_ewma_0:.2f} 应 > 均值 {mu:.2f}（反映异常点）"
+    )
 
-    req = AnalysisRequest(task="spc_ewma", data=df, target_col="val",
-                          params={"lam": lam, "L": 2.7})
+    req = AnalysisRequest(task="spc_ewma", data=df, target_col="val", params={"lam": lam, "L": 2.7})
     result = ewma_chart(req)
     assert result.status == "ok"
     # EWMA 图应存在，摘要应包含统计信息

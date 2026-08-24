@@ -22,6 +22,7 @@ from smartsuite.services.orchestrator import (
 # 辅助: 模拟 CLI 路径 (直接调用 preprocess + orchestrate)
 # ═══════════════════════════════════════════════════════════════
 
+
 def run_via_cli(task, df, target_col, feature_cols, params=None, raw_cat=False):
     """模拟 CLI 路径: validate → preprocess_data → merge defaults → orchestrate。
 
@@ -40,20 +41,21 @@ def run_via_cli(task, df, target_col, feature_cols, params=None, raw_cat=False):
         feat_enc = list(feature_cols)
     else:
         df_enc, feat_enc, _, _, _ = preprocess_data(df, feature_cols)
-    req = AnalysisRequest(task=task, data=df_enc, target_col=target_col,
-                          feature_cols=feat_enc, params=merged)
+    req = AnalysisRequest(
+        task=task, data=df_enc, target_col=target_col, feature_cols=feat_enc, params=merged
+    )
     return orchestrate(req)
 
 
 def run_via_web(task, df, target_col, feature_cols, params=None, categoricals=None):
     """模拟 Web 路径: 通过 run_analysis 执行（与 Web API 完全一致的路径）。"""
     from smartsuite.web.api import run_analysis
+
     if params is None:
         params = {}
     if categoricals is None:
         categoricals = []
-    results = run_analysis(task, df, [target_col], list(feature_cols),
-                          list(categoricals), params)
+    results = run_analysis(task, df, [target_col], list(feature_cols), list(categoricals), params)
     return results[0] if results else None
 
 
@@ -61,11 +63,13 @@ def run_via_web(task, df, target_col, feature_cols, params=None, categoricals=No
 # 注册一致性检查
 # ═══════════════════════════════════════════════════════════════
 
+
 def test_default_params_valid():
     """所有 DEFAULT_PARAMS 中的键都对应有效的注册任务。"""
     for task_name in DEFAULT_PARAMS:
-        assert task_name in TASK_REGISTRY, \
+        assert task_name in TASK_REGISTRY, (
             f"DEFAULT_PARAMS 中的 '{task_name}' 不在 TASK_REGISTRY 中"
+        )
 
 
 def test_all_registered_tasks_have_defaults():
@@ -80,24 +84,29 @@ def test_registry_label_group_consistency():
     label_keys = set(TASK_LABELS.keys())
     group_keys = set().union(*[set(v) for v in TASK_GROUPS.values()])
 
-    assert reg_keys == label_keys, \
+    assert reg_keys == label_keys, (
         f"REGISTRY 独有: {reg_keys - label_keys}, LABELS 独有: {label_keys - reg_keys}"
-    assert reg_keys == group_keys, \
+    )
+    assert reg_keys == group_keys, (
         f"REGISTRY 独有: {reg_keys - group_keys}, GROUPS 独有: {group_keys - reg_keys}"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
 # 预处理路径一致性
 # ═══════════════════════════════════════════════════════════════
 
+
 def test_preprocess_idempotent():
     """对已预处理数据再次调用 preprocess 不应改变结果。"""
     np.random.seed(42)
-    df = pd.DataFrame({
-        "x1": np.random.normal(0, 1, 50),
-        "x2": np.random.normal(5, 2, 50),
-        "y": np.random.normal(10, 1, 50),
-    })
+    df = pd.DataFrame(
+        {
+            "x1": np.random.normal(0, 1, 50),
+            "x2": np.random.normal(5, 2, 50),
+            "y": np.random.normal(10, 1, 50),
+        }
+    )
     df1, cols1, _, log1, _ = preprocess_data(df, ["x1", "x2"])
     df2, cols2, _, log2, _ = preprocess_data(df1, cols1)
     assert cols1 == cols2, f"预处理不幂等: {cols1} ≠ {cols2}"
@@ -107,21 +116,25 @@ def test_preprocess_idempotent():
 def test_imputation_fills_missing():
     """NaN 列应被中位数填充。"""
     np.random.seed(42)
-    df = pd.DataFrame({
-        "num_col": pd.Series([1.0, 2.0, None, 4.0, 5.0]),
-        "y": np.random.normal(0, 1, 5),
-    })
+    df = pd.DataFrame(
+        {
+            "num_col": pd.Series([1.0, 2.0, None, 4.0, 5.0]),
+            "y": np.random.normal(0, 1, 5),
+        }
+    )
     df2, cols, _, log, _ = preprocess_data(df, ["num_col"])
     assert "num_col" in cols or any(c.startswith("num_col") for c in cols)
     assert df2[cols[0]].notna().sum() > 0, "输出列不应全 NaN"
     # 修复后：原始 NaN 也应被填充
-    assert df2[cols[0]].isna().sum() == 0, \
+    assert df2[cols[0]].isna().sum() == 0, (
         f"预处理后仍有 {df2[cols[0]].isna().sum()} 个 NaN，原始 NaN 未被填充"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
 # 跨路径数值一致性 — 全量 40 方法
 # ═══════════════════════════════════════════════════════════════
+
 
 # 为每种方法构建标准化测试数据
 def _make_test_data(task: str, n: int = 100):
@@ -142,10 +155,9 @@ def _make_test_data(task: str, n: int = 100):
 
     # 子组（确保长度与 n 一致）
     n_subgroups = max(2, min(15, n // 5))
-    subgroup = np.concatenate([
-        np.repeat(range(1, n_subgroups + 1), 5),
-        np.full(n - n_subgroups * 5, n_subgroups)
-    ])[:n]
+    subgroup = np.concatenate(
+        [np.repeat(range(1, n_subgroups + 1), 5), np.full(n - n_subgroups * 5, n_subgroups)]
+    )[:n]
 
     # 时间序列
     time_idx = np.arange(n)
@@ -159,13 +171,25 @@ def _make_test_data(task: str, n: int = 100):
     operators = np.random.choice(["张三", "李四", "王五"], n)
     parts = np.random.choice([f"部件{i}" for i in range(1, 11)], n)
 
-    df = pd.DataFrame({
-        "x1": x1, "x2": x2, "x3": x3, "y": y,
-        "组别": groups, "二分类": binary, "子组": subgroup,
-        "时间": time_idx, "前": before, "后": after,
-        "事件时间": event_time, "事件状态": event_observed, "事件分组": event_group,
-        "操作员": operators, "部件": parts,
-    })
+    df = pd.DataFrame(
+        {
+            "x1": x1,
+            "x2": x2,
+            "x3": x3,
+            "y": y,
+            "组别": groups,
+            "二分类": binary,
+            "子组": subgroup,
+            "时间": time_idx,
+            "前": before,
+            "后": after,
+            "事件时间": event_time,
+            "事件状态": event_observed,
+            "事件分组": event_group,
+            "操作员": operators,
+            "部件": parts,
+        }
+    )
     return df
 
 
@@ -293,16 +317,28 @@ def test_cli_web_numerical_parity_all(task):
     elif task in ("power_analysis",):
         target = ""
         features = ["x1", "x2"]
-    elif task in ("median_ci", "distribution_summary", "normality_check",
-                  "bootstrap_ci", "tolerance_interval", "anomaly_detect",
-                  "outlier_consensus"):
-        target = "y"
-        features = []
-    elif task in ("trend_forecast", "spc_cusum", "spc_ewma", "spc_nonparametric",
-                  "change_point", "process_capability"):
-        target = "y"
-        features = []
-    elif task == "gage_rr":
+    elif (
+        task
+        in (
+            "median_ci",
+            "distribution_summary",
+            "normality_check",
+            "bootstrap_ci",
+            "tolerance_interval",
+            "anomaly_detect",
+            "outlier_consensus",
+        )
+        or task
+        in (
+            "trend_forecast",
+            "spc_cusum",
+            "spc_ewma",
+            "spc_nonparametric",
+            "change_point",
+            "process_capability",
+        )
+        or task == "gage_rr"
+    ):
         target = "y"
         features = []
     elif task == "spc_xbar":
@@ -333,24 +369,33 @@ def test_cli_web_numerical_parity_all(task):
 
     # ── 路径 A: CLI (validate + preprocess + merge defaults + orchestrate) ──
     try:
-        result_cli = run_via_cli(task, df, target, features,
-                                 params=params, raw_cat=raw_cat)
+        result_cli = run_via_cli(task, df, target, features, params=params, raw_cat=raw_cat)
     except Exception as e:
-        result_cli = {"status": "error", "summary": str(e)[:200], "_exception": str(type(e).__name__)}
+        result_cli = {
+            "status": "error",
+            "summary": str(e)[:200],
+            "_exception": str(type(e).__name__),
+        }
 
     # ── 路径 B: Web (run_analysis → preprocess + orchestrate + JSON roundtrip) ──
     try:
-        web_result = run_via_web(task, df, target, features,
-                                params=params, categoricals=categoricals)
+        web_result = run_via_web(
+            task, df, target, features, params=params, categoricals=categoricals
+        )
     except Exception as e:
-        web_result = {"status": "error", "summary": str(e)[:200], "_exception": str(type(e).__name__)}
+        web_result = {
+            "status": "error",
+            "summary": str(e)[:200],
+            "_exception": str(type(e).__name__),
+        }
 
     # ── 验证 ──
     # 1. 状态一致性（Web 路径错误消息含更丰富上下文，但 status 应一致）
-    cli_status = result_cli.status if hasattr(result_cli, 'status') else result_cli.get("status", "error")
+    cli_status = (
+        result_cli.status if hasattr(result_cli, "status") else result_cli.get("status", "error")
+    )
     web_status = web_result.get("status", "error")
-    assert cli_status == web_status, \
-        f"{task}: CLI={cli_status}, Web={web_status} — 行为不一致"
+    assert cli_status == web_status, f"{task}: CLI={cli_status}, Web={web_status} — 行为不一致"
 
     # 2. 若都成功，验证数值一致性
     if cli_status == "ok" and web_status == "ok":
@@ -363,8 +408,9 @@ def test_cli_web_numerical_parity_all(task):
         web_tables = set(web_result.get("tables", {}).keys())
         # Web 路径可能含 _merged_correlation（仅多目标时）
         web_tables_clean = {k for k in web_tables if not k.startswith("_")}
-        assert cli_tables == web_tables_clean, \
+        assert cli_tables == web_tables_clean, (
             f"{task}: CLI tables={cli_tables}, Web tables={web_tables_clean}"
+        )
 
         # 2c. 核心数值元数据一致
         cli_meta = result_cli.metadata
@@ -374,13 +420,19 @@ def test_cli_web_numerical_parity_all(task):
             if key in web_meta:
                 cv = cli_meta[key]
                 wv = web_meta[key]
-                if isinstance(cv, (int, float, bool, str)) and not isinstance(cv, bool):
-                    if isinstance(cv, (int, float)) and isinstance(wv, (int, float)):
-                        # 数值比较（容忍 Web JSON 序列化的舍入差异，1e-6）
-                        if np.isfinite(cv) and np.isfinite(wv):
-                            assert abs(float(cv) - float(wv)) < 1e-6 or \
-                                abs(float(cv) - float(wv)) / (abs(float(cv)) + 1e-10) < 1e-4, \
-                                f"{task}: metadata[{key}] 数值不一致: CLI={cv}, Web={wv}"
+                if (
+                    isinstance(cv, (int, float, bool, str))
+                    and not isinstance(cv, bool)
+                    and isinstance(cv, (int, float))
+                    and isinstance(wv, (int, float))
+                    and np.isfinite(cv)
+                    and np.isfinite(wv)
+                ):
+                    # 数值比较（容忍 Web JSON 序列化的舍入差异，1e-6）
+                    assert (
+                        abs(float(cv) - float(wv)) < 1e-6
+                        or abs(float(cv) - float(wv)) / (abs(float(cv)) + 1e-10) < 1e-4
+                    ), f"{task}: metadata[{key}] 数值不一致: CLI={cv}, Web={wv}"
 
     # 3. 若都失败，验证错误行为一致（都有 error status）
     elif cli_status != "ok" or web_status != "ok":
@@ -396,8 +448,9 @@ def test_cli_web_default_params_sync():
     """
     # 这是静态检查：DEFAULT_PARAMS 中定义的参数应被 app.js 消费
     for task, defaults in DEFAULT_PARAMS.items():
-        assert isinstance(defaults, dict), \
+        assert isinstance(defaults, dict), (
             f"DEFAULT_PARAMS[{task}] 必须是 dict，实际: {type(defaults)}"
+        )
 
 
 def test_cli_web_specific_parity():
@@ -411,29 +464,35 @@ def test_cli_web_specific_parity():
 
     # ── X-bar/R 控制图 ──
     subgroup = np.repeat(range(1, 13), 5)
-    df_spc = pd.DataFrame({
-        "子组": subgroup,
-        "val": np.random.normal(10, 1, len(subgroup)),
-    })
+    df_spc = pd.DataFrame(
+        {
+            "子组": subgroup,
+            "val": np.random.normal(10, 1, len(subgroup)),
+        }
+    )
 
     from smartsuite.services.data_io import preprocess_data
 
     # CLI 路径: 手动预处理
     df_enc, feat_enc, _, _, _ = preprocess_data(df_spc, ["子组"])
-    req_cli = AnalysisRequest(task="spc_xbar", data=df_enc, target_col="val",
-                              feature_cols=feat_enc,
-                              params={})
+    req_cli = AnalysisRequest(
+        task="spc_xbar", data=df_enc, target_col="val", feature_cols=feat_enc, params={}
+    )
     r_cli = orchestrate(req_cli)
 
     # Web 路径: run_analysis (X 列为 "子组")
-    web_r = run_via_web("spc_xbar", df_spc, "val", ["子组"],
-                       params={})
+    web_r = run_via_web("spc_xbar", df_spc, "val", ["子组"], params={})
 
-    assert r_cli.status == web_r.get("status"), \
+    assert r_cli.status == web_r.get("status"), (
         f"spc_xbar status: CLI={r_cli.status}, Web={web_r.get('status')}"
-    assert abs(float(r_cli.metadata.get("xbar_mean", 0)) -
-               float(web_r.get("metadata", {}).get("xbar_mean", 0))) < 1e-4, \
-        "spc_xbar xbar_mean 不一致"
+    )
+    assert (
+        abs(
+            float(r_cli.metadata.get("xbar_mean", 0))
+            - float(web_r.get("metadata", {}).get("xbar_mean", 0))
+        )
+        < 1e-4
+    ), "spc_xbar xbar_mean 不一致"
 
     # ── 回归 ──
     x1 = np.random.normal(10, 2, n)
@@ -444,34 +503,46 @@ def test_cli_web_specific_parity():
     r_cli_reg = run_via_cli("regression", df_reg, "y", ["x1", "x2"])
     web_r_reg = run_via_web("regression", df_reg, "y", ["x1", "x2"])
 
-    assert r_cli_reg.status == web_r_reg.get("status"), \
+    assert r_cli_reg.status == web_r_reg.get("status"), (
         f"regression status: CLI={r_cli_reg.status}, Web={web_r_reg.get('status')}"
+    )
     # 审查 2026-08-19 #3.4：守卫改前置硬断言（数据完好时两条路径都必须 ok）
     assert r_cli_reg.status == "ok", f"regression CLI 失败: {r_cli_reg.messages}"
-    assert abs(r_cli_reg.metadata["r_squared"] -
-               float(web_r_reg.get("metadata", {}).get("r_squared", 0))) < 1e-4, \
-        f"regression R² 不一致: CLI={r_cli_reg.metadata['r_squared']}, " \
+    assert (
+        abs(
+            r_cli_reg.metadata["r_squared"]
+            - float(web_r_reg.get("metadata", {}).get("r_squared", 0))
+        )
+        < 1e-4
+    ), (
+        f"regression R² 不一致: CLI={r_cli_reg.metadata['r_squared']}, "
         f"Web={web_r_reg.get('metadata', {}).get('r_squared')}"
+    )
 
     # ── ANOVA ──
-    df_anova = pd.DataFrame({
-        "group": np.random.choice(["A", "B", "C"], n),
-        "y": np.concatenate([
-            np.random.normal(10, 1, n // 3),
-            np.random.normal(12, 1, n // 3),
-            np.random.normal(14, 1, n - 2 * (n // 3)),
-        ]),
-    })
+    df_anova = pd.DataFrame(
+        {
+            "group": np.random.choice(["A", "B", "C"], n),
+            "y": np.concatenate(
+                [
+                    np.random.normal(10, 1, n // 3),
+                    np.random.normal(12, 1, n // 3),
+                    np.random.normal(14, 1, n - 2 * (n // 3)),
+                ]
+            ),
+        }
+    )
 
     r_cli_a = run_via_cli("anova", df_anova, "y", ["group"])
-    web_r_a = run_via_web("anova", df_anova, "y", ["group"],
-                         categoricals=["group"])
+    web_r_a = run_via_web("anova", df_anova, "y", ["group"], categoricals=["group"])
 
-    assert r_cli_a.status == web_r_a.get("status"), \
+    assert r_cli_a.status == web_r_a.get("status"), (
         f"anova status: CLI={r_cli_a.status}, Web={web_r_a.get('status')}"
+    )
     # 审查 2026-08-19 #3.4：守卫改前置硬断言
     assert r_cli_a.status == "ok", f"anova CLI 失败: {r_cli_a.messages}"
     cli_p = float(r_cli_a.metadata.get("p_value", 0))
     web_p = float(web_r_a.get("metadata", {}).get("p_value", 0))
-    assert abs(cli_p - web_p) < 1e-4 or abs(cli_p - web_p) / (abs(cli_p) + 1e-10) < 0.01, \
+    assert abs(cli_p - web_p) < 1e-4 or abs(cli_p - web_p) / (abs(cli_p) + 1e-10) < 0.01, (
         f"anova p 值不一致: CLI={cli_p}, Web={web_p}"
+    )

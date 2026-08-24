@@ -53,9 +53,7 @@ def test_infer_group_col_returns_none_without_binary():
 
 def test_preprocess_for_task_raw_cat_keeps_original_column():
     df = pd.DataFrame({"y": [1, 2, 3], "批次": ["A", "B", "A"]})
-    enc, cols, _, _ = preprocess_for_task(
-        df, ["批次"], "anova", raw_cat_tasks={"anova"}
-    )
+    enc, cols, _, _ = preprocess_for_task(df, ["批次"], "anova", raw_cat_tasks={"anova"})
     assert "批次" in cols  # 原始类别列保留
     assert enc["批次"].tolist() == ["A", "B", "A"]
 
@@ -65,6 +63,8 @@ def test_preprocess_for_task_encodes_without_raw_cat():
     enc, cols, _, _ = preprocess_for_task(df, ["批次"], "regression")
     assert "批次" not in cols  # 被 one-hot 编码替换
     assert len(enc) == 3  # 行数不变
+
+
 def test_preprocess_for_task_removes_inf():
     """审查 2026-08-19 #1.5：预处理应把 ±Inf 转为 NaN（dropna 不过滤 Inf）。"""
     from smartsuite.services.data_io import preprocess_for_task
@@ -73,8 +73,9 @@ def test_preprocess_for_task_removes_inf():
     out, feat, log, _ = preprocess_for_task(df, ["a"], "regression", None)
     assert np.isinf(out["a"]).sum() == 0, "预处理后不应残留 Inf"
     # RAW_CAT 分支同样清洗
-    out2, feat2, _, _ = preprocess_for_task(df, ["a", "g"], "box_chart", None,
-                                            raw_cat_tasks={"box_chart"})
+    out2, feat2, _, _ = preprocess_for_task(
+        df, ["a", "g"], "box_chart", None, raw_cat_tasks={"box_chart"}
+    )
     assert np.isinf(out2["a"]).sum() == 0, "RAW_CAT 路径也不应残留 Inf"
 
 
@@ -84,9 +85,8 @@ def test_preprocess_data_cat_map_roundtrip():
 
     df = pd.DataFrame({"city": ["A", "B", "C", "A", "B"] * 2, "y": [1.0] * 10})
     enc1, cols1, cat_map, _, _ = preprocess_data(df, ["city"], categorical_cols={"city"})
-    enc2, cols2, _, _, _ = preprocess_data(df, ["city"], categorical_cols={"city"},
-                                           known_cat_map=cat_map)
+    enc2, cols2, _, _, _ = preprocess_data(
+        df, ["city"], categorical_cols={"city"}, known_cat_map=cat_map
+    )
     assert not enc2.isna().any().any(), f"回填产生 NaN 列: {list(enc2.columns)}"
     assert len(cols1) == len(cols2), f"列数不一致: {cols1} vs {cols2}"
-
-

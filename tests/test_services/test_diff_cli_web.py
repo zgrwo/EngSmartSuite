@@ -7,6 +7,9 @@
 - 顺带修复原脚本两处参数格式 bug：
   grid_search 的 ranges 传字符串（引擎需 dict）、multi_objective 的 objectives 传字符串
 """
+
+import contextlib
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -70,17 +73,15 @@ def _normalize_nan(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         col_dtype = df[col].dtype
         is_stringy = (
-            col_dtype == object
+            pd.api.types.is_object_dtype(df[col])
             or "str" in str(col_dtype).lower()
             or "string" in str(col_dtype).lower()
         )
         if is_stringy:
             empty_set = {"", "nan", "NaN", "None", "null", "NA"}
             df[col] = df[col].replace(empty_set, np.nan)
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 df[col] = pd.to_numeric(df[col])
-            except (ValueError, TypeError):
-                pass
         if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_datetime64_any_dtype(
             df[col]
         ):
@@ -112,7 +113,6 @@ def tables_equal(t_a, t_b):
     return True, ""
 
 
-
 def _meta_scalars_equal(meta_a, meta_b, rtol=1e-3, atol=1e-6):
     """比较两路径 metadata 中共有的标量数值键（Round-2 批次D #1）。
 
@@ -125,10 +125,10 @@ def _meta_scalars_equal(meta_a, meta_b, rtol=1e-3, atol=1e-6):
         if key not in meta_b:
             continue
         av, bv = meta_a[key], meta_b[key]
-        is_num = (
-            lambda v: isinstance(v, (int, float, np.integer, np.floating))
-            and not isinstance(v, bool)
-        )
+
+        def is_num(v):
+            return isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool)
+
         if not (is_num(av) and is_num(bv)):
             continue
         af, bf = float(av), float(bv)
@@ -139,6 +139,7 @@ def _meta_scalars_equal(meta_a, meta_b, rtol=1e-3, atol=1e-6):
         if abs(af - bf) > atol + rtol * abs(bf):
             return False, f"metadata[{key}]: CLI={af!r}, Web={bf!r}"
     return True, ""
+
 
 def _compare_one(df, task, target_col_str, features, categoricals, params):
     targets_for_b = [target_col_str] if target_col_str else []
@@ -153,7 +154,11 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
             df_a_work, params_a = auto_generate_subgroup_col(df, dict(params_a))
             params_a["group_col"] = params_a["subgroup_col"]
         df_enc, feat_enc, _, _ = preprocess_for_task(
-            df_a_work, feat_a, task, categoricals, RAW_CAT_TASKS,
+            df_a_work,
+            feat_a,
+            task,
+            categoricals,
+            RAW_CAT_TASKS,
         )
         if task == "hypothesis_test" and "group_col" not in params_a:
             extra = infer_group_col(df, feat_a, categoricals)
@@ -163,8 +168,11 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
                     feat_enc = list(feat_enc) + [extra_col]
                 params_a = {**params_a, **extra}
         req_a = AnalysisRequest(
-            task=task, data=df_enc, target_col=target_col_str,
-            feature_cols=feat_enc, params=params_a,
+            task=task,
+            data=df_enc,
+            target_col=target_col_str,
+            feature_cols=feat_enc,
+            params=params_a,
         )
         r_a = orchestrate(req_a)
     except Exception as e:
@@ -175,10 +183,14 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
     if not b_targets and task not in NO_TARGET_TASKS:
         b_targets = [target_col_str] if target_col_str else [""]
     try:
-        r_b_list = run_analysis(task, df, targets=b_targets,
-                                features=list(features),
-                                categoricals=list(categoricals) if categoricals else [],
-                                params=dict(params))
+        r_b_list = run_analysis(
+            task,
+            df,
+            targets=b_targets,
+            features=list(features),
+            categoricals=list(categoricals) if categoricals else [],
+            params=dict(params),
+        )
         if not r_b_list:
             return False, "PATH_B returned empty list"
         r_b_dict = r_b_list[0]
@@ -191,9 +203,7 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
     # 尾部结论差异（如显著性判定）会被漏检）
     summary_ok = (r_a.summary or "") == (r_b_dict.get("summary") or "")
     meta_keys_ok = set(r_a.metadata.keys()) == set(r_b_dict.get("metadata", {}).keys())
-    meta_vals_ok, meta_detail = _meta_scalars_equal(
-        r_a.metadata, r_b_dict.get("metadata", {})
-    )
+    meta_vals_ok, meta_detail = _meta_scalars_equal(r_a.metadata, r_b_dict.get("metadata", {}))
     try:
         t_b = {
             k: df_from_serialized(v)
@@ -261,16 +271,24 @@ PARITY_CASES = [
     # 审查修复：ranges 必须为 dict（原脚本传字符串致 Path A 恒错）
     ("grid_search", Y, ["熔体温度"], [], {"ranges": {"熔体温度": [180, 220]}}),
     # 审查修复：objectives 必须为 list[dict]
-    ("multi_objective", Y, ["熔体温度", "模具温度"], [],
-     {"objectives": [{"col": "不良率", "direction": "minimize"},
-                     {"col": "拉伸强度", "direction": "maximize"}]}),
+    (
+        "multi_objective",
+        Y,
+        ["熔体温度", "模具温度"],
+        [],
+        {
+            "objectives": [
+                {"col": "不良率", "direction": "minimize"},
+                {"col": "拉伸强度", "direction": "maximize"},
+            ]
+        },
+    ),
     ("roc_analysis", "首件合格", ["熔体温度"], [], {}),
     ("logistic_regression", "保养日", X, [], {}),
     ("box_chart", Y, [], [CAT], {}),
     ("outlier_consensus", Y, ["熔体温度"], [], {}),
     ("survival_analysis", Y, [], ["保养日"], {}),
-    ("gage_rr", Y, [], ["模具编号", "检验员"],
-     {"part_col": "模具编号", "operator_col": "检验员"}),
+    ("gage_rr", Y, [], ["模具编号", "检验员"], {"part_col": "模具编号", "operator_col": "检验员"}),
     ("contingency", "", [], ["原料类型", "保养日"], {}),
     ("scatter_plot", Y, X[:1], [], {"fit": "linear"}),
 ]
@@ -293,6 +311,7 @@ def test_cli_web_numerical_parity(parity_df, task, target_col_str, features, cat
     """CLI(orchestrate) 与 Web(run_analysis) 数值一致（审查 2026-08-19 #3.3 改造）。"""
     ok, detail = _compare_one(parity_df, task, target_col_str, features, categoricals, params)
     assert ok, f"{task}: {detail}"
+
 
 def test_compare_one_catches_metadata_numeric_drift(parity_df, monkeypatch):
     """变异验证（Round-2 批次D #1）：metadata 数值漂移必须被 _compare_one 捕获。
@@ -338,7 +357,6 @@ def test_compare_one_catches_summary_tail_diff(parity_df, monkeypatch):
         return results
 
     monkeypatch.setattr(sys.modules[__name__], "run_analysis", mutated_run)
-    ok, detail = _compare_one(parity_df, "process_capability", Y, [], [],
-                              {"usl": 10, "lsl": 1})
+    ok, detail = _compare_one(parity_df, "process_capability", Y, [], [], {"usl": 10, "lsl": 1})
     assert not ok, "summary 尾部差异应被捕获"
     assert "summary_ok=False" in detail, f"详情应指出 summary 不一致: {detail}"

@@ -6,6 +6,7 @@
 - auto_report 一键报告（HTML 输出）
 - export_workbook 空数据/失败任务优雅降级
 """
+
 import os
 import tempfile
 
@@ -75,12 +76,8 @@ def test_export_workbook_basic(sample_doe_data):
                 for cell in row:
                     if cell.fill and cell.fill.fgColor and cell.fill.fgColor.rgb:
                         rgb = cell.fill.fgColor.rgb
-                        assert not rgb.startswith("#"), (
-                            f"openpyxl 颜色不应包含 # 前缀: {rgb}"
-                        )
-                        assert len(rgb) == 8, (
-                            f"aRGB 应为 8 位 hex: {rgb}"
-                        )
+                        assert not rgb.startswith("#"), f"openpyxl 颜色不应包含 # 前缀: {rgb}"
+                        assert len(rgb) == 8, f"aRGB 应为 8 位 hex: {rgb}"
                         fills_found = True
                         break
                 if fills_found:
@@ -111,9 +108,7 @@ def test_export_workbook_custom_tasks(sample_doe_data):
         assert os.path.exists(out)
         wb = openpyxl.load_workbook(out)
         sheet_names_lower = [s.lower() for s in wb.sheetnames]
-        assert any("anova" in s for s in sheet_names_lower), (
-            f"应包含 anova sheet: {wb.sheetnames}"
-        )
+        assert any("anova" in s for s in sheet_names_lower), f"应包含 anova sheet: {wb.sheetnames}"
         wb.close()
     finally:
         if os.path.exists(path):
@@ -128,7 +123,9 @@ def test_export_workbook_subdir_creation():
     out_path = os.path.join(subdir, "output.xlsx")
     try:
         out = export_workbook(
-            df, target_col="y", feature_cols=[],
+            df,
+            target_col="y",
+            feature_cols=[],
             output_path=out_path,
             tasks=["distribution_summary"],
         )
@@ -149,7 +146,9 @@ def test_export_workbook_all_tasks_fail():
         path = f.name
     try:
         out = export_workbook(
-            df, target_col="y", feature_cols=[],
+            df,
+            target_col="y",
+            feature_cols=[],
             output_path=path,
             tasks=["regression", "anova"],  # 缺少 feature_cols，这些 task 会失败
         )
@@ -185,12 +184,8 @@ def test_auto_report_smoke(sample_doe_data):
         # 验证 HTML 内容
         with open(path, encoding="utf-8") as fh:
             html = fh.read()
-        assert "<html" in html.lower() or "<!doctype" in html.lower(), (
-            "输出应为有效 HTML"
-        )
-        assert "测试自动报告" in html or "SmartSuite" in html, (
-            "HTML 应包含报告标题或项目名"
-        )
+        assert "<html" in html.lower() or "<!doctype" in html.lower(), "输出应为有效 HTML"
+        assert "测试自动报告" in html or "SmartSuite" in html, "HTML 应包含报告标题或项目名"
         # 验证返回结构
         assert "data_quality" in result
         assert "batch_results" in result
@@ -203,6 +198,7 @@ def test_auto_report_smoke(sample_doe_data):
 def test_auto_report_auto_path(sample_doe_data):
     """验证 auto_report 不指定 output_path 时自动生成路径。"""
     import os as _os
+
     cwd = _os.getcwd()
     default_path = _os.path.join(cwd, "smartsuite_report.html")
     try:

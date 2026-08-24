@@ -4,6 +4,7 @@ Requires a running server: `python src/smartsuite/web/app.py`
 When the server is not running, the module is skipped at collection time.
 Run manually: pytest tests/test_web_e2e.py -v
 """
+
 import http.cookiejar
 import json
 import urllib.error
@@ -56,17 +57,41 @@ ALL_TASKS = [
     ("cronbach_alpha", [""], ["熔体温度", "模具温度", "注射压力"], [], {}),
     ("distribution_summary", ["不良率"], [], [], {}),
     ("normality_check", ["不良率"], ["熔体温度"], [], {}),
-    ("power_analysis", [""], [], [], {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5}),
+    (
+        "power_analysis",
+        [""],
+        [],
+        [],
+        {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5},
+    ),
     ("survival_analysis", ["不良率"], ["保养日"], [], {}),
-    ("gage_rr", ["不良率"], ["模具编号", "检验员"], [], {"part_col": "模具编号", "operator_col": "检验员"}),
+    (
+        "gage_rr",
+        ["不良率"],
+        ["模具编号", "检验员"],
+        [],
+        {"part_col": "模具编号", "operator_col": "检验员"},
+    ),
     ("tolerance_interval", ["不良率"], [], [], {}),
-    ("grid_search", ["不良率"], ["熔体温度"], [], {"ranges": {"熔体温度": [180, 220]}, "n_points": 5}),
-    ("multi_objective", ["不良率"], ["熔体温度", "模具温度"], [], {
-        "objectives": [
-            {"col": "不良率", "direction": "minimize"},
-            {"col": "拉伸强度", "direction": "maximize"},
-        ]
-    }),
+    (
+        "grid_search",
+        ["不良率"],
+        ["熔体温度"],
+        [],
+        {"ranges": {"熔体温度": [180, 220]}, "n_points": 5},
+    ),
+    (
+        "multi_objective",
+        ["不良率"],
+        ["熔体温度", "模具温度"],
+        [],
+        {
+            "objectives": [
+                {"col": "不良率", "direction": "minimize"},
+                {"col": "拉伸强度", "direction": "maximize"},
+            ]
+        },
+    ),
     ("spc_nonparametric", ["不良率"], [], [], {}),
     ("box_chart", ["不良率"], ["原料类型"], ["原料类型"], {}),
     ("scatter_plot", ["不良率"], ["熔体温度"], [], {"fit": "linear"}),
@@ -87,15 +112,19 @@ def web_session():
     with open("tests/test_data.xlsx", "rb") as f:
         data = f.read()
     boundary = uuid.uuid4().hex
-    body = (b"--" + boundary.encode() + b"\r\n"
-            b'Content-Disposition: form-data; name="file"; filename="t.xlsx"\r\n'
-            b"Content-Type: application/octet-stream\r\n\r\n"
-            + data +
-            b"\r\n--" + boundary.encode() + b"--\r\n")
+    body = (
+        b"--" + boundary.encode() + b"\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="t.xlsx"\r\n'
+        b"Content-Type: application/octet-stream\r\n\r\n"
+        + data
+        + b"\r\n--"
+        + boundary.encode()
+        + b"--\r\n"
+    )
     req = urllib.request.Request(
-        f"{BASE}/api/upload", body,
-        {"Content-Type": f"multipart/form-data; boundary={boundary}",
-         "X-CSRF-Token": csrf_token},
+        f"{BASE}/api/upload",
+        body,
+        {"Content-Type": f"multipart/form-data; boundary={boundary}", "X-CSRF-Token": csrf_token},
     )
     resp = json.loads(opener.open(req).read())
     assert resp.get("columns"), f"上传失败: {resp}"
@@ -103,17 +132,25 @@ def web_session():
     return opener, csrf_token
 
 
-@pytest.mark.parametrize("task,targets,features,cats,params", ALL_TASKS,
-                         ids=[t for t, *_ in ALL_TASKS])
+@pytest.mark.parametrize(
+    "task,targets,features,cats,params", ALL_TASKS, ids=[t for t, *_ in ALL_TASKS]
+)
 def test_task_via_web_api(web_session, task, targets, features, cats, params):
     opener, csrf_token = web_session
-    body = json.dumps({"task": task, "targets": targets, "features": features,
-                       "categoricals": cats, "params": params},
-                      ensure_ascii=False).encode("utf-8")
+    body = json.dumps(
+        {
+            "task": task,
+            "targets": targets,
+            "features": features,
+            "categoricals": cats,
+            "params": params,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
     req = urllib.request.Request(
-        f"{BASE}/api/analyze", body,
-        {"Content-Type": "application/json; charset=utf-8",
-         "X-CSRF-Token": csrf_token},
+        f"{BASE}/api/analyze",
+        body,
+        {"Content-Type": "application/json; charset=utf-8", "X-CSRF-Token": csrf_token},
     )
     resp = opener.open(req, timeout=120)
     d = json.loads(resp.read())

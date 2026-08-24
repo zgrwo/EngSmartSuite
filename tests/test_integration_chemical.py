@@ -1,4 +1,5 @@
 """化工批次数据集集成测试 — 端到端工作流验证。"""
+
 import os
 
 import pandas as pd
@@ -28,7 +29,9 @@ def test_chemical_data_loaded(chemical_df):
 def test_chemical_correlation(chemical_df):
     """收率与工艺参数的相关性分析。"""
     req = AnalysisRequest(
-        task="correlation", data=chemical_df, target_col="收率",
+        task="correlation",
+        data=chemical_df,
+        target_col="收率",
         feature_cols=["实际温度", "温度偏差", "压力", "搅拌速度", "反应时间", "pH值"],
     )
     result = orchestrate(req)
@@ -38,7 +41,9 @@ def test_chemical_correlation(chemical_df):
 def test_chemical_regression(chemical_df):
     """收率回归分析。"""
     req = AnalysisRequest(
-        task="regression", data=chemical_df, target_col="收率",
+        task="regression",
+        data=chemical_df,
+        target_col="收率",
         feature_cols=["实际温度", "压力", "搅拌速度", "反应时间", "pH值", "终点纯度"],
     )
     result = orchestrate(req)
@@ -49,7 +54,9 @@ def test_chemical_regression(chemical_df):
 def test_chemical_anova(chemical_df):
     """催化剂类型对收率的 ANOVA。"""
     req = AnalysisRequest(
-        task="anova", data=chemical_df, target_col="收率",
+        task="anova",
+        data=chemical_df,
+        target_col="收率",
         feature_cols=["催化剂类型"],
     )
     result = orchestrate(req)
@@ -59,7 +66,9 @@ def test_chemical_anova(chemical_df):
 def test_chemical_hypothesis_auto(chemical_df):
     """自动选择检验类型的工作流（二分类变量）。"""
     req = AnalysisRequest(
-        task="hypothesis_test", data=chemical_df, target_col="收率",
+        task="hypothesis_test",
+        data=chemical_df,
+        target_col="收率",
         feature_cols=["外观检查"],
         params={"test": "auto", "group_col": "外观检查"},
     )
@@ -71,7 +80,9 @@ def test_chemical_hypothesis_auto(chemical_df):
 def test_chemical_capability(chemical_df):
     """过程能力分析。"""
     req = AnalysisRequest(
-        task="process_capability", data=chemical_df, target_col="纯度",
+        task="process_capability",
+        data=chemical_df,
+        target_col="纯度",
         params={"usl": 99.5, "lsl": 95.0, "target": 97.5},
     )
     result = orchestrate(req)
@@ -81,7 +92,9 @@ def test_chemical_capability(chemical_df):
 def test_chemical_trend(chemical_df):
     """收率趋势预测。"""
     req = AnalysisRequest(
-        task="trend_forecast", data=chemical_df, target_col="收率",
+        task="trend_forecast",
+        data=chemical_df,
+        target_col="收率",
         params={"forecast_steps": 5},
     )
     result = orchestrate(req)
@@ -91,7 +104,9 @@ def test_chemical_trend(chemical_df):
 def test_chemical_normality(chemical_df):
     """正态性评估。"""
     req = AnalysisRequest(
-        task="normality_check", data=chemical_df, target_col="收率",
+        task="normality_check",
+        data=chemical_df,
+        target_col="收率",
         feature_cols=["实际温度", "压力", "反应时间", "pH值", "纯度"],
     )
     result = orchestrate(req)
@@ -101,7 +116,9 @@ def test_chemical_normality(chemical_df):
 def test_chemical_outlier_consensus(chemical_df):
     """多方法异常共识。"""
     req = AnalysisRequest(
-        task="outlier_consensus", data=chemical_df, target_col="收率",
+        task="outlier_consensus",
+        data=chemical_df,
+        target_col="收率",
         feature_cols=["实际温度", "压力"],
     )
     result = orchestrate(req)
@@ -111,7 +128,9 @@ def test_chemical_outlier_consensus(chemical_df):
 def test_chemical_bootstrap(chemical_df):
     """Bootstrap 置信区间。"""
     req = AnalysisRequest(
-        task="bootstrap_ci", data=chemical_df, target_col="收率",
+        task="bootstrap_ci",
+        data=chemical_df,
+        target_col="收率",
         params={"statistic": "mean", "n_bootstrap": 500},
     )
     result = orchestrate(req)

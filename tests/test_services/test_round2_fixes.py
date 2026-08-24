@@ -9,6 +9,7 @@
 - reporter.py: to_pdf 表格行 CJK 字体
 - smartsuite.__init__.py: setup_logging 幂等 / 归一化 / 降级
 """
+
 import json
 import logging
 import os
@@ -25,9 +26,11 @@ from smartsuite.core.exceptions import ValidationError
 
 # ─────────────────────────── cli.py (任务 7) ───────────────────────────
 
+
 def test_parse_sheet_pure_digit_string():
     """'0'/'01' 字符串按索引解析为 int；'Sheet1'/None 原样保留。"""
     from smartsuite.cli import _parse_sheet
+
     assert _parse_sheet("0") == 0
     assert _parse_sheet("01") == 1
     assert _parse_sheet(0) == 0
@@ -38,6 +41,7 @@ def test_parse_sheet_pure_digit_string():
 def _run_cli(monkeypatch, args, capsys):
     """以给定 argv 调用 cli.main()，返回 (exit_code_or_None, stdout, stderr)。"""
     import smartsuite.cli as cli_mod
+
     monkeypatch.setattr(sys, "argv", args)
     exit_code = None
     try:
@@ -108,14 +112,18 @@ def test_cli_sheet_zero_index(monkeypatch, tmp_path, capsys):
 
 # ─────────────────────────── api.py (任务 8/9/10) ───────────────────────────
 
+
 def test_run_analysis_onehot_conflict_raises_validation():
     """One-Hot 编码列名冲突 → ValidationError（当前 500）。"""
     from smartsuite.web.api import run_analysis
-    df = pd.DataFrame({
-        "不良率": [1.0, 2.0, 3.0, 4.0],
-        "原料类型": ["A", "B", "A", "B"],
-        "原料类型_B": [5.0, 6.0, 7.0, 8.0],  # 与 One-Hot 生成的列重名
-    })
+
+    df = pd.DataFrame(
+        {
+            "不良率": [1.0, 2.0, 3.0, 4.0],
+            "原料类型": ["A", "B", "A", "B"],
+            "原料类型_B": [5.0, 6.0, 7.0, 8.0],  # 与 One-Hot 生成的列重名
+        }
+    )
     with pytest.raises(ValidationError):
         run_analysis("regression", df, ["不良率"], ["原料类型"], ["原料类型"], {})
 
@@ -123,14 +131,18 @@ def test_run_analysis_onehot_conflict_raises_validation():
 def test_run_analysis_categoricals_not_list():
     """categoricals 非 list → ValidationError。"""
     from smartsuite.web.api import run_analysis
+
     df = pd.DataFrame({"不良率": [1.0, 2.0], "熔体温度": [3.0, 4.0]})
     with pytest.raises(ValidationError):
-        run_analysis("correlation", df, ["不良率"], ["熔体温度"], categoricals="熔体温度", params={})
+        run_analysis(
+            "correlation", df, ["不良率"], ["熔体温度"], categoricals="熔体温度", params={}
+        )
 
 
 def test_serialize_meta_df_series_ndarray():
     """DataFrame/Series/ndarray 显式转列表，而非巨型 str()。"""
     from smartsuite.web.api import _serialize_meta
+
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
     assert _serialize_meta(df) == [[1, 3], [2, 4]]
     assert _serialize_meta(pd.Series([1, 2])) == [1, 2]
@@ -140,6 +152,7 @@ def test_serialize_meta_df_series_ndarray():
 def test_serialize_table_inf_replaced():
     """表格序列化 round 前 inf/-inf → NaN → fillna('')，JSON 无 Infinity。"""
     from smartsuite.web.api import _serialize_table
+
     tbl = pd.DataFrame({"a": [1.0, np.inf, 2.0], "b": [-np.inf, 3.0, 4.0]})
     out = _serialize_table(tbl)
     flat = [v for row in out["data"] for v in row]
@@ -150,11 +163,14 @@ def test_serialize_table_inf_replaced():
 def test_run_analysis_vif_inf_not_in_json():
     """VIF 共线场景产生 inf 表 → 序列化后 JSON 无 Infinity（防 JSON.parse 崩）。"""
     from smartsuite.web.api import run_analysis
-    dfv = pd.DataFrame({
-        "a": [1.0, 2, 3, 4, 5, 6],
-        "b": [1.0, 2, 3, 4, 5, 6],
-        "c": [2.0, 4, 6, 8, 10, 12],
-    })
+
+    dfv = pd.DataFrame(
+        {
+            "a": [1.0, 2, 3, 4, 5, 6],
+            "b": [1.0, 2, 3, 4, 5, 6],
+            "c": [2.0, 4, 6, 8, 10, 12],
+        }
+    )
     results = run_analysis("vif", dfv, [], ["a", "b", "c"], [])
     assert results[0]["status"] == "ok"
     text = json.dumps(results)
@@ -163,16 +179,20 @@ def test_run_analysis_vif_inf_not_in_json():
 
 # ─────────────────────────── app.py (任务 11) ───────────────────────────
 
+
 @pytest.fixture()
 def api_client(tmp_path):
     """带 CSRF + _data_path 会话的 Flask test client。"""
     from smartsuite.web.app import app
-    df = pd.DataFrame({
-        "不良率": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "熔体温度": [10.0, 20.0, 30.0, 40.0, 50.0],
-        "原料类型": ["A", "B", "A", "B", "A"],
-        "原料类型_B": [5.0, 6.0, 7.0, 8.0, 9.0],
-    })
+
+    df = pd.DataFrame(
+        {
+            "不良率": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "熔体温度": [10.0, 20.0, 30.0, 40.0, 50.0],
+            "原料类型": ["A", "B", "A", "B", "A"],
+            "原料类型_B": [5.0, 6.0, 7.0, 8.0, 9.0],
+        }
+    )
     pq = tmp_path / "data.parquet"
     df.to_parquet(pq)
     client = app.test_client()
@@ -198,21 +218,35 @@ def test_analyze_invalid_json_400(api_client):
 
 def test_analyze_categoricals_not_list_400(api_client):
     """categoricals 非 list → 400 中文。"""
-    resp = _post_analyze(api_client, payload={
-        "task": "regression", "targets": ["不良率"], "features": ["熔体温度"],
-        "categoricals": "熔体温度", "params": {},
-    })
+    resp = _post_analyze(
+        api_client,
+        payload={
+            "task": "regression",
+            "targets": ["不良率"],
+            "features": ["熔体温度"],
+            "categoricals": "熔体温度",
+            "params": {},
+        },
+    )
     assert resp.status_code == 400
     assert "categoricals" in resp.get_json()["error"]
 
 
 def test_analyze_onehot_conflict_400(api_client):
     """One-Hot 列名冲突 → 400（ValidationError 映射），不再 500。"""
-    resp = _post_analyze(api_client, payload={
-        "task": "regression", "targets": ["不良率"], "features": ["原料类型"],
-        "categoricals": ["原料类型"], "params": {},
-    })
-    assert resp.status_code == 400, f"应 400，实际 {resp.status_code}: {resp.get_data(as_text=True)}"
+    resp = _post_analyze(
+        api_client,
+        payload={
+            "task": "regression",
+            "targets": ["不良率"],
+            "features": ["原料类型"],
+            "categoricals": ["原料类型"],
+            "params": {},
+        },
+    )
+    assert resp.status_code == 400, (
+        f"应 400，实际 {resp.status_code}: {resp.get_data(as_text=True)}"
+    )
     assert "One-Hot" in resp.get_json()["error"]
 
 
@@ -224,9 +258,11 @@ def test_analyze_missing_body_400(api_client):
 
 # ─────────────────────────── audit.py (任务 12) ───────────────────────────
 
+
 def test_process_audit_missing_feature_col_no_crash():
     """feature_cols 含不存在列 → 不抛 KeyError（当前 :40 在 try 外）。"""
     from smartsuite.services.audit import process_audit
+
     df = pd.DataFrame({"y": [1.0, 2.0, 3.0, 4.0, 5.0], "a": [2.0, 3.0, 4.0, 5.0, 6.0]})
     out = process_audit(df, target_col="y", feature_cols=["不存在列", "a"])
     assert "health_checks" in out
@@ -235,11 +271,14 @@ def test_process_audit_missing_feature_col_no_crash():
 def test_process_audit_correlation_failure_healthcheck():
     """correlation 分析失败（常量目标）→ health_check 显示 ✗ 失败而非误导。"""
     from smartsuite.services.audit import process_audit
-    df = pd.DataFrame({
-        "y": [5.0] * 5,
-        "a": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "b": [2.0, 3.0, 4.0, 5.0, 6.0],
-    })
+
+    df = pd.DataFrame(
+        {
+            "y": [5.0] * 5,
+            "a": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "b": [2.0, 3.0, 4.0, 5.0, 6.0],
+        }
+    )
     out = process_audit(df, target_col="y", feature_cols=["a", "b"])
     checks = out["health_checks"]
     corr_check = checks[checks["检查项"] == "关键因子识别"]
@@ -250,22 +289,27 @@ def test_process_audit_correlation_failure_healthcheck():
     assert "无强相关因子" not in str(corr_check.iloc[0]["详情"])
 
 
-@pytest.mark.parametrize("entry", ["batch_analyze", "process_audit", "export_workbook", "auto_report"])
+@pytest.mark.parametrize(
+    "entry", ["batch_analyze", "process_audit", "export_workbook", "auto_report"]
+)
 def test_audit_entries_clean_inf(monkeypatch, tmp_path, entry):
     """四个入口在分析前统一 ±Inf→NaN 清洗。"""
     from smartsuite.services import audit as audit_mod
 
     captured = {}
+
     def fake_orchestrate(req):
         captured["df"] = req.data.copy()
         return AnalysisResult(task=req.task, status="ok", summary="ok", tables={}, figures=[])
 
     monkeypatch.setattr(audit_mod, "orchestrate", fake_orchestrate)
-    df = pd.DataFrame({
-        "y": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "a": [1.0, np.inf, 3.0, 4.0, 5.0],
-        "b": [2.0, 3.0, -np.inf, 5.0, 6.0],
-    })
+    df = pd.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "a": [1.0, np.inf, 3.0, 4.0, 5.0],
+            "b": [2.0, 3.0, -np.inf, 5.0, 6.0],
+        }
+    )
     if entry == "batch_analyze":
         audit_mod.batch_analyze(df, "y", ["a", "b"], tasks=["correlation"])
     elif entry == "process_audit":
@@ -285,6 +329,7 @@ def test_audit_entries_clean_inf(monkeypatch, tmp_path, entry):
 
 # ─────────────────────────── reporter.py (任务 13) ───────────────────────────
 
+
 def test_to_pdf_table_rows_use_body_font(monkeypatch, tmp_path):
     """to_pdf 表格行不再用 Courier（CJK 内容静默丢失）。"""
     import reportlab.pdfgen.canvas as rl_canvas_mod
@@ -297,13 +342,14 @@ def test_to_pdf_table_rows_use_body_font(monkeypatch, tmp_path):
             self.font_calls = []
             created.append(self)
 
-        def setFont(self, name, size, leading=None):
+        def setFont(self, name, size, leading=None):  # noqa: N802 — 覆盖 reportlab Canvas.setFont
             self.font_calls.append((name, size))
             return super().setFont(name, size, leading)
 
     monkeypatch.setattr(rl_canvas_mod, "Canvas", RecordingCanvas)
 
     from smartsuite.services.reporter import to_pdf
+
     result = AnalysisResult(
         task="correlation",
         status="ok",
@@ -317,12 +363,11 @@ def test_to_pdf_table_rows_use_body_font(monkeypatch, tmp_path):
     canvas = created[-1]
     table_fonts = [name for name, size in canvas.font_calls if size == 7]
     assert table_fonts, "应存在表格行 setFont(_, 7) 调用"
-    assert all(name != "Courier" for name in table_fonts), (
-        f"表格行仍使用 Courier: {table_fonts}"
-    )
+    assert all(name != "Courier" for name in table_fonts), f"表格行仍使用 Courier: {table_fonts}"
 
 
 # ─────────────────────────── __init__.py (任务 14) ───────────────────────────
+
 
 @pytest.fixture()
 def root_handlers_backup():
@@ -344,6 +389,7 @@ def _managed_handlers(root):
 def test_setup_logging_idempotent(root_handlers_backup):
     """重复调用 setup_logging 不重复添加 handler（幂等守卫基于本包 handler）。"""
     from smartsuite import setup_logging
+
     setup_logging()
     first = len(_managed_handlers(root_handlers_backup))
     setup_logging()
@@ -355,6 +401,7 @@ def test_setup_logging_idempotent(root_handlers_backup):
 def test_setup_logging_other_handlers_do_not_block(root_handlers_backup):
     """root 上存在其他 handler 时，setup_logging 仍添加本包 handler。"""
     from smartsuite import setup_logging
+
     root = root_handlers_backup
     root.addHandler(logging.NullHandler())
     setup_logging()
@@ -364,6 +411,7 @@ def test_setup_logging_other_handlers_do_not_block(root_handlers_backup):
 def test_setup_logging_normpath(root_handlers_backup, monkeypatch):
     """log_dir 归一化：带 .. 的路径被 normpath 处理。"""
     from smartsuite import setup_logging
+
     base = tempfile.mkdtemp()
     weird = os.path.join(base, "sub", "..", "logs")
     setup_logging(log_dir=weird)
@@ -374,6 +422,7 @@ def test_setup_logging_normpath(root_handlers_backup, monkeypatch):
 def test_setup_logging_makedirs_fallback(root_handlers_backup, monkeypatch):
     """makedirs 失败 → 降级 tempfile + warning，不崩溃。"""
     from smartsuite import setup_logging
+
     root = root_handlers_backup
     real_makedirs = os.makedirs
 
@@ -386,6 +435,8 @@ def test_setup_logging_makedirs_fallback(root_handlers_backup, monkeypatch):
     setup_logging(log_dir=os.path.join(tempfile.gettempdir(), "logs"))
     handlers = _managed_handlers(root)
     assert len(handlers) >= 1, "即使文件 handler 降级，控制台 handler 仍应存在"
+
+
 def test_run_analysis_spc_auto_subgroup():
     """Round-2 P3：Web 路径 cusum/ewma 无 group_col 时自动生成子组列。"""
     import numpy as np
@@ -397,6 +448,6 @@ def test_run_analysis_spc_auto_subgroup():
     df = pd.DataFrame({"y": np.random.normal(50, 2, 100)})
     res = run_analysis("spc_cusum", df, targets=["y"], features=[], categoricals=[], params={})
     assert res and res[0]["status"] == "ok", f"spc_cusum 失败: {res[0].get('messages')}"
-    assert res[0]["metadata"].get("n_groups", 0) > 1, \
+    assert res[0]["metadata"].get("n_groups", 0) > 1, (
         f"应自动生成多子组系列，实际 n_groups: {res[0]['metadata'].get('n_groups')}"
-
+    )
