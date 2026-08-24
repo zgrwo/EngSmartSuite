@@ -2,6 +2,23 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.1.9](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.8...v1.1.9) (2026-08-24)
+
+
+### 🐛 Bug 修复
+
+* **engine:** trend_forecast ACF 绘图与 Ljung-Box 统一全样本均值自相关 ([5f584be](https://github.com/zgrwo/EngSmartSuite/commit/5f584be49d98645ec9fe0c8b772384c852d4c9b8))
+
+
+### 🔧 重构
+
+* **tests:** ruff lint/format 全量清理 tests/ ([46ae8c3](https://github.com/zgrwo/EngSmartSuite/commit/46ae8c32de7d0fd7713d03fe947c08bcc69012fd))
+
+
+### 🧹 维护
+
+* agents.md 重命名为 AGENTS.md 并同步引用 + ci 门禁覆盖 tests/ ([bc14d2f](https://github.com/zgrwo/EngSmartSuite/commit/bc14d2f9d1c25e4402fc4b98c8e7995b2acdbf68))
+
 ## [1.1.8](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.7...v1.1.8) (2026-08-23)
 
 
