@@ -1,6 +1,6 @@
 # SmartSuite — 领域术语表
 
-> 统一团队沟通和代理协作的术语定义。架构与模块结构见 `agents.md`，开发陷阱见 `skills/smartsuite-dev.md`。
+> 统一团队沟通和代理协作的术语定义。架构与模块结构见 `AGENTS.md`，开发陷阱见 `skills/smartsuite-dev.md`。
 
 ## 核心概念
 

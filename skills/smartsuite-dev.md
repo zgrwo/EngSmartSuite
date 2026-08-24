@@ -7,7 +7,7 @@ description: SmartSuite 项目开发技能 — 工艺数据分析工具箱的代
 
 > **面向 AI 编程助手**：本项目是工艺数据分析工具箱（40 个分析方法，Flask Web UI + Python API），约 9,000 行 Python 代码 + 470 行 JavaScript。本文档提炼自 126 次 commit 中反复出现的 bug 模式和修复规范。
 >
-> **协作文档**：开发规范 → `agents.md` | 术语 → `CONTEXT.md` | 决策树 → `skills/analysis-decision-tree.md` | API → `rules/api-reference.md`
+> **协作文档**：开发规范 → `AGENTS.md` | 术语 → `CONTEXT.md` | 决策树 → `skills/analysis-decision-tree.md` | API → `rules/api-reference.md`
 
 ## 触发条件
 
@@ -370,7 +370,7 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 
 | 文档 | 路径 | 用途 |
 |------|------|------|
-| 开发规范 | `agents.md` | 架构约束、代码风格、测试策略 |
+| 开发规范 | `AGENTS.md` | 架构约束、代码风格、测试策略 |
 | 领域术语 | `CONTEXT.md` | 中文术语定义 |
 | 决策知识 | `skills/analysis-decision-tree.md` | 分析方法决策树 + 工作流 |
 | API 参考 | `rules/api-reference.md` | 40 个函数完整签名 |

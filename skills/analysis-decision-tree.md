@@ -1,6 +1,6 @@
 # SmartSuite 分析方法决策树
 
-> 当用户描述一个分析需求时，按此树推荐方法。完整开发规范见 `agents.md`，操作陷阱见 `skills/smartsuite-dev.md`，API 签名见 `rules/api-reference.md`。
+> 当用户描述一个分析需求时，按此树推荐方法。完整开发规范见 `AGENTS.md`，操作陷阱见 `skills/smartsuite-dev.md`，API 签名见 `rules/api-reference.md`。
 
 ```
 用户的问题是什么？

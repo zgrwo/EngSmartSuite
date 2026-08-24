@@ -218,7 +218,7 @@ EngSmartSuite/
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
 ├── pyproject.toml                  # 包配置 + ruff 规则
 ├── CONTEXT.md                      # 领域术语
-├── agents.md                       # 项目宪法 / AI 行为准则
+├── AGENTS.md                       # 项目宪法 / AI 行为准则
 ├── README.md                       # 用户入口
 ├── CONTRIBUTING.md                 # 贡献指南
 ├── CODE_OF_CONDUCT.md              # 贡献者行为准则

@@ -1,4 +1,4 @@
-# agents.md — EngSmartSuite 项目宪法
+# AGENTS.md — EngSmartSuite 项目宪法
 
 > 工艺数据分析工具箱：40 个统计分析方法，Python 引擎 + Flask Web UI + CLI。
 > 本文件面向 AI 编程助手，编码细节按需加载 Skill。
@@ -98,7 +98,7 @@ EngSmartSuite/
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
 ├── pyproject.toml                    # 包配置 + ruff 规则
 ├── CONTEXT.md                        # 领域术语
-├── agents.md                         # 本文件
+├── AGENTS.md                         # 本文件
 ├── README.md                         # 用户向功能指南
 ├── CONTRIBUTING.md                   # 贡献指南
 ├── CODE_OF_CONDUCT.md                # 贡献者行为准则
@@ -151,7 +151,8 @@ EngSmartSuite/
 | 一键全量验证 | `python scripts/verify_all.py` |
 | 环境诊断 | `python scripts/doctor.py` |
 | 增量测试（只跑受影响） | `python scripts/run_affected_tests.py` |
-| 代码检查 | `ruff check src/smartsuite/ scripts/` |
+| 代码检查 | `ruff check src/smartsuite/ scripts/ tests/` |
+| 代码格式化 | `ruff format --check src/smartsuite/ scripts/ tests/` |
 | 文档一致性 | `python scripts/verify_docs.py --strict` |
 | 测试质量守卫 | `python scripts/test_quality_guard.py` |
 | 提交规范校验 | `echo "fix(engine): 描述" \| sh scripts/validate-commit-msg.sh` |
@@ -195,7 +196,8 @@ EngSmartSuite/
 
 ### 提交前必检
 
-- [ ] `ruff check src/smartsuite/ scripts/` 零错误
+- [ ] `ruff check src/smartsuite/ scripts/ tests/` 零错误
+- [ ] `ruff format --check src/smartsuite/ scripts/ tests/` 通过
 - [ ] `pytest tests/ -x -q` 全绿
 - [ ] 无裸 `except:` 或 `except Exception:` 不记录日志
 - [ ] 新增函数已注册到 TASK_REGISTRY（如适用）

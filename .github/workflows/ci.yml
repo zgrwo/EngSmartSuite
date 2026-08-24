@@ -14,7 +14,7 @@ on:
       - "rules/**"
       - "skills/**"
       - ".github/**"
-      - "agents.md"
+      - "AGENTS.md"
       - "README.md"
       - "CONTRIBUTING.md"
       - "CHANGELOG.md"
@@ -82,7 +82,10 @@ jobs:
         run: python -c "from smartsuite.engine import __all__ as eng; from smartsuite.services.orchestrator import TASK_REGISTRY; print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
 
       - name: Ruff Lint
-        run: ruff check src/smartsuite/ scripts/
+        run: ruff check src/smartsuite/ scripts/ tests/
+
+      - name: Ruff Format
+        run: ruff format --check src/smartsuite/ scripts/ tests/
 
       - name: 引擎层核心测试
         # 第二轮 #8：--basetemp 固定独立临时目录（Windows junction 防护，见 verify_consistency.py #5.2）

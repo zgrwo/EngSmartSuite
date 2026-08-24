@@ -39,7 +39,7 @@
 
 - 所有安全相关修复优先处理，不等待常规发版周期
 - 修复后会在 CHANGELOG.md 中标注，并建议用户尽快升级
-- 本项目遵循 [agents.md](agents.md) 的安全红线：无裸异常捕获不记录日志、错误信息不暴露
+- 本项目遵循 [AGENTS.md](AGENTS.md) 的安全红线：无裸异常捕获不记录日志、错误信息不暴露
   traceback、无敏感信息泄漏（密钥不入库，见 .gitignore），以及哨兵契约的「静默传播阻断」
   （见 [rules/sentinel-contract.md](rules/sentinel-contract.md)）
 - 依赖安全由 CI 守护：`security.yml` 工作流定期执行 CodeQL 静态扫描与 pip-audit 依赖漏洞审计

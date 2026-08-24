@@ -15,7 +15,7 @@ doctor.py — 环境就绪性诊断（Environment Doctor）
   - 必需工具（ruff / pytest）
   - 运行时依赖（pandas / numpy / scipy / statsmodels / sklearn / matplotlib / flask）
   - 关键目录（src / tests / rules / skills / scripts / templates / .github）
-  - 关键文件（agents.md / pyproject.toml）
+  - 关键文件（AGENTS.md / pyproject.toml）
 
 退出码：0 = 全部就绪；1 = 存在失败项（输出修复指引）
 """
@@ -34,7 +34,7 @@ MIN_PYTHON = (3, 10)
 
 # 必需目录/文件（相对 ROOT）——套件基线
 REQUIRED_DIRS = ["src", "tests", "rules", "skills", "scripts", "templates", ".github"]
-REQUIRED_FILES = ["agents.md", "pyproject.toml", "README.md"]
+REQUIRED_FILES = ["AGENTS.md", "pyproject.toml", "README.md"]
 # 必需 Python 工具（import 名 + 包名）
 REQUIRED_TOOLS = [
     ("ruff", "ruff"),

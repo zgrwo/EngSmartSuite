@@ -45,8 +45,10 @@ def build_repo(tmp_path: Path) -> Path:
     for d in ("src", "tests", "rules", "skills"):
         (root / d).mkdir(parents=True)
     (root / "rules" / "project-structure.md").write_text(TREE_OK, encoding="utf-8")
-    (root / "agents.md").write_text(TREE_AGENTS_OK, encoding="utf-8")
-    (root / "rules" / "api-reference.md").write_text("# API\n\n见 [README](README.md)\n", encoding="utf-8")
+    (root / "AGENTS.md").write_text(TREE_AGENTS_OK, encoding="utf-8")
+    (root / "rules" / "api-reference.md").write_text(
+        "# API\n\n见 [README](README.md)\n", encoding="utf-8"
+    )
     (root / "README.md").write_text(
         "# Mini\n\n参考 [rules/api-reference.md](rules/api-reference.md)\n", encoding="utf-8"
     )
@@ -56,6 +58,7 @@ def build_repo(tmp_path: Path) -> Path:
 
 
 # ── 向量 1：markdown 链接断链 ─────────────────────────────────
+
 
 def test_check_links_reports_broken_and_passes_ok(tmp_path):
     root = build_repo(tmp_path)
@@ -76,12 +79,12 @@ def test_check_links_skips_http_and_anchor(tmp_path):
 
 # ── 向量 2：反引号根路径 ──────────────────────────────────────
 
+
 def test_check_backtick_paths(tmp_path):
     root = build_repo(tmp_path)
     (root / "scripts" / "verify_docs.py").write_text("", encoding="utf-8")
     (root / "README.md").write_text(
-        "存在 `scripts/verify_docs.py`，缺失 `scripts/ghost.py`，"
-        "占位 `{Name}.py` 跳过\n",
+        "存在 `scripts/verify_docs.py`，缺失 `scripts/ghost.py`，占位 `{Name}.py` 跳过\n",
         encoding="utf-8",
     )
     problems = verify_docs.check_backtick_paths(root, ["README.md"])
@@ -90,6 +93,7 @@ def test_check_backtick_paths(tmp_path):
 
 
 # ── 向量 3：目录树声明存在性 ──────────────────────────────────
+
 
 def test_check_dirs_reports_missing_declared_dir(tmp_path):
     root = build_repo(tmp_path)
@@ -103,10 +107,11 @@ def test_check_dirs_reports_missing_declared_dir(tmp_path):
 
 # ── 向量 4：双目录树漂移 ──────────────────────────────────────
 
+
 def test_check_agents_tree_reports_drift(tmp_path):
     root = build_repo(tmp_path)
     assert verify_docs.check_agents_tree(root) == []
-    (root / "agents.md").write_text(
+    (root / "AGENTS.md").write_text(
         "```\nMini/\n├── src/\n├── rules/\n└── README.md\n```\n", encoding="utf-8"
     )
     problems = verify_docs.check_agents_tree(root)
@@ -114,6 +119,7 @@ def test_check_agents_tree_reports_drift(tmp_path):
 
 
 # ── 向量 5：语义检查（裸 except / TODO / 裸 input）────────────
+
 
 def test_bare_except_detected(tmp_path):
     root = build_repo(tmp_path)
@@ -131,14 +137,13 @@ def test_todo_in_doc_detected(tmp_path):
 
 def test_bare_input_in_verify_script_detected(tmp_path):
     root = build_repo(tmp_path)
-    (root / "scripts" / "verify_something.py").write_text(
-        "x = input('输入: ')\n", encoding="utf-8"
-    )
+    (root / "scripts" / "verify_something.py").write_text("x = input('输入: ')\n", encoding="utf-8")
     problems = verify_docs.check_semantic_consistency(root, [])
     assert any("verify_something.py" in p for p in problems)
 
 
 # ── 向量 6：版本一致性 ────────────────────────────────────────
+
 
 def test_version_consistency(tmp_path):
     root = build_repo(tmp_path)
@@ -146,9 +151,7 @@ def test_version_consistency(tmp_path):
     (root / ".release-please-manifest.json").write_text(
         json.dumps({".": "1.0.1"}), encoding="utf-8"
     )
-    (root / "CHANGELOG.md").write_text(
-        "# Changelog\n\n## [1.0.1] - 2026-01-01\n", encoding="utf-8"
-    )
+    (root / "CHANGELOG.md").write_text("# Changelog\n\n## [1.0.1] - 2026-01-01\n", encoding="utf-8")
     assert verify_docs.check_version_consistency(root) == []
     (root / "pyproject.toml").write_text('[project]\nversion = "1.0.2"\n', encoding="utf-8")
     problems = verify_docs.check_version_consistency(root)
@@ -156,6 +159,7 @@ def test_version_consistency(tmp_path):
 
 
 # ── 向量 7：未声明文件（--strict）────────────────────────────
+
 
 def test_undeclared_root_file_strict_only(tmp_path):
     root = build_repo(tmp_path)

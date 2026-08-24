@@ -32,7 +32,7 @@ body:
     attributes:
       label: 影响范围
       options:
-        - label: 影响公开 API 签名（⚠️ 不允许，见 agents.md 红线规则）
+        - label: 影响公开 API 签名（⚠️ 不允许，见 AGENTS.md 红线规则）
         - label: 涉及文档同步（api-reference / user-manual）
         - label: 需要回归测试覆盖
   - type: textarea

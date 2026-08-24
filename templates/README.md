@@ -6,7 +6,7 @@
 
 - 每个模板对应一个分析方法（task），定义参数默认值与示例数据说明
 - Web UI 与 CLI 按模板加载参数面板/命令行参数
-- 模板是「11 步注册链」的第 7 步（见 agents.md / CONTRIBUTING.md）
+- 模板是「11 步注册链」的第 7 步（见 AGENTS.md / CONTRIBUTING.md）
 
 ## 模板格式
 

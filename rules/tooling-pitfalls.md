@@ -1,7 +1,7 @@
 # 工具与脚本坑位清单（Windows / PowerShell / git / CI）
 
 > 从 VibeCodingTemplate 多个子项目实际踩坑提炼的跨项目工具级陷阱，按本仓情况裁剪并补充套件自身历史。
-> 修改 `scripts/`、运行终端命令、处理 git/CI 操作前必读。项目专属坑位（如统计语义）在 `agents.md`「历史经验」，本文件只收工具链问题。
+> 修改 `scripts/`、运行终端命令、处理 git/CI 操作前必读。项目专属坑位（如统计语义）在 `AGENTS.md`「历史经验」，本文件只收工具链问题。
 
 ## PowerShell / Windows 陷阱
 
@@ -43,7 +43,7 @@
 | 19 | **配置流断裂（声明→解析→传递→读取→使用任一环断开）** → 参数在配置中声明但链路某节点静默失效 | 新增注册点后立即用一致性检查断言多注册表键集一致（CI consistency job：TASK_REGISTRY == DEFAULT_PARAMS == TASK_LABELS == TASK_GROUPS） |
 | 20 | **验证脚本 `if __name__ == "__main__"` 守卫被绕过**（`spec_from_file_location` 加载时 `__name__` 恒为模块 stem）→ 校验逻辑不执行仍 exit 0（门禁说谎） | 测试用入口断言（`main()` 直接调用）；CI 直接跑脚本而非 import |
 
-## 套件历史踩坑（从 agents.md「历史经验」固化）
+## 套件历史踩坑（从 AGENTS.md「历史经验」固化）
 
 | # | 陷阱 | 正确做法 |
 |---|------|----------|
@@ -65,4 +65,4 @@ python scripts/test_quality_guard.py     # 测试弱断言/缺测/命名
 
 - 新踩坑并验证修复后，**立即追加到本表**（附真实案例与正确做法）
 - 语言级陷阱只在 `skills/smartsuite-dev.md` 维护（本表只留工具链问题，禁止双写）
-- 项目专属坑位（统计语义/业务规则）写入 `agents.md`「历史经验」，不放本文件
+- 项目专属坑位（统计语义/业务规则）写入 `AGENTS.md`「历史经验」，不放本文件

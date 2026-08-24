@@ -88,4 +88,4 @@ pytest tests/test_engine/test_edge_cases.py -q
 ## 维护规则
 
 - 本契约变更必须同步 `skills/smartsuite-dev.md` 的陷阱清单与修复模板
-- 新踩哨兵/守卫坑 → 追加到 `agents.md`「历史经验」并登记 `rules/tooling-pitfalls.md`（如属工具链问题）
+- 新踩哨兵/守卫坑 → 追加到 `AGENTS.md`「历史经验」并登记 `rules/tooling-pitfalls.md`（如属工具链问题）
