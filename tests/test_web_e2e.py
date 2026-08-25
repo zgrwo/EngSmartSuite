@@ -64,6 +64,13 @@ ALL_TASKS = [
         [],
         {"mode": "required_n", "test_type": "ttest", "effect_size": 0.5},
     ),
+    (
+        "doe_design",
+        [""],
+        [],
+        [],
+        {"method": "full_factorial", "factors": [{"name": "A", "levels": [1, 2]}]},
+    ),
     ("survival_analysis", ["不良率"], ["保养日"], [], {}),
     (
         "gage_rr",
@@ -97,7 +104,7 @@ ALL_TASKS = [
     ("scatter_plot", ["不良率"], ["熔体温度"], [], {"fit": "linear"}),
 ]
 
-assert len({t for t, *_ in ALL_TASKS}) == 40, "E2E must cover all 40 tasks"
+assert len({t for t, *_ in ALL_TASKS}) == 41, "E2E must cover all 41 tasks"
 
 
 @pytest.fixture(scope="module")

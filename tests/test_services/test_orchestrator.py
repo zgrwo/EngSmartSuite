@@ -15,6 +15,7 @@ import pandas as pd
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import (
     DEFAULT_PARAMS,
+    NO_DATA_TASKS,
     NO_TARGET_TASKS,
     TASK_REGISTRY,
     orchestrate,
@@ -182,7 +183,7 @@ def test_all_tasks_have_default_params():
 
 def test_task_registry_count():
     """验证注册任务数量符合预期（40 个分析方法）。"""
-    assert len(TASK_REGISTRY) == 40, f"期望 40 个任务，实际 {len(TASK_REGISTRY)}"
+    assert len(TASK_REGISTRY) == 41, f"期望 41 个任务，实际 {len(TASK_REGISTRY)}"
 
 
 # ── 异常处理测试 ──
@@ -203,3 +204,29 @@ def test_exception_handling_graceful(sample_doe_data):
     # 应返回错误状态而非抛出异常
     assert result.status == "error"
     assert len(result.messages) > 0
+
+
+def test_doe_design_registered_and_no_target():
+    """doe_design 注册且无需目标列，可无数据运行。"""
+    assert "doe_design" in TASK_REGISTRY
+    assert "doe_design" in NO_TARGET_TASKS
+    r = orchestrate(
+        AnalysisRequest(
+            task="doe_design",
+            data=pd.DataFrame(),
+            params={
+                "method": "full_factorial",
+                "factors": [{"name": "A", "levels": [1, 2]}],
+            },
+        )
+    )
+    assert r.status == "ok"
+    assert r.metadata["n_runs"] == 2
+
+
+def test_no_data_tasks_membership():
+    """完全无需输入数据的任务（纯参数计算）应登记进 NO_DATA_TASKS。"""
+    assert "doe_design" in NO_DATA_TASKS
+    assert "power_analysis" in NO_DATA_TASKS
+    # NO_DATA_TASKS 是 NO_TARGET_TASKS 的子集（无需数据的任务必然也无需目标列）
+    assert NO_DATA_TASKS <= NO_TARGET_TASKS

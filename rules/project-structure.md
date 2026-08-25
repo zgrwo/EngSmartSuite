@@ -140,7 +140,7 @@ EngSmartSuite/
 │   ├── verification-before-completion/
 │   └── subagent-driven-development/
 │
-├── templates/                      # YAML 分析模板 (43 个) + new_analysis.py + README.md
+├── templates/                      # YAML 分析模板 (44 个) + new_analysis.py + README.md
 │   ├── README.md                   #   模板目录说明
 │   ├── new_analysis.py             #   新方法脚手架（11 步注册链模板）
 │   ├── example_anomaly_detect.yaml
@@ -155,6 +155,7 @@ EngSmartSuite/
 │   ├── example_decision_tree.yaml
 │   ├── example_distribution_summary.yaml
 │   ├── example_doe_analysis.yaml
+│   ├── example_doe_design.yaml
 │   ├── example_gage_rr.yaml
 │   ├── example_grid_search.yaml
 │   ├── example_hypothesis_test.yaml

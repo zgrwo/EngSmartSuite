@@ -1,4 +1,5 @@
 import logging
+from itertools import combinations, product
 
 import numpy as np
 import pandas as pd
@@ -1846,3 +1847,455 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(
             task="quantile_regression", status="error", messages=["分位数回归拟合失败"]
         )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# DOE 实验设计（doe_design）— 生成实验设计矩阵
+# ══════════════════════════════════════════════════════════════════════
+
+_VALID_DOE_METHODS = (
+    "full_factorial",
+    "fractional_factorial",
+    "plackett_burman",
+    "taguchi",
+    "box_behnken",
+    "ccd",
+)
+
+# Plackett-Burman 支持的运行数（N-1 必须为素数且 ≡ 3 mod 4，保证循环构造正交）。
+# 注：28 不是标准 PB 规模（27=3³ 非素数，无循环差集，构造方式不同），故不列入。
+_PB_SUPPORTED = (12, 20, 24)
+
+
+def _legendre(a: int, p: int) -> int:
+    """Legendre 符号：+1（二次剩余）/ -1（非剩余）/ 0（a ≡ 0 mod p）。"""
+    a %= p
+    if a == 0:
+        return 0
+    return 1 if pow(a, (p - 1) // 2, p) == 1 else -1
+
+
+def _pb_generator(n_runs: int) -> list[int]:
+    """Plackett-Burman 生成首行（+1 → 1，-1 → 0），基于二次剩余构造。
+
+    N-1 = p 为素数时，g[j] = χ(j)（j=0..p-1），其中 χ(0) 约定为 +1。
+    循环移位 + 末行全 0 后构成正交矩阵（由测试校验）。
+    """
+    if n_runs not in _PB_SUPPORTED:
+        raise ValueError(f"plackett_burman 当前仅支持运行数 {list(_PB_SUPPORTED)}")
+    p = n_runs - 1
+    return [1 if (j == 0 or _legendre(j, p) == 1) else 0 for j in range(p)]
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _as_bool(v, default=True) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "是")
+    return bool(v)
+
+
+def _parse_factors(params):
+    """解析并校验 factors 参数。返回 (parsed_list | None, [错误消息])。"""
+    factors = params.get("factors")
+    if not factors:
+        return None, ["需要提供因子定义 (factors)，格式: [{'name': ..., 'levels': [...]}]"]
+    parsed, seen = [], set()
+    for i, f in enumerate(factors):
+        name = f.get("name")
+        levels = f.get("levels")
+        if not name or not isinstance(name, str):
+            return None, [f"第 {i + 1} 个因子缺少有效的 name"]
+        if name in seen:
+            return None, [f"因子名重复: {name}"]
+        seen.add(name)
+        if not isinstance(levels, (list, tuple)) or len(set(map(str, levels))) < 2:
+            return None, [f"因子「{name}」的水平数必须 ≥ 2 且互异"]
+        parsed.append({"name": name, "levels": list(levels)})
+    return parsed, []
+
+
+def _gen_full_factorial(factors) -> np.ndarray:
+    """全因子：所有水平组合的笛卡尔积，返回水平索引矩阵。"""
+    idx = [range(len(f["levels"])) for f in factors]
+    return np.array(list(product(*idx)), dtype=int)
+
+
+def _gen_fractional(factors, n_runs):
+    """2^(k-p) 部分因子：GF(2) 饱和表取 k 个因子列（独立列优先）。返回 (矩阵, 错误列表)。"""
+    from smartsuite.engine._doe_arrays import _two_level_factor_columns
+
+    n = int(round(np.log2(n_runs)))
+    if 2**n != n_runs:
+        return None, [f"fractional_factorial 的运行数必须是 2 的幂，当前: {n_runs}"]
+    k = len(factors)
+    if k > n_runs - 1:
+        return None, [f"因子数({k})超过 2^n-1({n_runs - 1})，正交表装不下"]
+    return _two_level_factor_columns(n_runs, k), []
+
+
+def _pb_matrix(n_runs) -> np.ndarray:
+    """Plackett-Burman 矩阵：循环移位 + 末行全 0。"""
+    g = np.array(_pb_generator(n_runs))
+    rows = [np.roll(g, i) for i in range(n_runs - 1)]
+    rows.append(np.zeros(n_runs - 1, dtype=int))
+    return np.array(rows, dtype=int)
+
+
+def _gen_plackett_burman(factors, n_runs):
+    """Plackett-Burman 筛选设计。返回 (矩阵, 错误列表)。"""
+    k = len(factors)
+    try:
+        m = _pb_matrix(n_runs)
+    except ValueError as e:
+        return None, [str(e)]
+    if k > n_runs - 1:
+        return None, [f"因子数({k})超过 PB 运行数上限({n_runs - 1})"]
+    return m[:, :k], []
+
+
+def _two_level_base(name, runs) -> np.ndarray:
+    """二水平正交表：L12 走 PB，其余走 GF(2)。"""
+    from smartsuite.engine._doe_arrays import two_level_oa
+
+    if name == "L12":
+        return _pb_matrix(12)
+    return two_level_oa(runs)
+
+
+def _gen_taguchi(factors):
+    """田口正交数组匹配器。返回 (编码矩阵, 表名, 列构成描述)。
+
+    纯二水平 → L4/L8/L12/L16/L32；纯三水平 → L9/L27；
+    混合 2/3 水平 → 以 L18 为基与 2^m 全因子做直积。
+    失败时抛 ValueError（中文消息）。
+    """
+    from smartsuite.engine._doe_arrays import L18, three_level_oa, two_level_oa
+
+    n2 = sum(1 for f in factors if len(f["levels"]) == 2)
+    n3 = sum(1 for f in factors if len(f["levels"]) == 3)
+
+    if n3 == 0:
+        for name, runs, c2 in (
+            ("L4", 4, 3),
+            ("L8", 8, 7),
+            ("L12", 12, 11),
+            ("L16", 16, 15),
+            ("L32", 32, 31),
+        ):
+            if n2 <= c2:
+                two_cols = _two_level_base(name, runs)
+                three_cols = None
+                spec = f"2^{c2}"
+                break
+        else:
+            raise ValueError(f"二水平因子数({n2})过多，无正交表可匹配")
+    elif n2 == 0:
+        for name, runs, c3 in (("L9", 9, 4), ("L27", 27, 13)):
+            if n3 <= c3:
+                three_cols = three_level_oa(runs)
+                two_cols = None
+                spec = f"3^{c3}"
+                break
+        else:
+            raise ValueError(f"三水平因子数({n3})过多，无正交表可匹配")
+    else:
+        if n3 > 7:
+            raise ValueError(
+                "三水平因子数超过 7 且含二水平因子时无正交表可匹配；"
+                "建议改用 full_factorial 或减少三水平因子数"
+            )
+        if n2 <= 1:
+            two_cols = L18[:, 0:1]
+            three_cols = L18[:, 1:8]
+            name, spec = "L18", "2^1·3^7"
+        else:
+            m = 1
+            while 2 ** (m + 1) - 1 < n2:
+                m += 1
+            ff = two_level_oa(2**m)  # (2^m) × (2^m-1)
+            c1 = L18[:, 0]
+            three = L18[:, 1:8]
+            tiled_c1 = np.tile(c1, 2**m)
+            two_list = [tiled_c1]
+            for i in range(ff.shape[1]):
+                a = np.repeat(ff[:, i], 18)
+                two_list.append(a)
+                two_list.append(tiled_c1 ^ a)
+            two_cols = np.column_stack(two_list)  # (18·2^m) × (2^(m+1)-1)
+            three_cols = np.tile(three, (2**m, 1))  # (18·2^m) × 7
+            name = f"L{18 * 2**m}"
+            spec = f"2^{2 ** (m + 1) - 1}·3^7"
+
+    # 依因子顺序拼装列（二水平因子取二水平列，三水平因子取三水平列）
+    cols, p2, p3 = [], 0, 0
+    for f in factors:
+        if len(f["levels"]) == 2:
+            cols.append(two_cols[:, p2])
+            p2 += 1
+        else:
+            cols.append(three_cols[:, p3])
+            p3 += 1
+    return np.column_stack(cols), name, spec
+
+
+def _gen_box_behnken(k) -> np.ndarray:
+    """Box-Behnken：每对因子的 2×2 方形角点（其余取中心），返回 -1/0/+1 编码。"""
+    rows = []
+    for i, j in combinations(range(k), 2):
+        for a in (-1, 1):
+            for b in (-1, 1):
+                r = np.zeros(k)
+                r[i], r[j] = a, b
+                rows.append(r)
+    return np.array(rows)
+
+
+def _gen_ccd(k, alpha, center_points) -> np.ndarray:
+    """中心复合设计：2^k（或 2^(k-1)）阶乘 + 2k 轴向点 + 中心点。"""
+    if k <= 4:
+        fact = np.array(list(product([-1.0, 1.0], repeat=k)))
+    else:
+        from smartsuite.engine._doe_arrays import _two_level_factor_columns
+
+        n = int(round(np.log2(2 ** (k - 1))))
+        fact = 2 * _two_level_factor_columns(2**n, k) - 1  # 0/1 → -1/+1
+    axial = []
+    for i in range(k):
+        for s in (-alpha, alpha):
+            r = np.zeros(k)
+            r[i] = s
+            axial.append(r)
+    center = np.zeros((center_points, k))
+    return np.vstack([fact, np.array(axial), center])
+
+
+def _resolve_alpha(alpha, k, center_points):
+    """解析 CCD 轴向距离 α。返回 float 或 None（非法）。"""
+    # 阶乘点数量：k≤4 全因子 2^k，k≥5 半因子 2^(k-1)
+    nf = 2**k if k <= 4 else 2 ** (k - 1)
+    if alpha == "rotatable":
+        # 旋转性：α = nf^(1/4)（k≤4 时即 2^(k/4)）
+        return float(nf ** (1 / 4))
+    if alpha == "face":
+        return 1.0
+    if alpha == "orthogonal":
+        # 正交性：α = sqrt((sqrt(nf·N) − nf) / 2)，N = 总运行数
+        ns = 2 * k
+        n_total = nf + ns + center_points
+        return float(np.sqrt((np.sqrt(nf * n_total) - nf) / 2))
+    if _is_num(alpha) and alpha > 0:
+        return float(alpha)
+    return None
+
+
+def _assemble_design(req, factors, coded, method, oa_name, oa_spec):
+    """映射到实际水平 + 重复 + 随机化 + 运行顺序，组装 AnalysisResult。"""
+    replicates = req.params.get("replicates", 1)
+    try:
+        replicates = int(replicates)
+    except (ValueError, TypeError):
+        return AnalysisResult(
+            task="doe_design",
+            status="error",
+            messages=[f"replicates 值无效: {replicates}，请输入整数"],
+        )
+    if replicates < 1:
+        return AnalysisResult(task="doe_design", status="error", messages=["replicates 必须 ≥ 1"])
+
+    cols = {}
+    for ci, f in enumerate(factors):
+        lv = f["levels"]
+        col = coded[:, ci]
+        if method in ("box_behnken", "ccd"):
+            lo, mid, hi = float(lv[0]), float(lv[1]), float(lv[2])
+            vals = np.where(col >= 0, mid + col * (hi - mid), mid + col * (mid - lo))
+        else:
+            vals = np.array([lv[int(i)] for i in col])
+        cols[f["name"]] = vals
+
+    df = pd.DataFrame(cols)
+    if replicates > 1:
+        df = pd.concat([df] * replicates, ignore_index=True)
+        df.insert(0, "重复", np.repeat(np.arange(1, replicates + 1), len(coded)))
+
+    randomize = _as_bool(req.params.get("randomize", True), True)
+    seed = req.params.get("seed", 42)
+    try:
+        seed = int(seed)
+    except (ValueError, TypeError):
+        seed = 42
+    if randomize:
+        df = df.sample(frac=1.0, random_state=np.random.RandomState(seed)).reset_index(drop=True)
+    df.insert(0, "运行顺序", np.arange(1, len(df) + 1))
+
+    info = pd.DataFrame(
+        {
+            "指标": ["方法", "正交表", "列构成", "运行数", "因子数"],
+            "值": [method, oa_name or "—", oa_spec or "—", str(len(df)), str(len(factors))],
+        }
+    )
+    summary = f"{method} 设计：{len(factors)} 个因子，共 {len(df)} 次运行" + (
+        f"（正交表 {oa_name}）" if oa_name else ""
+    )
+    return AnalysisResult(
+        task="doe_design",
+        tables={"design_matrix": df, "design_info": info},
+        summary=summary,
+        metadata={
+            "method": method,
+            "n_runs": len(df),
+            "n_factors": len(factors),
+            "oa_name": oa_name,
+            "oa_spec": oa_spec,
+            "randomized": randomize,
+            "seed": seed,
+            "replicates": replicates,
+        },
+    )
+
+
+def doe_design(req: AnalysisRequest) -> AnalysisResult:
+    """DOE 实验设计 — 输入因子（名称+水平）与设计方法，输出实验设计矩阵。
+
+    参数 (params):
+        factors: 必需，[{name, levels}]，levels 为水平值列表（数值或标签）
+        method: full_factorial | fractional_factorial | plackett_burman
+                | taguchi | box_behnken | ccd（默认 full_factorial）
+        replicates: 重复次数（默认 1）
+        randomize: 是否随机化运行顺序（默认 True）
+        seed: 随机种子（默认 42）
+        center_points: RSM 中心点重复数（BB/CCD，默认 3）
+        alpha: CCD 轴向距离 rotatable|orthogonal|face|数值（默认 rotatable）
+        n_runs: 指定运行数（fractional_factorial / plackett_burman）
+
+    数据要求: 无（忽略 req.data，因子从 params 读取）
+    """
+    method = req.params.get("method", "full_factorial")
+    if method not in _VALID_DOE_METHODS:
+        return AnalysisResult(
+            task="doe_design",
+            status="error",
+            messages=[f"method 无效: {method!r}，支持: {list(_VALID_DOE_METHODS)}"],
+        )
+    factors, errs = _parse_factors(req.params)
+    if errs:
+        return AnalysisResult(task="doe_design", status="error", messages=errs)
+
+    oa_name, oa_spec = None, None
+    try:
+        if method == "full_factorial":
+            total = int(np.prod([len(f["levels"]) for f in factors]))
+            if total > 10000:
+                return AnalysisResult(
+                    task="doe_design",
+                    status="error",
+                    messages=[f"全因子运行数({total})超过上限 10000，请改用 taguchi/ccd 降维"],
+                )
+            coded = _gen_full_factorial(factors)
+        elif method == "fractional_factorial":
+            if any(len(f["levels"]) != 2 for f in factors):
+                return AnalysisResult(
+                    task="doe_design",
+                    status="error",
+                    messages=["fractional_factorial 要求所有因子为 2 水平"],
+                )
+            n_runs = req.params.get("n_runs") or 2 ** len(factors)
+            try:
+                n_runs = int(n_runs)
+            except (ValueError, TypeError):
+                return AnalysisResult(
+                    task="doe_design", status="error", messages=[f"n_runs 值无效: {n_runs}"]
+                )
+            coded, err = _gen_fractional(factors, n_runs)
+            if err:
+                return AnalysisResult(task="doe_design", status="error", messages=err)
+            oa_name = f"2^{int(np.log2(n_runs))}"
+            oa_spec = f"2^(k-p), 运行数={n_runs}"
+        elif method == "plackett_burman":
+            if any(len(f["levels"]) != 2 for f in factors):
+                return AnalysisResult(
+                    task="doe_design",
+                    status="error",
+                    messages=["plackett_burman 要求所有因子为 2 水平"],
+                )
+            k = len(factors)
+            n_runs = req.params.get("n_runs") or next(
+                (n for n in _PB_SUPPORTED if n - 1 >= k), None
+            )
+            try:
+                n_runs = int(n_runs)
+            except (ValueError, TypeError):
+                return AnalysisResult(
+                    task="doe_design", status="error", messages=[f"n_runs 值无效: {n_runs}"]
+                )
+            coded, err = _gen_plackett_burman(factors, n_runs)
+            if err:
+                return AnalysisResult(task="doe_design", status="error", messages=err)
+            oa_name = f"PB{n_runs}"
+            oa_spec = f"2^{n_runs - 1}"
+        elif method == "taguchi":
+            coded, oa_name, oa_spec = _gen_taguchi(factors)
+        else:  # box_behnken / ccd
+            bad = [
+                f["name"]
+                for f in factors
+                if len(f["levels"]) != 3 or not all(_is_num(v) for v in f["levels"])
+            ]
+            if bad:
+                return AnalysisResult(
+                    task="doe_design",
+                    status="error",
+                    messages=[
+                        f"{method} 要求所有因子为 3 个数值水平（低/中/高），以下因子不符: {bad}"
+                    ],
+                )
+            k = len(factors)
+            if method == "box_behnken" and not (3 <= k <= 12):
+                return AnalysisResult(
+                    task="doe_design", status="error", messages=["box_behnken 支持 3-12 个因子"]
+                )
+            if method == "ccd" and not (2 <= k <= 10):
+                return AnalysisResult(
+                    task="doe_design", status="error", messages=["ccd 支持 2-10 个因子"]
+                )
+            center_points = req.params.get("center_points", 3)
+            try:
+                center_points = int(center_points)
+            except (ValueError, TypeError):
+                center_points = 3
+            if center_points < 0:
+                return AnalysisResult(
+                    task="doe_design", status="error", messages=["center_points 必须 ≥ 0"]
+                )
+            if method == "box_behnken":
+                coded = np.vstack(
+                    [
+                        _gen_box_behnken(k),
+                        np.zeros((center_points, k)),
+                    ]
+                )
+                oa_name, oa_spec = "Box-Behnken", f"k={k}"
+            else:
+                alpha = _resolve_alpha(req.params.get("alpha", "rotatable"), k, center_points)
+                if alpha is None:
+                    return AnalysisResult(
+                        task="doe_design",
+                        status="error",
+                        messages=[
+                            f"alpha 无效: {req.params.get('alpha')!r}，"
+                            "支持 rotatable|orthogonal|face 或正数值"
+                        ],
+                    )
+                coded = _gen_ccd(k, alpha, center_points)
+                oa_name, oa_spec = "CCD", f"k={k}, α={alpha:.4f}"
+    except ValueError as e:
+        return AnalysisResult(task="doe_design", status="error", messages=[str(e)])
+
+    return _assemble_design(req, factors, coded, method, oa_name, oa_spec)

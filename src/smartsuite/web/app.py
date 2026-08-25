@@ -30,6 +30,7 @@ except ImportError:
 from smartsuite.core.exceptions import ValidationError
 from smartsuite.services.orchestrator import (
     GROUP_COLORS,
+    NO_DATA_TASKS,
     NO_TARGET_TASKS,
     TASK_GROUPS,
     TASK_LABELS,
@@ -332,10 +333,14 @@ def analyze():
             return jsonify(
                 {"error": f"未知的分析任务「{task}」，支持: {list(TASK_REGISTRY.keys())}"}
             ), 400
+        # 完全无需数据的任务（纯参数计算）跳过数据文件检查，传入空 DataFrame
         path = session.get("_data_path")
-        if not path or not os.path.exists(path):
+        if task in NO_DATA_TASKS:
+            df = pd.DataFrame()
+        elif not path or not os.path.exists(path):
             return jsonify({"error": "请先上传数据文件"}), 400
-        df = pd.read_parquet(path)
+        else:
+            df = pd.read_parquet(path)
         results = run_analysis(task, df, targets, features, categoricals, params)
         return jsonify({"results": results})
     except ValidationError as e:

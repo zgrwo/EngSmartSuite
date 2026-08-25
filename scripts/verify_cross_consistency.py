@@ -121,6 +121,17 @@ TEST_CASES = [
         },
     ),
     ("doe_analysis", "不良率", ["熔体温度", "模具温度", "注射压力"], [], {}),
+    (
+        "doe_design",
+        "",
+        [],
+        [],
+        {
+            "method": "full_factorial",
+            "factors": [{"name": "A", "levels": [1, 2]}, {"name": "B", "levels": [1, 2]}],
+            "randomize": False,
+        },
+    ),
     ("roc_analysis", "首件合格", ["熔体温度"], [], {}),
     ("logistic_regression", "保养日", ["熔体温度", "模具温度"], ["保养日"], {}),
     ("lasso_regression", "不良率", ["熔体温度", "模具温度", "注射压力"], [], {}),
@@ -153,7 +164,7 @@ TEST_CASES = [
     ("scatter_plot", "不良率", ["熔体温度"], [], {"fit": "linear"}),
 ]
 
-assert len(TEST_CASES) == 40, f"Expected 40 test cases, got {len(TEST_CASES)}"
+assert len(TEST_CASES) == 41, f"Expected 41 test cases, got {len(TEST_CASES)}"
 
 # ── 运行验证 ──
 results = []

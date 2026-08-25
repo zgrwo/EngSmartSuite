@@ -833,7 +833,79 @@ Pareto 前沿图 + 综合评分排序。加权最优方案的参数组合。
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='multi_objective', ...))`
-### 6.5 DOE 效应估计 (`doe_analysis`)
+### 6.5 DOE 实验设计 (`doe_design`)
+
+**功能**: 给定因子（名称+水平）与设计方法，生成实验设计矩阵（run table）。无需数据/目标列。
+
+#### 参数选择及说明
+
+**无需上传数据文件**，也无需标记 Y/X 列——本方法直接从参数生成实验方案。
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `method` | `full_factorial` | 设计方法（见下方「设计方法详解」） |
+| `factors` | 必填 | 因子定义：每个因子一行，填「因子名」+「水平（逗号分隔）」 |
+| `replicates` | 1 | 重复次数（整套设计的重复遍数，≥1） |
+| `randomize` | `true` | 是否随机化运行顺序 |
+| `seed` | 42 | 随机种子（固定后可复现同一运行顺序） |
+| `center_points` | 3 | 中心点重复数（仅 Box-Behnken / CCD 生效） |
+| `alpha` | `rotatable` | CCD 轴向距离：`rotatable`(旋转性)/`orthogonal`(正交性)/`face`(面心 α=1)/正数值 |
+| `n_runs` | 自动 | 指定运行数（`fractional_factorial` 需 2 的幂；`plackett_burman` 需 12/20/24） |
+
+**因子定义（Web UI）**：每个因子独占一行，左侧填因子名，右侧填水平（逗号分隔）。
+
+| 因子名 | 水平 | 结果 |
+|--------|------|------|
+| 料温 | `180,200,220` | 三水平数值因子 |
+| 模具 | `A,B` | 二水平类别因子（文本水平） |
+
+数值水平自动转数字，文本水平原样保留；每个因子至少 2 个互异水平。
+
+#### 设计方法详解
+
+| method | 中文名 | 适用场景 |
+|--------|--------|----------|
+| `full_factorial` | 全因子 | 因子少（≤4-5）且需估计全部交互 |
+| `fractional_factorial` | 部分因子 2^(k-p) | 纯二水平因子筛选 |
+| `plackett_burman` | PB 筛选 | 大量二水平因子（≤23 个） |
+| `taguchi` | 田口正交数组 | 混合 2/3 水平筛选（自动匹配 L4~L36） |
+| `box_behnken` | Box-Behnken | 3-12 个连续因子响应面（无角点） |
+| `ccd` | 中心复合 | 2-10 个连续因子响应面（含轴向点） |
+
+> ⚠️ **协同要求**：无需 Y/X 列；每个因子至少 2 个互异水平。三水平+二水平混合自动匹配田口正交表（如 6×三水平+2×二水平 → L36，36 次）。`box_behnken`/`ccd` 要求每个因子恰为 **3 个数值水平（低/中/高）**。
+
+#### 示例分析图片
+
+_本方法输出实验设计矩阵表格，不生成图表。_
+
+#### 数值结果（Web UI ≡ Python）
+
+`design_matrix`（运行顺序 + 因子列）、`design_info`（方法/正交表/列构成/运行数/因子数）。
+
+#### 解读说明
+
+按「运行顺序」列依次执行实验，记录响应值后接入 `doe_analysis` 分析效应。
+
+#### 补充备注
+
+- **Python API**：`factors` 为 `[{name, levels}]` 列表（与 Web UI 每因子一行的编辑器对应）：
+  ```python
+  orchestrate(AnalysisRequest(
+      task='doe_design',
+      data=pd.DataFrame(),
+      params={
+          'method': 'taguchi',
+          'factors': [
+              {'name': '料温', 'levels': [180, 200, 220]},
+              {'name': '模具', 'levels': ['A', 'B']},
+          ],
+          'randomize': False,
+      },
+  ))
+  ```
+- **无需数据文件**：本方法不读 `req.data`，可传空 `DataFrame`。
+
+### 6.6 DOE 效应估计 (`doe_analysis`)
 **功能**: 估计各因子的主效应大小，Pareto 图展示，Lenth PSE 显著性参考线。
 
 #### 参数选择及说明
@@ -865,7 +937,7 @@ Pareto 前沿图 + 综合评分排序。加权最优方案的参数组合。
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='doe_analysis', ...))`
-### 6.6 ROC/AUC 分析 (`roc_analysis`)
+### 6.7 ROC/AUC 分析 (`roc_analysis`)
 **功能**: 评估连续变量对二分类结果的区分能力。
 
 #### 参数选择及说明
@@ -895,7 +967,7 @@ AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='roc_analysis', ...))`
-### 6.7 Logistic 回归 (`logistic_regression`)
+### 6.8 Logistic 回归 (`logistic_regression`)
 **功能**: 二分类结果建模（如预测是否会出现不良品）。
 
 #### 参数选择及说明
@@ -924,7 +996,7 @@ AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='logistic_regression', ...))`
-### 6.8 Lasso 回归 (`lasso_regression`)
+### 6.9 Lasso 回归 (`lasso_regression`)
 **功能**: 带正则化的回归——自动将不重要的变量系数压缩到零，实现特征选择。
 
 #### 参数选择及说明
@@ -956,7 +1028,7 @@ AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='lasso_regression', ...))`
-### 6.9 稳健回归 Huber (`robust_regression`)
+### 6.10 稳健回归 Huber (`robust_regression`)
 **功能**: 对异常值不敏感的回归——Huber 损失函数自动降低异常值权重。
 
 #### 参数选择及说明
@@ -986,7 +1058,7 @@ Huber vs OLS 系数对比柱状图。差异最大变量标注。
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='robust_regression', ...))`
-### 6.10 分位数回归 (`quantile_regression`)
+### 6.11 分位数回归 (`quantile_regression`)
 
 **功能**: 对中位数（或任意分位数）建模，不依赖正态假设。
 

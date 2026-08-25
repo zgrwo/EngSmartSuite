@@ -177,6 +177,17 @@ class AnalysisResult:
 - **返回**: `effect_estimates` (含 t 值/p 值/效应量解读)
 - **图**: Pareto 效应图 + Lenth ME 参考线
 
+### doe_design
+- **Task Key**: `doe_design`
+- **描述**: DOE 实验设计 — 给定因子（名称+水平）与设计方法，生成实验设计矩阵
+- **params**:
+  - `factors` (必需): `[{name, levels}]`，levels 为水平值列表（数值或类别标签）
+  - `method`: `full_factorial` | `fractional_factorial` | `plackett_burman` | `taguchi` | `box_behnken` | `ccd`（默认 `full_factorial`）
+  - `replicates` (1)、`randomize` (True)、`seed` (42)、`center_points` (3)、`alpha` (`rotatable`)、`n_runs` (None)
+- **返回**: `design_matrix`（运行顺序 + 因子列 + 可选重复列）、`design_info`（方法/正交表/列构成/运行数/因子数）
+- **图**: 无
+- **无需目标列/数据**：仅读 `params.factors`，已注册进 `NO_TARGET_TASKS` + `NO_DATA_TASKS`（Web 层无需上传数据文件）
+
 ### roc_analysis
 - **Task Key**: `roc_analysis`
 - **描述**: ROC 曲线和 AUC 分析 — 评估连续预测变量对二分类结果的区分能力

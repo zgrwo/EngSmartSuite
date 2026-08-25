@@ -1,0 +1,28 @@
+# DOE 实验设计模板 — 田口正交数组（6 个三水平因子 + 2 个二水平因子 → L36）
+# 设计方法 method: full_factorial | fractional_factorial | plackett_burman
+#                   | taguchi | box_behnken | ccd
+task: doe_design
+target_col: ""
+feature_cols: []
+params:
+  method: taguchi          # 田口正交数组（混合 2/3 水平）
+  factors:
+    - name: "料温"
+      levels: [180, 200, 220]
+    - name: "模温"
+      levels: [40, 60, 80]
+    - name: "注射压力"
+      levels: [60, 80, 100]
+    - name: "保压时间"
+      levels: [5, 10, 15]
+    - name: "冷却时间"
+      levels: [10, 20, 30]
+    - name: "注射速度"
+      levels: [30, 60, 90]
+    - name: "原料类型"
+      levels: ["A", "B"]
+    - name: "模具类型"
+      levels: ["标准", "强化"]
+  randomize: true          # 随机化运行顺序
+  seed: 42                 # 随机种子（可复现）
+  replicates: 1            # 重复次数

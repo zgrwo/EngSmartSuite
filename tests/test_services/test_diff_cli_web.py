@@ -265,6 +265,17 @@ PARITY_CASES = [
     ("cohens_kappa", "", [], ["首件合格", "外观检查"], {}),
     ("cronbach_alpha", "", X[:3], [], {}),
     ("power_analysis", "", [], [], {"effect_size": 0.5}),
+    (
+        "doe_design",
+        "",
+        [],
+        [],
+        {
+            "method": "full_factorial",
+            "factors": [{"name": "A", "levels": [1, 2]}, {"name": "B", "levels": [1, 2]}],
+            "randomize": False,
+        },
+    ),
     # Category 6 — 特殊
     ("doe_analysis", Y, X, [], {}),
     ("response_surface", Y, ["熔体温度", "模具温度"], [], {}),
@@ -295,8 +306,8 @@ PARITY_CASES = [
 
 
 def test_parity_case_count():
-    """40 个任务必须全部覆盖（含注册表核对）。"""
-    assert len(PARITY_CASES) == 40
+    """41 个任务必须全部覆盖（含注册表核对）。"""
+    assert len(PARITY_CASES) == 41
     registered = set(TASK_REGISTRY.keys())
     covered = {c[0] for c in PARITY_CASES}
     assert covered == registered, f"差分清单与注册表不一致: {covered ^ registered}"
