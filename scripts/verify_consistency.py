@@ -150,6 +150,15 @@ TASK_SPEC = {
         ["a", "b"],
         {"objectives": [{"col": "target", "direction": "maximize"}]},
     ),
+    "doe_design": (
+        "",
+        [],
+        {
+            "method": "full_factorial",
+            "factors": [{"name": "a", "levels": [1, 2]}, {"name": "b", "levels": [1, 2]}],
+            "randomize": False,
+        },
+    ),
 }
 for task_id in sorted(TASK_REGISTRY.keys()):
     spec = TASK_SPEC.get(task_id)

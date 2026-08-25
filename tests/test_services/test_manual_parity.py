@@ -528,6 +528,7 @@ def test_all_methods_3path_behavior(raw_df, task):
         "grid_search": ("不良率", ["熔体温度", "注射压力"], False),
         "multi_objective": ("不良率", ["熔体温度", "注射压力"], False),
         "doe_analysis": ("不良率", ["熔体温度", "注射压力"], False),
+        "doe_design": ("", [], False),
         "spc_xbar": ("不良率", [], False),
         "spc_cusum": ("不良率", [], False),
         "spc_ewma": ("不良率", [], False),
@@ -591,6 +592,10 @@ def test_all_methods_3path_behavior(raw_df, task):
         extra_params["event_col"] = "首件合格"
     elif task == "hypothesis_test":
         extra_params["test"] = "ttest_ind"
+    elif task == "doe_design":
+        extra_params["method"] = "full_factorial"
+        extra_params["factors"] = [{"name": "A", "levels": [1, 2]}]
+        extra_params["randomize"] = False
 
     # 运行三条路径
     r_py = path_python(task, raw_df, target, features, extra_params, raw_cat=raw_cat)

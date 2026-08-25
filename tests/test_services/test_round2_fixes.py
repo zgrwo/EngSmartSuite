@@ -256,6 +256,34 @@ def test_analyze_missing_body_400(api_client):
     assert resp.status_code == 400
 
 
+def test_analyze_no_data_task_without_upload():
+    """无需数据的任务（doe_design）在未上传数据文件时应能正常运行，不再报「请先上传」。"""
+    from smartsuite.web.app import app
+
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["_csrf_token"] = "test-token"
+        # 不设置 _data_path，模拟未上传文件
+    resp = _post_analyze(
+        client,
+        payload={
+            "task": "doe_design",
+            "targets": [],
+            "features": [],
+            "categoricals": [],
+            "params": {
+                "method": "full_factorial",
+                "factors": [{"name": "A", "levels": [1, 2]}],
+                "randomize": False,
+            },
+        },
+    )
+    assert resp.status_code == 200, f"应 200，实际 {resp.status_code}: {resp.get_data(as_text=True)}"
+    results = resp.get_json()["results"]
+    assert results[0]["status"] == "ok"
+    assert results[0]["metadata"]["n_runs"] == 2
+
+
 # ─────────────────────────── audit.py (任务 12) ───────────────────────────
 
 

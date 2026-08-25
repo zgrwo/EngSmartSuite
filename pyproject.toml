@@ -48,6 +48,9 @@ dev = [
     "pytest-cov>=4.0",
     "ruff==0.16.3",
     "setuptools>=83.0",
+    # DOE 设计 benchmark 基准库（可选，未安装时 test_doe_pydoe2_benchmark.py 自动跳过）
+    # 注意：pyDOE2 1.3.0 在 Python 3.12+ 因遗留 `import imp` 需手动去除才可导入
+    "pyDOE2>=1.3.0",
 ]
 all = [
     "flask>=3.0",

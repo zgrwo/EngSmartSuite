@@ -125,7 +125,7 @@ def test_all_registered_tasks(df, task, target, features, params):
 
 def test_all_tasks_registered_count():
     """验证任务注册表完整性。"""
-    assert len(TASK_REGISTRY) == 40, f"Expected 40 tasks, got {len(TASK_REGISTRY)}"
+    assert len(TASK_REGISTRY) == 41, f"Expected 41 tasks, got {len(TASK_REGISTRY)}"
     required = [
         "correlation",
         "anova",

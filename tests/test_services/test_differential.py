@@ -229,6 +229,10 @@ def _params_for(task: str):
         params["objectives"] = [{"col": "y", "direction": "maximize"}]
     elif task == "doe_analysis":
         params["alpha"] = 0.05
+    elif task == "doe_design":
+        params["method"] = "full_factorial"
+        params["factors"] = [{"name": "A", "levels": [1, 2]}, {"name": "B", "levels": [1, 2]}]
+        params["randomize"] = False
     elif task == "lasso_regression":
         params["l1_ratio"] = 1.0
     elif task == "quantile_regression":
@@ -361,6 +365,9 @@ def test_cli_web_numerical_parity_all(task):
         target = "y_cat"
         features = ["组别"]
         categoricals = ["组别"]
+    elif task == "doe_design":
+        target = ""
+        features = []
     else:
         target = "y"
         features = ["x1", "x2"]
