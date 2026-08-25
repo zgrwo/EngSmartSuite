@@ -166,6 +166,7 @@ const TASK_PARAMS = {
   // 审查 2026-08-19 Round-2：min_segment 引擎自适应，前端不再下发
   change_point:      { n_changepoints: 5 },
   doe_analysis:      { alpha: 0.05 },
+  doe_design:        { method: 'full_factorial', factors: '', replicates: 1, randomize: 'true', seed: 42, center_points: 3, alpha: 'rotatable', n_runs: '' },
   variance_test:     { group_col: '', alpha: 0.05 },
   box_chart:         { mode: 'facet', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
   scatter_plot:      { fit: 'none', show_ci: 'true', group_col: '' },
@@ -284,6 +285,27 @@ const PARAM_META = {
     type: 'select', label: '置信带',
     options: [['true', '显示 95% 置信带'], ['false', '隐藏']]
   },
+  'method@doe_design': {
+    type: 'select', label: '设计方法',
+    options: [
+      ['full_factorial', '全因子设计'],
+      ['fractional_factorial', '部分因子 2^(k-p)'],
+      ['plackett_burman', 'Plackett-Burman 筛选'],
+      ['taguchi', '田口正交数组'],
+      ['box_behnken', 'Box-Behnken 响应面'],
+      ['ccd', '中心复合设计 (CCD)'],
+    ]
+  },
+  'alpha@doe_design': {
+    type: 'select', label: 'CCD 轴向距离 α',
+    options: [
+      ['rotatable', '旋转性 (2^(k/4))'], ['orthogonal', '正交性'], ['face', '面心 (α=1)']
+    ]
+  },
+  randomize: {
+    type: 'select', label: '随机化',
+    options: [['true', '随机化运行顺序'], ['false', '固定标准顺序']]
+  },
 };
 
 // 参数标签（中文显示名）
@@ -305,6 +327,9 @@ const PARAM_LABELS = {
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
   fit: '拟合类型', show_ci: '显示置信带', threshold: '分类阈值',
+  factors: '因子定义', replicates: '重复次数', randomize: '随机化',
+  seed: '随机种子', center_points: '中心点重复数', n_runs: '运行数',
+  'method@doe_design': '设计方法', 'alpha@doe_design': 'CCD 轴向距离 α',
 };
 
 const PARAM_HINTS = {
@@ -312,11 +337,63 @@ const PARAM_HINTS = {
   objectives: '格式: 强度:maximize; 不良率:minimize',
 };
 
+// ── DOE 因子编辑器（每个因子单独一行：因子名 + 水平）──
+function factorRowHtml(name = '', levels = '') {
+  return `<div class="factor-row">
+    <input class="factor-name" placeholder="因子名（如 料温）" value="${escHtml(name)}">
+    <input class="factor-levels" placeholder="水平（逗号分隔，如 180,200,220）" value="${escHtml(levels)}">
+    <button type="button" onclick="removeFactorRow(this)" class="btn-sm" title="删除">✕</button>
+  </div>`;
+}
+
+function buildFactorEditor() {
+  return `<div class="param-item">
+    <label class="param-label">因子定义</label>
+    <div class="param-hint">每个因子一行：因子名 + 水平（逗号分隔）。数值水平自动转数字，文本水平原样保留。</div>
+    <div id="factor-editor">${factorRowHtml()}</div>
+    <button type="button" onclick="addFactorRow()" class="btn-sm">+ 添加因子</button>
+  </div>`;
+}
+
+function addFactorRow(name = '', levels = '') {
+  const ed = document.getElementById('factor-editor');
+  if (ed) ed.insertAdjacentHTML('beforeend', factorRowHtml(name, levels));
+}
+
+function removeFactorRow(btn) {
+  const ed = document.getElementById('factor-editor');
+  const rows = ed ? ed.querySelectorAll('.factor-row') : [];
+  if (rows.length <= 1) {
+    // 至少保留一行，清空内容
+    rows[0].querySelector('.factor-name').value = '';
+    rows[0].querySelector('.factor-levels').value = '';
+    return;
+  }
+  btn.closest('.factor-row').remove();
+}
+
+function collectFactors() {
+  const ed = document.getElementById('factor-editor');
+  if (!ed) return [];
+  return [...ed.querySelectorAll('.factor-row')]
+    .map(row => {
+      const name = row.querySelector('.factor-name').value.trim();
+      const levels = row.querySelector('.factor-levels').value
+        .split(',').map(x => {
+          const t = x.trim();
+          return (t !== '' && !isNaN(t)) ? Number(t) : t;
+        }).filter(x => x !== '');
+      return { name, levels };
+    })
+    .filter(f => f.name && f.levels.length >= 2);
+}
+
 // ── 构建参数输入控件 ──
 function buildParamInput(k, v, task) {
+  if (k === 'factors') return buildFactorEditor();
   // 支持 task.key 格式的覆盖查找（如 power_analysis.mode vs box_chart.mode）
   const meta = PARAM_META[k + '@' + task] || PARAM_META[k];
-  const label = PARAM_LABELS[k] || k;
+  const label = PARAM_LABELS[k + '@' + task] || PARAM_LABELS[k] || k;
   const hint = PARAM_HINTS[k];
   const id = `param_${k}`;
 
@@ -367,6 +444,11 @@ function getParams(task) {
   if (!cfg) return {};
   const p = {};
   Object.keys(cfg).forEach(k => {
+    if (k === 'factors') {
+      const factors = collectFactors();
+      if (factors.length) p[k] = factors;
+      return;
+    }
     const el = document.getElementById('param_'+k);
     if (!el) return;
     let v = el.value.trim();
@@ -417,7 +499,7 @@ async function runAnalysis(task) {
   if (_running) return;  // 防抖：上一次分析尚未完成
   // 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
   const _noTargetNeeded = new Set([
-    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective',
+    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective', 'doe_design',
   ]);
   if (!_noTargetNeeded.has(task) && !selectedY.size) {
     alert('请至少选择一个 Y 列'); return;
@@ -425,7 +507,7 @@ async function runAnalysis(task) {
   // 仅需 Y 列即可运行的任务（无需选择 X 列）
   const _yOnlyTasks = new Set([
     'process_capability', 'trend_forecast',
-    'power_analysis', 'spc_nonparametric',
+    'power_analysis', 'doe_design', 'spc_nonparametric',
     'distribution_summary', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
     'spc_cusum', 'spc_ewma',

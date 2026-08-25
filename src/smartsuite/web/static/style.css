@@ -103,6 +103,16 @@ table tr:hover td { background: #f0f4ff; }
   font-size: 13px; font-family: inherit; background: #fff;
 }
 .param-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(63,81,181,0.15); }
+/* DOE 因子编辑器：每因子一行 */
+.factor-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+.factor-row .factor-name { width: 40%; min-width: 0; }
+.factor-row .factor-levels { flex: 1; min-width: 0; }
+.factor-row input {
+  padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px;
+  font-size: 13px; font-family: inherit; background: #fff;
+}
+.factor-row input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(63,81,181,0.15); }
+.factor-row .btn-sm { flex: none; }
 .param-select {
   width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
   font-size: 13px; font-family: inherit; background: #fff; cursor: pointer;
