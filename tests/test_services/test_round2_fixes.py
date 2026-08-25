@@ -278,7 +278,9 @@ def test_analyze_no_data_task_without_upload():
             },
         },
     )
-    assert resp.status_code == 200, f"应 200，实际 {resp.status_code}: {resp.get_data(as_text=True)}"
+    assert resp.status_code == 200, (
+        f"应 200，实际 {resp.status_code}: {resp.get_data(as_text=True)}"
+    )
     results = resp.get_json()["results"]
     assert results[0]["status"] == "ok"
     assert results[0]["metadata"]["n_runs"] == 2

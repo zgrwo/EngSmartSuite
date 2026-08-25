@@ -1929,7 +1929,7 @@ def _gen_full_factorial(factors) -> np.ndarray:
 
 def _gen_fractional(factors, n_runs):
     """2^(k-p) 部分因子：GF(2) 饱和表取 k 个因子列（独立列优先）。返回 (矩阵, 错误列表)。"""
-    from smartsuite.engine._doe_arrays import two_level_factor_columns
+    from smartsuite.engine._doe_arrays import _two_level_factor_columns
 
     n = int(round(np.log2(n_runs)))
     if 2**n != n_runs:
@@ -1937,7 +1937,7 @@ def _gen_fractional(factors, n_runs):
     k = len(factors)
     if k > n_runs - 1:
         return None, [f"因子数({k})超过 2^n-1({n_runs - 1})，正交表装不下"]
-    return two_level_factor_columns(n_runs, k), []
+    return _two_level_factor_columns(n_runs, k), []
 
 
 def _pb_matrix(n_runs) -> np.ndarray:
@@ -2062,10 +2062,10 @@ def _gen_ccd(k, alpha, center_points) -> np.ndarray:
     if k <= 4:
         fact = np.array(list(product([-1.0, 1.0], repeat=k)))
     else:
-        from smartsuite.engine._doe_arrays import two_level_factor_columns
+        from smartsuite.engine._doe_arrays import _two_level_factor_columns
 
         n = int(round(np.log2(2 ** (k - 1))))
-        fact = 2 * two_level_factor_columns(2**n, k) - 1  # 0/1 → -1/+1
+        fact = 2 * _two_level_factor_columns(2**n, k) - 1  # 0/1 → -1/+1
     axial = []
     for i in range(k):
         for s in (-alpha, alpha):

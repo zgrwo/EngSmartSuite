@@ -32,7 +32,7 @@ def two_level_oa(n_runs: int) -> np.ndarray:
     return np.column_stack(cols)
 
 
-def two_level_factor_columns(n_runs: int, n_factors: int) -> np.ndarray:
+def _two_level_factor_columns(n_runs: int, n_factors: int) -> np.ndarray:
     """从 GF(2) 饱和表取 n_factors 个因子列：独立列优先、高次交互列次之。
 
     直接取「前 n_factors 列」会把交互列（mask=3=b0^b1）排在独立列
