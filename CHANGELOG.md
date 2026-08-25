@@ -2,6 +2,13 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.9...v1.2.0) (2026-08-25)
+
+
+### ✨ 新功能
+
+* **engine:** 新增 DOE 实验设计 doe_design 方法 ([#19](https://github.com/zgrwo/EngSmartSuite/issues/19)) ([4e0177d](https://github.com/zgrwo/EngSmartSuite/commit/4e0177d316b6192d2f7ec93d2798b40d12976fe0))
+
 ## [1.1.9](https://github.com/zgrwo/EngSmartSuite/compare/v1.1.8...v1.1.9) (2026-08-24)
 
 
