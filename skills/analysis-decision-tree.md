@@ -19,6 +19,7 @@
 │   └── 多组方差相等 → variance_test
 │
 ├── "最优参数是什么？"
+│   ├── 先设计实验方案（全因子/部分因子/田口/BB/CCD） → doe_design
 │   ├── 建立 Y=f(X) 公式 → regression
 │   ├── 两参数可视化最优区 → response_surface
 │   ├── 精确搜索最优值 → grid_search
@@ -64,5 +65,5 @@
 2. 类别分析:  anova → (显著时) hypothesis_test (Tukey HSD)
 3. 非参数:    normality_check → (非正态) kruskal + bootstrap_ci + median_ci
 4. SPC 全流程: spc_xbar → process_capability → trend_forecast → anomaly_detect
-5. DOE 优化:  doe_analysis → regression → response_surface → grid_search → multi_objective
+5. DOE 优化:  doe_design（设计实验） → 执行实验 → doe_analysis → regression → response_surface → grid_search → multi_objective
 ```
