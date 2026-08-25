@@ -165,6 +165,7 @@ for key, val in _palette_style.items():
 try:
     from smartsuite.engine.doe_opt import (
         doe_analysis,
+        doe_design,
         grid_search,
         lasso_regression,
         logistic_regression,
@@ -254,6 +255,7 @@ __all__ = [
     "grid_search",
     "multi_objective_opt",
     "doe_analysis",
+    "doe_design",
     "roc_analysis",
     "logistic_regression",
     "lasso_regression",

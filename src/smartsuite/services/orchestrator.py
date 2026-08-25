@@ -20,6 +20,7 @@ from smartsuite.engine import (
     decision_tree_analysis,
     distribution_summary,
     doe_analysis,
+    doe_design,
     ewma_chart,
     gage_rr,
     grid_search,
@@ -61,6 +62,7 @@ TASK_REGISTRY = {
     "grid_search": grid_search,
     "multi_objective": multi_objective_opt,
     "doe_analysis": doe_analysis,
+    "doe_design": doe_design,
     "spc_xbar": xbar_r_chart,
     "spc_cusum": cusum_chart,
     "spc_ewma": ewma_chart,
@@ -120,6 +122,16 @@ DEFAULT_PARAMS = {
     "grid_search": {"ranges": None, "direction": "maximize", "n_points": 10},
     "multi_objective": {"objectives": None, "weights": None},
     "doe_analysis": {"alpha": 0.05},
+    "doe_design": {
+        "factors": None,
+        "method": "full_factorial",
+        "replicates": 1,
+        "randomize": True,
+        "seed": 42,
+        "center_points": 3,
+        "alpha": "rotatable",
+        "n_runs": None,
+    },
     "roc_analysis": {},
     "logistic_regression": {"threshold": 0.5},
     "lasso_regression": {"alpha_lasso": None, "l1_ratio": 1.0},
@@ -300,6 +312,7 @@ TASK_LABELS = {
     "grid_search": "网格搜索寻优",
     "multi_objective": "多目标优化",
     "doe_analysis": "DOE效应估计",
+    "doe_design": "DOE实验设计",
     "roc_analysis": "ROC/AUC分析",
     "logistic_regression": "Logistic回归",
     "lasso_regression": "Lasso回归",
@@ -344,6 +357,7 @@ TASK_GROUPS = {
         "power_analysis",
     ],
     "建模优化": [
+        "doe_design",
         "regression",
         "response_surface",
         "grid_search",
@@ -395,4 +409,12 @@ NO_TARGET_TASKS: set[str] = {
     "cronbach_alpha",
     "power_analysis",
     "multi_objective",
+    "doe_design",
+}
+
+# ── 完全无需输入数据的任务（纯参数计算，不读 req.data）──
+# Web 层通过此常量跳过「请先上传数据文件」的拦截，并传入空 DataFrame。
+NO_DATA_TASKS: set[str] = {
+    "power_analysis",
+    "doe_design",
 }
