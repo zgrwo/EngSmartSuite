@@ -72,13 +72,12 @@ _STATUS_IN_TUPLE_RE = re.compile(r"assert\s+\w+(?:\.\w+)*\s+in\s*\(([^)]*)\)")
 SELF_TEST_FILES = {"test_test_quality_guard.py"}
 
 # 既有公共函数缺测豁免（每项必须注明理由；新增公共函数一律不豁免）：
-#   - read_excel_range / to_excel：依赖 xlwings + Excel 实例（add-in 遗留路径，
-#     docstring 明确 Web/CLI 不调用；导出请用 audit.export_workbook）
+#   - to_excel：导出 API 由 reporter 提供，需已打开 workbook 实例，单测收益低
+#     （read_excel_range 已于 2026-08 移除——V1 add-in 遗留死代码，无调用方）
 #   - upload / analyze / list_tasks / column_info / require_csrf / csrf_token：
 #     Flask 视图/辅助函数，经 tests/test_web_e2e.py HTTP 层端到端覆盖，
 #     直接函数级测试需 request context，收益低
 EXEMPT_FUNCS = {
-    "read_excel_range",
     "to_excel",
     "upload",
     "analyze",
@@ -86,6 +85,10 @@ EXEMPT_FUNCS = {
     "column_info",
     "require_csrf",
     "csrf_token",
+    "index",  # Flask 首页视图：经 tests/test_web_e2e.py HTTP 层覆盖（审查 #R2 收紧模块关联后暴露）
+    # pydantic field_validator：由框架反射调用，无直接测试引用（审查 #P1-8 修复后
+    # 类公共方法也纳入缺测检查，validator 属框架回调而非业务公共函数）
+    "task_not_empty",
 }
 
 
@@ -268,37 +271,119 @@ def check_naming(tests_dir: Path) -> list[str]:
     return problems
 
 
+def _iter_public_funcs(tree: ast.Module):
+    """模块级公共函数 + 类的公共方法（审查 #P1-8：此前类方法不检查）。
+
+    函数内嵌套闭包（bootstrap 的 stat_fn、装饰器工厂的 wrapper 等）是内部实现，
+    不视为公共 API；装饰器包装的 pydantic validator 单独豁免（EXEMPT_FUNCS）。
+    AsyncFunctionDef 与 FunctionDef 同等对待（审查 #R2 前瞻）。
+    """
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith(
+            "_"
+        ):
+            yield node
+        elif isinstance(node, ast.ClassDef):
+            for sub in node.body:
+                if isinstance(
+                    sub, (ast.FunctionDef, ast.AsyncFunctionDef)
+                ) and not sub.name.startswith("_"):
+                    yield sub
+
+
+def _src_imported_names(tree: ast.Module) -> set[str]:
+    """测试文件中 import 引入的绑定名（审查 #R2 模块关联）。
+
+    Name 调用仅统计由此集合引入的名字；Attribute 调用仅统计
+    `导入绑定名.函数(...)` 形态。变量名（labels、df 等）不在集合内，
+    因此 labels.index() 这类同名方法调用不会掩盖 src 函数缺测。
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.ImportFrom, ast.Import)):
+            for a in node.names:
+                names.add(a.asname or a.name.split(".")[0])
+    return names
+
+
+def _collect_tested_names(tests_dir: Path) -> set[str]:
+    """用 AST 收集测试中对 src 函数的真实调用名。
+
+    审查 #P1-8：旧实现用 re.findall 匹配全文，注释/字符串里出现函数名即算
+    "已测"——现在仅统计真实 Call 节点。
+    审查 #R2：Name 调用仅计从 src 导入的名字；Attribute 调用仅计
+    `src模块.函数(...)` 形态（第一段是 src 导入名），避免 labels.index() 等
+    同名方法掩盖 src 函数缺测。
+    """
+    tested: set[str] = set()
+    for p in tests_dir.rglob("test_*.py"):
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        imported = _src_imported_names(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            if isinstance(f, ast.Name):
+                if f.id in imported:
+                    tested.add(f.id)
+            elif (
+                isinstance(f, ast.Attribute)
+                and isinstance(f.value, ast.Name)
+                and f.value.id in imported
+            ):
+                tested.add(f.attr)
+    return tested
+
+
 def check_missing_tests(src_dir: Path, tests_dir: Path) -> list[str]:
     """src/ 公共函数 vs tests/ 测试引用对应检测（防"改代码没更测试"）。"""
     problems: list[str] = []
     if not src_dir.is_dir() or not tests_dir.is_dir():
         return problems
-    tested: set[str] = set()
-    for p in tests_dir.rglob("test_*.py"):
-        try:
-            text = p.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        tested.update(re.findall(r"\b(\w+)\(", text))
+    tested = _collect_tested_names(tests_dir)
     for p in sorted(src_dir.rglob("*.py")):
-        if p.name.startswith("__"):
+        # 审查 #R2：__init__.py 内的公共函数（如 check_core_deps）也应纳入检查；
+        # 仅跳过纯 re-export（__all__ 引用或 from X import *）的声明文件
+        if p.name == "__init__.py" and not _has_local_defs(p):
+            continue
+        if p.name.startswith("__") and p.name != "__init__.py":
             continue
         try:
             tree = ast.parse(p.read_text(encoding="utf-8"))
         except (OSError, SyntaxError):
             continue
-        for node in tree.body:
-            is_public = isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
-            if is_public and node.name not in tested and node.name not in EXEMPT_FUNCS:
+        for node in _iter_public_funcs(tree):
+            if node.name not in tested and node.name not in EXEMPT_FUNCS:
                 rel = _rel(p)
                 problems.append(f"[FAIL] {rel}:{node.name} 无对应测试引用——新增公共函数必须配测试")
     return problems
+
+
+def _has_local_defs(path: Path) -> bool:
+    """__init__.py 是否含直接定义的函数/类（区别于纯 re-export）。"""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    return any(
+        isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for n in tree.body
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="测试质量守卫")
     parser.add_argument("--src", default="src", help="源码目录（默认 src）")
     parser.add_argument("--tests", default="tests", help="测试目录（默认 tests）")
+    parser.add_argument(
+        "--max-warn",
+        type=int,
+        default=None,
+        help="WARN 数量上限（审查 #P1-7：超出则 FAIL，防止弱断言只增不减；"
+        "不传则不限制，保持向后兼容）",
+    )
     args = parser.parse_args(argv)
 
     src_dir = ROOT / args.src
@@ -316,6 +401,15 @@ def main(argv: list[str] | None = None) -> int:
     for p in problems:
         print(p)
     if any(p.startswith("[FAIL]") for p in problems):
+        return 1
+    # 审查 #P1-7：WARN 计数上限——CI 显式传入基线，弱断言数量只减不增
+    warn_count = sum(1 for p in problems if p.startswith("[WARN]"))
+    if args.max_warn is not None and warn_count > args.max_warn:
+        print(
+            f"[FAIL] WARN 数量 {warn_count} 超过上限 {args.max_warn}——"
+            f"弱断言/恒真断言新增了 {warn_count - args.max_warn} 条，"
+            "请补真实断言或显式调高基线（--max-warn）"
+        )
         return 1
     print("[OK] 测试质量守卫通过（仅弱断言 WARN，已提示）")
     return 0
