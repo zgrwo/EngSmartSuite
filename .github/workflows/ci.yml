@@ -3,6 +3,30 @@ name: CI
 on:
   push:
     branches: [main]
+    # 路径过滤：无关文件改动不启动 runner，节省资源（workflow_dispatch 不受限）
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "tests/**"
+      - "templates/**"
+      - "rules/**"
+      - "skills/**"
+      - ".github/**"
+      - "AGENTS.md"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "CHANGELOG.md"
+      - "SECURITY.md"
+      - "CODE_OF_CONDUCT.md"
+      - "pyproject.toml"
+      - ".pre-commit-config.yaml"
+      - ".release-please-manifest.json"
+      # 根级启动/安装脚本（第二轮 #9）：改动这些也必须触发 CI
+      - "run_server.py"
+      - "run_smartsuite.bat"
+      - "run_smartsuite.sh"
+      - "setup_offline.bat"
+      - "setup_offline.sh"
   pull_request:
     branches: [main]
     # 路径过滤：无关文件改动不启动 runner，节省资源（workflow_dispatch 不受限）

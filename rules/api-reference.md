@@ -1,6 +1,6 @@
 # SmartSuite API Reference
 
-> 全部 40 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
+> 全部 41 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
 > 开发规范 → `AGENTS.md` | 开发陷阱 → `skills/smartsuite-dev.md` | 场景选择 → `skills/analysis-decision-tree.md` | 术语 → `CONTEXT.md`
 
 ## 数据契约
@@ -70,6 +70,9 @@ class AnalysisResult:
 | `mann_kendall` | Mann-Kendall 趋势检验 | — |
 | `jonckheere` | Jonckheere-Terpstra 趋势 | `group_col` |
 | `auto` | 自动选择 (Shapiro-Wilk → t/MWU) | `group_col` |
+| `kruskal` | Kruskal-Wallis H（kruskal_wallis 别名） | `group_col` |
+| `cohens_d` | 效应量 Cohen's d（不检验） | `group_col` |
+| `correlation` | 相关显著性检验 | `group_col` |
 
 ### decision_tree_analysis
 - **Task Key**: `decision_tree`
@@ -356,7 +359,7 @@ class AnalysisResult:
 路由分析请求到对应引擎函数，注入默认参数，统一异常处理。
 
 ### TASK_REGISTRY: dict[str, Callable]
-全部 40 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
+全部 41 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
 
 ### DEFAULT_PARAMS: dict[str, dict]
 各 task key 的默认参数。编排器会自动合并用户参数到默认参数之上。
@@ -378,7 +381,6 @@ class AnalysisResult:
 
 | 函数 | 用途 |
 |------|------|
-| `read_excel_range(sheet, range_addr=None)` | 从 Excel 选区读取 DataFrame |
 | `validate_data(df, target_col, feature_cols)` | 校验列存在性、类型、缺失值 |
 | `preprocess_data(df, features, categorical_cols=None)` | One-Hot 编码 + 中位数插补 |
 | `missing_pattern_analysis(df)` | 缺失模式诊断 + 高基数检测 |

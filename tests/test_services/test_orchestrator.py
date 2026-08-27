@@ -9,6 +9,7 @@
 - NO_TARGET_TASKS 行为
 """
 
+import pytest
 import numpy as np
 import pandas as pd
 
@@ -230,3 +231,24 @@ def test_no_data_tasks_membership():
     assert "power_analysis" in NO_DATA_TASKS
     # NO_DATA_TASKS 是 NO_TARGET_TASKS 的子集（无需数据的任务必然也无需目标列）
     assert NO_DATA_TASKS <= NO_TARGET_TASKS
+
+
+# ── 核心依赖检查（审查 #R2：__init__.py 公共函数纳入缺测检查后补测）──
+
+
+def test_check_core_deps_ok_when_installed():
+    """核心依赖齐全时 check_core_deps 不抛异常。"""
+    import smartsuite as pkg
+
+    pkg.check_core_deps()  # 本环境已安装全部依赖，应正常返回
+
+
+def test_check_core_deps_raises_friendly_import_error(monkeypatch):
+    """缺失依赖时抛出含中文安装提示的 ImportError。"""
+    import smartsuite as pkg
+
+    monkeypatch.setattr(pkg, "_CORE_DEPS", {"smartsuite_no_such_pkg_xyz": "pip install xxx"})
+    with pytest.raises(ImportError) as ei:
+        pkg.check_core_deps()
+    assert "缺少必要的核心依赖包" in str(ei.value)
+    assert "pip install" in str(ei.value)

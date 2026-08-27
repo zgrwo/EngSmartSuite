@@ -228,11 +228,13 @@ def upload():
         for encoding in ["utf-8-sig", "utf-8", "gbk", "latin-1"]:
             try:
                 # Round-2 P3：先探测行数（只读 max_rows+1 行），超限直接拒绝，
-                # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒
+                # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒。
+                # 审查 #P2：探测 nrows=100_001 未超限 ⟺ 文件行数 ≤ 100_000，
+                # probe 已是完整数据——直接复用，避免同一文件全量重读两次。
                 probe = pd.read_csv(io.BytesIO(f_bytes), encoding=encoding, nrows=100_001)
                 if len(probe) > 100_000:
                     return jsonify({"error": "数据行数超过限制 (100000行)，请减少数据量"}), 400
-                df = pd.read_csv(io.BytesIO(f_bytes), encoding=encoding)
+                df = probe
                 break
             except UnicodeError:
                 continue
@@ -376,5 +378,17 @@ def main(host="127.0.0.1", port=5050, debug=False):
 
 
 if __name__ == "__main__":
-    debug = os.environ.get("SMARTSUITE_DEBUG", "0") == "1"
-    main(debug=debug)
+    import argparse
+
+    _parser = argparse.ArgumentParser(description="SmartSuite Web UI")
+    _parser.add_argument("--host", default=None, help="监听地址 (默认: 127.0.0.1)")
+    _parser.add_argument("--port", type=int, default=None, help="监听端口 (默认: 5050)")
+    _parser.add_argument("--debug", action="store_true", help="启用 Flask debug 模式")
+    _args = _parser.parse_args()
+    main(
+        host=_args.host or "127.0.0.1",
+        port=_args.port
+        if _args.port is not None
+        else 5050,  # --port 0 是 Flask 合法值（随机端口），勿用 or 吞掉
+        debug=bool(_args.debug or os.environ.get("SMARTSUITE_DEBUG", "0") == "1"),
+    )

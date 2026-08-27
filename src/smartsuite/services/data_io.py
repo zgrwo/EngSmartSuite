@@ -11,22 +11,6 @@ from smartsuite.core.exceptions import ValidationError
 logger = logging.getLogger(__name__)
 
 
-def read_excel_range(sheet, range_addr: str | None = None) -> pd.DataFrame:
-    """从 Excel 选区读取 DataFrame。
-
-    依赖 xlwings Sheet 对象（需 Excel add-in 运行环境，xlwings 不作为 pip 依赖声明）。
-    Web UI 和 CLI 入口不调用此函数。
-    """
-    if range_addr:
-        data_range = sheet.range(range_addr)
-    else:
-        data_range = sheet.range("A1").expand()
-    df = data_range.options(pd.DataFrame, header=True).value
-    if df is None or df.empty:
-        raise ValidationError("所选区域无有效数据")
-    return df
-
-
 def validate_data(df: pd.DataFrame, target_col: str, feature_cols: list[str]) -> list[str]:
     """校验数据列存在性、类型、缺失值。返回警告消息列表。"""
     messages = []
@@ -526,6 +510,39 @@ def infer_group_col(
         if df[col].dropna().nunique() == 2:
             return {"group_col": col}
     return None
+
+
+def prepare_spc_subgroup_col(df: pd.DataFrame, params: dict) -> tuple[pd.DataFrame, dict]:
+    """CUSUM/EWMA 缺 group_col 时自动生成子组列（CLI/Web 共用，消除双份维护）。
+
+    注意：xbar 的子组走宽格式（feature_cols 多列），不适用长格式子组列，保持引擎回退。
+    生成失败时静默回退默认行为（调用方各自记录日志）。
+    """
+    if params.get("group_col"):
+        return df, params
+    try:
+        df, params = auto_generate_subgroup_col(df, dict(params))
+        params["group_col"] = params["subgroup_col"]  # CUSUM/EWMA 消费 group_col
+    except Exception:
+        logger.debug("自动子组列生成失败，回退默认行为", exc_info=True)
+    return df, params
+
+
+def infer_hypothesis_group_col(
+    df: pd.DataFrame, feature_cols: list[str], categoricals: list[str] | None, params: dict
+) -> tuple[list[str], dict]:
+    """hypothesis_test 缺 group_col 时自动推断分组列（CLI/Web 共用）。
+
+    返回 (feature_cols, params)：分组列未在特征列表时自动追加。
+    """
+    if "group_col" not in params:
+        extra = infer_group_col(df, feature_cols, categoricals=categoricals)
+        if extra:
+            extra_col = extra["group_col"]
+            if extra_col not in feature_cols:
+                feature_cols = list(feature_cols) + [extra_col]
+            params = {**params, **extra}
+    return feature_cols, params
 
 
 def preprocess_for_task(

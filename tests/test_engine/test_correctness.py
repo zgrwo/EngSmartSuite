@@ -1813,3 +1813,63 @@ def test_spc_xbar_grouped_multi_violation_label_correct_group():
         for _, row in b_rows.iterrows():
             labels = [x for x in str(row["违规子组"]).split(",") if x.strip()]
             assert labels, "B 组违规标签不应为空"
+
+
+def test_xbar_all_n1_groups_sigma_ddof1():
+    """X-bar (分组 + 全 n=1)：σ 回退路径必须用 ddof=1（审查 #P1-1）。
+
+    分组且每组 1 点时 MR 池化为空，σ 由子组均值的样本标准差估计；
+    此前分组分支用 ddof=1 而非分组分支用 ddof=0（spc_charts.py 468 vs 479），
+    现统一 ddof=1。手工交叉验证：std([1,5,9], ddof=1) = 4。
+    """
+    from smartsuite.engine.spc_monitor import xbar_r_chart
+
+    df = pd.DataFrame({"g": ["A", "B", "C"], "y": [1.0, 5.0, 9.0]})
+    req = AnalysisRequest(
+        task="spc_xbar", data=df, target_col="y", feature_cols=[], params={"group_col": "g"}
+    )
+    r = xbar_r_chart(req)
+    assert r.status == "ok", f"应可计算: {r.messages}"
+    expected_sigma = float(np.std([1.0, 5.0, 9.0], ddof=1))  # = 4.0
+    assert abs(r.metadata["sigma_xbar"] - expected_sigma) < 1e-9, (
+        f"σ 应使用 ddof=1: got {r.metadata['sigma_xbar']}, expected {expected_sigma}"
+    )
+    assert abs(r.metadata["ucl_x"] - (5.0 + 3 * expected_sigma)) < 1e-9
+    assert abs(r.metadata["lcl_x"] - (5.0 - 3 * expected_sigma)) < 1e-9
+
+
+def test_change_point_strict_accuracy():
+    """变点检测定位精度：固定 seed 下偏差 ≤3 点（审查 #R2 声明与测试对齐）。
+
+    实测 seed=7 时偏差为 -1；测试锁定 ±3 提供余量，防实现漂移导致定位退化。
+    """
+    from smartsuite.engine.detection import change_point_detect
+
+    scenarios = [
+        # (真实变点位置, 数据构造)
+        (100, lambda rng: np.concatenate([rng.normal(100, 2, 100), rng.normal(116, 2, 100)])),
+        (80, lambda rng: np.concatenate([rng.normal(10, 0.5, 80), rng.normal(12, 0.5, 80)])),
+        (
+            100,
+            lambda rng: np.concatenate(
+                [rng.normal(100, 2, 100), rng.normal(116, 2, 100), rng.normal(90, 2, 100)]
+            ),
+        ),
+    ]
+    for true_cp, make in scenarios:
+        rng = np.random.default_rng(7)
+        df = pd.DataFrame({"x": make(rng)})
+        r = change_point_detect(
+            AnalysisRequest(
+                task="change_point",
+                data=df,
+                target_col="x",
+                params={"min_segment": 15, "n_changepoints": 5},
+            )
+        )
+        assert r.status == "ok"
+        assert r.metadata["changepoints"], f"应检测到变点 (true={true_cp})"
+        # 至少一个变点落在真实位置 ±3
+        assert any(abs(cp - true_cp) <= 3 for cp in r.metadata["changepoints"]), (
+            f"定位偏差过大: true={true_cp}, detected={r.metadata['changepoints']}"
+        )

@@ -86,7 +86,11 @@ def test_referenced_function_not_flagged(tmp_path):
     src = root / "src"
     tests = root / "tests"
     _write(root, "src/pkg/mod.py", "def covered_func():\n    return 1\n")
-    _write(root, "tests/test_mod.py", "def test_covered():\n    assert covered_func() == 1\n")
+    _write(
+        root,
+        "tests/test_mod.py",
+        "from pkg.mod import covered_func\ndef test_covered():\n    assert covered_func() == 1\n",
+    )
     assert guard.check_missing_tests(src, tests) == []
 
 
@@ -218,3 +222,94 @@ def test_error_guard_inside_not_flagged(tmp_path):
     )
     problems = guard.check_status_only_asserts(tests)
     assert not any("守卫架空" in p for p in problems)
+
+
+# ── 缺测检测绕过口（审查 #P1-8）──────────────────────────────
+
+
+def test_class_method_missing_test_detected(tmp_path):
+    """公共方法定义在类内也必须被缺测检测覆盖（此前只查模块级函数）。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(
+        root,
+        "src/pkg/mod.py",
+        "class Service:\n    def public_method(self):\n        return 1\n",
+    )
+    _write(root, "tests/test_mod.py", "def test_other():\n    assert True\n")
+    problems = guard.check_missing_tests(src, tests)
+    assert any("public_method" in p for p in problems)
+
+
+def test_comment_mention_not_counted_as_tested(tmp_path):
+    """函数名只出现在注释/字符串里不算已测（此前 re.findall 匹配全文）。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(root, "src/pkg/mod.py", "def only_in_comment():\n    return 1\n")
+    _write(
+        root,
+        "tests/test_mod.py",
+        "# 参考 only_in_comment 的实现思路\n"
+        "MSG = '调用 only_in_comment 会返回 1'\n"
+        "def test_x():\n    assert True\n",
+    )
+    problems = guard.check_missing_tests(src, tests)
+    assert any("only_in_comment" in p for p in problems)
+
+
+def test_actual_call_in_string_not_counted(tmp_path):
+    """字符串字面量里的函数名不算真实调用。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(root, "src/pkg/mod.py", "def in_string_only():\n    return 1\n")
+    _write(
+        root,
+        "tests/test_mod.py",
+        "def test_x():\n    s = 'in_string_only() 是目标函数'\n    assert True\n",
+    )
+    problems = guard.check_missing_tests(src, tests)
+    assert any("in_string_only" in p for p in problems)
+
+
+def test_actual_call_via_attribute_detected(tmp_path):
+    """属性调用（svc.orchestrate(...)）算真实引用。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(root, "src/pkg/mod.py", "def attr_called():\n    return 1\n")
+    _write(
+        root,
+        "tests/test_mod.py",
+        "import pkg.mod as svc\ndef test_x():\n    assert svc.attr_called() == 1\n",
+    )
+    assert guard.check_missing_tests(src, tests) == []
+
+
+# ── WARN 计数上限（审查 #P1-7）───────────────────────────────
+
+
+def test_max_warn_exceeded_fails(tmp_path, capsys):
+    root = tmp_path / "repo"
+    _write(
+        root,
+        "tests/test_demo.py",
+        "def test_ok_only():\n    r = compute()\n    assert r.status == 'ok'\n",
+    )
+    rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests"), "--max-warn", "0"])
+    out = capsys.readouterr().out
+    assert rc == 1, f"WARN 超上限应 FAIL: {out[-200:]}"
+    assert "超过上限" in out
+
+
+def test_max_warn_within_limit_passes(tmp_path, capsys):
+    root = tmp_path / "repo"
+    _write(
+        root,
+        "tests/test_demo.py",
+        "def test_ok_only():\n    r = compute()\n    assert r.status == 'ok'\n",
+    )
+    rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests"), "--max-warn", "1"])
+    assert rc == 0

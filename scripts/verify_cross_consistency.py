@@ -1,5 +1,5 @@
 """
-全量 40 方法交叉验证: Web UI 路径 ↔ Python 直接路径 ↔ 用户手册记录值
+全量 41 方法交叉验证: Web UI 路径 ↔ Python 直接路径 ↔ 用户手册记录值
 
 验证维度:
 1. status 一致性 (ok/error)
@@ -68,7 +68,7 @@ MANUAL_EXPECTATIONS = {
     },
 }
 
-# ── 40 个方法的测试用例定义 ──
+# ── 41 个方法的测试用例定义 ──
 # (task, target_col, feature_cols, categoricals, params, skip_reason)
 TEST_CASES = [
     # === 要因筛选 ===

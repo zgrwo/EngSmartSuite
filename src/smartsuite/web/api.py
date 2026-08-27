@@ -12,8 +12,8 @@ import pandas as pd
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import ValidationError
 from smartsuite.services.data_io import (
-    auto_generate_subgroup_col,
-    infer_group_col,
+    infer_hypothesis_group_col,
+    prepare_spc_subgroup_col,
     preprocess_for_task,
     validate_data,
 )
@@ -131,14 +131,9 @@ def run_analysis(
             logger.warning("数据校验未通过（不阻塞分析）: %s", e)
             data_warnings = [f"数据校验提示: {e}"]
 
-    # Round-2 P3：CUSUM/EWMA 缺 group_col 时自动生成子组列（接线 auto_generate_subgroup_col）
-    # 注意：xbar 的子组走宽格式（feature_cols 多列），不适用长格式子组列，保持引擎回退
-    if task in ("spc_cusum", "spc_ewma") and not params.get("group_col"):
-        try:
-            df, params = auto_generate_subgroup_col(df, dict(params))
-            params["group_col"] = params["subgroup_col"]  # CUSUM/EWMA 消费 group_col
-        except Exception:
-            logger.debug("自动子组列生成失败，回退默认行为", exc_info=True)
+    # SPC 缺 group_col 时自动生成子组（与 CLI 共用 services.prepare_spc_subgroup_col）
+    if task in ("spc_cusum", "spc_ewma"):
+        df, params = prepare_spc_subgroup_col(df, params)
 
     # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
     from smartsuite.services.orchestrator import RAW_CAT_TASKS
@@ -189,16 +184,8 @@ def run_analysis(
 
     for target in targets:
         try:
-            if task == "hypothesis_test" and "group_col" not in params:
-                extra = infer_group_col(df, features, categoricals)
-                if extra:
-                    # 确保分组列在特征列表中（RAW_CAT_TASKS 下 feat_enc 为原始列名）
-                    extra_col = extra["group_col"]
-                    if extra_col not in feat_enc:
-                        feat_enc = list(feat_enc) + [extra_col]
-                    else:
-                        feat_enc = list(feat_enc)
-                    params = {**params, **extra}
+            if task == "hypothesis_test":
+                feat_enc, params = infer_hypothesis_group_col(df, feat_enc, categoricals, params)
 
             req = AnalysisRequest(
                 task=task,

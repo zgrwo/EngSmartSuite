@@ -43,16 +43,17 @@ def _cpk_confidence_interval(cpk, n, alpha=0.05):
 
 
 def _sigma_level(cpk_val):
-    """Cpk → Sigma Level (短期) 和 DPMO 估算。
+    """Cpk → Sigma Level 和 DPMO 估算。
 
-    注意: DPMO 公式使用短期 (unshifted) sigma，假设过程均值不发生偏移。
+    注意: DPMO 公式使用无偏移 (unshifted) sigma，假设过程均值不发生偏移。
     实际生产中常考虑 1.5σ 偏移，此时 DPMO 会更高。该公式提供的是
     理论最优条件下的缺陷率估算，用于能力对比而非绝对预测。
 
     Cpk < 0 时（过程均值在规格限外），钳位为 0 以确保 DPMO ≤ 1,000,000
     和 Sigma Level ≥ 0 的物理合理性。
     """
-    # Sigma Level ≈ 3 * Cpk（长期 Z 值）
+    # Sigma Level ≈ 3 * Cpk（无偏移理论 Z 值；注意与“短期/长期能力”口径无关，
+    # 短期/长期由组内 (within) / 整体 (overall) σ 区分，见 Cp/Cpk vs Pp/Ppk）
     # DPMO = 2 * Φ(-3*Cpk) * 1e6（双边正态，无偏移假设）
     # 负 Cpk 钳位 — 避免 DPMO > 1,000,000 (P1 fix)
     cpk_val = max(cpk_val, 0)
@@ -178,6 +179,8 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     mu = float(data.mean())
     sigma_overall = float(data.std(ddof=1))  # 整体 σ (用于 Pp/Ppk)
+    # ⚠ 移动极差法隐含“数据按行序 = 时间顺序”假设（相邻行差分）；
+    # 若数据未按采样时间排序，组内 σ 估计将失真。用户手册 7.5 已提示先排序。
     mr = np.abs(np.diff(data.values))
     within_sigma = float(np.mean(mr) / 1.128) if len(mr) > 0 else sigma_overall
 

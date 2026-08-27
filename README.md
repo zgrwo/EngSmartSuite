@@ -1,6 +1,6 @@
 # EngSmartSuite (SmartSuite)
 
-> 工艺数据分析工具箱：40 个统计分析方法，Python 引擎 + Flask Web UI + CLI，覆盖正态性检验、过程能力分析、可靠性工程、实验设计（DoE）等。
+> 工艺数据分析工具箱：41 个统计分析方法，Python 引擎 + Flask Web UI + CLI，覆盖正态性检验、过程能力分析、可靠性工程、实验设计（DoE）等。
 
 ---
 
