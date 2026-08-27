@@ -55,7 +55,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 | engine/ 引入框架依赖 | engine 导入 flask/xlwings | engine 保持纯 Python |
 | web/ 直接调用 engine/ | 绕过 services/ | 通过 orchestrator 间接调用 |
 | 为单一分析建抽象基类 | 一个方法一个 ABC | 直接写函数 |
-| 引入消息队列 | 为 40 个同步方法加 Celery | 同步调用即可 |
+| 引入消息队列 | 为 41 个同步方法加 Celery | 同步调用即可 |
 
 ---
 

@@ -1,6 +1,6 @@
 # AGENTS.md — EngSmartSuite 项目宪法
 
-> 工艺数据分析工具箱：40 个统计分析方法，Python 引擎 + Flask Web UI + CLI。
+> 工艺数据分析工具箱：41 个统计分析方法，Python 引擎 + Flask Web UI + CLI。
 > 本文件面向 AI 编程助手，编码细节按需加载 Skill。
 
 ## 元数据
@@ -8,7 +8,7 @@
 - **项目名**：EngSmartSuite (SmartSuite)
 - **GitHub**：https://github.com/zgrwo/EngSmartSuite
 - **语言**：Python >= 3.10（文档中文）
-- **数字唯一基准**：`rules/api-reference.md` — 40 函数签名以此为准
+- **数字唯一基准**：`rules/api-reference.md` — 41 函数签名以此为准
 - **SSOT**：每个事实只在一处定义，其余仅链接引用
 
 ## 四条核心准则
@@ -84,11 +84,12 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 ```
 EngSmartSuite/
 ├── .github/                          # GitHub 配置（工作流/Issue 模板/CODEOWNERS）
+├── docs/                             # 附加文档（superpowers 技能等，不入包）
 ├── src/                              # 主包（core / engine / services / web）
 ├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
 ├── rules/                            # 规范文档（含哨兵契约/ADR 模板/陷阱清单）
 ├── skills/                           # Skill 定义（领域 5 + 过程 6）
-├── templates/                        # YAML 分析模板 (43 个)
+├── templates/                        # YAML 分析模板 (44 个: 43 任务 + 1 工作流指南)
 ├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）
 ├── tools/                            # 工具目录
 ├── run_smartsuite.bat              # 一键启动脚本（Windows）
@@ -117,7 +118,7 @@ EngSmartSuite/
 
 ### 1. 架构隔离
 
-- engine/ 零外部框架依赖（纯 Python + numpy/scipy/pandas）
+- engine/ 零业务框架依赖（纯 Python + numpy/scipy/pandas + matplotlib/sklearn/statsmodels 统计栈；禁止 xlwings/flask）
 - web/ 通过 orchestrator 间接调用 engine/
 - 新增分析函数必须走 11 步注册清单
 
