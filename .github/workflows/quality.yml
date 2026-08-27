@@ -15,6 +15,9 @@ permissions:
   contents: read
   pull-requests: read
 
+# 版本策略（审查 #P1-8）：quality gate 固定 3.12 加速 PR 反馈，
+# 全版本矩阵（3.10–3.13）由 ci.yml full job 覆盖；docs-consistency 用 3.10
+# 兜底最低支持版本。
 jobs:
   dependency-review:
     name: PR 依赖变更审查
@@ -33,10 +36,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install
         run: pip install -e ".[dev]"
       - name: Run test quality guard
-        run: python scripts/test_quality_guard.py
+        # WARN 基线 29（审查 #P1-7）：新增弱断言/恒真断言即 FAIL
+        run: python scripts/test_quality_guard.py --max-warn 29
 
   docs-consistency:
     name: 文档一致性（断链/目录树/裸异常/版本漂移）
@@ -45,7 +50,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.10"  # 最低支持版本兜底（矩阵覆盖见 ci.yml full）
+          cache: pip
       - name: Run docs verification
         run: python scripts/verify_docs.py --strict
 
@@ -57,6 +63,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install
         # 2026-08-21 CI 修复：verify_cross_consistency 读 tests/test_data.xlsx，
         # 需要 openpyxl（report extras）；此前 [dev] 缺依赖 → pd.read_excel ImportError
@@ -72,6 +79,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
       - name: Run falsy audit
         run: python scripts/falsy_audit.py
 
@@ -83,6 +91,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install
         # Round-2：verify_consistency 内嵌全量 pytest，含 Web 层测试（flask）
         run: pip install -e ".[dev,web,report]"
@@ -97,6 +106,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install ruff
         run: pip install ruff==0.16.2
       - name: Ruff format check
