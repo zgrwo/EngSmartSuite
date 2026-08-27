@@ -177,6 +177,11 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     pmat = pd.DataFrame(index=cols, columns=cols, dtype=float)
     for c1 in cols:
         for c2 in cols:
+            # 常量列防护：nunique<=1 时相关性/检验无定义，直接 NaN（与其他函数一致，
+            # 避免 pearsonr/spearmanr/kendalltau 返回 NaN 后混入校正矩阵）
+            if req.data[c1].nunique(dropna=True) <= 1 or req.data[c2].nunique(dropna=True) <= 1:
+                pmat.loc[c1, c2] = np.nan
+                continue
             mask = req.data[c1].notna() & req.data[c2].notna()
             if mask.sum() >= 3:
                 if method == "spearman":
@@ -306,11 +311,13 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                 for ri, cv1 in enumerate(scatter_cols):
                     for ci, cv2 in enumerate(scatter_cols):
                         ax = fig_scatter.add_subplot(n_s, n_s, ri * n_s + ci + 1)
-                        sub = req.data[[cv1, cv2]].dropna()
-                        if len(sub) < 2:
-                            continue
                         if ri == ci:
-                            vals = sub[cv1].values
+                            # 对角线：单列直方图。注意 df[[cv1, cv2]] 在 cv1==cv2 时
+                            # 会选中两个同名列 → sub[cv1] 返回 2D → matplotlib≥3.9
+                            # hist 严格校验 color 报错（此前被 try 吞掉致图缺失）
+                            vals = req.data[cv1].dropna().values
+                            if len(vals) < 2:
+                                continue
                             ax.hist(
                                 vals,
                                 bins=min(15, len(vals) // 2),
@@ -319,34 +326,37 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                                 alpha=0.8,
                             )
                             ax.set_title(cv1, fontsize=9)
-                        else:
-                            ax.scatter(
-                                sub[cv1].values,
-                                sub[cv2].values,
-                                s=8,
-                                alpha=0.5,
-                                color=PALETTE["data"]["primary"],
-                            )
-                            # LOWESS 平滑趋势线
-                            if len(sub) >= 20:
-                                try:
-                                    smoothed = lowess(
-                                        sub[cv2].values,
-                                        sub[cv1].values,
-                                        frac=0.3,
-                                        return_sorted=True,
-                                    )
-                                    ax.plot(
-                                        smoothed[:, 0],
-                                        smoothed[:, 1],
-                                        "-",
-                                        color=PALETTE["target"]["primary"],
-                                        linewidth=1.5,
-                                        alpha=0.7,
-                                    )
-                                except (ValueError, RuntimeError):
-                                    logger.debug("LOWESS 平滑失败", exc_info=True)
-                                    pass
+                            continue
+                        sub = req.data[[cv1, cv2]].dropna()
+                        if len(sub) < 2:
+                            continue
+                        ax.scatter(
+                            sub[cv1].values,
+                            sub[cv2].values,
+                            s=8,
+                            alpha=0.5,
+                            color=PALETTE["data"]["primary"],
+                        )
+                        # LOWESS 平滑趋势线
+                        if len(sub) >= 20:
+                            try:
+                                smoothed = lowess(
+                                    sub[cv2].values,
+                                    sub[cv1].values,
+                                    frac=0.3,
+                                    return_sorted=True,
+                                )
+                                ax.plot(
+                                    smoothed[:, 0],
+                                    smoothed[:, 1],
+                                    "-",
+                                    color=PALETTE["target"]["primary"],
+                                    linewidth=1.5,
+                                    alpha=0.7,
+                                )
+                            except (ValueError, RuntimeError):
+                                logger.debug("LOWESS 平滑失败", exc_info=True)
+                                pass
                             r_val = (
                                 corr.loc[cv1, cv2]
                                 if cv1 in corr.index and cv2 in corr.columns
@@ -823,7 +833,8 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         patch.set_facecolor(PALETTE["data"]["secondary"])
     # 叠加散点
     for i, gdata in enumerate(group_data, 1):
-        jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+        # 可复现 jitter（种子基于组序号）
+        jitter = np.random.default_rng(20260819 + i).uniform(-0.12, 0.12, len(gdata))
         ax_box.scatter(
             np.full(len(gdata), i) + jitter,
             gdata,
@@ -2228,7 +2239,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         patch.set_facecolor(color)
     # 叠加散点
     for i, gdata in enumerate([g1, g2], 1):
-        jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+        # 可复现 jitter（种子基于组序号）
+        jitter = np.random.default_rng(20260819 + i).uniform(-0.12, 0.12, len(gdata))
         ax.scatter(
             np.full(len(gdata), i) + jitter,
             gdata.values,

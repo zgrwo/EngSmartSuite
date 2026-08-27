@@ -1743,3 +1743,74 @@ def test_process_capability_boxcox_single_side_spec():
     assert r.metadata.get("cpk") is not None or r.metadata.get("ppk") is not None, (
         "单侧正规格不应被静默丢弃"
     )
+
+
+# ── 常量列与相关性 p 值矩阵 ──
+
+
+def test_correlation_constant_factor_among_valid():
+    """相关性分析：正常因子 + 常量因子混入时（审查 #P1-2）。
+
+    此前 p 值矩阵缺 nunique<=1 防护，常量列 pair 经 pearsonr 返回 NaN 直接
+    混入 Bonferroni 校正矩阵。现在应直接在 p 值矩阵置 NaN 并跳过 scipy 调用：
+    分析仍 ok（top 因子有效），但常量因子在输出表中为 NaN 而非虚假 p 值。
+    """
+    df = _make_df(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "x_valid": [2.0, 4.0, 6.0, 8.0, 10.0],
+            "x_const": [7.0, 7.0, 7.0, 7.0, 7.0],
+        }
+    )
+    req = AnalysisRequest(
+        task="correlation", data=df, target_col="y", feature_cols=["x_valid", "x_const"]
+    )
+    r = correlation_analysis(req)
+    assert r.status == "ok", f"应正常完成（top 因子有效）: {r.messages}"
+    # 常量因子在相关表中为 NaN
+    corr = r.tables["correlation_matrix"]
+    assert pd.isna(corr.loc["x_const", "y"]), "常量因子相关系数应为 NaN"
+    # 常量因子与目标列 p 值应为 NaN（不混入虚假显著性）
+    pmat = r.tables["p_values_raw"]
+    assert pd.isna(pmat.loc["x_const", "y"]), "常量因子 p 值应为 NaN"
+    pcorr = r.tables["p_values_corrected"]
+    assert pd.isna(pcorr.loc["x_const", "y"]), "常量因子校正 p 值应为 NaN"
+
+    # 跨方法一致性契约（审查 #R2）：三种方法对常量列都必须走 guard 置 NaN。
+    # （旧版 scipy 的 kendalltau 对常量列可能返回有限 tau=0/p=1.0——guard
+    #   保证跨 scipy 版本、跨方法行为统一为 NaN）
+    for method in ("kendall", "spearman"):
+        req_m = AnalysisRequest(
+            task="correlation",
+            data=df,
+            target_col="y",
+            feature_cols=["x_valid", "x_const"],
+            params={"method": method},
+        )
+        r_m = correlation_analysis(req_m)
+        assert r_m.status == "ok", f"{method} 应正常完成: {r_m.messages}"
+        assert pd.isna(r_m.tables["p_values_raw"].loc["x_const", "y"]), (
+            f"{method} 常量因子 p 值应为 NaN"
+        )
+        assert pd.isna(r_m.tables["p_values_corrected"].loc["x_const", "y"]), (
+            f"{method} 常量因子校正 p 值应为 NaN"
+        )
+
+
+def test_correlation_scatter_matrix_figure_present():
+    """相关性分析散点矩阵图必须存在（审查 #R2：对角线 hist 2D 输入被吞的回归锁）。
+
+    修复前 df[[cv1, cv2]] 在 cv1==cv2 时返回 2 个同名列 → sub[cv1] 为 2D →
+    matplotlib≥3.9 hist 抛 ValueError 被 try 吞掉 → 散点矩阵图永远缺失（figures 仅热力图）。
+    """
+    df = _make_df(
+        {
+            "y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "a": [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+            "b": [8.0, 7.5, 7.0, 6.5, 6.0, 5.5, 5.0, 4.5],
+        }
+    )
+    req = AnalysisRequest(task="correlation", data=df, target_col="y", feature_cols=["a", "b"])
+    r = correlation_analysis(req)
+    assert r.status == "ok"
+    assert len(r.figures) >= 2, f"应包含热力图 + 散点矩阵（≥2 张图），实际 {len(r.figures)} 张"

@@ -423,7 +423,8 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
                 for pi, patch in enumerate(bp["boxes"]):
                     patch.set_facecolor(cmap(pi % 10))
                 for i, gdata in enumerate(sg_groups, 1):
-                    jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+                    # 可复现 jitter（种子基于组序号）
+                    jitter = np.random.default_rng(20260819 + i).uniform(-0.12, 0.12, len(gdata))
                     ax.scatter(
                         np.full(len(gdata), i) + jitter,
                         gdata,
@@ -451,7 +452,8 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         for pi, patch in enumerate(bp["boxes"]):
             patch.set_facecolor(cmap(pi % 10))
         for i, gdata in enumerate(group_data, 1):
-            jitter = np.random.uniform(-0.12, 0.12, len(gdata))
+            # 可复现 jitter（种子基于组序号）
+            jitter = np.random.default_rng(20260819 + i).uniform(-0.12, 0.12, len(gdata))
             ax.scatter(
                 np.full(len(gdata), i) + jitter,
                 gdata,

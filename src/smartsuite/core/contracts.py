@@ -34,14 +34,6 @@ class AnalysisRequest(BaseModel):
             raise ValueError("task 不能为空字符串")
         return v.strip()
 
-    @field_validator("data")
-    @classmethod
-    def data_not_none(cls, v: pd.DataFrame) -> pd.DataFrame:
-        """data 不能为 None（允许空 DataFrame，部分方法如 power_analysis 无需数据）。"""
-        if v is None:
-            raise ValueError("data 不能为 None")
-        return v
-
 
 @dataclass
 class AnalysisResult:

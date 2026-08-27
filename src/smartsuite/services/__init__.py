@@ -4,7 +4,6 @@ from smartsuite.services.audit import auto_report, batch_analyze, export_workboo
 from smartsuite.services.data_io import (
     missing_pattern_analysis,
     preprocess_data,
-    read_excel_range,
     recommend_analysis,
     validate_data,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "to_ppt",
     "to_html",
     "preprocess_data",
-    "read_excel_range",
     "validate_data",
     "missing_pattern_analysis",
     "recommend_analysis",

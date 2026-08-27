@@ -609,3 +609,50 @@ def test_vif_greater_equal_one():
     for _, row in vif_tbl.iterrows():
         val = float(row["VIF"])
         assert val >= 1.0 - 1e-6, f"VIF={val} < 1（数学上不可能，VIF=1/(1-R²)）"
+
+
+# ── 变点检测不变量（审查追踪：4 层防线第②层补位）──
+
+
+def test_change_point_invariants():
+    """变点检测输出必须满足的结构不变量。
+
+    1) 变点数 ≤ n_changepoints，且每个变点位于搜索区间 [min_segment, n-min_segment)
+    2) 变点严格递增、无重复
+    3) 段统计样本数之和 = n（分段完备、不重不漏）
+    """
+    from smartsuite.engine.detection import change_point_detect
+
+    np.random.seed(42)
+    data = np.concatenate(
+        [
+            np.random.normal(10, 1, 60),
+            np.random.normal(18, 1, 60),
+            np.random.normal(8, 1, 60),
+            np.random.normal(20, 1, 60),
+        ]
+    )
+    n = len(data)
+    df = pd.DataFrame({"x": data})
+    req = AnalysisRequest(
+        task="change_point",
+        data=df,
+        target_col="x",
+        params={"min_segment": 10, "n_changepoints": 3},
+    )
+    r = change_point_detect(req)
+    assert r.status == "ok"
+    cps = r.metadata["changepoints"]
+
+    # 1) 数量上限 + 搜索区间约束
+    assert len(cps) <= 3, f"变点数 {len(cps)} 超过 n_changepoints=3"
+    for cp in cps:
+        assert 10 <= cp < n - 10, f"变点 {cp} 超出搜索区间 [10, {n - 10})"
+
+    # 2) 严格递增、无重复
+    assert cps == sorted(set(cps)), f"变点应严格递增无重复: {cps}"
+
+    # 3) 分段完备：样本数之和 = n
+    stats = r.tables["segment_statistics"]
+    assert int(stats["样本数"].sum()) == n, f"分段样本数之和 {stats['样本数'].sum()} != n={n}"
+    assert len(stats) == len(cps) + 1, "段数 = 变点数 + 1"

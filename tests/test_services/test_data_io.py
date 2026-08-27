@@ -3,7 +3,6 @@
 背景：test_quality_guard 缺测检测要求公共函数有测试引用——
 auto_generate_subgroup_col / infer_group_col / preprocess_for_task
 此前仅被 Web/CLI 路径间接调用，本文件补直接单测。
-（read_excel_range 依赖 xlwings/Excel 环境，豁免，见 test_quality_guard.py）
 """
 
 import numpy as np
@@ -12,7 +11,9 @@ import pandas as pd
 from smartsuite.services.data_io import (
     auto_generate_subgroup_col,
     infer_group_col,
+    infer_hypothesis_group_col,
     preprocess_for_task,
+    prepare_spc_subgroup_col,
 )
 
 
@@ -90,3 +91,33 @@ def test_preprocess_data_cat_map_roundtrip():
     )
     assert not enc2.isna().any().any(), f"回填产生 NaN 列: {list(enc2.columns)}"
     assert len(cols1) == len(cols2), f"列数不一致: {cols1} vs {cols2}"
+
+
+# ── 共用编排函数（CLI/Web 双路一致，审查 #P2）──
+
+
+def test_prepare_spc_subgroup_col_generates_when_missing():
+    df = pd.DataFrame({"y": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]})
+    df2, params = prepare_spc_subgroup_col(df, {})
+    assert params.get("group_col") == params.get("subgroup_col")
+    assert params["group_col"] in df2.columns, "应自动生成子组列"
+
+
+def test_prepare_spc_subgroup_col_keeps_existing_group():
+    df = pd.DataFrame({"y": [1.0, 2.0]})
+    df2, params = prepare_spc_subgroup_col(df, {"group_col": "g"})
+    assert params["group_col"] == "g"
+    assert df2.equals(df), "已有 group_col 时不应改数据"
+
+
+def test_infer_hypothesis_group_col_appends_feature():
+    df = pd.DataFrame({"y": [1.0, 2.0, 3.0, 4.0], "组": ["A", "B", "A", "B"]})
+    feats, params = infer_hypothesis_group_col(df, ["y", "组"], [], {})
+    assert params.get("group_col") == "组"
+    assert "组" in feats, "分组列应追加到特征列表"
+
+
+def test_infer_hypothesis_group_col_no_group_preserved():
+    df = pd.DataFrame({"y": [1.0, 2.0, 3.0], "组": ["A", "B", "C"]})
+    feats, params = infer_hypothesis_group_col(df, ["y"], [], {})
+    assert params == {} and feats == ["y"], "无二分类列时应保持原样"
