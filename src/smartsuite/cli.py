@@ -1,6 +1,7 @@
 """CLI 入口 — 命令行直接运行分析。"""
 
 import argparse
+import contextlib
 import logging
 import os
 import sys
@@ -13,8 +14,8 @@ import yaml
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import SmartSuiteError
 from smartsuite.services.data_io import (
-    auto_generate_subgroup_col,
-    infer_group_col,
+    infer_hypothesis_group_col,
+    prepare_spc_subgroup_col,
     preprocess_for_task,
     validate_data,
 )
@@ -55,6 +56,11 @@ def _parse_sheet(sheet) -> int | str | None:
 
 
 def main():
+    # Windows 控制台默认 GBK 无法输出 ⚠/中文 emoji 等字符 → 重配为标准 UTF-8（替换不可编码字符）
+    with contextlib.suppress(AttributeError, ValueError):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     from smartsuite import setup_logging
 
     setup_logging()
@@ -69,6 +75,11 @@ def main():
     )
     run_parser.add_argument(
         "--sheet", "-s", default=0, help="Sheet 名或索引 (仅 Excel，默认: 第一个)"
+    )
+    run_parser.add_argument(
+        "--outdir",
+        default=None,
+        help="图表输出目录（可选）。提供后会把本次分析的图表保存为 PNG，否则图表仅在内存中生成",
     )
 
     subparsers.add_parser("list", help="列出支持的分析方法")
@@ -133,13 +144,9 @@ def main():
         features = config.get("feature_cols", [])
         categoricals = config.get("categoricals", [])
         params = config.get("params", {})
-        # Round-2 P3：SPC 缺 group_col 时自动生成子组（与 Web 路径 api.py 保持一致）
-        if task in ("spc_cusum", "spc_ewma") and not params.get("group_col"):
-            try:
-                raw, params = auto_generate_subgroup_col(raw, dict(params))
-                params["group_col"] = params["subgroup_col"]
-            except Exception:
-                logger.debug("自动子组列生成失败，回退默认行为", exc_info=True)
+        # SPC 缺 group_col 时自动生成子组（与 Web 路径共用 services.prepare_spc_subgroup_col）
+        if task in ("spc_cusum", "spc_ewma"):
+            raw, params = prepare_spc_subgroup_col(raw, params)
         # 数据校验：提前发现列存在性、类型、缺失值问题
         if task not in NO_TARGET_TASKS:
             try:
@@ -172,14 +179,11 @@ def main():
             print(
                 f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。"
             )
-        # 假设检验缺 group_col 时自动推断（与 Web 路径保持一致）
-        if task == "hypothesis_test" and "group_col" not in params:
-            extra = infer_group_col(raw, features, categoricals=categoricals)
-            if extra:
-                extra_col = extra["group_col"]
-                if extra_col not in feature_cols:
-                    feature_cols = list(feature_cols) + [extra_col]
-                params = {**params, **extra}
+        # 假设检验缺 group_col 时自动推断（与 Web 路径共用 services.infer_hypothesis_group_col）
+        if task == "hypothesis_test":
+            feature_cols, params = infer_hypothesis_group_col(
+                raw, feature_cols, categoricals, params
+            )
         req = AnalysisRequest(
             task=task,
             data=df,
@@ -189,6 +193,36 @@ def main():
         )
         result = orchestrate(req)
         print(result.summary)
+        # 数值表输出（第④层防线：CLI 用户必须能拿到与 Web 一致的数值结果）
+        # 非默认索引（如相关性矩阵的行标签=变量名）保留 index，避免行信息丢失（审查 #R2）
+        for table_name, table in result.tables.items():
+            print(f"\n── {table_name} ──")
+            if table is None or len(table) == 0:
+                print("(空表)")
+            else:
+                _is_default_index = (
+                    isinstance(table.index, pd.RangeIndex) and table.index.start == 0
+                )
+                print(table.to_string(index=not _is_default_index))
+
+        # 图表：--outdir 提供时保存 PNG，否则关闭（CLI 无交互显示能力）
+        if args.outdir and result.figures:
+            try:
+                os.makedirs(args.outdir, exist_ok=True)
+            except OSError as e:
+                print(f"错误: 无法创建图表输出目录「{args.outdir}」: {e}", file=sys.stderr)
+                args.outdir = None
+            for i, fig in enumerate(result.figures):
+                if not args.outdir:
+                    break
+                out_path = os.path.join(args.outdir, f"{task}_figure_{i + 1}.png")
+                try:
+                    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+                    print(f"\n图表已保存: {out_path}")
+                except Exception as e:
+                    logger.exception("图表保存失败: %s", out_path)
+                    print(f"错误: 图表保存失败: {e}", file=sys.stderr)
+        # Figure 无 close() 方法（matplotlib API），须经 pyplot 关闭（Agg 后端已就绪）
         import matplotlib.pyplot as _plt
 
         for fig in result.figures:

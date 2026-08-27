@@ -9,40 +9,11 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
-from smartsuite.engine._constants import EPSILON
+from smartsuite.engine._constants import EPSILON, XBR_CONSTANTS
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import _adjust_xlabels  # 共享 X 轴标签自适应工具
 
 logger = logging.getLogger(__name__)
-
-# ── X-bar/R 控制图常数表 (子组大小 n → A2, D3, D4) ──
-# 标准 ASTM/ISO Shewhart 控制图常数 (Montgomery, 9th ed.)
-_XBR_CONSTANTS: dict[int, tuple[float, float, float]] = {
-    2: (1.880, 0, 3.267),
-    3: (1.023, 0, 2.574),
-    4: (0.729, 0, 2.282),
-    5: (0.577, 0, 2.114),
-    6: (0.483, 0, 2.004),
-    7: (0.419, 0.076, 1.924),
-    8: (0.373, 0.136, 1.864),
-    9: (0.337, 0.184, 1.816),
-    10: (0.308, 0.223, 1.777),
-    11: (0.285, 0.256, 1.744),
-    12: (0.266, 0.283, 1.717),
-    13: (0.249, 0.307, 1.693),
-    14: (0.235, 0.328, 1.672),
-    15: (0.223, 0.347, 1.653),
-    16: (0.212, 0.363, 1.637),
-    17: (0.203, 0.378, 1.622),
-    18: (0.194, 0.391, 1.609),
-    19: (0.187, 0.404, 1.596),
-    20: (0.180, 0.415, 1.585),
-    21: (0.173, 0.425, 1.575),
-    22: (0.167, 0.435, 1.565),
-    23: (0.162, 0.443, 1.557),
-    24: (0.157, 0.452, 1.548),
-    25: (0.153, 0.459, 1.541),
-}
 
 
 def _xbar_s_constants(n: int) -> tuple[float, float, float, float]:
@@ -362,8 +333,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     if len(multi_data) > 0:
         # ── 全局控制限（pooled，用于图表背景参考线）──
-        if n_common in _XBR_CONSTANTS:
-            A2, D3, D4 = _XBR_CONSTANTS[n_common]
+        if n_common in XBR_CONSTANTS:
+            A2, D3, D4 = XBR_CONSTANTS[n_common]
             _r_bar = float(multi_data["r"].mean())
             xbar_bar = float(multi_data["xbar"].mean())
             sigma_xbar = A2 * _r_bar / 3.0
@@ -398,8 +369,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 g_multi = multi_data[multi_data["group_val"] == gname]
                 if len(g_multi) < 2:
                     continue
-                if n_common in _XBR_CONSTANTS:
-                    A2g, D3g, D4g = _XBR_CONSTANTS[n_common]
+                if n_common in XBR_CONSTANTS:
+                    A2g, D3g, D4g = XBR_CONSTANTS[n_common]
                     _rg = float(g_multi["r"].mean())
                     _xbg = float(g_multi["xbar"].mean())
                     _sg = A2g * _rg / 3.0
@@ -427,7 +398,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                     }
 
         # ── 全局违规检测（无分组时直接用 pooled 限）──
-        if n_common in _XBR_CONSTANTS:
+        if n_common in XBR_CONSTANTS:
             xbar_violations = _we_rules_xbar(multi_data["xbar"].values, xbar_bar, sigma_xbar)
             r_violations = _we_rules_r(multi_data["r"].values, _r_bar, lower_ucl, lower_lcl)
         else:
@@ -439,7 +410,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             for gname, glim in group_limits.items():
                 g_multi = multi_data[multi_data["group_val"] == gname]
                 gv_x = _we_rules_xbar(g_multi["xbar"].values, glim["xbar_bar"], glim["sigma_xbar"])
-                if n_common in _XBR_CONSTANTS:
+                if n_common in XBR_CONSTANTS:
                     gv_disp = _we_rules_r(
                         g_multi["r"].values, glim["lower_cl"], glim["lower_ucl"], glim["lower_lcl"]
                     )
@@ -476,7 +447,9 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             if len(mr_vals) > 0:
                 sigma_xbar = float(np.mean(mr_vals)) / 1.128
             else:
-                sigma_xbar = float(agg["xbar"].std())
+                # 单点回退：与 has_groups 分支同款守卫（审查 #R2），
+                # 单值样本标准差 ddof=1 为 NaN，会落入下方错误消息而非误导性报缺
+                sigma_xbar = float(agg["xbar"].std(ddof=1)) if len(agg) > 1 else 0.0
         ucl_x = xbar_bar + 3.0 * sigma_xbar
         lcl_x = xbar_bar - 3.0 * sigma_xbar
         lower_label = "—"
