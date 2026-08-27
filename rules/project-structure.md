@@ -41,6 +41,7 @@ EngSmartSuite/
 │       │   ├── __init__.py         #   matplotlib 全局配置 + 字体 + 公开 API 导出
 │       │   ├── _palette.py         #   统一可视化配色方案（PALETTE 字典）
 │       │   ├── _constants.py       #   统计分析常量（阈值/乘数/效应量判定）
+│       │   ├── _doe_arrays.py      #   DOE 设计矩阵（中心复合/Box-Behnken 编码表）
 │       │   ├── _utils.py           #   共享工具函数 (safe_float, threshold_label)
 │       │   ├── root_cause.py       #   要因分析 (correlation, anova, hypothesis_test...)
 │       │   ├── doe_opt.py          #   DOE/优化 (regression, response_surface, grid_search...)
@@ -53,7 +54,7 @@ EngSmartSuite/
 │       │
 │       ├── services/               # ② 应用服务层：唯一桥接层
 │       │   ├── __init__.py
-│       │   ├── orchestrator.py     #   TASK_REGISTRY (40项) + DEFAULT_PARAMS
+│       │   ├── orchestrator.py     #   TASK_REGISTRY (41项) + DEFAULT_PARAMS
 │       │   ├── data_io.py          #   Excel 读写 + 校验 + 预处理
 │       │   ├── reporter.py         #   多格式输出: to_excel / to_pdf / to_ppt / to_html
 │       │   └── audit.py            #   综合审计: process_audit / batch_analyze
@@ -78,7 +79,7 @@ EngSmartSuite/
 │   ├── test_integration_chemical.py#   化工场景
 │   ├── test_integration_reliability.py # 可靠性场景
 │   ├── test_integration_warranty.py#   保修场景
-│   ├── test_master_integration.py  #   40 方法全量集成
+│   ├── test_master_integration.py  #   41 方法全量集成
 │   ├── test_web_e2e.py             #   Web UI E2E
 │   ├── test_workflows.py           #   工作流串联测试
 │   ├── crossval_r/                 #   R 交叉验证参考实现
@@ -87,9 +88,11 @@ EngSmartSuite/
 │   │   ├── __init__.py
 │   │   ├── test_root_cause.py
 │   │   ├── test_doe_opt.py
+│   │   ├── test_doe_design.py
+│   │   ├── test_doe_pydoe2_benchmark.py  #   DOE 基准对照（无 pydoe2 时自动跳过）
 │   │   ├── test_spc_monitor.py
 │   │   ├── test_utils.py
-│   │   ├── test_correctness.py     #   数值正确性 — 40/40 全覆盖
+│   │   ├── test_correctness.py     #   数值正确性 — 41/41 全覆盖
 │   │   ├── test_edge_cases.py      #   边界情况
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_fuzz.py            #   模糊测试
@@ -102,6 +105,7 @@ EngSmartSuite/
 │   │   ├── test_reporter.py
 │   │   ├── test_differential.py    #   CLI vs Web 路径一致性
 │   │   ├── test_diff_cli_web.py    #   CLI/Web 差分一致性
+│   │   ├── test_round2_fixes.py    #   审查回归修复验证
 │   │   └── test_manual_parity.py   #   Web/CLI/Python/手册 四路一致性
 │   └── scripts/                    #   治理脚本测试
 │       ├── test_retry.py
@@ -110,9 +114,10 @@ EngSmartSuite/
 │       ├── test_verify_docs.py
 │       └── test_test_quality_guard.py
 │
+├── docs/                           # 附加文档（superpowers 技能等，不入包）
 ├── rules/                          # 规范文档
-│   ├── api-reference.md            #   40 函数签名查阅（唯一信源）
-│   ├── user-manual.md              #   40 方法操作指南
+│   ├── api-reference.md            #   41 函数签名查阅（唯一信源）
+│   ├── user-manual.md              #   41 方法操作指南
 │   ├── specification.md            #   项目规格文档
 │   ├── context.md                  #   术语表
 │   ├── falsy-pitfalls.md           #   Falsy 陷阱清单
