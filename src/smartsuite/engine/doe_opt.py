@@ -1066,6 +1066,8 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 回归法估计效应（编码变量 -1/+1，比中位数分割更准确）──
     effects = []
+    coded_map: dict[str, np.ndarray] = {}  # 编码列缓存（供交互效应复用）
+    y = df[req.target_col].values
     for col in cols:
         col_vals = df[col]
         unique_vals = col_vals.unique()
@@ -1102,8 +1104,8 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
                 )
             # 多水平/连续因子：标准化后作为线性效应
             coded = (col_vals - col_vals.mean()) / (col_vals.std(ddof=1) + EPSILON)
+        coded_map[col] = coded
 
-        y = df[req.target_col].values
         X = np.column_stack([np.ones(len(coded)), coded])
         try:
             beta, residuals, rank, sv = np.linalg.lstsq(X, y, rcond=None)
@@ -1158,6 +1160,59 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
                 ),
             }
         )
+
+    # ── 两两交互效应（MED-2 修复 2026-08-29：docstring 承诺但此前缺失）──
+    # 编码交互列 = coded_i × coded_j，同样单变量 lstsq 回归，效应 = 2β（口径与主效应一致）
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    coded_names = list(coded_map.keys())
+    if len(coded_names) >= 2:
+        for i in range(len(coded_names)):
+            for j in range(i + 1, len(coded_names)):
+                ci_name, cj_name = coded_names[i], coded_names[j]
+                inter = coded_map[ci_name] * coded_map[cj_name]
+                inter_name = f"{ci_name}×{cj_name}"
+                X_i = np.column_stack([np.ones(len(inter)), inter])
+                try:
+                    beta_i, _, _, _ = np.linalg.lstsq(X_i, y, rcond=None)
+                    effect_i = float(2 * beta_i[1])
+                    resid_std_i = float(np.std(y - X_i @ beta_i, ddof=2)) if len(y) > 2 else 1.0
+                    Sxx_i = np.sum((inter - np.mean(inter)) ** 2)
+                    se_i = resid_std_i / np.sqrt(Sxx_i) if Sxx_i > EPSILON else 1.0
+                    t_i = float(beta_i[1] / se_i) if se_i > EPSILON else 0.0
+                    dof_i = len(y) - 2
+                    p_i = float(2 * sp_stats.t.sf(abs(t_i), dof_i)) if dof_i > 0 else 1.0
+                except (ValueError, np.linalg.LinAlgError, TypeError) as e:
+                    logger.warning("DOE 交互效应估计失败 (%s): %s", inter_name, e)
+                    effects.append(
+                        {
+                            "因子": inter_name,
+                            "主效应": None,
+                            "效应占比": None,
+                            "t值": None,
+                            "p值": None,
+                            "显著": "计算失败",
+                            "效应量": f"计算异常: {str(e)[:60]}",
+                        }
+                    )
+                    continue
+                ratio_i = (
+                    abs(effect_i) / (abs(grand_mean) + EPSILON)
+                    if abs(grand_mean) > EPSILON
+                    else 0.0
+                )
+                effects.append(
+                    {
+                        "因子": inter_name,
+                        "主效应": round(effect_i, 4),
+                        "效应占比": round(ratio_i, 4),
+                        "t值": round(t_i, 3),
+                        "p值": round(p_i, 4),
+                        "显著": "是" if p_i < alpha else "否",
+                        "效应量": threshold_label(
+                            ratio_i, _DOE_EFFECT_THRESHOLDS, ("可忽略", "小", "中", "大")
+                        ),
+                    }
+                )
 
     effects_df = pd.DataFrame(effects)
     # 分离计算失败的因子（避免 None 值影响排序和统计）
