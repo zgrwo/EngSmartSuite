@@ -67,6 +67,9 @@ smartsuite = "smartsuite.cli:main"
 where = ["src"]
 include = ["smartsuite*"]
 
+[tool.setuptools.package-data]
+"smartsuite.web" = ["templates/*", "static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
