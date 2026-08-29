@@ -58,7 +58,8 @@ class TestMed1CohensD:
         )
         expected = (np.mean(g1) - np.mean(g2)) / sp
         correction = 1 - 3 / (4 * (n1 + n2) - 9)  # Hedges' g
-        assert abs(d - expected * correction) < 1e-3, f"Cohen's d: {d} vs {expected * correction}"
+        diff = abs(d - expected * correction)
+        assert diff < 1e-3, f"Cohen's d: {d} vs {expected * correction}"
 
     def test_cohens_d_has_ci(self):
         df = _make_two_group_data()
@@ -269,3 +270,13 @@ class TestMed3BoxCoxSpecLimits:
         lam = r.metadata.get("boxcox_lambda")
         # 此场景规格限较大，变换后仍为正 → 应保留变换
         assert lam is not None, "正常场景应保留 Box-Cox 变换"
+        # 真实数值断言：λ 与 scipy 独立重算一致
+        from scipy.stats import boxcox as scipy_boxcox
+
+        _, ref_lam = scipy_boxcox(data)
+        lam_diff = abs(lam - ref_lam)
+        assert lam_diff < 1e-6, f"λ: {lam} vs {ref_lam}"
+        # 变换域下 cp 应为有限值（双侧规格均变换为正）
+        cp = r.metadata.get("cp")
+        assert cp is not None
+        assert 0 < cp < 10, f"cp 应为合理有限值: {cp}"
