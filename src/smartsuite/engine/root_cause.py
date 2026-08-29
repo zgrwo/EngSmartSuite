@@ -1284,10 +1284,154 @@ def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
     )
 
 
+def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
+    """效应量 Cohen's d（不检验）— 两组标准化均值差异。"""
+    group_col, group_err = _resolve_group_col(req, "hypothesis_test")
+    if group_err is not None:
+        return group_err
+    groups = req.data[group_col].unique()
+    if len(groups) != 2:
+        return AnalysisResult(
+            task="hypothesis_test",
+            status="error",
+            messages=["Cohen's d 需要恰好 2 个分组"],
+        )
+    g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
+    g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
+    if len(g1) < 3 or len(g2) < 3:
+        return AnalysisResult(
+            task="hypothesis_test",
+            status="error",
+            messages=[f"每组至少需要 3 个有效数据，当前 g1={len(g1)}, g2={len(g2)}"],
+        )
+    warn_list: list[str] = []
+    d = _cohens_d(g1.values, g2.values, warn_list)
+    ci = _cohens_d_ci(d, len(g1), len(g2))
+    label = _effect_size_label(abs(d), "cohens_d")
+    test_name = f"效应量 Cohen's d ({groups[0]} vs {groups[1]})"
+    fig = Figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)
+    ax.hist(
+        g1,
+        bins=20,
+        alpha=0.6,
+        color=PALETTE["data"]["secondary"],
+        density=True,
+        label=str(groups[0]),
+    )
+    ax.hist(
+        g2, bins=20, alpha=0.6, color=PALETTE["contrast"]["b"], density=True, label=str(groups[1])
+    )
+    ax.set_xlabel(req.target_col, fontsize=10)
+    ax.set_title(f"{test_name} (d={d:.3f}, {label})", fontsize=11)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    return AnalysisResult(
+        task="hypothesis_test",
+        tables={
+            "test_results": pd.DataFrame(
+                {
+                    "检验方法": [test_name],
+                    "效应量(d)": [f"{d:.4f}"],
+                    "95%CI": [f"[{ci[0]:.4f}, {ci[1]:.4f}]"],
+                    "效应量解读": [label],
+                    "样本量": [f"g1={len(g1)}, g2={len(g2)}"],
+                }
+            )
+        },
+        figures=[fig],
+        summary=f"Cohen's d={d:.3f} ({label})，95%CI=[{ci[0]:.3f}, {ci[1]:.3f}]",
+        metadata={
+            "test": test_name,
+            "statistic": float(d),
+            "p_value": None,  # 纯效应量，不检验
+            "effect_size": float(d),
+            "effect_name": "Cohen's d",
+            "effect_label": label,
+            "effect_size_ci": (float(ci[0]), float(ci[1])),
+            "n1": len(g1),
+            "n2": len(g2),
+        },
+        messages=warn_list,
+    )
+
+
+def _ht_correlation(req: AnalysisRequest) -> AnalysisResult:
+    """相关显著性检验 — 检验 target_col 与 feature_cols[0] 的 Pearson 相关。"""
+    feat_cols = [c for c in req.feature_cols if c in req.data.columns]
+    if not feat_cols:
+        return AnalysisResult(
+            task="hypothesis_test",
+            status="error",
+            messages=["相关显著性检验需要 1 个因子列（与目标列配对计算 Pearson 相关）"],
+        )
+    x_col = feat_cols[0]
+    sub = req.data[[req.target_col, x_col]].dropna()
+    if len(sub) < 3:
+        return AnalysisResult(
+            task="hypothesis_test",
+            status="error",
+            messages=[f"有效数据不足(至少3对完整观测)，当前 {len(sub)} 对"],
+        )
+    x = sub[x_col].values
+    y = sub[req.target_col].values
+    if np.std(x, ddof=1) < EPSILON or np.std(y, ddof=1) < EPSILON:
+        return AnalysisResult(
+            task="hypothesis_test",
+            status="error",
+            messages=["相关显著性检验需要两个变量均有变异（常量列无法计算相关系数）"],
+        )
+    r_val, p_val = sp_stats.pearsonr(x, y)
+    ci = _correlation_ci(r_val, len(sub))
+    label = _effect_size_label(abs(r_val), "correlation")
+    test_name = f"相关显著性检验 ({req.target_col} vs {x_col})"
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    conclusion = "存在显著相关" if p_val < alpha else "未发现显著相关"
+    fig = Figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)
+    ax.scatter(x, y, s=20, alpha=0.7, color=PALETTE["data"]["primary"])
+    ax.set_xlabel(x_col, fontsize=10)
+    ax.set_ylabel(req.target_col, fontsize=10)
+    ax.set_title(f"{test_name} (r={r_val:.3f}, p={p_val:.4f})", fontsize=11)
+    fig.tight_layout()
+    return AnalysisResult(
+        task="hypothesis_test",
+        tables={
+            "test_results": pd.DataFrame(
+                {
+                    "检验方法": [test_name],
+                    "相关系数(r)": [f"{r_val:.4f}"],
+                    "p值": [f"{p_val:.4f}"],
+                    "显著性水平": [str(alpha)],
+                    "95%CI": [f"[{ci[0]:.4f}, {ci[1]:.4f}]"],
+                    "效应量解读": [label],
+                    "样本量": [str(len(sub))],
+                    "结论": [conclusion],
+                }
+            )
+        },
+        figures=[fig],
+        summary=f"相关显著性: {conclusion} (r={r_val:.3f}, p={p_val:.4f}, n={len(sub)})",
+        metadata={
+            "test": test_name,
+            "statistic": float(r_val),
+            "p_value": float(p_val),
+            "alpha": alpha,
+            "effect_size": float(r_val),
+            "effect_name": "Pearson r",
+            "effect_label": label,
+            "effect_size_ci": (float(ci[0]), float(ci[1])),
+            "n": len(sub),
+        },
+    )
+
+
 _HYPOTHESIS_DISPATCH = {
     "cochran_q": _ht_cochran_q,
     "ks": _ht_ks,
     "friedman": _ht_friedman,
+    "cohens_d": _ht_cohens_d,
+    "correlation": _ht_correlation,
 }
 
 
