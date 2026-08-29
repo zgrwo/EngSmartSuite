@@ -93,7 +93,8 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
                     pdfmetrics.registerFont(TTFont(_fn, _fp))
                     _cjk_font_name = _fn
                     break
-                except Exception:
+                except Exception as e:
+                    logger.warning("中文字体注册失败: %s (%s): %s", _fn, _fp, e, exc_info=True)
                     continue
 
         # 字体选择: CJK 字体仅注册单一 weight, 全部文本使用同一字体;

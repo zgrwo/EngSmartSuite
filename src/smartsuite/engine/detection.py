@@ -757,7 +757,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
-                messages=[f"Isolation Forest 模型拟合失败: {e}"],
+                messages=["Isolation Forest 模型拟合失败，请检查数据质量或调整 contamination 参数"],
             )
 
         anomalies = req.data.loc[sub.index[mask]] if mask.sum() > 0 else pd.DataFrame()

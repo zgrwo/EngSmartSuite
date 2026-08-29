@@ -1131,7 +1131,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
                     "t值": None,
                     "p值": None,
                     "显著": "计算失败",
-                    "效应量": f"计算异常: {str(e)[:60]}",
+                    "效应量": "计算异常（详见日志）",
                 }
             )
             continue
@@ -1191,7 +1191,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
                             "t值": None,
                             "p值": None,
                             "显著": "计算失败",
-                            "效应量": f"计算异常: {str(e)[:60]}",
+                            "效应量": "计算异常（详见日志）",
                         }
                     )
                     continue
@@ -2009,7 +2009,8 @@ def _gen_plackett_burman(factors, n_runs):
     try:
         m = _pb_matrix(n_runs)
     except ValueError as e:
-        return None, [str(e)]
+        logger.warning("PB 设计生成失败 (n_runs=%s): %s", n_runs, e)
+        return None, [f"plackett_burman 当前仅支持运行数: {sorted(_PB_SUPPORTED)}"]
     if k > n_runs - 1:
         return None, [f"因子数({k})超过 PB 运行数上限({n_runs - 1})"]
     return m[:, :k], []
@@ -2351,6 +2352,11 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
                 coded = _gen_ccd(k, alpha, center_points)
                 oa_name, oa_spec = "CCD", f"k={k}, α={alpha:.4f}"
     except ValueError as e:
-        return AnalysisResult(task="doe_design", status="error", messages=[str(e)])
+        logger.warning("DOE 设计生成失败 (method=%s): %s", method, e)
+        return AnalysisResult(
+            task="doe_design",
+            status="error",
+            messages=["实验设计生成失败：请检查因子水平、alpha 与 center_points 参数配置"],
+        )
 
     return _assemble_design(req, factors, coded, method, oa_name, oa_spec)

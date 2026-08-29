@@ -2018,11 +2018,11 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             linewidth=1.5,
             label=f"UCL (P99.865)={ucl:.4f}",
         )
-        if ucl_2s:
+        if ucl_2s is not None:
             ax.axhline(
                 ucl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6
             )
-        if ucl_1s:
+        if ucl_1s is not None:
             ax.axhline(
                 ucl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4
             )
@@ -2036,11 +2036,11 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             linewidth=1.5,
             label=f"LCL (P0.135)={lcl:.4f}",
         )
-        if lcl_2s:
+        if lcl_2s is not None:
             ax.axhline(
                 lcl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6
             )
-        if lcl_1s:
+        if lcl_1s is not None:
             ax.axhline(
                 lcl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4
             )
