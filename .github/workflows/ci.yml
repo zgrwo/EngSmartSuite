@@ -127,8 +127,8 @@ jobs:
       # 审查 2026-08-19 #5.3：全量一致性门禁此前只在 main push 的 full job 跑，
       # 引擎崩溃（如 scatter_plot 重复列）可在 PR 阶段静默合入；纳入 PR 门禁
       # 第二轮 #8：--skip-pytest 跳过脚本内嵌套的全量 pytest（上方已逐层跑过），
-      # 只保留 40 任务 status=ok 冒烟判定，避免重复跑完整套件
-      - name: 全量一致性校验（40 任务 status=ok 冒烟门禁）
+      # 只保留 41 任务 status=ok 冒烟判定，避免重复跑完整套件
+      - name: 全量一致性校验（41 任务 status=ok 冒烟门禁）
         run: python scripts/verify_consistency.py --skip-pytest
 
   # ── Web E2E（审查 2026-08-19 #3.6：test_web_e2e 需运行中服务器，

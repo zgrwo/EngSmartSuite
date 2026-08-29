@@ -395,6 +395,50 @@ for key, val in res.metadata.items():
 p(f"\nAll PC numeric values: {pc_vals}")
 
 # ────────────────────────────────────────────────────────
+# 9. TREND_FORECAST (7.6) — 手册 §7.6 RMSE 硬校验（2026-08-29 审查 R2）
+# ────────────────────────────────────────────────────────
+p()
+p("=" * 70)
+p("9. TREND_FORECAST (7.6)")
+p("=" * 70)
+
+req = AnalysisRequest(
+    task="trend_forecast",
+    data=df_raw.copy(),
+    target_col=C_DEF,
+    feature_cols=[],
+    params={},
+)
+res = orchestrate(req)
+assert res.status != "error", str(res.messages)
+tf_rmse = float(res.metadata.get("rmse", float("nan")))
+tf_r2 = float(res.metadata.get("r_squared", float("nan")))
+tf_dw = float(res.metadata.get("durbin_watson", float("nan")))
+p(f"  RMSE={tf_rmse:.4f}, R²={tf_r2:.4f}, DW={tf_dw:.4f}")
+
+# ────────────────────────────────────────────────────────
+# 10. BOOTSTRAP_CI (8.1) — 手册 §8.1 CI 硬校验（2026-08-29 审查 R7）
+# ────────────────────────────────────────────────────────
+p()
+p("=" * 70)
+p("10. BOOTSTRAP_CI (8.1)")
+p("=" * 70)
+
+req = AnalysisRequest(
+    task="bootstrap_ci",
+    data=df_raw.copy(),
+    target_col=C_DEF,
+    feature_cols=[],
+    params={"n_bootstrap": 2000},
+)
+res = orchestrate(req)
+assert res.status != "error", str(res.messages)
+bc_point = float(res.metadata.get("point_estimate", float("nan")))
+bc_lower = float(res.metadata.get("ci_lower", float("nan")))
+bc_upper = float(res.metadata.get("ci_upper", float("nan")))
+p(f"  点估计={bc_point:.4f}, CI=[{bc_lower:.4f}, {bc_upper:.4f}]")
+
+# ────────────────────────────────────────────────────────
 # FINAL COMPARISON REPORT
 # ────────────────────────────────────────────────────────
 p()
@@ -511,6 +555,16 @@ for key, val in pc_vals.items():
         and "ci" not in key_lower
     ):
         rpt("process_capability", f"Cp ({key})", 1.279, round(val, 4), 0.01)
+
+p()
+p("--- 7.6 TREND_FORECAST ---")
+rpt("trend_forecast", "RMSE", 1.2415, round(tf_rmse, 4), 0.001)
+
+p()
+p("--- 8.1 BOOTSTRAP_CI ---")
+rpt("bootstrap_ci", "点估计", 4.2491, round(bc_point, 4), 0.001)
+rpt("bootstrap_ci", "CI 下限", 4.1740, round(bc_lower, 4), 0.001)
+rpt("bootstrap_ci", "CI 上限", 4.3244, round(bc_upper, 4), 0.001)
 
 p()
 p("=" * 100)

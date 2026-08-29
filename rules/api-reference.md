@@ -311,7 +311,7 @@ class AnalysisResult:
 ### scatter_plot
 - **Task Key**: `scatter_plot`
 - **描述**: X-Y 散点图 — 可选线性回归 (OLS) 或 LOWESS 拟合线、95% 置信带、分组着色
-- **params**: `fit` ("none"|"linear"|"lowess"), `show_ci` ("true"|"false"), `group_col` (分组列)
+- **params**: `fit` ("none"|"linear"|"lowess"), `show_ci` (接受 "true"/"false" 字符串或布尔值；空字符串/None 视为 False), `group_col` (分组列)
 - **feature_cols**: `[X 轴数值列]`
 - **返回**: 无表格 (图表为主)
 - **图**: 散点图 + 拟合线 + 置信带 + 分组图例；summary 含 R² 和拟合方程
@@ -319,7 +319,7 @@ class AnalysisResult:
 ### bootstrap_ci
 - **Task Key**: `bootstrap_ci`
 - **描述**: Bootstrap 置信区间 — 百分位法，不依赖分布假设
-- **params**: `statistic` ("mean"|"median"|"std"), `n_bootstrap` (默认 2000), `ci_level` (默认 0.95)
+- **params**: `statistic` ("mean"|"median"|"std"|"var"), `n_bootstrap` (默认 2000), `ci_level` (默认 0.95), `random_state` (默认 42)
 - **返回**: `bootstrap_ci`
 - **图**: Bootstrap 分布直方图 + CI 区间
 

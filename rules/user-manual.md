@@ -533,7 +533,7 @@ Kappa = −0.009，判定等级 = **低于随机一致**。
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(task='cohens_kappa', ...))` → 返回 `kappa_results` 表。
+- **Python API**：`orchestrate(AnalysisRequest(task='cohens_kappa', ...))` → 返回 `kappa_result` 表。
 
 ### 5.2 信度分析 Cronbach α (`cronbach_alpha`)
 
@@ -1278,7 +1278,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 *趋势+预测(橙带)/残差(DW≈2)/ACF自相关/Actual vs Predicted(R²≈0)*
 
-#### 数值结果（Web UI ≡ Python） R²=0.0002, DW=1.979, MAPE=N/A, RMSE=2.495。数据无趋势（随机数据），预测区间较宽。2×2 诊断图（趋势+预测/残差/ACF/Actual vs Predicted）。
+#### 数值结果（Web UI ≡ Python） R²=0.0002, DW=1.979, MAPE=N/A, RMSE=1.2415。数据无趋势（随机数据），预测区间较宽。2×2 诊断图（趋势+预测/残差/ACF/Actual vs Predicted）。
 
 #### 解读说明
 
@@ -1547,15 +1547,15 @@ R² 越接近 1 说明线性关系越强。散点沿拟合线均匀分布 = 线�
 
 | 统计量 | 值 |
 |--------|-----|
-| 点估计（均值） | 4.249 |
-| CI 下限 (95%) | 4.174 |
-| CI 上限 (95%) | 4.330 |
-| CI 宽度 | 0.156 |
+| 点估计（均值） | 4.2491 |
+| CI 下限 (95%) | 4.1740 |
+| CI 上限 (95%) | 4.3244 |
+| CI 宽度 | 0.1504 |
 | 重抽样次数 | 2000 |
 
 #### 解读说明
 
-Bootstrap 95%CI [4.174, 4.330] 表示不良率均值有 95% 把握落在此区间。CI 宽度仅 0.156（均值的 3.7%）说明估计精度很高——2000 次重抽样足够。Bootstrap 分布图呈钟形，符合 CLT 预期。
+Bootstrap 95%CI [4.1740, 4.3244] 表示不良率均值有 95% 把握落在此区间。CI 宽度仅 0.1504（均值的 3.5%）说明估计精度很高——2000 次重抽样足够。Bootstrap 分布图呈钟形，符合 CLT 预期。
 
 #### 补充备注
 

@@ -82,7 +82,7 @@ EngSmartSuite/
 │   ├── test_master_integration.py  #   41 方法全量集成
 │   ├── test_web_e2e.py             #   Web UI E2E
 │   ├── test_workflows.py           #   工作流串联测试
-│   ├── crossval_r/                 #   R 交叉验证参考实现
+│   ├── crossval_r/                 #   关键方法交叉验证（手工公式/已知性质；已不再声称 R 参考）
 │   │   └── test_r_reference.py
 │   ├── test_engine/                #   引擎层单元测试
 │   │   ├── __init__.py
@@ -96,6 +96,7 @@ EngSmartSuite/
 │   │   ├── test_edge_cases.py      #   边界情况
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_fuzz.py            #   模糊测试
+│   │   ├── test_med_fixes.py       #   审查 MED 问题修复回归
 │   │   └── test_new_functions.py   #   新函数验证
 │   ├── test_services/              #   服务层单元测试
 │   │   ├── __init__.py
@@ -106,6 +107,7 @@ EngSmartSuite/
 │   │   ├── test_differential.py    #   CLI vs Web 路径一致性
 │   │   ├── test_diff_cli_web.py    #   CLI/Web 差分一致性
 │   │   ├── test_round2_fixes.py    #   审查回归修复验证
+│   │   ├── test_upload_limits.py   #   Web 上传限制校验
 │   │   └── test_manual_parity.py   #   Web/CLI/Python/手册 四路一致性
 │   └── scripts/                    #   治理脚本测试
 │       ├── test_retry.py

@@ -70,6 +70,7 @@ smartsuite/core/       ← ① 数据契约层：仅 pandas+pydantic（AnalysisR
 smartsuite/engine/     ← ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
 smartsuite/services/   ← ② 应用服务层：唯一桥接层
 smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
+smartsuite/cli.py      ← ⑤ CLI 入口：依赖 services/（第五入口），不直接依赖 engine/
 ```
 
 - ✅ 引擎函数签名统一：`(AnalysisRequest) -> AnalysisResult`
