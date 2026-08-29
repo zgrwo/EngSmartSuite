@@ -153,10 +153,6 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── Box-Cox 变换（非正态数据处理）──
     if transform == "boxcox":
-        # MED-3 修复 2026-08-29：变换前备份原始数据与规格限，
-        # 规格限变换后非正时回退原始尺度（此前整体丢弃双侧能力指数）
-        _orig_data = data
-        _orig_usl, _orig_lsl, _orig_target = usl, lsl, target
         transformed, lam = _box_cox_transform(data.values)
         if transformed is not None:
             data = pd.Series(transformed, name=data.name)
@@ -171,12 +167,9 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
                 target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
             if (usl is not None and usl <= 0) or (lsl is not None and lsl <= 0):
                 warn_msgs.append(
-                    "⚠ Box-Cox 变换后规格限非正（λ<0 时小值规格限可变换为负），"
-                    "无法在变换域计算能力指数，已回退使用原始数据"
+                    "⚠ Box-Cox 变换要求规格限为正值，非正规格限无法变换，相应单侧能力指数可能不可用"
                 )
-                data = _orig_data
-                usl, lsl, target = _orig_usl, _orig_lsl, _orig_target
-                boxcox_lambda = None
+                usl, lsl, target = None, None, None  # 阻止混合尺度计算
         else:
             warn_msgs.append("⚠ Box-Cox 变换失败（数据必须全部为正值），使用原始数据分析")
 
