@@ -2,6 +2,13 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.2](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.1...v1.2.2) (2026-08-29)
+
+
+### 🐛 Bug 修复
+
+* **engine:** 修复全量验证发现的 3 个 MED 问题 ([c43be41](https://github.com/zgrwo/EngSmartSuite/commit/c43be4188eb1da203be129c28c173a962190c880))
+
 ## [1.2.1](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.0...v1.2.1) (2026-08-27)
 
 
