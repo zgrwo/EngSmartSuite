@@ -116,6 +116,10 @@ def test_params_override_defaults(sample_doe_data):
     )
     result = orchestrate(req)
     assert result.status == "ok"
+    # 值级断言：用户参数 method=spearman 必须覆盖默认 pearson
+    assert result.metadata.get("method") == "spearman", (
+        f"参数覆盖失败: method={result.metadata.get('method')}"
+    )
 
 
 def test_empty_string_to_none_normalization(sample_doe_data):
@@ -129,8 +133,20 @@ def test_empty_string_to_none_normalization(sample_doe_data):
         params={"usl": "", "lsl": ""},  # 空字符串
     )
     result = orchestrate(req)
-    # 不应因空字符串报错
-    assert result.status in ("ok", "warning", "error")
+    # 空字符串应规范化为 None：不报错且输出有效控制限（UCL > CL > LCL）
+    assert result.status == "ok", f"空字符串应规范化为 None 而非报错: {result.messages}"
+    cl_table = result.tables.get("control_limits")
+    assert cl_table is not None and len(cl_table) >= 1, "spc_xbar 应输出 control_limits 表"
+    row = cl_table.iloc[0]
+    assert row["UCL"] > row["CL"] > row["LCL"], f"控制限应满足 UCL > CL > LCL: {row.to_dict()}"
+    # 精确值（固定种子数据）：CL=44.8208, UCL=51.8562, LCL=37.7855
+    assert all(
+        (
+            abs(float(row["CL"]) - 44.8208) < 0.01,
+            abs(float(row["UCL"]) - 51.8562) < 0.01,
+            abs(float(row["LCL"]) - 37.7855) < 0.01,
+        )
+    ), f"控制限数值漂移: {row.to_dict()}"
 
 
 # ── 目标列检查测试 ──
@@ -169,8 +185,14 @@ def test_vif_no_target_needed(sample_doe_data):
         feature_cols=["料温", "模温", "注射压力", "保压时间"],
     )
     result = orchestrate(req)
-    # VIF 应该能正常运行（可能因数据问题警告，但不应因缺目标列报错）
-    assert result.status in ("ok", "warning", "error")
+    # VIF 无需目标列：应正常输出全部 4 个因子的 VIF，且 VIF ≥ 1（数学下界）
+    assert result.status == "ok", f"VIF 无需目标列应成功: {result.messages}"
+    vt = result.tables.get("vif_table")
+    assert vt is not None and len(vt) == 4, (
+        f"应输出 4 个因子的 vif_table，实际 {None if vt is None else len(vt)}"
+    )
+    vif_vals = [float(v) for v in vt.iloc[:, 1]]
+    assert all(v >= 1.0 for v in vif_vals), f"VIF 不应小于 1: {vif_vals}"
 
 
 # ── 注册表完整性测试 ──

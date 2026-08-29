@@ -175,6 +175,42 @@ def test_hypothesis_kruskal_group_col_none_injection(sample_two_group_data):
     assert result.metadata.get("test") == "Kruskal-Wallis H 检验 (非参数 ANOVA)"
 
 
+def test_hypothesis_kruskal_dunn_posthoc_triggered():
+    """审查 2026-08-29 #R8：Dunn 事后检验真实分支（kruskal p<α 且 ≥3 组）此前零测试覆盖。
+
+    构造三组均值显著分离的数据触发 posthoc_dunn，断言表存在且含 C(3,2)=3 行成对对比。
+    """
+    from smartsuite.services.orchestrator import orchestrate
+
+    rng = np.random.RandomState(42)
+    df = pd.DataFrame(
+        {
+            "val": np.concatenate(
+                [
+                    rng.normal(1.0, 0.5, 30),
+                    rng.normal(5.0, 0.5, 30),
+                    rng.normal(9.0, 0.5, 30),
+                ]
+            ),
+            "组别": ["A"] * 30 + ["B"] * 30 + ["C"] * 30,
+        }
+    )
+    req = AnalysisRequest(
+        task="hypothesis_test",
+        data=df,
+        target_col="val",
+        feature_cols=["组别"],
+        params={"test": "kruskal", "group_col": "组别", "alpha": 0.05},
+    )
+    result = orchestrate(req)
+    assert result.status == "ok", f"kruskal 失败: {result.messages}"
+    assert result.metadata.get("n_groups") == 3
+    dunn = result.tables.get("posthoc_dunn")
+    assert dunn is not None, "Dunn 事后检验分支未触发（kruskal 应显著且 ≥3 组）"
+    assert len(dunn) == 3, f"应产生 C(3,2)=3 行对比，实际 {len(dunn)}"
+    assert {"对比", "Z值", "原始p值", "校正p值", "显著"} <= set(dunn.columns)
+
+
 def test_hypothesis_jonckheere_group_col_none_injection():
     """审查 2026-08-19 #1.1：jonckheere 分支同样不得 KeyError。"""
     from smartsuite.services.orchestrator import orchestrate

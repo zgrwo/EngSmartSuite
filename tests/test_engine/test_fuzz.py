@@ -280,3 +280,57 @@ def test_grid_search_five_points():
     )
     result = grid_search(req)
     _assert_no_crash(result, "grid_search", "5 points")
+
+
+# ── 宽表（docstring 承诺覆盖，2026-08-29 #R10 补测）──
+
+
+def test_correlation_wide_table():
+    """宽表覆盖：20 列 × 200 行的相关矩阵不应崩溃或超时。"""
+    np.random.seed(3)
+    n, k = 200, 20
+    cols = {f"col_{j:02d}": np.random.normal(0, 1, n) for j in range(k)}
+    df = pd.DataFrame(cols)
+    req = AnalysisRequest(
+        task="correlation",
+        data=df,
+        target_col="col_00",
+        feature_cols=list(cols.keys()),
+    )
+    result = correlation_analysis(req)
+    assert result.status == "ok", f"宽表相关分析应成功: {result.messages}"
+    cm = result.tables.get("correlation_matrix")
+    assert cm is not None, f"宽表相关分析应输出 correlation_matrix: {list(result.tables.keys())}"
+    assert cm.shape[0] == k and cm.shape[1] == k, f"相关矩阵应 {k}×{k}，实际 {cm.shape}"
+
+
+# ── 重复值（docstring 承诺覆盖，2026-08-29 #R10 补测）──
+
+
+def test_anova_heavy_duplicate_values():
+    """重复值覆盖：目标列大量重复（含结），ANOVA 不应崩溃且 p 值应为 NaN/哨兵而非异常。"""
+    rng = np.random.RandomState(5)
+    vals = np.repeat([10.0, 20.0, 30.0], 20)  # 仅 3 个唯一值，60 行
+    df = pd.DataFrame({"val": vals, "group": ["A", "B", "C"] * 20})
+    req = AnalysisRequest(task="anova", data=df, target_col="val", feature_cols=["group"])
+    result = anova_analysis(req)
+    _assert_no_crash(result, "anova", "heavy duplicate values")
+
+
+def test_hypothesis_heavy_duplicate_values():
+    """重复值覆盖：kruskal 遇大量结（重复秩）不得崩溃，Dunn 结校正分支安全。"""
+    df = pd.DataFrame(
+        {
+            "val": [1.0] * 30 + [2.0] * 30 + [3.0] * 30,  # 完全重复，秩大量并列
+            "group": ["A"] * 30 + ["B"] * 30 + ["C"] * 30,
+        }
+    )
+    req = AnalysisRequest(
+        task="hypothesis_test",
+        data=df,
+        target_col="val",
+        feature_cols=["group"],
+        params={"test": "kruskal", "group_col": "group", "alpha": 0.05},
+    )
+    result = hypothesis_test(req)
+    _assert_no_crash(result, "hypothesis_test", "heavy duplicate values")

@@ -3,7 +3,7 @@
 由原 tests/_diff_cli_web.py 模块级脚本改造（审查 2026-08-19 #3.3）：
 - 原文件名不匹配 pytest python_files=["test_*.py"] 收集规则，且无 test_* 函数，
   40 方法 CLI/Web 差分从未执行，属死代码
-- 现为参数化 pytest 测试：40 个任务逐一对比 status/summary/tables/metadata
+- 现为参数化 pytest 测试：41 个任务逐一对比 status/summary/tables/metadata
 - 顺带修复原脚本两处参数格式 bug：
   grid_search 的 ranges 传字符串（引擎需 dict）、multi_objective 的 objectives 传字符串
 """

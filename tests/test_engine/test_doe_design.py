@@ -261,6 +261,22 @@ def test_doe_design_fractional_non_two_level():
 
 
 # ── CCD α 正确性（审查发现的两个严重 bug 回归测试）──
+def test_doe_design_fractional_invalid_runs():
+    """审查 2026-08-29 #R8：fractional_factorial 非 2 的幂 n_runs 分支（doe_opt.py:1990）此前缺测。"""
+    factors = [{"name": f"X{i}", "levels": [0, 1]} for i in range(3)]
+    r = doe_design(_req("fractional_factorial", factors, n_runs=12))  # 12 不是 2 的幂
+    assert r.status == "error"
+    assert any("2 的幂" in m for m in r.messages), r.messages
+
+
+def test_doe_design_plackett_burman_invalid_runs_entry():
+    """审查 2026-08-29 #R8：doe_design 入口传非法 PB n_runs 应返回中文错误而非裸异常。"""
+    factors = [{"name": f"X{i}", "levels": [0, 1]} for i in range(3)]
+    r = doe_design(_req("plackett_burman", factors, n_runs=28))
+    assert r.status == "error"
+    assert any("仅支持运行数" in m for m in r.messages), r.messages
+
+
 def test_resolve_alpha_rotatable_full_and_half_fraction():
     # 全因子 k≤4：α = nf^(1/4) = 2^(k/4)
     assert _resolve_alpha("rotatable", 2, 3) == pytest.approx(2**0.5)

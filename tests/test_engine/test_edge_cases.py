@@ -680,7 +680,7 @@ def _close_result_figs(res):
 
 
 def test_empty_dataframe_all_tasks_return_result():
-    """空数据（0 行）：全部 40 任务不得抛异常（返回 ok 或带中文消息的 error）。"""
+    """空数据（0 行）：全部 41 任务不得抛异常（返回 ok 或带中文消息的 error）。"""
     from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
     df = pd.DataFrame(
@@ -700,7 +700,7 @@ def test_empty_dataframe_all_tasks_return_result():
 
 
 def test_all_nan_column_all_tasks_graceful():
-    """全 NaN 列：全部 40 任务不得抛异常。"""
+    """全 NaN 列：全部 41 任务不得抛异常。"""
     from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
     df = pd.DataFrame({"x": [np.nan] * 10, "y": [np.nan] * 10, "g": ["A"] * 10})
@@ -716,7 +716,7 @@ def test_all_nan_column_all_tasks_graceful():
 
 
 def test_single_row_all_tasks_graceful():
-    """单行数据：全部 40 任务不得抛异常。"""
+    """单行数据：全部 41 任务不得抛异常。"""
     from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
     df = pd.DataFrame({"x": [1.0], "y": [2.0], "g": ["A"]})
@@ -732,7 +732,7 @@ def test_single_row_all_tasks_graceful():
 
 
 def test_large_n_6000_all_tasks_graceful():
-    """n>5000：全部 40 任务不得抛异常（性能哨兵）。"""
+    """n>5000：全部 41 任务不得抛异常（性能哨兵）。"""
     from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
 
     np.random.seed(7)

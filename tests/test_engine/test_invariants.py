@@ -132,10 +132,10 @@ def test_cpk_leq_cp():
     cpk = result.metadata.get("cpk")
     pp = result.metadata.get("pp")
     ppk = result.metadata.get("ppk")
-    if cp is not None and cpk is not None:
-        assert cpk <= cp + 0.001, f"Cpk={cpk:.3f} > Cp={cp:.3f}"
-    if pp is not None and ppk is not None:
-        assert ppk <= pp + 0.001, f"Ppk={ppk:.3f} > Pp={pp:.3f}"
+    # 能力指标必须存在（不得静默缺失跳过不变量断言）
+    assert all(v is not None for v in (cp, cpk, pp, ppk)), f"能力指标缺失: {result.metadata}"
+    assert cpk <= cp + 0.001, f"Cpk={cpk:.3f} > Cp={cp:.3f}"
+    assert ppk <= pp + 0.001, f"Ppk={ppk:.3f} > Pp={pp:.3f}"
 
 
 def test_cpk_single_sided_spec():
@@ -215,8 +215,8 @@ def test_ttest_p_value_range():
     result = hypothesis_test(req)
     assert result.status == "ok", result.messages
     p = result.metadata.get("p_value")
-    if p is not None:
-        assert 0 <= p <= 1, f"p 值无效: {p}"
+    assert p is not None, "t 检验应返回 p_value 元数据"
+    assert 0 <= p <= 1, f"p 值无效: {p}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -277,13 +277,16 @@ def test_survival_km_monotonic():
     result = survival_analysis(req)
     assert result.status == "ok", result.messages
     surv_table = result.tables.get("km_survival")
-    if surv_table is not None and "生存概率" in surv_table.columns:
-        surv_values = surv_table["生存概率"].values
-        # KM 生存概率必须单调非增
-        assert all(
-            float(surv_values[i]) >= float(surv_values[i + 1]) - 0.001
-            for i in range(len(surv_values) - 1)
-        ), "KM 生存概率不是单调递减"
+    assert surv_table is not None, "survival_analysis 应输出 km_survival 表"
+    assert "生存概率" in surv_table.columns, (
+        f"km_survival 应含生存概率列: {list(surv_table.columns)}"
+    )
+    surv_values = surv_table["生存概率"].values
+    # KM 生存概率必须单调非增
+    assert all(
+        float(surv_values[i]) >= float(surv_values[i + 1]) - 0.001
+        for i in range(len(surv_values) - 1)
+    ), "KM 生存概率不是单调递减"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -319,14 +322,16 @@ def test_gage_rr_variance_decomposition():
     )
     result = gage_rr(req)
     assert result.status == "ok", result.messages
-    grr_pct = result.metadata.get("grr_pct")
-    ev_pct = result.metadata.get("ev_pct")
-    av_pct = result.metadata.get("av_pct")
-    pv_pct = result.metadata.get("pv_pct")
-    # 所有百分比分量应非负
-    for name, val in [("GRR%", grr_pct), ("EV%", ev_pct), ("AV%", av_pct), ("PV%", pv_pct)]:
-        if val is not None:
-            assert val >= 0, f"{name} 不应该为负: {val:.1f}"
+    # 方差分解不变量: TV² = GRR² + PV²（GRR 由 EV/AV 合成），各分量非负
+    assert all(k in result.metadata for k in ("ev", "av", "grr", "pv", "tv")), (
+        f"gage_rr 应返回 ev/av/grr/pv/tv 元数据: {list(result.metadata.keys())}"
+    )
+    assert float(result.metadata["tv"]) > 0, "总变异 TV 应为正"
+    for k in ("ev", "av", "grr", "pv"):
+        assert float(result.metadata[k]) >= 0, f"{k} 不应该为负: {result.metadata[k]:.1f}"
+    tv2 = float(result.metadata["tv"]) ** 2
+    grr_pv2 = float(result.metadata["grr"]) ** 2 + float(result.metadata["pv"]) ** 2
+    assert abs(tv2 - grr_pv2) < 1e-6, f"方差分解 TV² ≠ GRR² + PV²: {tv2} vs {grr_pv2}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -352,9 +357,9 @@ def test_attribute_chart_center_line_positive():
         )
         result = attribute_chart(req)
         assert result.status == "ok", result.messages
-        cl = result.metadata.get("center_line")
-        if cl is not None:
-            assert cl > 0, f"{chart_type}-chart CL={cl} ≤ 0"
+        cl = result.metadata.get("cl")
+        assert cl is not None, f"spc_attribute({chart_type}) 应返回 cl 元数据"
+        assert cl > 0, f"{chart_type}-chart CL={cl} ≤ 0"
 
 
 # ── 散点图不变量 ──
@@ -404,7 +409,13 @@ def test_scatter_plot_constant_x_column():
         params={"fit": "linear", "show_ci": True},
     )
     result = scatter_plot(req)
-    assert result.status == "ok"
+    assert result.status == "ok", result.messages
+    # 值级断言：常量 X 列仍统计全部点、仍输出图、线性拟合 R²=0
+    assert result.metadata.get("n_points") == 30, f"常量 X 列应统计全部 30 点: {result.metadata}"
+    assert len(result.figures) == 1, "常量 X 列仍应输出散点图"
+    assert result.metadata.get("r_squared") == 0.0, (
+        f"常量 X 线性拟合 R² 应为 0: {result.metadata.get('r_squared')}"
+    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -511,17 +522,19 @@ def test_p_value_range_all_tests():
     result = hypothesis_test(req)
     assert result.status == "ok", result.messages
     p = result.metadata.get("p_value")
-    if p is not None:
-        assert 0 <= p <= 1, f"p={p} 超出 [0,1]"
+    assert p is not None, "hypothesis_test 应返回 p_value"
+    assert 0 <= p <= 1, f"p={p} 超出 [0,1]"
     # anova
     req2 = AnalysisRequest(
         task="anova", data=df, target_col="y", feature_cols=["g"], params={"alpha": 0.05}
     )
     result2 = anova_analysis(req2)
     assert result2.status == "ok", result2.messages
-    p2 = result2.metadata.get("p_value")
-    if p2 is not None:
-        assert 0 <= p2 <= 1, f"ANOVA p={p2} 超出 [0,1]"
+    # anova 的 p 值在 anova_enhanced 表首行「p值」列（metadata 不重复存储）
+    at2 = result2.tables.get("anova_enhanced")
+    assert at2 is not None and "p值" in at2.columns, "anova 应输出 anova_enhanced 表且含 p值 列"
+    p2 = float(at2.iloc[0, at2.columns.get_loc("p值")])
+    assert 0 <= p2 <= 1, f"p2={p2} 超出 [0,1]"
 
 
 # ═══════════════════════════════════════════════════════════
