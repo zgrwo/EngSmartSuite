@@ -2,6 +2,25 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.3](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.2...v1.2.3) (2026-08-29)
+
+
+### 🐛 Bug 修复
+
+* **build:** wheel/sdist 打包缺失 Web 资产，补 setuptools package-data 声明 ([7c23f2a](https://github.com/zgrwo/EngSmartSuite/commit/7c23f2acb479bd42227a7ad2163692dd89c26293))
+* **engine:** 收敛引擎裸异常入用户消息并统一 SPC 限值守卫 ([81b03b3](https://github.com/zgrwo/EngSmartSuite/commit/81b03b3fe93ac635a2643d7112a429d61f574994))
+
+
+### 📄 文档
+
+* 修正手册数值漂移并同步文档声明与硬校验 ([a921512](https://github.com/zgrwo/EngSmartSuite/commit/a921512616d0a6ee1a87abb90a3994100d01c787))
+* 补充发行前全量审查记录（第二轮，2026-08-29） ([bedd735](https://github.com/zgrwo/EngSmartSuite/commit/bedd7354819d65cb0eb6ecd89d895f080b45706e))
+
+
+### ✅ 测试
+
+* 补 Dunn/DOE 边界/宽表重复值用例并硬化弱断言 ([29e37f3](https://github.com/zgrwo/EngSmartSuite/commit/29e37f385b1a8f827339faead58a0f77c018bc99))
+
 ## [1.2.2](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.1...v1.2.2) (2026-08-29)
 
 
