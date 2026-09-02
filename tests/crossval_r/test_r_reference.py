@@ -308,6 +308,11 @@ class TestSpcCrossVal:
         assert 24 in next(iter(viol.values())), f"违规点应为子组 20 (索引 24): {viol}"
 
 
+# ═══════════════════════════════════════════════════════════
+# 测试 4: 过程能力 — 对比 R 手动公式
+# ═══════════════════════════════════════════════════════════
+
+
 class TestCapabilityCrossVal:
     """R 参考: Cp = (USL-LSL)/(6σ), Cpk = min((USL-μ)/(3σ), (μ-LSL)/(3σ))"""
 
