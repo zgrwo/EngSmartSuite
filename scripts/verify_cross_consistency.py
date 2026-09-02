@@ -406,9 +406,11 @@ print("=" * 70)
 
 # 返回状态码（第二轮 #3：手册数值检查失败也计入退出码，不再被静默吞掉）
 # 注：CI consistency job 以 2>&1 | tail -5 调用会掩码退出码——判定依赖 issues 输出
+# 审查 2026-09-01 G-5：收敛容差——表格/图表差异为 0 容差（此前 ≤5 表 / ≤3 图
+# 与"严格"验收声明矛盾，且当前基线实测 0 差异）
 exit_code = (
     1
-    if (status_mismatch > 0 or tables_mismatch > 5 or figs_mismatch > 3 or manual_failed > 0)
+    if (status_mismatch > 0 or tables_mismatch > 0 or figs_mismatch > 0 or manual_failed > 0)
     else 0
 )
 sys.exit(exit_code)

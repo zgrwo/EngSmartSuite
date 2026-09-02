@@ -16,6 +16,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# 审查 2026-09-01（验证补充）：Windows 控制台默认 GBK 无法打印 emoji 状态标记，
+# 与其它治理脚本（verify_consistency / verify_all）一致显式切换 UTF-8
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # 确保 src/ 在路径中
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -48,8 +52,8 @@ METHOD_CONFIGS: dict[str, dict] = {
     "anova": {"target": "y", "features": ["group"], "params": {}},
     "hypothesis_test": {
         "target": "y",
-        "features": ["group"],
-        "params": {"test": "ttest_ind", "group_col": "group"},
+        "features": ["分组"],
+        "params": {"test": "ttest_ind", "group_col": "分组"},
     },
     "decision_tree": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
     "vif": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
@@ -69,9 +73,9 @@ METHOD_CONFIGS: dict[str, dict] = {
     "box_chart": {"target": "y", "features": ["group"], "params": {}},
     "scatter_plot": {"target": "y", "features": ["x1"], "params": {"fit": "linear"}},
     "gage_rr": {
-        "target": "y",
-        "features": ["group"],
-        "params": {"part_col": "group", "operator_col": "group"},
+        "target": "measurement",
+        "features": ["part", "operator"],
+        "params": {},
     },
     "normality_check": {"target": "y", "features": [], "params": {}},
     "distribution_summary": {"target": "y", "features": [], "params": {}},
@@ -86,16 +90,29 @@ METHOD_CONFIGS: dict[str, dict] = {
             "test_type": "ttest",
         },
     },
+    "doe_design": {
+        "target": "",
+        "features": [],
+        "params": {
+            "method": "taguchi",
+            "factors": [
+                {"name": "A", "levels": [10, 20, 30]},
+                {"name": "B", "levels": [10, 20, 30]},
+                {"name": "C", "levels": [10, 20, 30]},
+            ],
+            "randomize": "false",
+        },
+    },
     "median_ci": {"target": "y", "features": [], "params": {}},
     "proportion_ci": {"target": "binary", "features": [], "params": {}},
     "variance_test": {"target": "y", "features": ["group"], "params": {"group_col": "group"}},
     "survival_analysis": {
-        "target": "y",
-        "features": ["group"],
-        "params": {"time_col": "time", "event_col": "binary"},
+        "target": "time",
+        "features": ["binary"],
+        "params": {},
     },
     "tolerance_interval": {"target": "y", "features": [], "params": {}},
-    "cohens_kappa": {"target": "group", "features": ["binary"], "params": {}},
+    "cohens_kappa": {"target": "y", "features": ["rater1", "rater2"], "params": {}},
     "cronbach_alpha": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
     # 第二轮 #12：补齐 9 个缺失方法配置（此前走默认参数，示例图与手册声明不符）
     "roc_analysis": {"target": "binary", "features": ["x1", "x2"], "params": {}},
@@ -118,8 +135,34 @@ METHOD_CONFIGS: dict[str, dict] = {
 }
 
 
-def generate_images(output_dir: Path):
-    """为每个方法生成示例图片。"""
+def _make_method_data(method_name: str, base: pd.DataFrame) -> pd.DataFrame:
+    """方法专用示例数据：仅对需要特殊结构的任务返回定制 df（其余复用 base）。"""
+    rng = np.random.default_rng(42)
+    n = 60
+    if method_name == "gage_rr":
+        rows = []
+        for part in range(1, 6):
+            for op in ("甲", "乙"):
+                for _ in range(3):
+                    rows.append(
+                        {"part": part, "operator": op,
+                         "measurement": 50.0 + part * 2 + float(rng.normal(0, 0.4))}
+                    )
+        return pd.DataFrame(rows)
+    if method_name == "cohens_kappa":
+        true = rng.integers(0, 2, n)
+        r1 = true
+        r2 = np.where(rng.random(n) < 0.85, true, 1 - true)
+        return pd.DataFrame({"rater1": r1, "rater2": r2})
+    if method_name == "hypothesis_test":
+        out = base.copy()
+        out["分组"] = np.where(base["group"] == "A", "组1", "组2")
+        return out
+    return base
+
+
+def generate_images(output_dir: Path) -> int:
+    """为每个方法生成示例图片。返回失败方法数。"""
     output_dir.mkdir(parents=True, exist_ok=True)
     df = _make_sample_data()
 
@@ -135,7 +178,7 @@ def generate_images(output_dir: Path):
         try:
             req = AnalysisRequest(
                 task=method_name,
-                data=df.copy(),
+                data=_make_method_data(method_name, df).copy(),
                 target_col=config["target"],
                 feature_cols=config["features"],
                 params=config["params"],
@@ -166,6 +209,8 @@ def generate_images(output_dir: Path):
         print(f"失败: {len(failed)}")
         for name, err in failed:
             print(f"  - {name}: {err[:80]}")
+    # 审查 2026-09-01 G-6：失败数返回给 main → 退出码（此前仅打印，验收无约束）
+    return len(failed)
 
 
 if __name__ == "__main__":
@@ -174,4 +219,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="生成方法示例图片")
     parser.add_argument("--output-dir", default=str(ROOT / "rules" / "images"))
     args = parser.parse_args()
-    generate_images(Path(args.output_dir))
+    failed = generate_images(Path(args.output_dir))
+    sys.exit(1 if failed else 0)

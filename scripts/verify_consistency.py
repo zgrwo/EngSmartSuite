@@ -47,20 +47,57 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ============================================================
 section("0. Environment")
+
+
 # ============================================================
-check("smartsuite package importable", True)
+def _import_guard(label: str, do_import) -> None:
+    """包导入检查：导入失败记录 FAIL（退出码非零），不崩溃脚本。
 
-from smartsuite.core.contracts import AnalysisRequest
+    审查 2026-09-01 G-3：此前 check(..., True) 硬编码，import 失败时脚本直接 traceback。
+    """
+    try:
+        do_import()
+    except Exception as e:  # noqa: BLE001 — 启动诊断需捕获任意导入失败
+        check(label, False, detail=f"import 失败: {type(e).__name__}: {e}")
+        return
+    check(label, True)
 
-check("Data contracts importable", True)
 
-from smartsuite.engine import __all__ as engine_all
+def _imp_smartsuite():
+    import smartsuite  # noqa: F401
 
-check(f"Engine: {len(engine_all)} functions exported", len(engine_all) >= 30)
 
-from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate
+def _imp_contracts():
+    # 脚本后续使用模块级 AnalysisRequest，需在此重建绑定
+    global AnalysisRequest
+    from smartsuite.core.contracts import AnalysisRequest  # noqa: F401
 
-check(f"Orchestrator: {len(TASK_REGISTRY)} tasks registered", len(TASK_REGISTRY) >= 30)
+
+def _imp_engine():
+    from smartsuite.engine import __all__ as engine_all  # noqa: F401
+
+    global _engine_export_count
+    _engine_export_count = len(engine_all)
+
+
+def _imp_orchestrator():
+    # 脚本后续使用模块级 TASK_REGISTRY/orchestrate，需在此重建绑定
+    global orchestrate, TASK_REGISTRY, _orchestrator_task_count
+    from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate  # noqa: F401
+
+    _orchestrator_task_count = len(TASK_REGISTRY)
+
+
+_engine_export_count = 0
+_orchestrator_task_count = 0
+_import_guard("smartsuite package importable", _imp_smartsuite)
+_import_guard("Data contracts importable", _imp_contracts)
+_import_guard("Engine functions importable", _imp_engine)
+_import_guard("Orchestrator importable", _imp_orchestrator)
+
+# 审查 2026-09-01 G-3/G-4：任务数阈值从 >= 30 提升到真实契约值（41 个分析方法）
+check(f"Engine: {_engine_export_count} functions exported", _engine_export_count >= 41)
+check(f"Orchestrator: {_orchestrator_task_count} tasks registered", _orchestrator_task_count >= 41)
 
 # ============================================================
 section("1. Architecture Constraints")

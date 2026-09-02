@@ -342,7 +342,11 @@ def check_version_consistency(root: Path) -> list[str]:
         manifest_version = str(
             json.loads(manifest_path.read_text(encoding="utf-8")).get(".", "")
         ).strip()
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        # 审查 2026-09-01 G-7：manifest 解析失败不再静默跳过——记录为问题
+        problems.append(
+            f"[版本漂移] .release-please-manifest.json 解析失败: {type(e).__name__}: {e}"
+        )
         manifest_version = ""
     m = re.search(
         r'^version\s*=\s*["\']([^"\']+)["\']',

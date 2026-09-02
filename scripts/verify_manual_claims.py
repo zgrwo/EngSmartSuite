@@ -19,6 +19,9 @@ from smartsuite.services.orchestrator import orchestrate
 OUTPUT = os.path.join(PROJECT_ROOT, "scripts", "verify_manual_claims_output.txt")
 buf = io.StringIO()
 
+# 审查 2026-09-01 G-1：失败计数 → 脚本退出码（此前 DIFF 仅记录文本，永远 exit 0）
+fail_count = 0
+
 
 def p(*args, **kwargs):
     print(*args, **kwargs, file=buf)
@@ -456,6 +459,7 @@ def rpt(analysis, value_name, manual, actual=None, tolerance=0.001, ok=None):
     （"~1.002-1.004"），字符串全等比较恒 DIFF（第二轮 #1 修复）；
     未传 ok 时回退旧逻辑（字符串全等 / 数值容差）。
     """
+    global fail_count
     if ok is not None:
         match = "OK" if ok else "DIFF"
         disp = f"{float(actual):.4f}" if isinstance(actual, (int, float)) else str(actual)
@@ -473,6 +477,9 @@ def rpt(analysis, value_name, manual, actual=None, tolerance=0.001, ok=None):
             match = "ERR"
             disp = str(actual)
     p(f"  {analysis:<24} | {value_name:<25} | {str(manual):<18} | {disp:<18} | {match}")
+    # 审查 2026-09-01 G-1：非 OK/N/A 计为失败（DIFF/ERR）
+    if match not in ("OK", "N/A"):
+        fail_count += 1
 
 
 p("--- 4.1 CORRELATION ---")
@@ -574,4 +581,8 @@ p("=" * 100)
 with open(OUTPUT, "w", encoding="utf-8") as f:
     f.write(buf.getvalue())
 print(f"Output: {OUTPUT}")
+# 审查 2026-09-01 G-1：发布前门禁——任一项 DIFF/ERR 即以非零退出码告警
+if fail_count:
+    print(f"\n❌ {fail_count} 项与手册不一致（详见 {OUTPUT}），门禁失败")
+    sys.exit(1)
 print("Done.")
