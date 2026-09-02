@@ -275,6 +275,16 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                 f"参数 sigma_multiplier 值无效: {req.params.get('sigma_multiplier')}，请输入数值"
             ],
         )
+    # 审查 2026-09-01 N-2：float("nan")/float("inf") 不抛异常，需显式拒绝
+    # 非有限值，否则 NaN 静默传播进 Gage R&R 百分比输出
+    if not np.isfinite(sigma_mult):
+        return AnalysisResult(
+            task="gage_rr",
+            status="error",
+            messages=[
+                f"参数 sigma_multiplier 必须为有限数值，当前: {req.params.get('sigma_multiplier')!r}"
+            ],
+        )
 
     # Repeatability (EV)
     ev = r_double_bar / d2_r

@@ -28,7 +28,8 @@ def _xbar_s_constants(n: int) -> tuple[float, float, float, float]:
     import math
 
     c4 = math.sqrt(2.0 / (n - 1)) * math.gamma(n / 2.0) / math.gamma((n - 1) / 2.0)
-    c4 = max(c4, 1e-10)
+    # 审查 2026-09-01 C-10：内联 1e-10 与 _constants.EPSILON 同值，统一引用常量
+    c4 = max(c4, EPSILON)
     A3 = 3.0 / (c4 * math.sqrt(n))
     common = 3.0 * math.sqrt(max(0.0, 1.0 - c4**2)) / c4
     B3 = max(0.0, 1.0 - common)

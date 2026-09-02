@@ -64,7 +64,8 @@ def preprocess_data(
         unknown_cat_warnings: 未知类别警告列表，每个元素为 (col, unknown_categories, n_affected)，
                              调用方可据此决定是否中断分析或向用户展示警告
     """
-    if not categorical_cols:
+    if categorical_cols is None:
+        # 仅 None 触发自动检测；显式空集合表示"不做任何类别编码"（审查 2026-09-01 C-4）
         categorical_cols = {
             c
             for c in features
@@ -176,6 +177,22 @@ def missing_pattern_analysis(df: pd.DataFrame) -> dict:
 
     用于数据质量审查，帮助用户了解数据缺失的结构和严重程度。
     """
+    # 审查 2026-09-01 C-1：0 列 DataFrame 时 pd.DataFrame([]).sort_values()
+    # 抛 KeyError，提前返回结构完整的空结果
+    if df.shape[1] == 0:
+        return {
+            "total_rows": len(df),
+            "total_columns": 0,
+            "total_missing_values": 0,
+            "rows_with_missing": 0,
+            "rows_missing_pct": 0.0,
+            "cols_with_missing": 0,
+            "column_missing_stats": pd.DataFrame(),
+            "missing_patterns": pd.DataFrame(),
+            "high_cardinality_columns": pd.DataFrame({"信息": ["未检测到高基数列"]}),
+            "zero_variance_columns": [],
+            "summary": f"数据质量诊断: {len(df)} 行 × 0 列，无缺失列",
+        }
     n_total = len(df)
 
     # ── 逐列缺失统计 ──
@@ -479,6 +496,10 @@ def auto_generate_subgroup_col(df: pd.DataFrame, params: dict) -> tuple[pd.DataF
     """
     n = len(df)
     target_size = 5
+    # 审查 2026-09-01 C-5：空 DataFrame 时 pd.cut(range(0), bins=2) 抛 ValueError，
+    # 提前返回（上层调用方按现有逻辑回退默认行为）
+    if n == 0:
+        return df, params
     n_subgroups = max(2, min(n // target_size, 50))
     df = df.copy()
     # 使用 UUID 生成确定性唯一的列名，避免 random.randint 的非确定性问题

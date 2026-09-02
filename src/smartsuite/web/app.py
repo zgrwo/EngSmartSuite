@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 _UPLOAD_FILES: list[str] = []
 _upload_lock = threading.Lock()
 
+# 审查 2026-09-01 S-4：单次分析的目标列/特征列数量上限（防 DoS 与浏览器卡顿）
+_MAX_TARGETS = 50
+_MAX_FEATURES = 100
+
 
 def _cleanup_uploads() -> None:
     with _upload_lock:
@@ -152,7 +156,8 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 # Session 安全配置
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = False  # 本地工具默认 HTTP；部署 HTTPS 时应开启
+# 审查 2026-09-01 S-3：本地 HTTP 默认 False；公网 HTTPS 部署可设环境变量开启
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SMARTSUITE_COOKIE_SECURE") == "1"
 app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 小时后过期，限制 CSRF token 重用窗口
 
 
@@ -321,6 +326,10 @@ def analyze():
         features = body.get("features", [])
         categoricals = body.get("categoricals", [])
         params = body.get("params", {})
+        # 审查 2026-09-01 S-1：task 缺少类型检查 → unhashable 输入（如数组）
+        # 在 `task not in TASK_REGISTRY` 处抛 TypeError → 500，应返回 400
+        if not isinstance(task, str):
+            return jsonify({"error": "task 必须是字符串"}), 400
         if not task or (not targets and task not in NO_TARGET_TASKS):
             return jsonify({"error": "缺少分析任务或目标列"}), 400
         if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
@@ -331,6 +340,11 @@ def analyze():
             return jsonify({"error": "categoricals 必须是字符串列表"}), 400
         if not isinstance(params, dict):
             return jsonify({"error": "params 必须是字典"}), 400
+        # 审查 2026-09-01 S-4：目标列/特征列数量上限 → 400
+        if len(targets) > _MAX_TARGETS:
+            return jsonify({"error": f"目标列数量不能超过 {_MAX_TARGETS}"}), 400
+        if len(features) > _MAX_FEATURES:
+            return jsonify({"error": f"特征列数量不能超过 {_MAX_FEATURES}"}), 400
         if task not in TASK_REGISTRY:
             return jsonify(
                 {"error": f"未知的分析任务「{task}」，支持: {list(TASK_REGISTRY.keys())}"}
@@ -342,7 +356,13 @@ def analyze():
         elif not path or not os.path.exists(path):
             return jsonify({"error": "请先上传数据文件"}), 400
         else:
-            df = pd.read_parquet(path)
+            # 审查 2026-09-01 S-2：清理线程与读取存在 TOCTOU 窗口，
+            # 文件可能在 exists() 后被删除 → FileNotFoundError 专项 400（非裸 500）
+            try:
+                df = pd.read_parquet(path)
+            except FileNotFoundError:
+                logger.warning("上传数据文件已被清理，请重新上传: %s", path)
+                return jsonify({"error": "上传的数据文件已过期，请重新上传"}), 400
         results = run_analysis(task, df, targets, features, categoricals, params)
         return jsonify({"results": results})
     except ValidationError as e:

@@ -162,7 +162,8 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             influence = model.get_influence()
             cooks_d = influence.cooks_distance[0]
         except Exception as e:
-            logger.warning("Cook's D 计算失败 (矩阵可能接近奇异): %s", e)
+            # 审查 2026-09-01 C-9：记录完整堆栈便于定位（Cook's D 隔离 try）
+            logger.warning("Cook's D 计算失败 (矩阵可能接近奇异): %s", e, exc_info=True)
             warn_msgs.append(
                 "⚠ Cook's Distance 无法计算（数据可能存在严重共线性），"
                 "回归系数仍然有效但影响点诊断已跳过"

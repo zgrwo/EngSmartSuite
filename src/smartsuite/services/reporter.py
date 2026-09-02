@@ -3,6 +3,7 @@
 import io
 import logging
 import os
+import warnings
 
 import matplotlib.pyplot as plt
 
@@ -32,14 +33,16 @@ def _validate_output_path(output_path: str) -> str:
 def to_excel(result: AnalysisResult, workbook, sheet_name: str = "分析结果") -> str:
     """将分析结果写入 Excel 新 Sheet。
 
-    注意: 此函数依赖 xlwings Excel add-in 运行环境，需要:
-      1. 安装 xlwings: ``pip install xlwings``
-      2. Excel 实例正在运行（通过 xlwings 连接）
-      3. 传入有效的 xlwings Workbook 对象
-
-    Web UI 和 CLI 入口不调用此函数。如需导出 Excel 报告，请使用
-    ``audit.export_workbook()``（基于 openpyxl，无需 Excel 实例）。
+    ⚠️ Deprecated (审查 2026-09-01 A-1)：V1 遗留，仅支持 xlwings 鸭子类型
+    workbook 对象（无静态类型约束）。Web UI 和 CLI 入口均不调用此函数；
+    如需导出 Excel 报告请使用 ``audit.export_workbook()``（基于 openpyxl）。
     """
+    warnings.warn(
+        "services.reporter.to_excel 已弃用（依赖 xlwings 运行环境），"
+        "请改用 services.audit.export_workbook",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
         ws = workbook.sheets.add(sheet_name, after=workbook.sheets[-1])
         r = 1
@@ -71,8 +74,10 @@ def to_excel(result: AnalysisResult, workbook, sheet_name: str = "分析结果")
 
 def to_pdf(result: AnalysisResult, output_path: str) -> str:
     """生成 PDF 报告。"""
-    output_path = _validate_output_path(output_path)
     try:
+        # 审查 2026-09-01 C-2：路径校验移入 try 内——os.makedirs 失败时
+        # 转 OutputError 中文消息，不再裸抛 PermissionError/OSError
+        output_path = _validate_output_path(output_path)
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.utils import ImageReader
         from reportlab.pdfbase import pdfmetrics
@@ -133,10 +138,13 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
                 c.showPage()
                 y = h - 50
             buf = io.BytesIO()
-            fig.savefig(buf, format="png", dpi=_PDF_DPI, bbox_inches="tight")
-            buf.seek(0)
-            c.drawImage(ImageReader(buf), 50, y - 300, width=450, height=300)
-            plt.close(fig)
+            try:
+                fig.savefig(buf, format="png", dpi=_PDF_DPI, bbox_inches="tight")
+                buf.seek(0)
+                c.drawImage(ImageReader(buf), 50, y - 300, width=450, height=300)
+            finally:
+                # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
+                plt.close(fig)
             y -= 320
 
         c.save()
@@ -148,8 +156,9 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
 
 def to_ppt(result: AnalysisResult, output_path: str, template_path: str | None = None) -> str:
     """生成 PPT 报告。"""
-    output_path = _validate_output_path(output_path)
     try:
+        # 审查 2026-09-01 C-2：路径校验移入 try 内（同 to_pdf）
+        output_path = _validate_output_path(output_path)
         from pptx import Presentation
         from pptx.util import Inches
 
@@ -167,11 +176,14 @@ def to_ppt(result: AnalysisResult, output_path: str, template_path: str | None =
 
         for fig in result.figures:
             buf = io.BytesIO()
-            fig.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
-            buf.seek(0)
-            slide = prs.slides.add_slide(prs.slide_layouts[6])
-            slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5), Inches(12), Inches(6.5))
-            plt.close(fig)
+            try:
+                fig.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
+                buf.seek(0)
+                slide = prs.slides.add_slide(prs.slide_layouts[6])
+                slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5), Inches(12), Inches(6.5))
+            finally:
+                # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
+                plt.close(fig)
 
         prs.save(output_path)
         return output_path
@@ -182,7 +194,6 @@ def to_ppt(result: AnalysisResult, output_path: str, template_path: str | None =
 
 def to_html(result: AnalysisResult, output_path: str) -> str:
     """生成自包含 HTML 分析报告 (Base64 内嵌图表)。"""
-    output_path = _validate_output_path(output_path)
     import base64
     import html as _html
 
@@ -190,6 +201,8 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
         return _html.escape(str(s))
 
     try:
+        # 审查 2026-09-01 C-2：路径校验移入 try 内（同 to_pdf/to_ppt）
+        output_path = _validate_output_path(output_path)
         html_parts = [
             "<!DOCTYPE html><html lang='zh-CN'><head>",
             "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>",
@@ -253,24 +266,27 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
         # 图表 (Base64 内嵌，压缩 PNG)
         for i, fig in enumerate(result.figures):
             buf = io.BytesIO()
-            fig.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
-            buf.seek(0)
-            # PIL 压缩优化
             try:
-                from PIL import Image
+                fig.savefig(buf, format="png", dpi=_CHART_DPI, bbox_inches="tight")
+                buf.seek(0)
+                # PIL 压缩优化
+                try:
+                    from PIL import Image
 
-                img = Image.open(buf)
-                out_buf = io.BytesIO()
-                img.save(out_buf, format="PNG", optimize=True)
-                out_buf.seek(0)
-                img_b64 = base64.b64encode(out_buf.read()).decode("utf-8")
-            except ImportError:
-                img_b64 = base64.b64encode(buf.read()).decode("utf-8")
-            html_parts.append(
-                f"<h2>📈 图表 {i + 1}</h2>"
-                f"<img src='data:image/png;base64,{img_b64}' alt='图表{i + 1}'>"
-            )
-            plt.close(fig)
+                    img = Image.open(buf)
+                    out_buf = io.BytesIO()
+                    img.save(out_buf, format="PNG", optimize=True)
+                    out_buf.seek(0)
+                    img_b64 = base64.b64encode(out_buf.read()).decode("utf-8")
+                except ImportError:
+                    img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+                html_parts.append(
+                    f"<h2>📈 图表 {i + 1}</h2>"
+                    f"<img src='data:image/png;base64,{img_b64}' alt='图表{i + 1}'>"
+                )
+            finally:
+                # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
+                plt.close(fig)
 
         # 元数据
         if result.metadata:

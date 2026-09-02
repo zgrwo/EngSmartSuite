@@ -5,7 +5,12 @@ import io
 import logging
 import math
 
-import matplotlib.pyplot as plt
+# 审查 2026-09-01 A-2：matplotlib.use() 必须在 pyplot 首次导入之前调用，
+# 否则 engine/__init__.py 中同样调用将因 pyplot 已锁定后端而失效（时序脆弱）
+import matplotlib as _mpl
+
+_mpl.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402 — Agg 后端已在上一行设置
 import numpy as np
 import pandas as pd
 
@@ -17,7 +22,7 @@ from smartsuite.services.data_io import (
     preprocess_for_task,
     validate_data,
 )
-from smartsuite.services.orchestrator import NO_TARGET_TASKS, orchestrate
+from smartsuite.services.orchestrator import NO_TARGET_TASKS, RAW_CAT_TASKS, orchestrate
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +83,8 @@ def _serialize_table(tbl: pd.DataFrame) -> dict:
 
     审查 2026-08-19 Round-2：round(4) 前把 ±Inf 替换为 NaN（否则 inf 经
     json.dumps 输出为 Infinity，破坏浏览器 JSON.parse）。NaN 最终填充为 ""。
+    审查 2026-09-01 N-1：datetime64 列此前走 else col 原样传递，values.tolist()
+    产出 Timestamp → json.dumps TypeError；现转换为字符串（NaT → NaN → ""）。
     """
     data = (
         tbl.apply(
@@ -85,7 +92,11 @@ def _serialize_table(tbl: pd.DataFrame) -> dict:
                 col.replace([np.inf, -np.inf], np.nan).round(4)
                 if pd.api.types.is_numeric_dtype(col)
                 and not pd.api.types.is_datetime64_any_dtype(col)
-                else col
+                else (
+                    col.dt.strftime("%Y-%m-%d %H:%M:%S")
+                    if pd.api.types.is_datetime64_any_dtype(col)
+                    else col
+                )
             )
         )
         .fillna("")
@@ -136,7 +147,7 @@ def run_analysis(
         df, params = prepare_spc_subgroup_col(df, params)
 
     # 需要原始类别列的任务（不做 one-hot 编码），由 orchestrator 集中定义
-    from smartsuite.services.orchestrator import RAW_CAT_TASKS
+    # （RAW_CAT_TASKS 已在模块顶部导入）
 
     # 审查 2026-08-19 Round-2：preprocess 失败（如 One-Hot 列名冲突 / 缺列）
     # 转为 ValidationError → 由 Web 层返回 400 中文，而非 500
@@ -152,10 +163,11 @@ def run_analysis(
     for col, n_coerced in imputation_log.items():
         data_warnings.append(f"列「{col}」中 {n_coerced} 个缺失值已自动填充")
     # 未知类别警告：提升为用户可见的 P0 级警告（可能影响分析准确性）
+    # 审查 2026-09-01 C-8：文案与实际行为对齐——未知类别行归入参照组，数据未删除
     for col, extra_cats, n_affected in unknown_cat_warnings:
         data_warnings.append(
             f"⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别，"
-            f"影响 {n_affected} 行，已丢弃: {extra_cats}。"
+            f"影响 {n_affected} 行，已归入参照组（数据保留）: {extra_cats}。"
             f"建议检查数据或重新训练模型。"
         )
 

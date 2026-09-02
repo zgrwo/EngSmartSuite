@@ -742,6 +742,30 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         from sklearn.ensemble import IsolationForest
 
         contamination = req.params.get("contamination", 0.05)
+        # 审查 2026-09-01 N-3：CLI/YAML 字符串参数需转换——numeric 字符串转 float，
+        # "auto"（sklearn 合法）保留原值；非法字符串返回中文错误而非 sklearn 原始异常
+        if isinstance(contamination, str):
+            if contamination.strip().lower() == "auto":
+                contamination = "auto"
+            else:
+                try:
+                    contamination = float(contamination)
+                except (ValueError, TypeError):
+                    return AnalysisResult(
+                        task="anomaly_detect",
+                        status="error",
+                        messages=[
+                            f"参数 contamination 无效: {contamination!r}，"
+                            f"请输入 (0, 0.5] 区间数值或 'auto'"
+                        ],
+                    )
+        if not isinstance(contamination, str) and not np.isfinite(contamination):
+            return AnalysisResult(
+                task="anomaly_detect",
+                status="error",
+                messages=[f"参数 contamination 必须为有限数值或 'auto'，当前: {contamination!r}"],
+            )
+        contamination_disp = "auto" if contamination == "auto" else f"{contamination:.1%}"
         try:
             iso = IsolationForest(
                 contamination=contamination,
@@ -837,7 +861,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             figures=[fig],
             summary=(
                 f"Isolation Forest 检测到 {mask.sum()} 个多变量异常点 "
-                f"(污染率={contamination:.1%}, 维度={len(feature_cols)})"
+                f"(污染率={contamination_disp}, 维度={len(feature_cols)})"
             ),
             metadata={
                 "anomaly_count": int(mask.sum()),

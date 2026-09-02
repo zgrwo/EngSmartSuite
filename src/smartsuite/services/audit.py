@@ -17,8 +17,11 @@ logger = logging.getLogger(__name__)
 def _close_figures(result):
     """关闭 AnalysisResult 中的所有 matplotlib Figure，防止内存泄漏。"""
     if hasattr(result, "figures"):
+        # 审查 2026-09-01 C-7：fig.clear() 不清除绘图后端引用，统一用 plt.close
+        import matplotlib.pyplot as plt
+
         for fig in result.figures:
-            fig.clear()
+            plt.close(fig)
 
 
 def _clean_inf(df: pd.DataFrame) -> pd.DataFrame:
