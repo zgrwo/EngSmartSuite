@@ -301,3 +301,54 @@ def test_doe_design_ccd_k5_half_fraction():
     # 轴向点应为 ±α=±2（nf=16 的旋转性 α）
     x0 = r.tables["design_matrix"]["X0"]
     assert 2.0 in set(x0.values) and -2.0 in set(x0.values)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 审查 2026-09-01 L1 缺口：doe_design 已知答案测试（此前仅结构/正交断言）
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_doe_design_full_factorial_known_matrix():
+    """L1 数值正确性：2 因子 × 2 水平全因子（randomize=False）的精确设计矩阵。"""
+    factors = [
+        {"name": "A", "levels": [100, 200]},
+        {"name": "B", "levels": ["低", "高"]},
+    ]
+    r = doe_design(_req("full_factorial", factors, randomize="false"))
+    assert r.status == "ok"
+    dm = r.tables["design_matrix"]
+    assert list(dm.columns) == ["运行顺序", "A", "B"]
+    expected = [
+        (1, 100, "低"),
+        (2, 100, "高"),
+        (3, 200, "低"),
+        (4, 200, "高"),
+    ]
+    assert [tuple(row) for row in dm.to_numpy()] == expected
+
+
+def test_doe_design_taguchi_l9_known_rows():
+    """L1 数值正确性：taguchi L9（3 因子 × 3 水平）行组合集合 == 经典 L9 标准表。
+
+    经典 L9（因子水平 1/2/3，行置换等价）九行作为已知答案手工列出。
+    """
+    factors = [{"name": f, "levels": [1, 2, 3]} for f in ("A", "B", "C")]
+    r = doe_design(_req("taguchi", factors, randomize="false"))
+    assert r.status == "ok"
+    dm = r.tables["design_matrix"]
+    assert len(dm) == 9
+    got = {tuple(row) for row in dm[["A", "B", "C"]].to_numpy()}
+    # 经典 Taguchi L9 正交表（标准九行）
+    classic = {
+        (1, 1, 1),
+        (1, 2, 2),
+        (1, 3, 3),
+        (2, 1, 2),
+        (2, 2, 3),
+        (2, 3, 1),
+        (3, 1, 3),
+        (3, 2, 1),
+        (3, 3, 2),
+    }
+    assert got == classic, f"L9 组合与标准表不符: 缺 {classic - got} 多 {got - classic}"
+    assert r.metadata["oa_name"] == "L9"

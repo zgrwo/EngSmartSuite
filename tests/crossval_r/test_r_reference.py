@@ -282,8 +282,11 @@ class TestSpcCrossVal:
             assert abs(cl - data.mean()) < 0.5, f"CL={cl}, expected≈{data.mean():.2f}"
 
     def test_xbar_detects_shift(self):
-        """第 20 子组有 +3σ 偏移，应被检出或过程稳定判定合理"""
+        """第 20 子组注入偏移，应检出失控（is_stable=False + violations）。"""
         data = _make_spc_data()
+        # 审查 2026-09-01 T-2：_make_spc_data 仅注入 +3.0（实测不足越限，
+        # is_stable 仍为 True）；此处追加 +5.0（合计 +8.0）确保 X-bar 越 ±3σ
+        data[19] += 5.0
         df = pd.DataFrame(data, columns=[f"s{i}" for i in range(5)])
         df["subgroup"] = range(1, 26)
         r = orchestrate(
@@ -295,14 +298,14 @@ class TestSpcCrossVal:
                 params={"subgroup_col": "subgroup"},
             )
         )
-        # 函数应正常运行，且返回控制限信息
+        # 应返回正常状态与控制限，并检出第 20 子组的偏移（审查 2026-09-01 T-2：
+        # 此前仅断言状态与 UCL 存在，检测器完全失效时测试仍通过）
         assert r.status == "ok"
         assert "ucl_x" in r.metadata or "UCL" in str(r.tables)
-
-
-# ═══════════════════════════════════════════════════════════
-# 测试 4: 过程能力 — 对比 R 手动公式
-# ═══════════════════════════════════════════════════════════
+        assert r.metadata["is_stable"] is False, "注入偏移后 X-bar 应判失控"
+        viol = r.metadata.get("xbar_violations") or {}
+        assert viol, f"应检出 X-bar 违规子组: {r.metadata}"
+        assert 24 in next(iter(viol.values())), f"违规点应为子组 20 (索引 24): {viol}"
 
 
 class TestCapabilityCrossVal:

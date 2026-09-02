@@ -7,6 +7,7 @@ Run manually: pytest tests/test_web_e2e.py -v
 
 import http.cookiejar
 import json
+import os
 import urllib.error
 import urllib.request
 import uuid
@@ -116,7 +117,9 @@ def web_session():
     csrf_resp = opener.open(urllib.request.Request(f"{BASE}/api/csrf-token"))
     csrf_token = json.loads(csrf_resp.read())["token"]
 
-    with open("tests/test_data.xlsx", "rb") as f:
+    with open(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_data.xlsx"), "rb"
+    ) as f:
         data = f.read()
     boundary = uuid.uuid4().hex
     body = (

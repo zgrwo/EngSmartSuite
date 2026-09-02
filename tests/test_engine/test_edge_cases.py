@@ -299,9 +299,13 @@ def test_contingency_2x2():
     r = contingency_analysis(req)
     assert r.status == "ok"
     assert "p_value" in r.metadata
-    # 2x2 卡方检验应有 Cramér's V 效应量
-    if "effect" in r.metadata:
-        assert 0 <= r.metadata["effect"] <= 1, f"Cramér's V out of range: {r.metadata['effect']}"
+    # 2x2 卡方检验应有 Cramér's V 效应量（审查 2026-09-01 T-3：原条件断言
+    # `if "effect" in r.metadata` 键名与实际不符（实际为 effect_size），
+    # 永远静默跳过——改为无条件断言真实契约键）
+    assert "effect_size" in r.metadata
+    assert 0 <= r.metadata["effect_size"] <= 1, (
+        f"Cramér's V out of range: {r.metadata['effect_size']}"
+    )
 
 
 # ── Kendall ──
@@ -1614,6 +1618,27 @@ def test_distribution_summary_constant_data_graceful():
 
 def test_power_analysis_p0_equals_p1_rejected():
     """P3：p0==p1 时 required_n 不应输出 3.9e10。"""
+    # 审查 2026-09-01 T-1：此测试此前仅含 docstring，无任何断言——
+    # 补充真实调用与错误状态断言（p0==p1 应被引擎拒绝）
+    from smartsuite.engine.root_cause import power_analysis
+
+    r = power_analysis(
+        AnalysisRequest(
+            task="power_analysis",
+            data=pd.DataFrame(),  # 纯参数计算，不读数据
+            params={
+                "mode": "required_n",
+                "test_type": "proportion",
+                "effect_size": 0.5,
+                "alpha": 0.05,
+                "target_power": 0.8,
+                "p0": 0.5,
+                "p1": 0.5,
+            },
+        )
+    )
+    assert r.status == "error"
+    assert any("不能相等" in m for m in r.messages), f"消息应说明 p0==p1 被拒绝: {r.messages}"
 
 
 # ── Round-2 遗留 P3 修复 批次2 回归测试 ──
@@ -1635,10 +1660,13 @@ def test_doe_numeric_levels_sorted_numerically():
         AnalysisRequest(task="doe_analysis", data=df, target_col="y", feature_cols=["温度"])
     )
     assert r.status == "ok", f"doe 失败: {r.messages}"
-    effects = r.tables.get("effects")
-    if effects is not None and "主效应" in effects.columns:
-        eff = float(effects[effects["因子"] == "温度"]["主效应"].iloc[0])
-        assert eff > 0, f"数值水平应数值序（'220' 高均值 → 正效应），实际: {eff}"
+    # 审查 2026-09-01 T-3b：原表名 "effects" 与实际不符（实际为 effect_estimates），
+    # 条件断言永远静默跳过——改为无条件断言真实表/列，数值断言始终生效
+    effects = r.tables.get("effect_estimates")
+    assert effects is not None, f"doe_analysis 应产出 effect_estimates 表: {list(r.tables)}"
+    assert "主效应" in effects.columns
+    eff = float(effects[effects["因子"] == "温度"]["主效应"].iloc[0])
+    assert eff > 0, f"数值水平应数值序（'220' 高均值 → 正效应），实际: {eff}"
 
 
 def test_doe_alpha_range_validated():

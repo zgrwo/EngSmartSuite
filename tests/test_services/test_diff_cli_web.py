@@ -1,4 +1,4 @@
-"""CLI (orchestrate) vs Web (run_analysis) numerical parity — all 40 methods.
+"""CLI (orchestrate) vs Web (run_analysis) numerical parity — all 41 methods.
 
 由原 tests/_diff_cli_web.py 模块级脚本改造（审查 2026-08-19 #3.3）：
 - 原文件名不匹配 pytest python_files=["test_*.py"] 收集规则，且无 test_* 函数，
@@ -9,6 +9,7 @@
 """
 
 import contextlib
+import os
 
 import numpy as np
 import pandas as pd
@@ -26,12 +27,15 @@ from smartsuite.services.orchestrator import (
     TASK_REGISTRY,
     orchestrate,
 )
-from smartsuite.web.api import run_analysis
+from smartsuite.web.api import _serialize_table, run_analysis
 
 
 @pytest.fixture(scope="module")
 def parity_df():
-    path = "tests/test_data.xlsx"
+    # 审查 2026-09-01 T-5：数据路径基于 __file__ 解析，不再依赖进程 cwd
+    path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_data.xlsx"
+    )
     if not pd.io.common.file_exists(path):
         pytest.skip("缺少 tests/test_data.xlsx，跳过 CLI/Web 差分测试")
     return pd.read_excel(path)
@@ -212,7 +216,17 @@ def _compare_one(df, task, target_col_str, features, categoricals, params):
         }
     except Exception as exc:
         return False, f"TABLE_RECONSTRUCT: {str(exc)[:120]}"
-    table_ok, table_detail = tables_equal(r_a.tables, t_b)
+    # 审查 2026-09-01 N-1：Web 端表格经 _serialize_table 规范化（datetime→str、
+    # 数值 round(4)、NaN→""），CLI 端原生 DataFrame 需过同一管线后对称比较
+    try:
+        t_a = {
+            k: df_from_serialized(_serialize_table(v))
+            for k, v in r_a.tables.items()
+            if not k.startswith("_merged")
+        }
+    except Exception as exc:
+        return False, f"TABLE_SERIALIZE: {str(exc)[:120]}"
+    table_ok, table_detail = tables_equal(t_a, t_b)
 
     if not (status_ok and summary_ok and table_ok and meta_keys_ok and meta_vals_ok):
         detail = (
