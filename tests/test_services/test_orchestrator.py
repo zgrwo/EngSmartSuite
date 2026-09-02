@@ -205,7 +205,7 @@ def test_all_tasks_have_default_params():
 
 
 def test_task_registry_count():
-    """验证注册任务数量符合预期（40 个分析方法）。"""
+    """验证注册任务数量符合预期（41 个分析方法）。"""
     assert len(TASK_REGISTRY) == 41, f"期望 41 个任务，实际 {len(TASK_REGISTRY)}"
 
 
