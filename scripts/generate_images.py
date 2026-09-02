@@ -145,8 +145,11 @@ def _make_method_data(method_name: str, base: pd.DataFrame) -> pd.DataFrame:
             for op in ("甲", "乙"):
                 for _ in range(3):
                     rows.append(
-                        {"part": part, "operator": op,
-                         "measurement": 50.0 + part * 2 + float(rng.normal(0, 0.4))}
+                        {
+                            "part": part,
+                            "operator": op,
+                            "measurement": 50.0 + part * 2 + float(rng.normal(0, 0.4)),
+                        }
                     )
         return pd.DataFrame(rows)
     if method_name == "cohens_kappa":
