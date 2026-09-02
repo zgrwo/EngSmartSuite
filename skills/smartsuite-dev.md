@@ -78,12 +78,13 @@ color=PALETTE["anomaly"]["primary"]    # 红色异常线
 3. 该函数 X 列可选吗？→ 如果是，应加入 `_xOptionalTasks`
 4. 手册协同要求与 `_yOnlyTasks` / `_noTargetNeeded` / `_xOptionalTasks` 一致吗？
 
-**关键代码位置**：`app.js` 第 418-439 行
+**关键代码位置**：`app.js` 第 501-510 行
 
 ```javascript
 // _noTargetNeeded: 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
 const _noTargetNeeded = new Set([
     'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective',
+    'doe_design',  // 审查 2026-09-01 D-4：与 app.js 同步补入（DOE 设计仅依赖参数）
 ]);
 
 // _yOnlyTasks: 仅需 Y 列即可运行的任务（无需选择 X 列）
