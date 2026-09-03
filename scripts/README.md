@@ -32,7 +32,7 @@
 |------|------|-----|
 | `verify_all.py` | 一键全量验证（构建+测试+文档+审计+守卫，`--quick` 跳过文档） | 本地 |
 | `doctor.py` | 环境就绪性诊断（Python/工具/目录/文件，给出修复指引） | 本地 |
-| `verify_consistency.py` | 41 任务冒烟门禁（status=ok） | ✅ quick |
+| `verify_consistency.py` | 全任务冒烟门禁（status=ok，任务数随 TASK_REGISTRY） | ✅ quick |
 | `verify_cross_consistency.py` | Web/CLI 分析一致性交叉验证（纯 Python 直接调用，无需服务器） | ✅ CI |
 | `verify_manual_claims.py` | 手册数值实跑验证（CLAIM 标记 → 实际输出） | 发布前 |
 | `verify_docs.py` | 文档一致性：断链/目录树/裸异常/版本漂移（`--strict` 含未声明文件） | ✅ quality |

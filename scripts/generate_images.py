@@ -7,7 +7,7 @@
     rules/images/{method_name}_1.png — 每个分析方法的示例输出图
     （命名对齐手册约定：{method}_1.png 为第 1 张示例图）
 
-验收标准：41 方法图片全覆盖
+验收标准：全部方法图片全覆盖
 """
 
 import sys

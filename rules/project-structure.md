@@ -54,7 +54,7 @@ EngSmartSuite/
 │       │
 │       ├── services/               # ② 应用服务层：唯一桥接层
 │       │   ├── __init__.py
-│       │   ├── orchestrator.py     #   TASK_REGISTRY (41项) + DEFAULT_PARAMS
+│       │   ├── orchestrator.py     #   TASK_REGISTRY + DEFAULT_PARAMS
 │       │   ├── data_io.py          #   Excel 读写 + 校验 + 预处理
 │       │   ├── reporter.py         #   多格式输出: to_excel / to_pdf / to_ppt / to_html
 │       │   └── audit.py            #   综合审计: process_audit / batch_analyze
@@ -79,7 +79,7 @@ EngSmartSuite/
 │   ├── test_integration_chemical.py#   化工场景
 │   ├── test_integration_reliability.py # 可靠性场景
 │   ├── test_integration_warranty.py#   保修场景
-│   ├── test_master_integration.py  #   41 方法全量集成
+│   ├── test_master_integration.py  #   全方法集成
 │   ├── test_review_2026_09_fixes.py#   2026-09-01 审查修复回归（跨层）
 │   ├── test_web_e2e.py             #   Web UI E2E
 │   ├── test_workflows.py           #   工作流串联测试
@@ -93,7 +93,7 @@ EngSmartSuite/
 │   │   ├── test_doe_pydoe2_benchmark.py  #   DOE 基准对照（无 pydoe2 时自动跳过）
 │   │   ├── test_spc_monitor.py
 │   │   ├── test_utils.py
-│   │   ├── test_correctness.py     #   数值正确性 — 41/41 全覆盖
+│   │   ├── test_correctness.py     #   数值正确性 — 全量覆盖
 │   │   ├── test_edge_cases.py      #   边界情况
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_fuzz.py            #   模糊测试
@@ -119,8 +119,8 @@ EngSmartSuite/
 │
 ├── docs/                           # 附加文档（superpowers 技能等，不入包）
 ├── rules/                          # 规范文档
-│   ├── api-reference.md            #   41 函数签名查阅（唯一信源）
-│   ├── user-manual.md              #   41 方法操作指南
+│   ├── api-reference.md            #   函数签名查阅（唯一信源，总数锚点）
+│   ├── user-manual.md              #   全方法操作指南
 │   ├── specification.md            #   项目规格文档
 │   ├── context.md                  #   术语表
 │   ├── falsy-pitfalls.md           #   Falsy 陷阱清单

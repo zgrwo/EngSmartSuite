@@ -5,7 +5,7 @@ description: SmartSuite 项目开发技能 — 工艺数据分析工具箱的代
 
 # SmartSuite 开发技能
 
-> **面向 AI 编程助手**：本项目是工艺数据分析工具箱（41 个分析方法，Flask Web UI + Python API），约 9,000 行 Python 代码 + 470 行 JavaScript。本文档提炼自 126 次 commit 中反复出现的 bug 模式和修复规范。
+> **面向 AI 编程助手**：本项目是工艺数据分析工具箱（Flask Web UI + Python API 的统计分析方法集，方法总数见 `rules/api-reference.md`），约 9,000 行 Python 代码 + 470 行 JavaScript。本文档提炼自 126 次 commit 中反复出现的 bug 模式和修复规范。
 >
 > **协作文档**：开发规范 → `AGENTS.md` | 术语 → `CONTEXT.md` | 决策树 → `skills/analysis-decision-tree.md` | API → `rules/api-reference.md`
 
@@ -374,7 +374,7 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 开发规范 | `AGENTS.md` | 架构约束、代码风格、测试策略 |
 | 领域术语 | `CONTEXT.md` | 中文术语定义 |
 | 决策知识 | `skills/analysis-decision-tree.md` | 分析方法决策树 + 工作流 |
-| API 参考 | `rules/api-reference.md` | 41 个函数完整签名 |
+| API 参考 | `rules/api-reference.md` | 全量函数签名（总数锚点） |
 | 用户手册 | `rules/user-manual.md` | 操作说明 + 五段式示例 |
 | 架构决策 | `rules/0001-*.md` / `rules/0002-*.md` | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel |
 | 防错契约 | `rules/sentinel-contract.md` | L1-L5 哨兵 + NaN/Inf 守卫清单（新增/修改引擎函数必查） |

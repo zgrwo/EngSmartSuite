@@ -47,7 +47,7 @@ ruff check src/smartsuite/ scripts/
 |------|-----|
 | pytest 通过 | {pass}/{total} |
 | ruff 错误数 | {count} |
-| 数值正确性 (40/40) | {result} |
+| 数值正确性 (全量) | {result} |
 | 差分测试 (CLI=Web) | {result} |
 
 ### 已知失败（非本 Phase 引入）

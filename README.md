@@ -1,6 +1,6 @@
 # EngSmartSuite (SmartSuite)
 
-> 工艺数据分析工具箱：41 个统计分析方法，Python 引擎 + Flask Web UI + CLI，覆盖正态性检验、过程能力分析、可靠性工程、实验设计（DoE）等。
+> 工艺数据分析工具箱：Python 引擎 + Flask Web UI + CLI，覆盖正态性检验、过程能力分析、可靠性工程、实验设计（DoE）等。
 
 ---
 
@@ -128,7 +128,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 ## 质量保证
 
 - **4 层测试防线**：
-  ① 数值正确性（已知答案 + 手工公式交叉验证，40/40 验证通过）
+  ① 数值正确性（已知答案 + 手工公式交叉验证，全量验证通过）
   ② 数学不变量（p∈[0,1]、Cpk≤Cp、R²≥0）
   ③ 边界模糊（空数据/单行/全NaN/常量列/共线/n>5000）
   ④ 差分测试（CLI 输出 = Web API 输出）
@@ -179,7 +179,7 @@ python run_server.py
 
 | 文档 | 角色 | 内容 |
 |------|------|------|
-| [API 参考](rules/api-reference.md) | 数字唯一信源 | 40 分析方法签名、参数说明 |
+| [API 参考](rules/api-reference.md) | 数字唯一信源 | 分析方法签名与参数说明（方法总数唯一锚点） |
 | [用户手册](rules/user-manual.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
 | [context.md](rules/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](rules/project-structure.md) | 结构地图 | 文件职责与层级关系 |

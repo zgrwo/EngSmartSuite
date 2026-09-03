@@ -1,6 +1,6 @@
 # AGENTS.md — EngSmartSuite 项目宪法
 
-> 工艺数据分析工具箱：41 个统计分析方法，Python 引擎 + Flask Web UI + CLI。
+> 工艺数据分析工具箱：Python 引擎 + Flask Web UI + CLI。
 > 本文件面向 AI 编程助手，编码细节按需加载 Skill。
 
 ## 元数据
@@ -8,7 +8,7 @@
 - **项目名**：EngSmartSuite (SmartSuite)
 - **GitHub**：https://github.com/zgrwo/EngSmartSuite
 - **语言**：Python >= 3.10（文档中文）
-- **数字唯一基准**：`rules/api-reference.md` — 41 函数签名以此为准
+- **数字唯一基准**：`rules/api-reference.md` — 函数签名总数以此为准（方法总数仅在此定义）
 - **SSOT**：每个事实只在一处定义，其余仅链接引用
 
 ## 四条核心准则
@@ -139,7 +139,7 @@ EngSmartSuite/
 
 | 层 | 验证内容 |
 |---|---|
-| ① 数值正确性 | 已知答案 + 手工公式交叉验证 (40/40) |
+| ① 数值正确性 | 已知答案 + 手工公式交叉验证 (全量) |
 | ② 数学不变量 | p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减 |
 | ③ 边界模糊 | 空数据/单行/全NaN/常量列/共线/n>5000 |
 | ④ 差分测试 | CLI vs Web API 数值一致 |
