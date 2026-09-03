@@ -14,8 +14,9 @@ verify_all.py — 全量验证入口（一个命令完成全部治理验证）
   4. Falsy 审计（falsy_audit.py）
   5. 测试质量守卫（test_quality_guard.py：弱断言/缺测/命名）
 
-注：verify_consistency.py（含 pytest 子进程，重）与 verify_manual_claims.py
-（需真实分析运行）不纳入本入口，由 CI full job 与发布前流程覆盖。
+注：verify_consistency.py（含 pytest 子进程，重）不纳入本入口（由 CI full job
+与 consistency job 覆盖）；verify_manual_claims.py 已接入 CI quick job
+（.github/workflows/ci.yml「手册数值声明 ↔ 引擎输出交叉校验」），本入口不再重复。
 
 用法：
   python scripts/verify_all.py            # 全量验证
