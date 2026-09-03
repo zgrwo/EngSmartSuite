@@ -613,6 +613,12 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     r_squared = None
     eq_text = ""
     if fit_type == "linear" and len(x_all) >= 3:
+        if y_all.size and np.unique(y_all).size <= 1:
+            return AnalysisResult(
+                task="scatter_plot",
+                status="error",
+                messages=["目标列为常量，无法拟合线性趋势（R² 无意义，避免 0/0 假 R²=1）"],
+            )
         # OLS 线性回归
         X_mat = x_all.reshape(-1, 1)
         model = LinearRegression().fit(X_mat, y_all)

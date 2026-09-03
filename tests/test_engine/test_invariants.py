@@ -669,3 +669,105 @@ def test_change_point_invariants():
     stats = r.tables["segment_statistics"]
     assert int(stats["样本数"].sum()) == n, f"分段样本数之和 {stats['样本数'].sum()} != n={n}"
     assert len(stats) == len(cps) + 1, "段数 = 变点数 + 1"
+
+
+# ── 2026 全库深度审查补齐：②层不变量盲点 ──
+
+
+def _assert_table_finite_ordered(result, lcl_col="LCL", ucl_col="UCL", stat_col=None):
+    """控制限表通用不变量：全数值有限、LCL≤UCL、stat 在限内（若给出列）。"""
+
+    for tbl in result.tables.values():
+        if not hasattr(tbl, "columns"):
+            continue
+        for col in tbl.columns:
+            if pd.api.types.is_numeric_dtype(tbl[col]):
+                assert tbl[col].notna().all(), f"列 {col} 含 NaN（静默污染）"
+                assert not (tbl[col].abs() > 1e300).any(), f"列 {col} 含 Inf"
+        if lcl_col in tbl.columns and ucl_col in tbl.columns:
+            assert (tbl[lcl_col] <= tbl[ucl_col] + 1e-12).all(), "LCL > UCL"
+        if stat_col and stat_col in tbl.columns and lcl_col in tbl.columns:
+            assert (tbl[stat_col] >= tbl[lcl_col] - 1e-9).all() and (
+                tbl[stat_col] <= tbl[ucl_col] + 1e-9
+            ).all(), "stat 超出控制限"
+
+
+def test_spc_cusum_no_nan_limits():
+    """CUSUM 不变量：任何输入下输出表不得出现 NaN/Inf 或 LCL>UCL。"""
+    from smartsuite.engine.spc_monitor import cusum_chart
+
+    np.random.seed(42)
+    df = pd.DataFrame({"y": np.random.normal(0, 1, 60)})
+    r = cusum_chart(AnalysisRequest(task="spc_cusum", data=df, target_col="y"))
+    assert r.status == "ok", r.messages
+    _assert_table_finite_ordered(r)
+
+
+def test_spc_ewma_no_nan_limits():
+    """EWMA 不变量：逐点限与渐近限有限且有序（首点限不宽于渐近限）。"""
+    from smartsuite.engine.spc_monitor import ewma_chart
+
+    np.random.seed(42)
+    df = pd.DataFrame({"y": np.random.normal(0, 1, 60)})
+    r = ewma_chart(AnalysisRequest(task="spc_ewma", data=df, target_col="y"))
+    assert r.status == "ok", r.messages
+    _assert_table_finite_ordered(r)
+
+
+def test_power_analysis_achieved_power_bounds():
+    """power_analysis(achieved)：已达功效 ∈ (0,1)。"""
+    from smartsuite.engine.root_cause import power_analysis
+
+    df = pd.DataFrame({"x": [1.0] * 5})
+    r = power_analysis(
+        AnalysisRequest(
+            task="power_analysis",
+            data=df,
+            params={
+                "mode": "achieved",
+                "test_type": "ttest",
+                "effect_size": 0.5,
+                "alpha": 0.05,
+                "current_n": 30,
+            },
+        )
+    )
+    assert r.status == "ok", r.messages
+    p = r.metadata.get("achieved_power")
+    assert p is not None, "achieved 模式应返回 achieved_power"
+    assert 0 < p < 1, f"achieved_power={p} 越界 [0,1]"
+
+
+def test_spc_attribute_np_c_limits_finite():
+    """属性图 np/c 不变量：控制限有限、LCL≤UCL、stat∈[LCL,UCL]。"""
+    from smartsuite.engine.spc_monitor import attribute_chart
+
+    np.random.seed(42)
+    n = 40
+    # np：每个 (x,g) 子组需给出样本量列（count ≤ n）；c：逐子组计数即可
+    df_c = pd.DataFrame({"x": np.repeat(range(1, 11), 4), "y": np.random.poisson(3, n)})
+    r = attribute_chart(
+        AnalysisRequest(
+            task="spc_attribute",
+            data=df_c,
+            target_col="y",
+            feature_cols=["x"],
+            params={"chart_type": "c", "group_col": "x"},
+        )
+    )
+    assert r.status == "ok", r.messages
+    _assert_table_finite_ordered(r)
+
+    df_np = df_c.copy()
+    df_np["n"] = 50  # 每子组样本量 50 ≥ count，保证 p_bar ≤ 1
+    r = attribute_chart(
+        AnalysisRequest(
+            task="spc_attribute",
+            data=df_np,
+            target_col="y",
+            feature_cols=["x"],
+            params={"chart_type": "np", "group_col": "x", "n_col": "n"},
+        )
+    )
+    assert r.status == "ok", r.messages
+    _assert_table_finite_ordered(r)

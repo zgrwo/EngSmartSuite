@@ -1028,6 +1028,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     chart_type = req.params.get("chart_type", "p")
     data = req.data.copy()
     y_col = req.target_col
+    _text_mapped = False  # 文本二值列被映射为 0/1 时置 True（用于下游语义提示）
 
     # 审查 2026-08-19 #2.8：常见中文二值串（合格/不合格、是/否）映射为 0/1，
     # 使 p/np 图可直接用于质量记录列（此前只能吃数值列）
@@ -1047,6 +1048,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         _mapped = data[y_col].map(_bin_map)
         if _mapped.notna().sum() == data[y_col].notna().sum() and _mapped.notna().sum() > 0:
             data[y_col] = _mapped.astype(float)
+            _text_mapped = True
         else:
             # Round-2 #A2k：部分值无法映射（如"待检"）→ 明确报错而非下游深层异常
             _unmapped = sorted(
@@ -1096,6 +1098,12 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     # 按 (X, group) 聚合
     valid = data[y_col].notna()
     dv = data[valid]
+    # 分组列含 NaN 的行无法归属任何序列：剔除其参与池化统计/绘图，避免“看不见的点在算控制限”
+    _nan_dropped = 0
+    if has_groups:
+        _nan_dropped = int(dv["_g"].isna().sum())
+        if _nan_dropped:
+            dv = dv[dv["_g"].notna()]
     agg = dv.groupby(["_x", "_g"], dropna=False)[y_col].agg(count="sum", size="count").reset_index()
     agg = agg.rename(columns={"_x": "x_val", "_g": "group_val"})
 
@@ -1103,6 +1111,14 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     if m < 5:
         return AnalysisResult(
             task="spc_attribute", status="error", messages=["分组数量不足(至少5个)"]
+        )
+
+    # 计数型/属性图的缺陷计数不允许为负：负值会使 sqrt 内为负 → NaN 控制限静默污染
+    if (agg["count"] < 0).any():
+        return AnalysisResult(
+            task="spc_attribute",
+            status="error",
+            messages=["目标列含负计数值：p/np/c/u 图要求缺陷计数 ≥ 0，请检查目标列选择"],
         )
 
     # 按图表类型计算
@@ -1337,6 +1353,17 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
 
     summary = f"{chart_type.upper()} 控制图: CL={cl:.4f}, 超出控制限 {violations}/{m} 个点"
 
+    _notes = []
+    if _text_mapped:
+        _notes.append(
+            "文本质量列已映射（合格→1、不合格→0），图统计的是“1 事件”占比/计数，"
+            "请按列语义解读（若列以 1=合格 编码则为合格率图，而非不良率）"
+        )
+    if _nan_dropped:
+        _notes.append(f"已剔除 {_nan_dropped} 行分组(group_col)为空的记录，避免其参与控制限统计")
+    if _notes:
+        summary += "；" + "；".join(_notes)
+
     # 控制限表
     table_rows = []
     for _, row in agg.iterrows():
@@ -1361,6 +1388,8 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
             "n_points": m,
             "n_violations": violations,
             "groups": [str(g) for g in all_group_names if g != "_default"],
+            "text_binary_mapped": _text_mapped,
+            "nan_group_rows_dropped": _nan_dropped,
         },
     )
 
@@ -1440,6 +1469,12 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
                 task="spc_cusum",
                 status="error",
                 messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
+            )
+        if not (np.isfinite(user_mu) and np.isfinite(user_sigma)):
+            return AnalysisResult(
+                task="spc_cusum",
+                status="error",
+                messages=["参数 mu/sigma 必须为有限数值（不允许 NaN/Inf）"],
             )
     # Round-2 #A2j：与 EWMA 一致——只传一个时此前静默忽略两个
     if (user_mu is None) != (user_sigma is None):
@@ -1701,6 +1736,12 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
             )
+        if not (np.isfinite(user_mu) and np.isfinite(user_sigma)):
+            return AnalysisResult(
+                task="spc_ewma",
+                status="error",
+                messages=["参数 mu/sigma 必须为有限数值（不允许 NaN/Inf）"],
+            )
     # 审查 2026-08-19 #2.8：只传一个时此前静默忽略两个；改为提示
     if (user_mu is None) != (user_sigma is None):
         return AnalysisResult(
@@ -1712,10 +1753,13 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     # 分组处理
     group_results = []
     all_group_names = []
+    skipped_insufficient: list[str] = []
+    skipped_zero_var: list[str] = []
     for gname in group_names:
         mask = group_vals == gname if has_groups else pd.Series(True, index=req.data.index)
         gdata = req.data.loc[mask, y_col].dropna()
         if len(gdata) < 3:
+            skipped_insufficient.append(str(gname))
             continue
         all_group_names.append(gname)
 
@@ -1725,6 +1769,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             mu = float(gdata.mean())
             sigma = float(gdata.std(ddof=1))
         if sigma < EPSILON:
+            skipped_zero_var.append(str(gname))
             continue
 
         n = len(gdata)
@@ -1776,6 +1821,14 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
 
     total_violations = 0
     warn_msgs: list[str] = []
+    if skipped_zero_var:
+        warn_msgs.append(
+            f"⚠ 以下分组标准差为零（常量值），已跳过 EWMA 计算: {', '.join(skipped_zero_var)}"
+        )
+    if skipped_insufficient:
+        warn_msgs.append(
+            f"⚠ 以下分组有效数据不足（<3 个点），已跳过 EWMA 计算: {', '.join(skipped_insufficient)}"
+        )
     if user_mu is None:
         warn_msgs.append("⚠ μ/σ 从各组数据独立估计。建议通过参数 mu/sigma 指定已知受控状态的参数。")
 
@@ -1959,7 +2012,9 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         """安全 PPF，防止极端值溢出"""
         try:
             return float(dist.ppf(p, *args))
-        except Exception:
+        except Exception as e:
+            # 审查 2026-xx：PPF 失败静默降级为经验分位数——记录日志，避免用户误以为仍是理论分布限
+            logger.debug("PPF 计算失败，回退经验分位数: %s", e, exc_info=True)
             return float(np.percentile(values, p * 100))
 
     if side == "upper":

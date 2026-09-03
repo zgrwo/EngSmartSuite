@@ -354,7 +354,8 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效数据不足(至少20个点)"],
         )
 
-    min_segment = req.params.get("min_segment", max(10, n // 20))
+    _def_ms = min(max(10, n // 20), (n - 1) // 2)  # 保证 2*min_segment < n（n=20 时默认 9 而非 10）
+    min_segment = req.params.get("min_segment", _def_ms)
     max_cp = req.params.get("n_changepoints", 5)
     # 标准化峰值阈值（审查 2026-08-19 #2.6）：CUSUM 统计量量纲为 σ√L，
     # 与单点量纲的 data_range 比较是量纲错误；改为与 σ√L 比较。

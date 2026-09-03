@@ -803,7 +803,9 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     fig.tight_layout()
 
     summary_parts = [
-        f"KM: 中位寿命={median_survival:.0f}" if median_survival else "KM: 中位寿命未达到"
+        f"KM: 中位寿命={median_survival:.0f}"
+        if median_survival is not None
+        else "KM: 中位寿命未达到"
     ]
     if weibull_shape is not None:
         summary_parts.append(f"Weibull β={weibull_shape:.2f}, η={weibull_scale:.0f}")

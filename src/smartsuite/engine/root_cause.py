@@ -156,6 +156,14 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["至少需要 1 个因子列与目标列进行相关性分析，当前无有效因子列"],
         )
 
+    # 最小样本守卫：n<3 时任意两列 |r|=1 的“伪完美相关”会误导结论（允许部分列缺失）
+    if req.data[cols].dropna(how="all").shape[0] < 3:
+        return AnalysisResult(
+            task="correlation",
+            status="error",
+            messages=["有效样本不足(至少3行含数据)，相关分析在极小样本下无意义"],
+        )
+
     method = req.params.get("method", "pearson")  # "pearson" | "spearman" | "kendall"
     if method not in ("pearson", "spearman", "kendall"):
         return AnalysisResult(
@@ -708,6 +716,12 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     effect_sizes = _eta_squared(anova_table)
 
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    if not 0 < alpha < 1:
+        return AnalysisResult(
+            task="anova",
+            status="error",
+            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
+        )
     sig_factors: list[tuple[str, str]] = []  # (raw_col_name, formatted_display_str)
     for i, col in enumerate(cols):
         _esc_key = _escaped[i]
@@ -1180,6 +1194,12 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
         )
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
+    if len(g1) < 3 or len(g2) < 3:
+        return AnalysisResult(
+            task="hypothesis_test",
+            status="error",
+            messages=["KS 检验每组至少需要 3 个有效观测（某组目标列可能全为 NaN）"],
+        )
     stat, p = sp_stats.ks_2samp(g1, g2)
     test_name = f"Kolmogorov-Smirnov 检验 ({groups[0]} vs {groups[1]})"
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
@@ -1467,6 +1487,16 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             messages=[
                 f"不支持的检验类型: {test_type!r}，可选: "
                 + ", ".join(sorted(_HYPOTHESIS_TEST_TYPES))
+            ],
+        )
+
+    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    if not 0 < alpha < 1:
+        return AnalysisResult(
+            task="hypothesis_test",
+            status="error",
+            messages=[
+                f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}（越界会使检验结论恒显著或恒不显著）"
             ],
         )
 
@@ -2482,6 +2512,12 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     X = df[cols]
     y = df[req.target_col]
+    if y.nunique() <= 1:
+        return AnalysisResult(
+            task="decision_tree",
+            status="error",
+            messages=["目标列为常量列，决策树特征重要性无意义（避免假 R²=1）"],
+        )
     # 审查 2026-08-19 #1.4：字符串 max_depth/random_state 会触发 sklearn
     # InvalidParameterError，此处安全转换
     max_depth = _safe_int(req.params.get("max_depth", 5), 5)
@@ -2744,6 +2780,12 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     effect_size = req.params.get("effect_size", 0.5)
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    if not 0 < alpha < 1:
+        return AnalysisResult(
+            task="power_analysis",
+            status="error",
+            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
+        )
     target_power = req.params.get("target_power", 0.80)
     mode = req.params.get("mode", "required_n")  # "required_n" | "achieved"
     test_type = req.params.get("test_type", "ttest")
@@ -3128,6 +3170,12 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         effect_label = _cramers_v_interpretation(effect)
 
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    if not 0 < alpha < 1:
+        return AnalysisResult(
+            task="contingency",
+            status="error",
+            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
+        )
     conclusion = "两变量存在显著关联" if p_val < alpha else "两变量未发现显著关联"
 
     # 可视化：堆叠柱状图
@@ -3343,6 +3391,12 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         bart_stat, bart_p = None, None
 
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    if not 0 < alpha < 1:
+        return AnalysisResult(
+            task="variance_test",
+            status="error",
+            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
+        )
 
     # 判定
     if lev_p is not None:
@@ -3772,6 +3826,12 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         )
 
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
+    if not 0 < alpha < 1:
+        return AnalysisResult(
+            task="normality_check",
+            status="error",
+            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
+        )
 
     results = []
     for col in cols:

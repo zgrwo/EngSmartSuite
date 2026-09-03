@@ -1638,6 +1638,12 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
 
     X = sub[cols].values
     y = sub[req.target_col].values
+    if np.unique(y).size <= 1:
+        return AnalysisResult(
+            task="lasso_regression",
+            status="error",
+            messages=["目标列为常量列，无法进行 Lasso/ElasticNet 回归"],
+        )
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -1773,6 +1779,12 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
     try:
         X = sub[cols].values
         y = sub[req.target_col].values
+        if np.unique(y).size <= 1:
+            return AnalysisResult(
+                task="robust_regression",
+                status="error",
+                messages=["目标列为常量列，无法进行 Huber 稳健回归"],
+            )
         huber = HuberRegressor(epsilon=1.35, max_iter=1000)
         huber.fit(X, y)
 
@@ -1874,6 +1886,12 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
     try:
         X_df = sub[cols]
         y = sub[req.target_col]
+        if y.nunique() <= 1:
+            return AnalysisResult(
+                task="quantile_regression",
+                status="error",
+                messages=["目标列为常量列，无法进行分位数回归"],
+            )
         Xc = sm.add_constant(X_df)
         model = sm.QuantReg(y, Xc).fit(q=quantile)
 
