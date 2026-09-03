@@ -115,6 +115,10 @@ DEFAULT_PARAMS = {
         "effect_size": 0.5,
         "alpha": 0.05,
         "target_power": 0.80,
+        "current_n": 30,
+        "n_groups": 3,
+        "p0": 0.5,
+        "p1": 0.6,
     },
     # DOE / 优化
     "regression": {"model_type": "linear"},
@@ -267,7 +271,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         err_cls = type(e).__name__
         detail_map = {
             "ValueError": "数据格式不符合分析要求，请检查目标列和因子列的数据类型",
-            "KeyError": "数据处理异常，请检查数据列名和参数配置是否正确",
+            "KeyError": "数据处理异常（键不存在）：请检查数据列名与参数配置；若列名无误则可能是引擎内部错误，请反馈日志",
             "TypeError": "数据类型不匹配，请确保所有因子列为数值型或类别型",
             "IndexError": "数据索引异常，请检查数据是否包含空行或异常索引",
             "MemoryError": "数据量过大超出内存限制，请减少数据行数或列数",

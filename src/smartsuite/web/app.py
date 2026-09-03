@@ -292,7 +292,8 @@ def upload():
         tmp.close()
         try:
             df.to_parquet(tmp.name)
-        except Exception:
+        except Exception as exc:
+            logger.error("上传数据 parquet 保存失败: %s (%s)", tmp.name, exc, exc_info=True)
             try:
                 os.unlink(tmp.name)
             except OSError:

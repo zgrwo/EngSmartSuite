@@ -177,7 +177,8 @@ def main():
             print(f"  ⚠ 列「{col}」中 {n_coerced} 个非数值已自动转换为中位数")
         for col, extra_cats, _n_affected in unknown_cat_warnings:
             print(
-                f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，已被丢弃。建议检查数据或重新训练模型。"
+                f"  ⚠️ 列「{col}」出现 {len(extra_cats)} 个未知类别 {extra_cats}，"
+                "已归入参照组（数据保留）。建议检查数据或重新训练模型。"
             )
         # 假设检验缺 group_col 时自动推断（与 Web 路径共用 services.infer_hypothesis_group_col）
         if task == "hypothesis_test":
