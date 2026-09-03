@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.audit import process_audit
@@ -79,6 +80,13 @@ def test_workflow_hypothesis_to_anova(workflow_df):
         )
     )
     assert r1.status == "ok"
+    # 审查 2026-09-04 补充：此前仅断言 status。auto 对二组方差齐时选学生 t（等方差）；
+    # 与 scipy 独立重算对照（组序可能致符号翻转 → 比较 |t|）
+    g_yes = workflow_df.loc[workflow_df["maintenance"] == "是", "defect_rate"]
+    g_no = workflow_df.loc[workflow_df["maintenance"] == "否", "defect_rate"]
+    manual = stats.ttest_ind(g_yes, g_no, equal_var=True)
+    assert abs(r1.metadata["statistic"]) == pytest.approx(abs(manual.statistic), abs=1e-9)
+    assert r1.metadata["p_value"] == pytest.approx(manual.pvalue, abs=1e-9)
 
     # Step 2: 多组 ANOVA
     r2 = orchestrate(
@@ -90,6 +98,15 @@ def test_workflow_hypothesis_to_anova(workflow_df):
         )
     )
     assert r2.status == "ok"
+    # 审查 2026-09-04 补充：单因子 ANOVA F/p 与 scipy f_oneway 独立重算对照
+    grp = [
+        workflow_df.loc[workflow_df["material"] == m, "defect_rate"] for m in ["ABS", "PP", "PA6"]
+    ]
+    F, pF = stats.f_oneway(*grp)
+    anova_tbl = r2.tables["anova_enhanced"]
+    anova_row = anova_tbl[anova_tbl["来源"] == "Q('material')"].iloc[0]
+    assert anova_row["F值"] == pytest.approx(F, abs=1e-9)
+    assert anova_row["p值"] == pytest.approx(pF, abs=1e-9)
 
     # Step 3: 非参数验证
     r3 = orchestrate(
@@ -102,6 +119,9 @@ def test_workflow_hypothesis_to_anova(workflow_df):
         )
     )
     assert r3.status == "ok"
+    H, pK = stats.kruskal(*grp)
+    assert r3.metadata["statistic"] == pytest.approx(H, abs=1e-9)
+    assert r3.metadata["p_value"] == pytest.approx(pK, abs=1e-9)
 
 
 def test_workflow_spc_full(workflow_df):
@@ -116,6 +136,9 @@ def test_workflow_spc_full(workflow_df):
         )
     )
     assert r1.status == "ok"
+    # 审查 2026-09-04 补充：报警数非负 + 结果表存在（此前仅 status）
+    assert r1.metadata["total_alarms"] >= 0
+    assert "cusum_stats" in r1.tables
 
     # Step 2: 过程能力
     r2 = orchestrate(
@@ -127,6 +150,14 @@ def test_workflow_spc_full(workflow_df):
         )
     )
     assert r2.status == "ok"
+    # 审查 2026-09-04 补充：① Pp=(USL−LSL)/(6·s) 用原始数据 ddof=1 标准差独立重算；
+    # ② 数学不变量 Cp≥Cpk、Pp≥Ppk；③ n 与数据一致
+    md2 = r2.metadata
+    s = workflow_df["defect_rate"].std(ddof=1)
+    assert md2["pp"] == pytest.approx((7.0 - 1.0) / (6 * s), abs=1e-9)
+    assert md2["cp"] >= md2["cpk"] > 0
+    assert md2["pp"] >= md2["ppk"] > 0
+    assert md2["n"] == len(workflow_df)
 
     # Step 3: 趋势预测
     r3 = orchestrate(
@@ -138,6 +169,10 @@ def test_workflow_spc_full(workflow_df):
         )
     )
     assert r3.status == "ok"
+    # 审查 2026-09-04 补充：预测步数兑现 + RMSE 有限非负
+    assert len(r3.tables["forecast"]) == 5
+    assert r3.metadata["rmse"] > 0
+    assert np.isfinite(r3.metadata["rmse"])
 
     # Step 4: 异常共识
     r4 = orchestrate(
@@ -149,6 +184,10 @@ def test_workflow_spc_full(workflow_df):
         )
     )
     assert r4.status == "ok"
+    # 审查 2026-09-04 补充：计数有界 + 明细表行数 == 声明总数（此前仅 status）
+    assert len(r4.tables["anomalies"]) == r4.metadata["total_flagged"]
+    for k in ("iqr_count", "zscore_count", "isoforest_count", "total_flagged"):
+        assert 0 <= r4.metadata[k] <= len(workflow_df)
 
 
 def test_workflow_data_quality(workflow_df):
@@ -202,6 +241,10 @@ def test_workflow_model_evaluation(workflow_df):
         )
     )
     assert r1.status == "ok"
+    # 审查 2026-09-04 补充：F 统计量/p 有界；系数表行数 = 截距 + 3 自变量
+    assert 0 <= r1.metadata["f_pvalue"] <= 1
+    assert r1.metadata["f_statistic"] >= 0
+    assert len(r1.tables["coefficients"]) == 4
 
     # Step 2: 将缺陷率二值化后做 ROC
     high_defect = workflow_df["defect_rate"] > workflow_df["defect_rate"].median()
@@ -215,6 +258,9 @@ def test_workflow_model_evaluation(workflow_df):
         )
     )
     assert r2.status == "ok"
+    # 审查 2026-09-04 补充：AUC ∈ [0,1] 且 ROC 点表非平凡
+    assert 0 <= r2.metadata["auc"] <= 1
+    assert len(r2.tables["roc_points"]) >= 2
 
 
 def test_workflow_nonparametric_full(workflow_df):
@@ -229,6 +275,15 @@ def test_workflow_nonparametric_full(workflow_df):
         )
     )
     assert ri.status == "ok"
+    # 审查 2026-09-04 补充：Levene(center=median)/Bartlett p 与 scipy 独立重算对照
+    grp = [
+        workflow_df.loc[workflow_df["material"] == m, "defect_rate"] for m in ["ABS", "PP", "PA6"]
+    ]
+    assert ri.metadata["n_groups"] == 3
+    assert ri.metadata["levene_p"] == pytest.approx(
+        stats.levene(*grp, center="median").pvalue, abs=1e-9
+    )
+    assert ri.metadata["bartlett_p"] == pytest.approx(stats.bartlett(*grp).pvalue, abs=1e-9)
 
     rj = orchestrate(
         AnalysisRequest(
@@ -240,6 +295,9 @@ def test_workflow_nonparametric_full(workflow_df):
         )
     )
     assert rj.status == "ok"
+    H, pK = stats.kruskal(*grp)
+    assert rj.metadata["statistic"] == pytest.approx(H, abs=1e-9)
+    assert rj.metadata["p_value"] == pytest.approx(pK, abs=1e-9)
 
     rk = orchestrate(
         AnalysisRequest(
@@ -250,3 +308,8 @@ def test_workflow_nonparametric_full(workflow_df):
         )
     )
     assert rk.status == "ok"
+    # 审查 2026-09-04 补充：原始中位数落在 CI 内且点估计与其接近
+    raw_median = float(workflow_df["defect_rate"].median())
+    assert rk.metadata["n"] == len(workflow_df)
+    assert rk.metadata["ci_lower"] <= raw_median <= rk.metadata["ci_upper"]
+    assert rk.metadata["point_estimate"] == pytest.approx(raw_median, abs=0.1)
