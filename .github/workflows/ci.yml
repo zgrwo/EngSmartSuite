@@ -310,4 +310,4 @@ jobs:
           EOF
 
       - name: 前后端参数默认值一致性
-        run: python scripts/verify_cross_consistency.py 2>&1 | tail -5
+        run: set -o pipefail && python scripts/verify_cross_consistency.py 2>&1 | tail -5

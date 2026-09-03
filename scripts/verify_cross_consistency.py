@@ -71,7 +71,7 @@ MANUAL_EXPECTATIONS = {
 }
 
 # ── 全量方法的测试用例定义（随 TASK_REGISTRY，不硬编码总数） ──
-# (task, target_col, feature_cols, categoricals, params, skip_reason)
+# (task, target_col, feature_cols, categoricals, params)
 TEST_CASES = [
     # === 要因筛选 ===
     ("correlation", "不良率", ["熔体温度", "模具温度", "注射压力", "冷却时间"], [], {}),
@@ -166,9 +166,9 @@ TEST_CASES = [
     ("scatter_plot", "不良率", ["熔体温度"], [], {"fit": "linear"}),
 ]
 
-assert set(TEST_CASES) == set(TASK_REGISTRY), (
-    f"TEST_CASES 须与 TASK_REGISTRY 一一对应，缺失: {sorted(set(TASK_REGISTRY) - set(TEST_CASES))}，"
-    f"多余: {sorted(set(TEST_CASES) - set(TASK_REGISTRY))}"
+assert {c[0] for c in TEST_CASES} == set(TASK_REGISTRY), (
+    f"TEST_CASES 任务名须与 TASK_REGISTRY 一一对应，缺失: {sorted(set(TASK_REGISTRY) - {c[0] for c in TEST_CASES})}，"
+    f"多余: {sorted({c[0] for c in TEST_CASES} - set(TASK_REGISTRY))}"
 )
 
 # ── 运行验证 ──
