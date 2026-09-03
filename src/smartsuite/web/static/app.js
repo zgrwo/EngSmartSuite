@@ -153,7 +153,7 @@ const TASK_PARAMS = {
   spc_cusum:         { k: 0.5, h: 5.0, group_col: '' },
   spc_ewma:          { lam: 0.2, L: 2.7, group_col: '' },
   spc_attribute:     { chart_type: 'p', group_col: '' },
-  power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5, alpha: 0.05, target_power: 0.80 },
+  power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5, alpha: 0.05, target_power: 0.80, current_n: 30, n_groups: 3, p0: 0.5, p1: 0.6 },
   bootstrap_ci:      { statistic: 'mean', n_bootstrap: 2000, ci_level: 0.95 },
   median_ci:         { ci_level: 0.95 },
   quantile_regression:{ quantile: 0.5 },
@@ -203,7 +203,6 @@ const PARAM_META = {
     options: [
       ['iqr', 'IQR (四分位距法)'], ['zscore', 'Z-Score (标准差法)'],
       ['isolation_forest', 'Isolation Forest (隔离森林)'], ['grubbs', 'Grubbs 检验'],
-      ['mad', 'MAD (中位数绝对偏差)'],
     ]
   },
   'method@correlation': {
@@ -312,7 +311,7 @@ const PARAM_META = {
 const PARAM_LABELS = {
   ranges: '搜索范围', objectives: '目标定义', direction: '优化方向',
   n_points: '网格点数', usl: '规格上限 (USL)', lsl: '规格下限 (LSL)',
-  test: '检验方法', alpha: '显著性水平 α', interactions: '交互阶数',
+  test: '检验方法', alpha: '显著性水平 α', interactions: '含两两交互 (0/1)',
   forecast_steps: '预测步数', method: '异常检测方法', side: '检验侧',
   k: 'K 值 (松弛因子)', h: 'H 值 (决策区间)', lam: 'λ (平滑系数)',
   L: 'L (控制限宽度)', chart_type: '控制图类型', mode: '模式',
@@ -326,10 +325,12 @@ const PARAM_LABELS = {
   sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
+  current_n: '当前样本量 n (achieved 模式)', n_groups: '组数 k (anova)', p0: '基准比例 (proportion)', p1: '目标比例 (proportion)',
   fit: '拟合类型', show_ci: '显示置信带', threshold: '分类阈值',
   factors: '因子定义', replicates: '重复次数', randomize: '随机化',
   seed: '随机种子', center_points: '中心点重复数', n_runs: '运行数',
   'method@doe_design': '设计方法', 'alpha@doe_design': 'CCD 轴向距离 α',
+  'method@correlation': '相关方法', 'side@spc_nonparametric': '控制限方向',
 };
 
 const PARAM_HINTS = {
