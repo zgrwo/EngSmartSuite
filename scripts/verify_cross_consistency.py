@@ -1,5 +1,7 @@
 """
-全量 41 方法交叉验证: Web UI 路径 ↔ Python 直接路径 ↔ 用户手册记录值
+全量方法交叉验证: Web UI 路径 ↔ Python 直接路径 ↔ 用户手册记录值
+
+任务清单随 TASK_REGISTRY 派生（数量唯一源），不再硬编码方法总数。
 
 验证维度:
 1. status 一致性 (ok/error)
@@ -20,7 +22,7 @@ np.random.seed(42)
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import preprocess_data
-from smartsuite.services.orchestrator import RAW_CAT_TASKS, orchestrate
+from smartsuite.services.orchestrator import RAW_CAT_TASKS, TASK_REGISTRY, orchestrate
 
 # ── 加载测试数据 ──
 df_raw = pd.read_excel("tests/test_data.xlsx")
@@ -68,7 +70,7 @@ MANUAL_EXPECTATIONS = {
     },
 }
 
-# ── 41 个方法的测试用例定义 ──
+# ── 全量方法的测试用例定义（随 TASK_REGISTRY，不硬编码总数） ──
 # (task, target_col, feature_cols, categoricals, params, skip_reason)
 TEST_CASES = [
     # === 要因筛选 ===
@@ -164,7 +166,10 @@ TEST_CASES = [
     ("scatter_plot", "不良率", ["熔体温度"], [], {"fit": "linear"}),
 ]
 
-assert len(TEST_CASES) == 41, f"Expected 41 test cases, got {len(TEST_CASES)}"
+assert set(TEST_CASES) == set(TASK_REGISTRY), (
+    f"TEST_CASES 须与 TASK_REGISTRY 一一对应，缺失: {sorted(set(TASK_REGISTRY) - set(TEST_CASES))}，"
+    f"多余: {sorted(set(TEST_CASES) - set(TASK_REGISTRY))}"
+)
 
 # ── 运行验证 ──
 results = []

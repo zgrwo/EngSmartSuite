@@ -1,5 +1,7 @@
 """主集成测试 — 验证所有 TASK_REGISTRY 函数可被调用并返回合理结果。"""
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -124,8 +126,22 @@ def test_all_registered_tasks(df, task, target, features, params):
 
 
 def test_all_tasks_registered_count():
-    """验证任务注册表完整性。"""
-    assert len(TASK_REGISTRY) == 41, f"Expected 41 tasks, got {len(TASK_REGISTRY)}"
+    """验证任务注册表完整性：TASK_REGISTRY ↔ api-reference.md Task Key 清单一致。
+
+    方法总数锚点=api-reference 清单（数量派生，不硬编码），防注册表/文档单向漂移。
+    """
+    import re as _re
+
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(_root, "rules", "api-reference.md"), encoding="utf-8") as _fh:
+        _doc = _fh.read()
+    doc_keys = set(_re.findall(r"^- \*\*Task Key\*\*: `([a-z_0-9]+)`", _doc, _re.M))
+    missing = set(TASK_REGISTRY) - doc_keys
+    extra = doc_keys - set(TASK_REGISTRY)
+    assert not missing and not extra, (
+        f"api-reference Task Key 与 TASK_REGISTRY 不一致；"
+        f"缺: {sorted(missing)}，多: {sorted(extra)}"
+    )
     required = [
         "correlation",
         "anova",

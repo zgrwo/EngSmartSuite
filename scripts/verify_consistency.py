@@ -13,7 +13,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 # 第二轮 #8：--skip-pytest 供 CI quick job 复用——跳过嵌套 pytest 步骤，
 # 避免 quick job 里"引擎层/服务层/集成测试 + 这里全量 pytest"重复跑完整套件
-_parser = argparse.ArgumentParser(description="行为/架构一致性验证（40 任务冒烟门禁）")
+_parser = argparse.ArgumentParser(description="行为/架构一致性验证（全任务冒烟门禁）")
 _parser.add_argument(
     "--skip-pytest",
     action="store_true",
@@ -73,6 +73,18 @@ def _imp_contracts():
     from smartsuite.core.contracts import AnalysisRequest  # noqa: F401
 
 
+def _imp_apiref_task_keys():
+    """api-reference.md 的 Task Key 清单：文档侧唯一任务清单（防文档↔注册表漂移）。"""
+    import re as _re
+
+    global _apiref_task_keys
+    _path = os.path.join(ROOT, "rules", "api-reference.md")
+    with open(_path, encoding="utf-8") as _fh:
+        _apiref_task_keys = set(
+            _re.findall(r"^- \*\*Task Key\*\*: `([a-z_0-9]+)`", _fh.read(), _re.M)
+        )
+
+
 def _imp_engine():
     from smartsuite.engine import __all__ as engine_all  # noqa: F401
 
@@ -90,14 +102,23 @@ def _imp_orchestrator():
 
 _engine_export_count = 0
 _orchestrator_task_count = 0
+_apiref_task_keys = set()
 _import_guard("smartsuite package importable", _imp_smartsuite)
 _import_guard("Data contracts importable", _imp_contracts)
 _import_guard("Engine functions importable", _imp_engine)
 _import_guard("Orchestrator importable", _imp_orchestrator)
+_import_guard("api-reference Task Key 清单可读", _imp_apiref_task_keys)
 
-# 审查 2026-09-01 G-3/G-4：任务数阈值从 >= 30 提升到真实契约值（41 个分析方法）
-check(f"Engine: {_engine_export_count} functions exported", _engine_export_count >= 41)
-check(f"Orchestrator: {_orchestrator_task_count} tasks registered", _orchestrator_task_count >= 41)
+# 方法总数不再硬编码字面量，改为派生链保持一致（避免文档/引擎/注册表三者数字漂移）：
+#   engine 导出数 ≥ orchestrator 任务数 == api-reference.md Task Key 数（唯一人读锚点）
+check(
+    f"Orchestrator: {_orchestrator_task_count} tasks == api-reference {len(_apiref_task_keys)} Task Keys",
+    _orchestrator_task_count == len(_apiref_task_keys),
+)
+check(
+    f"Engine: {_engine_export_count} exports cover {_orchestrator_task_count} tasks",
+    _engine_export_count >= _orchestrator_task_count,
+)
 
 # ============================================================
 section("1. Architecture Constraints")

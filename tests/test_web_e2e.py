@@ -1,4 +1,4 @@
-"""End-to-end test of all 40 analysis tasks via Web API.
+"""End-to-end test of every registered analysis task via Web API (任务清单随 TASK_REGISTRY，不硬编码总数).
 
 Requires a running server: `python src/smartsuite/web/app.py`
 When the server is not running, the module is skipped at collection time.
@@ -14,6 +14,8 @@ import uuid
 
 import pytest
 
+from smartsuite.services.orchestrator import TASK_REGISTRY
+
 BASE = "http://127.0.0.1:5050"
 
 # ── Check server availability ──
@@ -23,7 +25,7 @@ try:
 except Exception:
     pytest.skip("Server not running on port 5050 — skip E2E test", allow_module_level=True)
 
-# ── All 40 tasks: (task, targets, features, categoricals, params) ──
+# ── All registered tasks: (task, targets, features, categoricals, params) ──
 ALL_TASKS = [
     ("correlation", ["不良率"], ["熔体温度", "模具温度", "注射压力"], [], {}),
     ("anova", ["不良率"], ["原料类型"], ["原料类型"], {}),
@@ -105,7 +107,9 @@ ALL_TASKS = [
     ("scatter_plot", ["不良率"], ["熔体温度"], [], {"fit": "linear"}),
 ]
 
-assert len({t for t, *_ in ALL_TASKS}) == 41, "E2E must cover all 41 tasks"
+assert {t for t, *_ in ALL_TASKS} == set(TASK_REGISTRY), (
+    "E2E 任务清单须与 TASK_REGISTRY 一致（新增方法需同步补 E2E 用例）"
+)
 
 
 @pytest.fixture(scope="module")
