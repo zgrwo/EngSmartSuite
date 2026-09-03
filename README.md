@@ -40,18 +40,21 @@ python run_server.py
 
 > 完整签名、参数说明见 **[API 参考](rules/api-reference.md)**；每个函数的详细示例见 **[用户手册](rules/user-manual.md)**。
 
-| 模块 | 做什么 | 试一试 |
-|------|------|-------|
-| 正态性检验 | Anderson-Darling / Shapiro-Wilk / Kolmogorov-Smirnov | 判断数据是否正态分布 |
-| 过程能力 | Cp / Cpk / Pp / Ppk | 评估制程是否满足规格 |
-| 测量系统分析 | Gage R&R（ANOVA 法） | 评估测量系统变异来源 |
-| 控制图 | Xbar-R / Xbar-S / I-MR / P / NP / C / U | 统计过程控制（SPC） |
-| 可靠性分析 | Weibull / Kaplan-Meier / 寿命回归 | 寿命数据建模与预测 |
-| 假设检验 | t检验 / ANOVA / 卡方 / Mann-Whitney / Kruskal-Wallis | 比较组间差异 |
-| 回归分析 | 多元回归 / Logistic / 逐步 / PLS | 建模与预测 |
-| DoE | 全因子 / 部分因子 / 响应曲面 / 田口 | 实验设计与优化 |
-| 样本量计算 | 均值/比率/方差/等效性检验 | 确定实验所需样本数 |
-| 分布拟合 | 正态/对数正态/Weibull/指数/Gamma | 数据分布识别 |
+| 模块 | 做什么 |
+|------|------|
+| 正态性检验 | Anderson-Darling / Shapiro-Wilk / Kolmogorov-Smirnov |
+| 过程能力 | Cp / Cpk / Pp / Ppk（Cpm 与 Box-Cox 变换仅 CLI/模板） |
+| 测量系统分析 | Gage R&R（X-bar & R 法，ANOVA 方差分解） |
+| SPC 控制图 | X-bar-R/S、I(MR)、p / np / c / u、CUSUM、EWMA、非参数 |
+| 可靠性/寿命 | Kaplan-Meier、Weibull 拟合、Log-rank、容差区间 |
+| 假设检验 | t / 配对 / Mann-Whitney / Wilcoxon / Kruskal-Wallis / McNemar / KS 等 17 种 |
+| 回归分析 | 多元 OLS / Lasso / Huber / 分位数 / Logistic（不含逐步/PLS） |
+| DoE | 全因子 / 部分因子 / Plackett-Burman / 田口 / Box-Behnken / CCD |
+| 功效/样本量 | t / ANOVA / 比例检验的所需样本量与已达功效 |
+| 异常/变点/趋势 | 异常检测、变点识别、趋势预测、离群共识 |
+| 探索性 | 箱线图、散点图、Bootstrap/中位数/比例置信区间 |
+
+> 模块能力以 [rules/api-reference.md](rules/api-reference.md)（41 个任务签名唯一信源）为准，上表仅为概览。
 
 ---
 

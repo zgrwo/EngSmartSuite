@@ -672,7 +672,7 @@ Cronbach's α = 0.015（**不可接受**），3 题项，n=854。
 
 #### 补充备注
 
-- **Python API**：`orchestrate(AnalysisRequest(task='power_analysis', params={...}))` → 返回 `power_results` 表 + 1 张功效曲线图。
+- **Python API**：`orchestrate(AnalysisRequest(task='power_analysis', params={...}))` → 返回 `power_result` 表 + 1 张功效曲线图。
 
 ---
 
@@ -1156,6 +1156,8 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='spc_attribute', feature_cols=['批次'], params={'chart_type': 'c', 'group_col': '产线'}, ...))`
+- **质量记录文本列**：可直接选择“合格/不合格、是/否”文本列。引擎自动映射 合格→1、不合格→0，**统计的是“1 事件”占比/计数**——若列以 1=合格 编码，p/np 图实际监控的是合格率而非不良率（控制限等价，解读时请勿把中心线当作不良率）；如需监控不良率，请将列编码为 1=不合格 后再分析。运行结果会给出相应语义提示。
+- **np 图**：按子组给定已聚合不良数（count>1）时必须提供 `n_col` 样本量列，且要求 count ≤ n，否则报错。
 ### 7.3 CUSUM 控制图 (`spc_cusum`)
 
 **功能**: 累积和控制图——对小偏移（0.5σ~2σ）比 X-bar 更敏感。输出双侧 CUSUM（C⁺上偏移 + C⁻下偏移）及决策区间。

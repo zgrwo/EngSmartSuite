@@ -137,7 +137,7 @@ class AnalysisResult:
 ### power_analysis
 - **Task Key**: `power_analysis`
 - **描述**: 统计功效分析 — 估计所需样本量 (`required_n`) 或已达功效 (`achieved`)
-- **params**: `effect_size` (0.5), `alpha` (0.05), `target_power` (0.80), `mode`, `test_type` ("ttest"|"anova"|"proportion")
+- **params**: `effect_size` (0.5), `alpha` (0.05), `target_power` (0.80), `mode`, `test_type` ("ttest"|"anova"|"proportion"), `current_n` (30, achieved 模式当前样本量), `n_groups` (3, anova 组数), `p0`/`p1` (proportion 基准/目标比例)
 - **返回**: `power_result`
 - **图**: 功效曲线 (required_n 模式)
 
