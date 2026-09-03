@@ -43,6 +43,7 @@ EXCLUDED_DIRS = {
     ".git",
     ".claude",
     ".codegraph",
+    ".opencode-goal",  # opencode goal 会话产物（.gitignore 已忽略）
     ".pytest_cache",
     ".qoder",
     ".ruff_cache",

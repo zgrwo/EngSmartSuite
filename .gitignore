@@ -97,5 +97,6 @@ scripts/verify_manual_claims_output.txt
 .superpowers/
 docs/superpowers/
 
-# IDE 工具（本地保留，不推送）
+# IDE/Agent 工具（本地保留，不推送）
 .qoder/
+.opencode-goal/
