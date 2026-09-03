@@ -1137,9 +1137,9 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 | **Y** | `不良率` | 计数指标：监控不良率（p 图）/不良数（np）/缺陷数（c）/单位缺陷率（u） |
 | **参数** | `chart_type=c` | 图表类型：c=缺陷数控制图（Poisson），也可选 p/np/u |
 | **参数** | `group_col`（可选） | 分组依据：按此列分系列，不同值=不同颜色的线 |
-| **参数** | `n_col`（p/u 图需要） | 样本量列：指定各子组的检验样本数 |
+| **参数** | `n_col`（p/u 图需要，np 图推荐） | 样本量列：指定各子组的检验样本数（np 图要求子组缺陷计数 ≤ 样本量） |
 
-> ⚠️ **协同要求**：必须标记 **1 个 Y（数值）**。`chart_type=p` 或 `u` 时需额外指定 `n_col`。
+> ⚠️ **协同要求**：必须标记 **1 个 Y（数值）**。`chart_type=p`、`u` 时需要 `n_col`；np 图按子组给定已聚合不良数时推荐指定 `n_col`（且要求计数 ≤ 样本量）。
 
 #### 示例分析图片
 
@@ -1734,9 +1734,9 @@ KM 阶梯曲线 + Weibull 拟合。中位寿命=None（数据中不良率是连�
 | contingency | ok | ok | ✓ | < 1s |
 | lasso_regression | ok | ok | ✓ | < 1s |
 | robust_regression | ok | ok | ✓ | < 1s |
-| ... (全部 41 个) | ok | ok | ✓ | — |
+| ... (全部任务) | ok | ok | ✓ | — |
 
-**结论**: 全部 41 个分析方法在 Web UI 和 Python 直接调用下产生一致的结果。
+**结论**: 全部分析方法在 Web UI 和 Python 直接调用下产生一致的结果。
 
 ### 9.3 快速验证脚本
 
@@ -1750,7 +1750,7 @@ python tests/test_web_e2e.py
 #   OK correlation                 0.2s  ok
 #   OK anova                       0.3s  ok
 #   ...
-# Results: 41/41 responded, 0 failed
+# Results: 全量通过 responded, 0 failed
 ```
 
 ---

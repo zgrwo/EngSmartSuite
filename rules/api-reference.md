@@ -185,7 +185,7 @@ class AnalysisResult:
 - **描述**: DOE 实验设计 — 给定因子（名称+水平）与设计方法，生成实验设计矩阵
 - **params**:
   - `factors` (必需): `[{name, levels}]`，levels 为水平值列表（数值或类别标签）
-  - `method`: `full_factorial` | `fractional_factorial` | `plackett_burman` | `taguchi` | `box_behnken` | `ccd`（默认 `full_factorial`）
+  - `method`: `full_factorial` | `fractional_factorial` | `plackett_burman` | `taguchi`（仅支持 2/3 水平因子） | `box_behnken` | `ccd`（默认 `full_factorial`）
   - `replicates` (1)、`randomize` (True)、`seed` (42)、`center_points` (3)、`alpha` (`rotatable`)、`n_runs` (None)
 - **返回**: `design_matrix`（运行顺序 + 因子列 + 可选重复列）、`design_info`（方法/正交表/列构成/运行数/因子数）
 - **图**: 无
@@ -240,7 +240,7 @@ class AnalysisResult:
 ### attribute_chart
 - **Task Key**: `spc_attribute`
 - **描述**: 计数型控制图 — p (不良率), np (不良数), c (缺陷数), u (单位缺陷率)
-- **params**: `chart_type` ("p"|"np"|"c"|"u"), `group_col` (分组依据，空→单一序列), `n_col` (p/u 图样本量列；未在 DEFAULT_PARAMS 注册默认值，不传时默认取每点子组样本量)
+- **params**: `chart_type` ("p"|"np"|"c"|"u"), `group_col` (分组依据，空→单一序列), `n_col` (p/np/u 图样本量列；np 图亦以其为样本量来源并要求子组缺陷计数 ≤ 样本量；未在 DEFAULT_PARAMS 注册默认值，不传时默认取每点子组样本量)
 - **返回**: `control_stats`
 - **图**: 属性控制图 + 控制限
 
@@ -359,7 +359,7 @@ class AnalysisResult:
 路由分析请求到对应引擎函数，注入默认参数，统一异常处理。
 
 ### TASK_REGISTRY: dict[str, Callable]
-全部 41 个 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
+全部 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
 
 ### DEFAULT_PARAMS: dict[str, dict]
 各 task key 的默认参数。编排器会自动合并用户参数到默认参数之上。
