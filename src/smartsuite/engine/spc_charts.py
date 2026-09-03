@@ -1150,11 +1150,28 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         ucl_const = None
 
     elif chart_type == "np":
+        if (agg["n_vals"] == 0).any():
+            return AnalysisResult(
+                task="spc_attribute",
+                status="error",
+                messages=["np 图要求各子组样本量 n>0（n_col 指定样本量时不得含 0）"],
+            )
         agg["stat"] = agg["count"].astype(float)
         stat_name = "不良数(np)"
         np_bar = float(agg["count"].mean())
-        n_bar = float(agg["size"].mean())
-        p_bar = np_bar / max(n_bar, 1)
+        # 与 p 图一致：用 n_vals（子组实际样本量）而非 size（聚合行数），
+        # 否则分组聚合下 p_bar=count/行数 恒 >1 → sqrt(负) → NaN 控制限静默污染
+        p_bar = float(agg["count"].sum() / agg["n_vals"].sum())
+        if not 0 <= p_bar <= 1:
+            return AnalysisResult(
+                task="spc_attribute",
+                status="error",
+                messages=[
+                    "np 图要求缺陷计数值不超过对应样本量；"
+                    f"当前总体不良比例={p_bar:.4f} 超出 [0,1]，"
+                    "请检查目标列是否为缺陷计数（且 count ≤ 样本量 n 列）"
+                ],
+            )
         cl = np_bar
         ucl_const = float(np_bar + 3 * np.sqrt(np_bar * (1 - p_bar)))
 

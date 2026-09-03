@@ -109,7 +109,7 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     """Bootstrap 置信区间 — 不依赖正态假设的稳健区间估计。
 
     参数:
-        statistic: "mean" (默认) | "median" | "std"
+        statistic: "mean" (默认) | "median" | "std" | "var"
         n_bootstrap: 重抽样次数 (默认 2000)
         ci_level: 置信水平 (默认 0.95)
 
@@ -160,6 +160,11 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
 
         def stat_fn(x):
             return np.std(x, ddof=1)
+    elif statistic == "var":
+        orig_stat = float(np.var(values, ddof=1))
+
+        def stat_fn(x):
+            return np.var(x, ddof=1)
     else:  # mean
         orig_stat = float(np.mean(values))
 

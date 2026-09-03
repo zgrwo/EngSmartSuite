@@ -637,6 +637,36 @@ def test_bootstrap_ci_contains_mean():
     assert abs(point_est - true_mean) < 2.0, f"点估计应接近 {true_mean}, 实际={point_est:.3f}"
 
 
+def test_bootstrap_ci_var_matches_sample_variance():
+    """statistic='var' 应返回样本方差及其 Bootstrap CI，而非被静默替换为均值。
+
+    回归：审查 2026-10 发现 'var' 落入 else(mean) 分支，点估计=均值。
+    """
+    np.random.seed(42)
+    data = np.random.normal(0, 1, 500)
+    df = pd.DataFrame({"val": data})
+    # 独立手工锚点（不复用引擎同一 np.var 实现，防 ddof 约定回归被同源断言掩盖）
+    manual_var = float(((data - data.mean()) ** 2).sum() / (len(data) - 1))
+
+    req = AnalysisRequest(
+        task="bootstrap_ci",
+        data=df,
+        target_col="val",
+        params={"statistic": "var", "n_bootstrap": 2000, "ci_level": 0.95, "random_state": 42},
+    )
+    result = bootstrap_ci(req)
+    assert result.status == "ok"
+    assert result.metadata["statistic"] == "var"
+    point_est = result.metadata["point_estimate"]
+    assert np.isclose(point_est, manual_var, rtol=1e-9), (
+        f"点估计应等于样本方差 {manual_var:.6f}, 实际={point_est:.6f}"
+    )
+    ci_lower, ci_upper = result.metadata["ci_lower"], result.metadata["ci_upper"]
+    assert ci_lower <= manual_var <= ci_upper, (
+        f"95% Bootstrap CI [{ci_lower:.4f}, {ci_upper:.4f}] 应包含真方差 {manual_var:.4f}"
+    )
+
+
 # ── 中位数置信区间正确性 ──
 
 
@@ -1758,6 +1788,29 @@ def test_spc_attribute_p_chart_rejects_percentage_data():
     result = attribute_chart(req)
     assert result.status == "error"
     assert any("0/1" in m for m in result.messages)
+
+
+def test_spc_attribute_np_chart_rejects_count_gt_size():
+    """np 图遇缺陷计数 > 样本量时应报错而非 NaN 控制限（p 图防护的同族漏项）。"""
+    from smartsuite.engine.spc_monitor import attribute_chart
+
+    df = pd.DataFrame(
+        {
+            "x": list(range(10)) * 2,
+            "y": [30, 35, 28, 40, 33, 31, 38, 27, 29, 36] * 2,  # 计数 > 样本量 20
+            "batch_size": [20] * 20,
+        }
+    )
+    req = AnalysisRequest(
+        task="spc_attribute",
+        data=df,
+        target_col="y",
+        feature_cols=["x"],
+        params={"chart_type": "np", "group_col": "x", "n_col": "batch_size"},
+    )
+    result = attribute_chart(req)
+    assert result.status == "error"
+    assert any("np" in m for m in result.messages)
 
 
 def test_spc_attribute_p_chart_binary_string_column():

@@ -170,6 +170,17 @@ def test_taguchi_mixed_1x2_5x3_hits_l18():
     _assert_orthogonal(m)
 
 
+def test_doe_design_taguchi_rejects_4level_factor():
+    """taguchi 仅支持 2/3 水平因子；4+ 水平因子应返回中文校验错误而非崩溃。"""
+    factors = [
+        {"name": "A", "levels": [1, 2, 3, 4]},  # 四水平：taguchi 不支持
+        {"name": "B", "levels": [10, 20]},
+    ]
+    r = doe_design(_req("taguchi", factors, randomize=False))
+    assert r.status == "error"
+    assert any("2 或 3 水平" in m for m in r.messages)
+
+
 # ── Task 7: Box-Behnken + CCD ──
 def test_box_behnken_k3_point_count():
     m = _gen_box_behnken(3)

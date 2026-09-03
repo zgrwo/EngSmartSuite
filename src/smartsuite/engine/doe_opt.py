@@ -2224,7 +2224,7 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
     参数 (params):
         factors: 必需，[{name, levels}]，levels 为水平值列表（数值或标签）
         method: full_factorial | fractional_factorial | plackett_burman
-                | taguchi | box_behnken | ccd（默认 full_factorial）
+                | taguchi（仅支持 2/3 水平因子）| box_behnken | ccd（默认 full_factorial）
         replicates: 重复次数（默认 1）
         randomize: 是否随机化运行顺序（默认 True）
         seed: 随机种子（默认 42）
@@ -2298,6 +2298,13 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
             oa_name = f"PB{n_runs}"
             oa_spec = f"2^{n_runs - 1}"
         elif method == "taguchi":
+            bad_levels = [f["name"] for f in factors if len(f["levels"]) not in (2, 3)]
+            if bad_levels:
+                return AnalysisResult(
+                    task="doe_design",
+                    status="error",
+                    messages=[f"taguchi 仅支持 2 或 3 水平因子，以下因子不符: {bad_levels}"],
+                )
             coded, oa_name, oa_spec = _gen_taguchi(factors)
         else:  # box_behnken / ccd
             bad = [
