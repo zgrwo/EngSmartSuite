@@ -3,6 +3,7 @@
 对应 logs/reports/review-2026-09-05-release-prep.md 问题项：
 C1(规格限 isfinite), B1(常量列相对阈值), B2(d2* 取 ∞ 列), C2(无效 group_col),
 M-4(n_runs falsy), B3(微尺度阈值), E1(verify_docs tag 校验)。
+另含修复轮新观察 O-1(表格显示舍入尺度感知)。
 每项先以对抗脚本复现（修复前基线），再随修复转绿。
 """
 
@@ -273,3 +274,37 @@ def test_scatter_ci_band_micro_scale_x():
     assert r.status == "ok", r.messages
     # 置信带（fill_between → PolyCollection）应绘制而非静默缺失
     assert len(r.figures[0].axes[0].collections) >= 1, "微尺度 X 的置信带不应缺失"
+
+
+# ── 新观察 O-1: 表格显示舍入尺度感知（微尺度数据不再显示 0.0000）──────
+
+
+def test_round_for_display_scale_aware():
+    from smartsuite.engine._utils import round_for_display
+
+    # 常规量级：与 round(x, 4) 逐位一致（既有表格显示口径不变）
+    normal = np.array([123.45678, 0.123456, -5.5])
+    assert np.array_equal(round_for_display(normal), np.round(normal, 4))
+    assert round_for_display(123.45678) == 123.4568
+    # 微尺度：按 4 位有效数字保留，而非整组归零
+    micro = round_for_display(np.array([1.2346e-10, 2.0e-13]))
+    assert abs(micro[0] - 1.235e-10) < 1e-12, f"微尺度值被归零或失真: {micro[0]}"
+    assert micro[1] > 0
+    # 标量输入同样保留量级
+    assert round_for_display(1.2346e-10) > 1e-11
+    # 全零 / 非有限值行为不变
+    assert np.array_equal(round_for_display(np.zeros(3)), np.zeros(3))
+    assert np.isnan(round_for_display(np.array([np.nan, 0.5]))[0])
+    assert round_for_display(np.array([np.inf, 1.0]))[0] == np.inf
+
+
+def test_trend_forecast_micro_scale_table_not_zero():
+    from smartsuite.engine.detection import trend_forecast
+
+    np.random.seed(1)
+    micro = pd.DataFrame({"v": 1e-10 + np.random.normal(0, 1e-13, 60)})
+    r = trend_forecast(_mk("trend_forecast", micro, "v"))
+    assert r.status == "ok", r.messages
+    tbl = r.tables["forecast"]
+    assert (tbl["预测值"].to_numpy() != 0).all(), "微尺度预测值不应整列显示 0.0000"
+    assert (tbl["预测值"].abs() < 1e-8).all(), "预测值应保持微尺度量级"

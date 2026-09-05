@@ -19,7 +19,7 @@ from smartsuite.engine._constants import (
     ZSCORE_OUTLIER_THRESHOLD,
 )
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import durbin_watson
+from smartsuite.engine._utils import durbin_watson, round_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -159,9 +159,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         forecast_df = pd.DataFrame(
             {
                 "步数": range(1, steps + 1),
-                "预测值": predictions.round(4),
-                "下限": (predictions - conf_array).round(4),
-                "上限": (predictions + conf_array).round(4),
+                # 审查 2026-09-05 新观察 O-1：固定 4 位小数把微尺度预测（~1e-10）
+                # 整列显示为 0.0000 → 尺度感知舍入（常规量级行为不变）
+                "预测值": round_for_display(predictions),
+                "下限": round_for_display(predictions - conf_array),
+                "上限": round_for_display(predictions + conf_array),
             }
         )
 
@@ -630,7 +632,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             anomaly_rows.append(
                 {
                     "序号": idx,
-                    req.target_col: round(float(data.iloc[i]), 4),
+                    req.target_col: round_for_display(float(data.iloc[i])),
                     "IQR": "是" if iqr_mask.iloc[i] else "否",
                     "Z-Score": "是" if z_mask.iloc[i] else "否",
                     "IsoForest": "是" if iso_mask.iloc[i] else "否",
@@ -853,7 +855,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         anomaly_rows = []
         if mask.sum() > 0:
             for i, idx in enumerate(sub.index[mask]):
-                row_data = {"异常分数": round(float(scores[mask][i]), 4)}
+                row_data = {"异常分数": round_for_display(float(scores[mask][i]))}
                 for c in feature_cols:
                     row_data[c] = req.data.loc[idx, c]
                 anomaly_rows.append(row_data)

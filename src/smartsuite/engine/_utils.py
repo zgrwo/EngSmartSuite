@@ -86,6 +86,34 @@ def durbin_watson(residuals):
     return float(dw)
 
 
+def round_for_display(values, decimals: int = 4):
+    """表格显示舍入：常规量级按 decimals 位小数；微尺度数据改按有效数字。
+
+    固定 decimals 位小数对量级 < 0.5×10^-decimals 的数据会整组归零——
+    单位换算后的纳米/微应变测量值（~1e-10）在预测/异常表中全部显示
+    0.0000（审查 2026-09-05 新观察 O-1）。当组内最大绝对值低于该阈值时，
+    按组内最大值的量级统一取 decimals 位有效数字；常规量级的行为与
+    round(x, decimals) 逐位一致，既有表格显示不受影响。
+
+    Args:
+        values: 标量或数组（ndarray/Series/list，按位置转换）；NaN/Inf 原样保留
+        decimals: 常规量级的小数位（同时也是微尺度分支的有效数字位数）
+
+    Returns:
+        标量输入返回 float，数组输入返回 ndarray
+    """
+    scalar_input = np.isscalar(values)
+    arr = np.atleast_1d(np.asarray(values, dtype=float))
+    finite = arr[np.isfinite(arr)]
+    scale = float(np.max(np.abs(finite))) if finite.size else 0.0
+    if scale == 0.0 or scale >= 0.5 * 10.0 ** (-decimals):
+        out = np.round(arr, decimals)
+    else:
+        mag = int(np.floor(np.log10(scale)))
+        out = np.round(arr, max(decimals - 1 - mag, 0))
+    return float(out[0]) if scalar_input else out
+
+
 def _adjust_xlabels(ax, n_labels: int, fig=None):
     """自适应调整 X 轴刻度标签：根据标签数量选择旋转角度和字号。
 
