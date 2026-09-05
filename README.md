@@ -38,7 +38,7 @@ python run_server.py
 
 ## 模块速览
 
-> 完整签名、参数说明见 **[API 参考](rules/api-reference.md)**；每个函数的详细示例见 **[用户手册](rules/user-manual.md)**。
+> 完整签名、参数说明见 **[API 参考](docs/specification/api-reference.md)**；每个函数的详细示例见 **[用户手册](docs/user-manual/user-manual.md)**。
 
 | 模块 | 做什么 |
 |------|------|
@@ -54,7 +54,7 @@ python run_server.py
 | 异常/变点/趋势 | 异常检测、变点识别、趋势预测、离群共识 |
 | 探索性 | 箱线图、散点图、Bootstrap/中位数/比例置信区间 |
 
-> 模块能力以 [rules/api-reference.md](rules/api-reference.md)（41 个任务签名唯一信源）为准，上表仅为概览。
+> 模块能力以 [docs/specification/api-reference.md](docs/specification/api-reference.md)（41 个任务签名唯一信源）为准，上表仅为概览。
 
 ---
 
@@ -182,10 +182,10 @@ python run_server.py
 
 | 文档 | 角色 | 内容 |
 |------|------|------|
-| [API 参考](rules/api-reference.md) | 数字唯一信源 | 分析方法签名与参数说明（方法总数唯一锚点） |
-| [用户手册](rules/user-manual.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
-| [context.md](rules/context.md) | 术语表 | 所有领域术语唯一定义 |
-| [project-structure.md](rules/project-structure.md) | 结构地图 | 文件职责与层级关系 |
+| [API 参考](docs/specification/api-reference.md) | 数字唯一信源 | 分析方法签名与参数说明（方法总数唯一锚点） |
+| [用户手册](docs/user-manual/user-manual.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
+| [context.md](docs/governance/context.md) | 术语表 | 所有领域术语唯一定义 |
+| [project-structure.md](docs/governance/project-structure.md) | 结构地图 | 文件职责与层级关系 |
 | [AGENTS.md](AGENTS.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
 
 ---
@@ -198,7 +198,7 @@ python run_server.py
 |------|------|------|
 | `AGENTS.md` | AI 编程助手 | 项目宪法——架构、红线、编码准则、防幻觉铁律 |
 | `readme.md` | 人类用户 | 功能指南——安装、模块速览、使用模式（本文件） |
-| `rules/` | AI + 人类 | 规范文档——API 参考、用户手册、术语表、审查模板 |
+| `docs/` | AI + 人类 | 规范文档——API 参考、用户手册、术语表、ADR |
 | `skills/` | AI 编码 | 技能定义——语言陷阱、编码模式、重构守则 |
 
 **核心原则**：SSOT（信息只在一处定义）、Skill-first（修改代码前加载技能）、四条核心准则。

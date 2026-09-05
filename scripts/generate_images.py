@@ -1,10 +1,10 @@
 """图片自动生成脚本 — 从 Python 运行生成用户手册中的方法图片。
 
 用法：
-    python scripts/generate_images.py [--output-dir rules/images]
+    python scripts/generate_images.py [--output-dir docs/user-manual/images]
 
 产出：
-    rules/images/{method_name}_1.png — 每个分析方法的示例输出图
+    docs/user-manual/images/{method_name}_1.png — 每个分析方法的示例输出图
     （命名对齐手册约定：{method}_1.png 为第 1 张示例图）
 
 验收标准：全部方法图片全覆盖
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="生成方法示例图片")
-    parser.add_argument("--output-dir", default=str(ROOT / "rules" / "images"))
+    parser.add_argument("--output-dir", default=str(ROOT / "docs" / "user-manual" / "images"))
     args = parser.parse_args()
     failed = generate_images(Path(args.output_dir))
     sys.exit(1 if failed else 0)

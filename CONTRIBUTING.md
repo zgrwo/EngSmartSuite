@@ -21,8 +21,8 @@ pip install -e ".[dev,report]"
 □ 6. web/static/app.js — TASK_PARAMS 添加参数默认值
 □ 7. templates/ — 创建 YAML 模板
 □ 8. tests/ — 至少覆盖 correctness + invariants 两层
-□ 9. rules/api-reference.md — 更新 API 参考
-□ 10. rules/user-manual.md — 更新用户手册（五段式）
+□ 9. docs/specification/api-reference.md — 更新 API 参考
+□ 10. docs/user-manual/user-manual.md — 更新用户手册（五段式）
 □ 11. skills/analysis-decision-tree.md — 更新决策树（如引入新场景）
 ```
 

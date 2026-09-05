@@ -8,7 +8,7 @@
 * @zgrwo
 
 # 规范文档变更必须由文档负责人审查
-rules/ @zgrwo
+docs/ @zgrwo
 
 # CI/脚本变更建议由基础设施负责人审查
 .github/ @zgrwo

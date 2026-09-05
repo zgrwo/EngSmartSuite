@@ -117,22 +117,27 @@ EngSmartSuite/
 │       ├── test_verify_docs.py
 │       └── test_test_quality_guard.py
 │
-├── docs/                           # 附加文档（superpowers 技能等，不入包）
-├── rules/                          # 规范文档
-│   ├── api-reference.md            #   函数签名查阅（唯一信源，总数锚点）
-│   ├── user-manual.md              #   全方法操作指南
-│   ├── specification.md            #   项目规格文档
-│   ├── context.md                  #   术语表
-│   ├── falsy-pitfalls.md           #   Falsy 陷阱清单
-│   ├── sentinel-contract.md        #   哨兵契约 L1-L5 与 NaN/Inf 守卫
-│   ├── tooling-pitfalls.md         #   工具链陷阱清单
-│   ├── adr-template.md             #   ADR 模板
-│   ├── adr/                        #   架构决策记录
-│   ├── 0001-three-layer-architecture.md   #   ADR-001 三层架构
-│   ├── 0002-web-ui-replaces-excel-layer.md # ADR-002 Web UI 替代 Excel
-│   ├── documentation.md            #   文档职责
-│   ├── project-structure.md        #   本文件（目录树契约）
-│   └── images/                     #   示例图片
+├── docs/                           # 项目文档（规范文档 + ADR + 手册）
+│   ├── README.md                   #   文档分类导航
+│   ├── governance/                 #   治理与基础
+│   │   ├── context.md              #   术语表
+│   │   ├── documentation.md        #   文档职责
+│   │   ├── falsy-pitfalls.md       #   Falsy 陷阱清单
+│   │   ├── project-structure.md    #   本文件（目录树契约）
+│   │   ├── sentinel-contract.md    #   哨兵契约 L1-L5 与 NaN/Inf 守卫
+│   │   └── tooling-pitfalls.md     #   工具链陷阱清单
+│   ├── specification/              #   技术规格
+│   │   ├── api-reference.md        #   函数签名查阅（唯一信源，总数锚点）
+│   │   └── specification.md        #   项目规格文档
+│   ├── user-manual/                #   用户手册
+│   │   ├── user-manual.md          #   全方法操作指南
+│   │   └── images/                 #   示例图片
+│   └── adr/                        #   架构决策记录
+│       ├── adr-template.md         #   ADR 模板
+│       ├── 0001-three-layer-architecture.md   #   ADR-001 三层架构
+│       └── 0002-web-ui-replaces-excel-layer.md # ADR-002 Web UI 替代 Excel
+│
+├── logs/                           # 审查报告/运行产物（本地保留，不入库）
 │
 ├── skills/                         # AI Skill 定义
 │   ├── README.md                   #   技能目录说明
@@ -217,16 +222,12 @@ EngSmartSuite/
 │   └── git-hooks/                  #   本地 git hooks
 │       └── commit-msg
 │
-├── tools/                          # 工具目录
-│   └── .gitkeep
-│
 ├── run_smartsuite.bat              # 一键启动脚本（Windows）
 ├── run_smartsuite.sh               # 一键启动脚本（Linux/macOS）
 ├── run_server.py                   # Web UI 启动入口
 ├── setup_offline.bat               # 离线安装脚本（Windows）
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
 ├── pyproject.toml                  # 包配置 + ruff 规则
-├── CONTEXT.md                      # 领域术语
 ├── AGENTS.md                       # 项目宪法 / AI 行为准则
 ├── README.md                       # 用户入口
 ├── CONTRIBUTING.md                 # 贡献指南

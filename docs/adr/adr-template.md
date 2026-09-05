@@ -5,7 +5,7 @@
 
 ## 文件位置与编号规则
 
-- 存放于 `rules/adr/` 目录，文件名：`NNNN-简短描述.md`（编号 4 位递增，如 `0001-three-layer-architecture.md`）
+- 存放于 `docs/adr/` 目录，文件名：`NNNN-简短描述.md`（编号 4 位递增，如 `0001-three-layer-architecture.md`）
 - 编号全局唯一，不因决策被撤销而复用
 - 决策被推翻时：保留原 ADR，更新其「状态」为 `已废弃`，并在新 ADR 的「上下文」中引用
 

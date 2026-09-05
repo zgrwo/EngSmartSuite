@@ -67,7 +67,7 @@
 | 数值转换失败 | `float("nan")` / `math.nan` | `safe_float`（engine/_utils.py） |
 | None/缺失 | `""` 或 `None`（按列类型） | data_io 预处理跳过空值 |
 | 未知类型（L5） | `raise`（由入口转错误） | `AnalysisResult(status="error")` |
-| falsy 判断 | 用 `is not None` 而非 `if x:` | 见 rules/falsy-pitfalls.md |
+| falsy 判断 | 用 `is not None` 而非 `if x:` | 见 falsy-pitfalls.md |
 
 ## 快速自查命令
 
@@ -88,4 +88,4 @@ pytest tests/test_engine/test_edge_cases.py -q
 ## 维护规则
 
 - 本契约变更必须同步 `skills/smartsuite-dev.md` 的陷阱清单与修复模板
-- 新踩哨兵/守卫坑 → 追加到 `AGENTS.md`「历史经验」并登记 `rules/tooling-pitfalls.md`（如属工具链问题）
+- 新踩哨兵/守卫坑 → 追加到 `AGENTS.md`「历史经验」并登记 `tooling-pitfalls.md`（如属工具链问题）

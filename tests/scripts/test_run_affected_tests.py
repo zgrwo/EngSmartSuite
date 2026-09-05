@@ -107,7 +107,7 @@ def test_template_yaml_maps_to_services_and_workflows():
 
 
 def test_docs_and_config_are_skipped():
-    assert map_source_to_tests("rules/api-reference.md") == ("skip", [])
+    assert map_source_to_tests("docs/specification/api-reference.md") == ("skip", [])
     assert map_source_to_tests("AGENTS.md") == ("skip", [])
     assert map_source_to_tests(".github/workflows/ci.yml") == ("skip", [])
     assert map_source_to_tests("README.md") == ("skip", [])

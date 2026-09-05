@@ -66,7 +66,6 @@ _SRC_TEST_MAP: list[tuple[str, tuple[str, ...]]] = [
 
 # 免测路径前缀（文档/配置/CI，SKIP）
 _SKIP_PREFIXES = (
-    "rules/",
     "skills/",
     "docs/",
     ".github/",

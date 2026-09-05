@@ -7,10 +7,10 @@
 | 文档 | 受众 | 核心问题 | 维护触发 |
 |------|------|----------|----------|
 | `AGENTS.md` | AI 助手 | "项目怎么组织？红线在哪？" | 架构/红线/流程变更 |
-| `rules/context.md` | AI + 新人 | "术语什么意思？" | 新概念引入 |
-| `rules/api-reference.md` | 开发者/AI | "函数签名是什么？"（**签名唯一信源**） | 任何 Public 接口变更 |
-| `rules/user-manual.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
-| `rules/project-structure.md` | 开发者/AI | "代码在哪？"（**结构唯一信源**） | 文件新增/删除/移动 |
+| `context.md` | AI + 新人 | "术语什么意思？" | 新概念引入 |
+| `../specification/api-reference.md` | 开发者/AI | "函数签名是什么？"（**签名唯一信源**） | 任何 Public 接口变更 |
+| `../user-manual/user-manual.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
+| `project-structure.md` | 开发者/AI | "代码在哪？"（**结构唯一信源**） | 文件新增/删除/移动 |
 | `skills/*.md` | AI 编码 | "Python 有什么陷阱？" | 发现新陷阱 |
 
 ## 禁止事项
@@ -33,8 +33,8 @@
   → ⑥ web/static/app.js → TASK_PARAMS
   → ⑦ templates/ 创建 YAML 模板
   → ⑧ 测试：test_correctness + test_invariants
-  → ⑨ rules/api-reference.md 更新
-  → ⑩ rules/user-manual.md 更新（五段式）
+  → ⑨ specification/api-reference.md 更新
+  → ⑩ user-manual/user-manual.md 更新（五段式）
   → ⑪ skill.md 决策树更新（如引入新场景）
 ```
 

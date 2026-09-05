@@ -23,4 +23,4 @@
 | `verification-before-completion/` | 声称工作完成前：运行验证命令，证据先行 |
 | `subagent-driven-development/` | 用计划驱动多子代理执行大任务时 |
 
-> 与 `rules/tooling-pitfalls.md` 的分工：本目录存技能（怎么做），陷阱清单存工具坑（什么别做）。
+> 与 `docs/governance/tooling-pitfalls.md` 的分工：本目录存技能（怎么做），陷阱清单存工具坑（什么别做）。

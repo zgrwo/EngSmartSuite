@@ -8,7 +8,7 @@
 - **项目名**：EngSmartSuite (SmartSuite)
 - **GitHub**：https://github.com/zgrwo/EngSmartSuite
 - **语言**：Python >= 3.10（文档中文）
-- **数字唯一基准**：`rules/api-reference.md` — 函数签名总数以此为准（方法总数仅在此定义）
+- **数字唯一基准**：`docs/specification/api-reference.md` — 函数签名总数以此为准（方法总数仅在此定义）
 - **SSOT**：每个事实只在一处定义，其余仅链接引用
 
 ## 四条核心准则
@@ -80,26 +80,24 @@ smartsuite/cli.py      ← ⑤ CLI 入口：依赖 services/（第五入口）�
 
 ## 仓库目录树
 
-> 路由地图：所有文件路径均以此为基准。详细结构见 [project-structure.md](rules/project-structure.md)。
+> 路由地图：所有文件路径均以此为基准。详细结构见 [project-structure.md](docs/governance/project-structure.md)。
 
 ```
 EngSmartSuite/
 ├── .github/                          # GitHub 配置（工作流/Issue 模板/CODEOWNERS）
-├── docs/                             # 附加文档（superpowers 技能等，不入包）
+├── docs/                             # 项目文档（governance / specification / user-manual / adr）
+├── logs/                             # 审查报告/运行产物（本地保留，不入库）
 ├── src/                              # 主包（core / engine / services / web）
 ├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
-├── rules/                            # 规范文档（含哨兵契约/ADR 模板/陷阱清单）
 ├── skills/                           # Skill 定义（领域 5 + 过程 6）
 ├── templates/                        # YAML 分析模板 (44 个: 43 任务 + 1 工作流指南)
 ├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）
-├── tools/                            # 工具目录
 ├── run_smartsuite.bat              # 一键启动脚本（Windows）
 ├── run_smartsuite.sh               # 一键启动脚本（Linux/macOS）
 ├── run_server.py                   # Web UI 启动入口
 ├── setup_offline.bat               # 离线安装脚本（Windows）
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
 ├── pyproject.toml                    # 包配置 + ruff 规则
-├── CONTEXT.md                        # 领域术语
 ├── AGENTS.md                         # 本文件
 ├── README.md                         # 用户向功能指南
 ├── CONTRIBUTING.md                   # 贡献指南
@@ -128,7 +126,7 @@ EngSmartSuite/
 - 无裸 `except:` 或 `except Exception:` 不记录日志
 - 错误信息使用中文工艺术语，不暴露 traceback
 - 优雅降级：输出失败退到更可靠格式
-- 退化输入走哨兵值（NaN/""），不静默传播 —— 见 [sentinel-contract.md](rules/sentinel-contract.md)
+- 退化输入走哨兵值（NaN/""），不静默传播 —— 见 [sentinel-contract.md](docs/governance/sentinel-contract.md)
 
 ### 3. 文档同步
 
@@ -240,11 +238,11 @@ EngSmartSuite/
 | 文档 | 角色 |
 | :--- | :--- |
 | [README.md](README.md) | 用户入口、模块速览、使用模式 |
-| [api-reference.md](rules/api-reference.md) | 签名唯一信源 |
-| [user-manual.md](rules/user-manual.md) | 用户手册 |
-| [context.md](rules/context.md) | 术语表 |
-| [project-structure.md](rules/project-structure.md) | 结构地图 |
-| [documentation.md](rules/documentation.md) | 文档职责 |
-| [sentinel-contract.md](rules/sentinel-contract.md) | 哨兵契约（L1-L5 + NaN/Inf 守卫清单） |
-| [adr-template.md](rules/adr-template.md) | ADR 模板（重大架构决策记录） |
-| [tooling-pitfalls.md](rules/tooling-pitfalls.md) | 工具链陷阱清单（PowerShell/git/CI） |
+| [api-reference.md](docs/specification/api-reference.md) | 签名唯一信源 |
+| [user-manual.md](docs/user-manual/user-manual.md) | 用户手册 |
+| [context.md](docs/governance/context.md) | 术语表 |
+| [project-structure.md](docs/governance/project-structure.md) | 结构地图 |
+| [documentation.md](docs/governance/documentation.md) | 文档职责 |
+| [sentinel-contract.md](docs/governance/sentinel-contract.md) | 哨兵契约（L1-L5 + NaN/Inf 守卫清单） |
+| [adr-template.md](docs/adr/adr-template.md) | ADR 模板（重大架构决策记录） |
+| [tooling-pitfalls.md](docs/governance/tooling-pitfalls.md) | 工具链陷阱清单（PowerShell/git/CI） |

@@ -133,7 +133,9 @@ def test_all_tasks_registered_count():
     import re as _re
 
     _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(_root, "rules", "api-reference.md"), encoding="utf-8") as _fh:
+    with open(
+        os.path.join(_root, "docs", "specification", "api-reference.md"), encoding="utf-8"
+    ) as _fh:
         _doc = _fh.read()
     doc_keys = set(_re.findall(r"^- \*\*Task Key\*\*: `([a-z_0-9]+)`", _doc, _re.M))
     missing = set(TASK_REGISTRY) - doc_keys

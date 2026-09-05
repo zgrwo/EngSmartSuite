@@ -36,7 +36,7 @@
 | # | 陷阱 | 正确做法 |
 |---|------|----------|
 | 14 | **`Path.rglob` 在文件上不迭代** → 扫描脚本对单文件路径静默输出"无发现"（门禁说谎） | 扫描入口先校验 `scope.is_dir()`，文件路径显式报错 |
-| 15 | **`check_undeclared` 只查根级** → 子目录新增 `rules/*.md` 等静默通过 | 对 SSOT 关键子目录（rules/skills）逐文件比对目录树声明（verify_docs.py --strict） |
+| 15 | **`check_undeclared` 只查根级** → 子目录新增 `docs/*.md` 等静默通过 | 对 SSOT 关键子目录（docs/skills）逐文件比对目录树声明（verify_docs.py --strict） |
 | 16 | **类型注解安全判定用子串匹配**（`"list" in hint.lower()`）→ `Optional[list[float]]` 被误判 | 解析注解 AST 取顶层类型构造器，`X \| None` 联合视为 Optional |
 | 17 | **工具命名映射未归一化连字符/下划线**（`validate-commit-msg.sh` vs `test_validate_commit_msg.py` 子串匹配失效）→ 门禁谎报"缺测" | 比较前统一分隔符：`stem.replace('-', '_')` 再子串匹配（见 run_affected_tests.py） |
 | 18 | **ruff per-file ignore 无理由注释**（来源：本仓 pyproject.toml 历史教训）→ 后人 copy-paste 忽略规则，无上下文 | 每条 per-file-ignores/noqa 必须带中文理由注释；新增规则类别需先确认非"覆盖问题"而是"约定豁免" |

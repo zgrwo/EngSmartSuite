@@ -19,9 +19,11 @@ TREE_OK = """\
 Mini/
 ├── src/
 ├── tests/
-├── rules/
-│   ├── api-reference.md
-│   └── project-structure.md
+├── docs/
+│   ├── specification/
+│   │   └── api-reference.md
+│   └── governance/
+│       └── project-structure.md
 ├── skills/
 └── README.md
 ```
@@ -32,7 +34,7 @@ TREE_AGENTS_OK = """\
 Mini/
 ├── src/
 ├── tests/
-├── rules/
+├── docs/
 ├── skills/
 └── README.md
 ```
@@ -42,15 +44,18 @@ Mini/
 def build_repo(tmp_path: Path) -> Path:
     """构造基础迷你仓库（目录树一致、无断链、无语义问题）。"""
     root = tmp_path / "repo"
-    for d in ("src", "tests", "rules", "skills"):
+    for d in ("src", "tests", "docs", "skills"):
         (root / d).mkdir(parents=True)
-    (root / "rules" / "project-structure.md").write_text(TREE_OK, encoding="utf-8")
+    (root / "docs" / "specification").mkdir()
+    (root / "docs" / "governance").mkdir()
+    (root / "docs" / "governance" / "project-structure.md").write_text(TREE_OK, encoding="utf-8")
     (root / "AGENTS.md").write_text(TREE_AGENTS_OK, encoding="utf-8")
-    (root / "rules" / "api-reference.md").write_text(
+    (root / "docs" / "specification" / "api-reference.md").write_text(
         "# API\n\n见 [README](README.md)\n", encoding="utf-8"
     )
     (root / "README.md").write_text(
-        "# Mini\n\n参考 [rules/api-reference.md](rules/api-reference.md)\n", encoding="utf-8"
+        "# Mini\n\n参考 [docs/specification/api-reference.md](docs/specification/api-reference.md)\n",
+        encoding="utf-8",
     )
     (root / "scripts").mkdir()
     (root / "src" / "ok.py").write_text("def f():\n    return 1\n", encoding="utf-8")
@@ -64,9 +69,9 @@ def test_check_links_reports_broken_and_passes_ok(tmp_path):
     root = build_repo(tmp_path)
     doc_files = ["README.md"]
     assert verify_docs.check_links(root, doc_files) == []
-    (root / "README.md").write_text("[坏链](rules/ghost.md)\n", encoding="utf-8")
+    (root / "README.md").write_text("[坏链](docs/specification/ghost.md)\n", encoding="utf-8")
     problems = verify_docs.check_links(root, doc_files)
-    assert any("rules/ghost.md" in p for p in problems)
+    assert any("docs/specification/ghost.md" in p for p in problems)
 
 
 def test_check_links_skips_http_and_anchor(tmp_path):
@@ -98,7 +103,7 @@ def test_check_backtick_paths(tmp_path):
 def test_check_dirs_reports_missing_declared_dir(tmp_path):
     root = build_repo(tmp_path)
     assert verify_docs.check_dirs(root) == []
-    (root / "rules" / "project-structure.md").write_text(
+    (root / "docs" / "governance" / "project-structure.md").write_text(
         TREE_OK.replace("└── README.md", "├── ghostdir/\n└── README.md"), encoding="utf-8"
     )
     problems = verify_docs.check_dirs(root)
@@ -112,7 +117,7 @@ def test_check_agents_tree_reports_drift(tmp_path):
     root = build_repo(tmp_path)
     assert verify_docs.check_agents_tree(root) == []
     (root / "AGENTS.md").write_text(
-        "```\nMini/\n├── src/\n├── rules/\n└── README.md\n```\n", encoding="utf-8"
+        "```\nMini/\n├── src/\n├── docs/\n└── README.md\n```\n", encoding="utf-8"
     )
     problems = verify_docs.check_agents_tree(root)
     assert any("tests" in p for p in problems)
@@ -171,7 +176,7 @@ def test_undeclared_root_file_strict_only(tmp_path):
 
 def test_subdir_undeclared_strict(tmp_path):
     root = build_repo(tmp_path)
-    (root / "rules" / "extra.md").write_text("x", encoding="utf-8")
+    (root / "docs" / "extra.md").write_text("x", encoding="utf-8")
     problems = verify_docs.check_subdir_undeclared(root, strict=True)
-    assert any("rules/extra.md" in p for p in problems)
+    assert any("docs/extra.md" in p for p in problems)
     assert verify_docs.check_subdir_undeclared(root, strict=False) == []

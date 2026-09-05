@@ -6,8 +6,8 @@ on:
       - "src/smartsuite/**"
       - "scripts/**"
       - "tests/**"
-      - "rules/user-manual.md"
-      - "rules/api-reference.md"
+      - "docs/user-manual/user-manual.md"
+      - "docs/specification/api-reference.md"
   workflow_dispatch:
 
 # 最小权限：只读仓库内容；pull-requests: read 供 dependency-review-action 读取 PR 元数据

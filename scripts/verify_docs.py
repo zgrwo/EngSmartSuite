@@ -9,7 +9,7 @@ verify_docs.py — 文档一致性验证（源自 VibeCodingTemplate verify-docs
   4. AGENTS.md 与 project-structure.md 的目录树顶层条目集合一致（双目录树防漂移）
   5. 语义交叉检查：裸 except 捕获 / 文档 TODO/FIXME 残留 / verify_* 脚本裸 input 调用
   6. 版本一致性门禁：.release-please-manifest.json == pyproject.toml == CHANGELOG 最新发布
-  7. （--strict）根级未声明文件/目录 + rules/、skills/、tests/、scripts/、templates/
+  7. （--strict）根级未声明文件/目录 + docs/、skills/、tests/、scripts/、templates/
      子目录直接文件未登记（.gitignore 忽略的本地生成产物豁免）
 
 规则：
@@ -49,44 +49,42 @@ EXCLUDED_DIRS = {
     ".ruff_cache",
     ".venv",
     "build",
-    "docs",  # 本地审查产物（.gitignore 忽略）
     "logs",
     "packages",  # 离线安装缓存（.gitignore 忽略）
     "__pycache__",
 }
 
 # 需核对"目录内文件已登记"的关键子目录（目录树即契约）
-# 审查 2026-08-19 第二轮 #5：从 rules/skills 扩展至 tests/、scripts/、templates/
-_SUBDIR_CHECK = ("rules", "skills", "tests", "scripts", "templates")
+# 审查 2026-08-19 第二轮 #5：从 docs/skills 扩展至 tests/、scripts/、templates/
+_SUBDIR_CHECK = ("docs", "skills", "tests", "scripts", "templates")
 
 # 反引号路径检查：仅检查以已知根目录前缀开头的引用（语义明确指向仓库内路径）
 _KNOWN_ROOT_PREFIXES = (
     "scripts/",
-    "rules/",
+    "docs/",
     "skills/",
     "templates/",
     ".github/",
     "tests/",
     "src/",
-    "tools/",
 )
 _BACKTICK_SKIP_MARKERS = ("xxx", "nnn", "{{", "{", "}", "<", ">", "*", "...")
-_BACKTICK_SKIP_PREFIXES = (".claude/", ".codegraph/", ".qoder/")
+_BACKTICK_SKIP_PREFIXES = (".claude/", ".codegraph/", ".qoder/", "docs/superpowers/")
 _BACKTICK_SKIP_DOCS = {"CHANGELOG.md"}  # 历史记录，引用已删文件属正常
 
 
 def collect_doc_files(root: Path) -> list[str]:
-    """动态收集需要检查链接的文档（根 *.md + rules/ + skills/ + scripts/README）。
+    """动态收集需要检查链接的文档（根 *.md + docs/ + skills/ + scripts/README）。
 
     用 glob 而非硬编码列表：新增规则/技能文档自动纳入检查，免维护。
     """
     docs = sorted(p.relative_to(root).as_posix() for p in root.glob("*.md"))
-    for sub in ("rules", "skills"):
-        docs.extend(sorted(p.relative_to(root).as_posix() for p in (root / sub).glob("*.md")))
+    docs.extend(sorted(p.relative_to(root).as_posix() for p in (root / "docs").rglob("*.md")))
+    docs.extend(sorted(p.relative_to(root).as_posix() for p in (root / "skills").glob("*.md")))
     readme = root / "scripts" / "README.md"
     if readme.exists():
         docs.append("scripts/README.md")
-    return docs
+    return [d for d in docs if not d.startswith("docs/superpowers/")]
 
 
 # ── 目录树解析（project-structure.md 即契约）──────────────────
@@ -114,7 +112,7 @@ def _parse_top_entries(root: Path, doc: str) -> list[str]:
 
 def _parse_nested_files(root: Path) -> dict[str, set[str]]:
     """解析目录树中顶层目录下的直接文件条目（供子目录未登记检查）。"""
-    path = root / "rules" / "project-structure.md"
+    path = root / "docs" / "governance" / "project-structure.md"
     result: dict[str, set[str]] = {}
     current: str | None = None
     in_block = False
@@ -201,7 +199,7 @@ def check_backtick_paths(root: Path, doc_files: list[str]) -> list[str]:
 
 def check_dirs(root: Path) -> list[str]:
     problems: list[str] = []
-    declared = [e for e in _parse_top_entries(root, "rules/project-structure.md")]
+    declared = [e for e in _parse_top_entries(root, "docs/governance/project-structure.md")]
     if not declared:
         problems.append(
             "[配置错误] 无法从 project-structure.md 目录树解析顶层条目（目录树格式异常？）"
@@ -220,7 +218,7 @@ def check_dirs(root: Path) -> list[str]:
 
 def check_agents_tree(root: Path) -> list[str]:
     problems: list[str] = []
-    ps_entries = set(_parse_top_entries(root, "rules/project-structure.md"))
+    ps_entries = set(_parse_top_entries(root, "docs/governance/project-structure.md"))
     # 文件名统一为大写 AGENTS.md（与 AI 代理惯例一致）；Linux 大小写敏感，
     # 此处路径必须与实际文件名精确匹配，否则双目录树检查恒失败
     agents_entries = set(_parse_top_entries(root, "AGENTS.md"))
@@ -383,7 +381,7 @@ def check_undeclared(root: Path, strict: bool) -> list[str]:
     if not strict:
         return []
     problems: list[str] = []
-    declared = set(_parse_top_entries(root, "rules/project-structure.md"))
+    declared = set(_parse_top_entries(root, "docs/governance/project-structure.md"))
     if not declared:
         problems.append("[配置错误] 无法从 project-structure.md 解析顶层条目（目录树格式异常？）")
         return problems

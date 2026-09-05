@@ -18,7 +18,7 @@
 | 脚本 | 用途 |
 |------|------|
 | `generate_test_data.py` | 生成通用测试数据集 |
-| `generate_images.py` | 生成用户手册示例图片（rules/images/） |
+| `generate_images.py` | 生成用户手册示例图片（docs/user-manual/images/） |
 
 ## 依赖管理
 

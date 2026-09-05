@@ -1,7 +1,7 @@
 # SmartSuite API Reference
 
 > 全部 41 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
-> 开发规范 → `AGENTS.md` | 开发陷阱 → `skills/smartsuite-dev.md` | 场景选择 → `skills/analysis-decision-tree.md` | 术语 → `CONTEXT.md`
+> 开发规范 → `AGENTS.md` | 开发陷阱 → `skills/smartsuite-dev.md` | 场景选择 → `skills/analysis-decision-tree.md` | 术语 → `docs/governance/context.md`
 
 ## 数据契约
 

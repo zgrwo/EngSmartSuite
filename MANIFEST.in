@@ -1,5 +1,9 @@
 graft templates
-graft rules
+include docs/README.md
+graft docs/adr
+graft docs/governance
+graft docs/specification
+graft docs/user-manual
 include *.md
 include *.bat
 include *.sh

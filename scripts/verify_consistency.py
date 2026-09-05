@@ -78,7 +78,7 @@ def _imp_apiref_task_keys():
     import re as _re
 
     global _apiref_task_keys
-    _path = os.path.join(ROOT, "rules", "api-reference.md")
+    _path = os.path.join(ROOT, "docs", "specification", "api-reference.md")
     with open(_path, encoding="utf-8") as _fh:
         _apiref_task_keys = set(
             _re.findall(r"^- \*\*Task Key\*\*: `([a-z_0-9]+)`", _fh.read(), _re.M)

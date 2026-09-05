@@ -51,9 +51,8 @@ smartsuite_report.html
 tests/results.pptx
 tests/demo_output/
 
-# 代码审查产物（本地保留，不推送）
-docs/code-review-report-*.md
-docs/known-issues.md
+# 代码审查产物（本地保留，不推送，见 logs/reports/）
+logs/reports/*.md
 
 # 审查/临时产物（第二轮 #11：审查轮次的临时脚本与探测文件）
 _rev_*.py

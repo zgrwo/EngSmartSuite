@@ -1,4 +1,4 @@
-"""Cross-check key numerical values from rules/user-manual.md against actual source code output.
+"""Cross-check key numerical values from docs/user-manual/user-manual.md against actual source code output.
 
 Robust version: uses positional column access and detection to avoid encoding issues.
 """
