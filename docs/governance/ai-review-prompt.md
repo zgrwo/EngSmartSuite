@@ -72,7 +72,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 → 测试（correctness+invariants）→ api-reference.md → user-manual.md（五段式）→ 决策树
 ```
 
-**前端列约束三集合**（`web/static/app.js` 约 501-510 行，引擎函数每次改动后必核对，陷阱 2）：
+**前端列约束三集合**（`web/static/app.js` 的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 常量——行号易漂移，按常量名定位；引擎函数每次改动后必核对，陷阱 2）：
 - `_noTargetNeeded`：完全无需 Y 列（vif/cohens_kappa/cronbach_alpha/power_analysis/multi_objective/doe_design…）
 - `_yOnlyTasks`：仅需 Y 列（process_capability/trend_forecast/distribution_summary/proportion_ci/spc_cusum…）
 - `_xOptionalTasks`：X 列可选回退（spc_xbar/spc_attribute/normality_check/anomaly_detect…）
@@ -99,7 +99,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 ```
 
 - 数据流转含 `services/data_io.preprocess_data`（**返回多个值的元组解包——历史的 4+ 解包错误**，改动必须核对全部调用方）。
-- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率基线 ~75%（隐藏性门槛：CI `--cov-fail-under=70`）；测试质量守卫基线 WARN ≤ 29。
+- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率以当轮实测为准（2026-09-05 实测 84%；隐藏性门槛：CI `--cov-fail-under=70`）；测试质量守卫基线 WARN ≤ 29（quality.yml `--max-warn 29`）。
 
 ### 3.6 治理红线与历史陷阱速查
 
@@ -111,7 +111,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.x）；CI 矩阵 3.10–3.13 × 3 OS |
 
 **高频复发模式**（逐条做被动排查，历史见 [AGENTS.md](../../AGENTS.md) 历史经验表）：
-① **falsy 陷阱**（`if value:` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）。
+① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）。
 
 **smartsuite-dev 技能 7 大陷阱速查**（详见 [smartsuite-dev.md](../../skills/smartsuite-dev.md)）：
 1. PALETTE 嵌套键错误（`anomaly` 无 `secondary`；访问即 KeyError 被 orchestrator 误翻译成"缺列"）
@@ -140,6 +140,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 2. 触发流程：本次变更会触发哪些 GitHub Actions（见 4.4）、各 job 的结果与失败日志。
 3. 基线状态：HEAD、版本、最新 `v*` tag、工作区是否干净。
 4. 发版拓扑（**仅发版前全量**）：远端 `refs/heads/main` 实际 HEAD、远端已发布 `v*` tag 清单、本地 HEAD 与远端 main 的祖先关系（是否分叉）。本地 `origin/*` 引用已知容易过期，须以 `git ls-remote` / 仓库外临时克隆为准（见 4.2）。
+5. **哈希口径警告**：报告引用的 commit 哈希须标注基准与日期；rebase 后旧哈希全部失效（2026-09-05 rebase 后 4400124→1c48bcd，旧报告哈希均为 rebase 前口径），不得用旧哈希做祖先/追溯判断。
 
 ### 4.2 必跑基线（按变更类型裁剪，结论必须引用实测输出）
 
@@ -153,7 +154,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | 脚本/门禁 | `pytest tests/scripts/ -q`（治理脚本自测）+ 负向注入验证（见 6.4） |
 | 文档/发版 | `python scripts/verify_docs.py --strict` + `python scripts/falsy_audit.py` + 版本链核对（pyproject/CHANGELOG/manifest） + **远端拓扑核验（发版前全量）**：`git ls-remote origin refs/heads/main 'refs/tags/v*'` + 仓库外临时克隆判祖先（见「4.2 附注」） |
 
-> **4.2 附注 · 远端拓扑核验**：本地 `origin/*` 引用会过期（2026-09-05 实测 `origin/main` 停在 v1.2.3 的父提交），`git fetch` 在只读审查中不应污染引用——改用 `git ls-remote origin` 取远端真值，再于仓库外临时目录 `git clone --no-checkout --filter=blob:none` 一次，把本地 HEAD 作为额外 remote 注入后 `git merge-base --is-ancestor` 判祖先；分叉（本地 HEAD ≠ 远端 main 祖先）即发行阻塞项。`verify_docs.py` 不校验远端 tag 与拓扑，该步骤是发版前全量的**唯一**版本链守卫。
+> **4.2 附注 · 远端拓扑核验**：本地 `origin/*` 引用会过期（2026-09-05 实测 `origin/main` 停在 v1.2.3 的父提交），`git fetch` 在只读审查中不应污染引用——改用 `git ls-remote origin` 取远端真值，再于仓库外临时目录 `git clone --no-checkout --filter=blob:none` 一次，把本地 HEAD 作为额外 remote 注入后 `git merge-base --is-ancestor` 判祖先；分叉（本地 HEAD ≠ 远端 main 祖先）即发行阻塞项。`verify_docs.py` 只校验**本地** tag（2026-09-05 E1 起 `check_git_tag_version`，CI shallow clone 无 tag 自动跳过），**不**校验远端 tag 与拓扑；远端拓扑核验是发版前全量的**唯一**远端版本链守卫，必须按上法执行。
 
 > 若环境问题导致某步无法执行（如 CI 外缺 CJK 字体影响图表渲染），在报告中**明确声明未执行的步骤**，不挪用旧结论。
 
@@ -180,7 +181,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 | 流程 | 触发 | 审查要点 |
 | :--- | :--- | :--- |
-| [ci.yml `quick`](../../.github/workflows/ci.yml) | push main / PR / dispatch | Conventional Commits（PR，逐 commit 校验）、模块导入（engine 导出数 + TASK_REGISTRY 数）、ruff lint+format、引擎/服务/脚本/集成 pytest、`verify_consistency --skip-pytest`（41 任务冒烟）、`verify_manual_claims`（PR 即拦手册数值漂移）。核对：**失败是否真由变更引起**；路径过滤（`docs/**`、`skills/**` 等）是否漏掉了实际上会影响结果的文件。 |
+| [ci.yml `quick`](../../.github/workflows/ci.yml) | push main / PR / dispatch | Conventional Commits（PR，逐 commit 校验）、模块导入（engine 导出数 + TASK_REGISTRY 数）、ruff lint+format、引擎/服务/脚本/集成 pytest、`verify_consistency --skip-pytest`（任务冒烟，数量当轮实测——2026-09-05 为 41）、`verify_manual_claims`（PR 即拦手册数值漂移）。核对：**失败是否真由变更引起**；路径过滤（`docs/**`、`skills/**` 等）是否漏掉了实际上会影响结果的文件。 |
 | [ci.yml `e2e`](../../.github/workflows/ci.yml) | Push/PR | 服务器 30 次探测（失败即红），`tests/test_web_e2e.py` 全部方法；Linux 需 CJK 字体。 |
 | [ci.yml `full`](../../.github/workflows/ci.yml) | main push / dispatch | 矩阵 3 OS × Python 3.10/3.11/3.12/3.13（部分排除），`pytest tests/ -q` + `verify_consistency`（完整嵌套 pytest）。核对 Windows junction `--basetemp` 处理。 |
 | [ci.yml `quality`](../../.github/workflows/ci.yml) | main push / dispatch | 覆盖率 fail-under=70、vulture（过滤 Pydantic `cls` 误报）、pip-audit。 |
@@ -206,7 +207,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 ### 维度 B：统计算法（Algorithm）
 
-- B1 **对标语义**：与 scipy/statsmodels/numpy 的**精确定义**一致（ddof、bias、Fisher、R7 分位数、box-cox lambda、置信水平、多重比较校正），禁用隐式默认（历史 bug：ZSCORE ddof、截距默认、d2\* 表索引口径——**注意"d2\* 常数表倒置"已被 2026-09-05 审查否证**，真因是 `_d2_star` 列索引用了 `n_obs` 而非操作员数，见「3.7 已否证历史结论」）。
+- B1 **对标语义**：与 scipy/statsmodels/numpy 的**精确定义**一致（ddof、bias、Fisher、R7 分位数、box-cox lambda、置信水平、多重比较校正），禁用隐式默认；**实现口径与主流替代不同但可辩护处，必须已在 api-reference/手册注明**（formula-audit 9 项约定先例：McNemar 混合策略、Jonckheere 双侧 p、2×2 Yates+Cramér's V、doe 单因子 t、multi_objective 加权算术平均、robust Huber、Hedges g 更名等，2026-09-05）。（历史 bug：ZSCORE ddof、截距默认、d2\* 表索引口径——**注意"d2\* 常数表倒置"已被 2026-09-05 审查否证**，真因是 `_d2_star` 列索引用了 `n_obs` 而非操作员数，见「3.7 已否证历史结论」）。
 - B2 算法选型：回归用稳定分解（QR/SVD），避免条件数平方的数值不稳定路径；pandas 链式 `.sum().sum()`；statsmodels 参数用 `np.asarray` 不依赖 `.values`。
 - B3 边界条件：空数据/单行/常量列/全 NaN/共线列/因子水平 n 与 p 相邻区间/秩亏（四层防线③必覆盖）。
 - B4 组合与维度：DOE 设计生成、因子与水平组合在**分配数组前**检查上限，防组合爆炸；分组子组（subgroup_col）存在性前置校验。
@@ -214,7 +215,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 ### 维度 C：代码实现（Implementation）
 
-- C1 参数传递（专项见 6.2）：`req.params.get(key, default)` 对 0/False/空串的 falsy 语义；`(ValueError, TypeError)` 捕获的 float 防护三件套（USL/LSL/Target 等）。
+- C1 参数传递（专项见 6.2）：`req.params.get(key, default)` 对 0/False/空串的 falsy 语义；`(ValueError, TypeError)` 捕获的 float 防护三件套（USL/LSL/Target 等）；**float 成功但非有限（`"inf"`/`"nan"`）必须 `np.isfinite` 显式拒绝**（历史：capability 规格限 `usl="inf"` 静默产出 `cp=inf`、`lsl="nan"` 产出 `cpk=42.43`，2026-09-05 C1；正确样板 `reliability.py:280`）。
 - C2 错误链：引擎内部返回 `AnalysisResult(status="error", messages=[中文])`，不依赖 orchestrator 翻译表乱译（陷阱 5）；**裸 `except:` / `except Exception` 不记录日志必须为 0**（verify_docs 检查强制）。
 - C3 数据面：DataFrame 空列/无目标列/列名不存在 → 前置校验并返回中文错误；`preprocess_data` 解包数核对；安全读写路径。
 - C4 性能：无不必要的 DataFrame 级复制放大；大 n（>5000）路径显式测试；循环内调用引擎函数（主循环复用）。
@@ -222,11 +223,11 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 ### 维度 D：数值与哨兵（Numerical，专项）
 
-- D1 **三路径守卫**：NaN / +Inf / −Inf / None 每一条都要显式处理；守卫不能只修一个分支放走另外两个（历史：NaN 旁未试 Inf）。
+- D1 **四路径守卫**：NaN / +Inf / −Inf / None 每一条都要显式处理；**`float()` 成功但结果为非有限（字符串 `"inf"`/`"nan"`）必须 `np.isfinite` 显式拒绝**（历史：capability 规格限，2026-09-05 C1）；守卫不能只修一个分支放走另外两个（历史：NaN 旁未试 Inf）。
 - D2 **判据同尺度**：`grep -rn "1e-\|< 1e" src/` 逐条核对——任何"与数据量级无关的常数阈值"都是红旗；**绝对阈值误判小量纲**是历史 P0 类（ppm/ppb 数据）。常量判据用精确零，对称判据用相对式。
-- D3 **falsy 陷阱**：`if value:` / `if x:` 对 0/False/空串全库审计（`scripts/falsy_audit.py`）；参数默认值取用走 `is not None`。
+- D3 **falsy 陷阱**：`if value:` / `if x:` 与 **`params.get(key) or default`** 对 0/False/空串全库审计（`scripts/falsy_audit.py`；`or default` 变体历史：doe_opt `n_runs=0` 被静默替换为 `2**k`，2026-09-05 M-4）；参数默认值取用走 `is not None`。
 - D4 **溢出与取消**：浮点求和溢出/灾难性抵消（两遍减法 → 单遍中心化）；方差稳定算法。
-- D5 **输出保洁**：结果表格/图内数据无 Inf 渗漏；中间 NaN 不吞没、最终传播为 NaN；`np.isfinite` 断言。
+- D5 **输出保洁**：结果表格/图内数据无 Inf 渗漏；中间 NaN 不吞没、最终传播为 NaN；`np.isfinite` 断言；**固定位小数展示不得吞没有效小数值**（`round(x,4)` 使微尺度整表显示 `0.0000`，历史：detection 表，2026-09-05 O-1，已修共享工具 `round_for_display`）。
 - D6 **浮点比较**：测试断言用相对误差（tolerance），与引擎实际精度对齐（交叉 1e-9~1e-15 量级），不写死硬编码精确值做差。
 
 ### 维度 E：结果与验证体系（Results）
@@ -234,22 +235,22 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 - E1 **自校验零容忍**（专项见 6.1）：期望值不得来自被测实现本身；`verify_manual_claims` 手册 CLAIM 值必须与引擎输出独立交叉（与 scipy 级独立参考对账）。
 - E2 **通道分离**：`verify_consistency` 的 status=ok 冒烟 ≠ 数值正确（它只证明不崩溃）；四层防线的"数值正确"必须由已知答案/独立重算支撑。
 - E3 **差分测试口径**：CLI vs Web 共享同一引擎——差分只能拦截"封装路径引入的不一致"，**不能**拦截引擎本身的错；引擎对的锚点是 correctness/tests + manual 交叉。
-- E4 **断言质量**：期望硬编码（禁 `assert 实现自产`）；禁零信息断言（NotNonEmpty 类）；复现测试必须进正式测试文件，临时审查测试（`_AUDIT_`）完成即转正或删除。
+- E4 **断言质量**：期望硬编码（禁 `assert 实现自产`）；禁零信息断言（NotNonEmpty 类）；**测试命名/标注与断言内容相符**（历史：`test_r_reference.py` 名为"R 参考"实际只断言 status+pv>grr、无 R 数值比对，2026-09-05 1.5 附注）；复现测试必须进正式测试文件，临时审查测试（`_AUDIT_`）完成即转正或删除。
 - E5 **测试稳定性**：随机/计时/时序/全局状态依赖、matplotlib 后端（Agg）、CI 环境差异（junction 路径）导致间歇失败先查环境再归因代码。
 
 ### 维度 F：文档一致性（Docs）
 
-- F1 数字基准：签名总数以 [api-reference.md](../specification/api-reference.md) 为唯一信源；41 任务文字在任何文档中不得硬编码成别的数。
+- F1 数字基准：签名总数以 [api-reference.md](../specification/api-reference.md) 为唯一信源；41 任务文字在任何文档中不得硬编码成别的数（**审查者当轮重测数量，模板中的 41 为 2026-09-05 快照**）。
 - F2 注册链：新增/修改分析函数必须走 11 步同步（见 3.3），前端三集合与引擎实际使用一致。
 - F3 手册准确性：user-manual 的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
-- F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义。
+- F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义；**`skills/*.md` 陷阱清单与源码同步**（历史：smartsuite-dev.md `_yOnlyTasks` 缺 `doe_design` 而 app.js 已含，2026-09-05 F-drift）。
 - F5 版本链：pyproject version == CHANGELOG（`## [X]` + `[X]:` 链接成对）== manifest == **远端** latest tag（本地 tag 与 `origin/*` 引用会过期，发版前全量按「4.2 附注」核远端）。
 
 ### 维度 G：脚本 / CI / PR / Q&S（Scripts & Flows）
 
 - G1 门禁自身正确性：新检查/脚本必须**正向全绿** + **负向注入实测**（注入漂移 → 指名 FAIL、退出码 1），并加入 `tests/scripts/` 自测防回归。
 - G2 门禁扫描盲区：正则覆盖中英双语变体；统计口径用实测（TASK_REGISTRY、断言数），不做声明式硬编码；`verify_consistency` 的 statsmodels `'failed'` 关键词误判。
-- G3 环境差异：PowerShell vs Bash 退出码/路径分隔；Windows junction `--basetemp`；CI 与本地 ruff 版本一致性（0.16.x 锁定）。
+- G3 环境差异：PowerShell vs Bash 退出码/路径分隔；Windows junction `--basetemp`；CI 与本地 ruff 版本一致性（0.16.x 锁定）；**脚本门禁打印非 ASCII 符号（`❌`/`✅`）在 GBK 控制台抛 UnicodeEncodeError**（exit 码与逻辑仍正确但观感受损，2026-09-05 E2，已改 ASCII `[FAIL]`）。
 - G4 发布安全：release.yml 产物/tag 校验、`fail_on_unmatched_files` 类断言、无 `pull_request_target`。
 - G5 dependabot / 版本上限：Python ≥3.10 相性、ruff 版本锁、pip-audit 安检。
 
@@ -319,6 +320,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | 5. 独立参考 | scipy/statsmodels/numpy 独立实现（或手算）与引擎输出并排，权重 1e-9 | 回归 / 统计 |
 | 6. 性能/概率复刻 | 性能声称用与生产相同路径测量；bootstrap/随机类重复采样报告分布 | 性能 / 概率 |
 | 7. 元批判 | reaudit 场景**强制**：对上一轮每条 P0/P1 独立复现并**重算方向与量级**（方法 5 切入），先判定旧结论真伪再谈修复与否；已否证项按「3.7」登记。禁用"旧报告说严重就按严重修"的默认继承 | reaudit / 任何对旧结论的引用 |
+| 8. 同族扫描 | 找到缺陷后 grep **同模式兄弟点**逐个核验：`1e-12` 绝对阈值族、`float()` 无 `isfinite` 族、`params.get(x) or default` falsy 族、orchestrator KeyError 翻译族、固定位 `round()` 舍入族——只修报告反例、同取值域复发即"修复不完整"（历史：spc_xbar 相对阈值已修但 detection/spc_nonparametric 未同步，2026-09-05 B1） | 任何缺陷修复的完整性 |
 
 **判定规则**：无法给出任何一项对抗验证的 finding 视为"待确认"或放弃；验证失败（输入不能复现所述问题）的 finding 必须删除或降级为 P3 观察项，并说明为什么误报（防止下一个审查者复检踩坑）。**证据双向强制**：`✅ 已修复 / 保持项 / 健康声明` 等**正向结论同样必须附 ≥1 项本轮回测证据**，无证据的正向断言标注"未经检验"（2026-09-05 教训：capability 的正面断言被下一统计量实跑打脸，见「3.7」同批）。
 
