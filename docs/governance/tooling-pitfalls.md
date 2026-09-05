@@ -11,6 +11,7 @@
 | 2 | **`&&` 语句分隔符**（PowerShell 5.1 不支持） | 用 `;` 分隔命令，或 `if ($LASTEXITCODE -eq 0)` 判断 |
 | 3 | **`robocopy` 退出码 1 表示"复制成功"**（非 0 即失败的错误假设） | `robocopy` 退出码 <8 均算成功；检查 `$LASTEXITCODE -lt 8` |
 | 4 | **`foreach` 语法缺 `in` 关键字**（`foreach $x $list`）→ 语法错误 | `foreach ($x in $list) { ... }` |
+| 25 | **PowerShell 5.1 向 native 命令传参剥离内部双引号**（`rg 'a("b")c'` 的 `"` 被丢弃 → 模式失配**静默 0 命中假阴性**；2026-09-06 审查实测踩中） | 模式含 `"` 时改写正则避开引号（如 `params.get..group_col..` 或字符类 `["]`）、或用 `--%` 停止解析；对"0 命中"结论必须用宽模式复核 |
 
 ## git 陷阱
 
@@ -20,6 +21,7 @@
 | 6 | **`git fetch --unshallow` 仅适用于浅克隆仓库** → 普通仓库报错 | 先 `git rev-parse --is-shallow-repository` 确认 |
 | 7 | **`git diff --name-only` 不含未跟踪新文件** → 增量工具漏掉新建脚本/测试 | 合并 `git ls-files --others --exclude-standard`（见 run_affected_tests.py） |
 | 8 | **CI checkout 默认浅克隆（fetch-depth=1）** → 提交规范检查 `base..HEAD` 无历史可用 | 需完整历史的 job 显式 `fetch-depth: 0` |
+| 26 | **GitHub API 创建的 tag/branch 不触发 `push` 事件**（release-please 经 API 打 tag → `on.push.tags` 永不触发，2026-09-05 v1.2.4 构建漏发实测） | 需要 tag 触发的构建监听 `release: types: [published]`（API 建 Release 同样触发）；或 `create` 事件加 ref 前缀过滤 |
 
 ## CI / YAML 陷阱
 

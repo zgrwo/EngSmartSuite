@@ -34,7 +34,10 @@ def _acf_values(residuals, max_lag):
     x = np.asarray(residuals, dtype=float)
     mean = float(x.mean())
     denom = float(np.sum((x - mean) ** 2))
-    if denom <= 1e-12:
+    # 审查 2026-09-06 B3：绝对阈值 1e-12 误判微尺度残差（~1e-13，纳米/微应变数据），
+    # 真实自相关 [1,0.45,...] 被静默吞为 [1,0,0]。改相对判据（与 exploratory.py ssx 同族）：
+    # 真常量残差 denom/Σx² ~ eps² 仍命中退化分支；微尺度真实波动比值 ~O(1) 不再误判。
+    if denom <= 1e-12 * max(float(np.sum(x**2)), 1e-300):
         return [1.0] + [0.0] * max_lag  # 零方差残差：除 lag0 外自相关无定义
     return [1.0] + [
         float(np.sum((x[:-k] - mean) * (x[k:] - mean)) / denom) for k in range(1, max_lag + 1)

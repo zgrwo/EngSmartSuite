@@ -108,7 +108,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | :--- | :--- |
 | 注册完整性 | 新增分析函数必须 11 步注册链全走（见 3.3） |
 | 文档同步 | api-reference 签名唯一信源；user-manual 参数选择→示例图片→数值结果→解读→补充五段式（承诺内存要求：**手册数值与引擎实测一致**，不得"声称未兑现"） |
-| 版本一致性 | `pyproject.toml version` == CHANGELOG（`## [X]` + `[X]:` 链接成对）== `.release-please-manifest.json` == 最新 `v*` tag（verify_docs 版本向量强制） |
+| 版本一致性 | `pyproject.toml version` == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 引用行，2026-09-06 F1）== `.release-please-manifest.json` == 最新 `v*` tag（verify_docs 版本向量强制） |
 | 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.x）；CI 矩阵 3.10–3.13 × 3 OS |
 
 **高频复发模式**（逐条做被动排查，历史见 [AGENTS.md](../../AGENTS.md) 历史经验表）：
@@ -245,7 +245,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 - F2 注册链：新增/修改分析函数必须走 11 步同步（见 3.3），前端三集合与引擎实际使用一致。
 - F3 手册准确性：user-manual 的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
 - F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义；**`skills/*.md` 陷阱清单与源码同步**（历史：smartsuite-dev.md `_yOnlyTasks` 缺 `doe_design` 而 app.js 已含，2026-09-05 F-drift）。
-- F5 版本链：pyproject version == CHANGELOG（`## [X]` + `[X]:` 链接成对）== manifest == **远端** latest tag（本地 tag 与 `origin/*` 引用会过期，发版前全量按「4.2 附注」核远端）。
+- F5 版本链：pyproject version == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 行，2026-09-06 F1）== manifest == **远端** latest tag（本地 tag 与 `origin/*` 引用会过期，发版前全量按「4.2 附注」核远端）。
 
 ### 维度 G：脚本 / CI / PR / Q&S（Scripts & Flows）
 
