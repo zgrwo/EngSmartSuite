@@ -90,7 +90,7 @@ const _noTargetNeeded = new Set([
 // _yOnlyTasks: 仅需 Y 列即可运行的任务（无需选择 X 列）
 const _yOnlyTasks = new Set([
     'process_capability', 'trend_forecast',
-    'power_analysis', 'spc_nonparametric',
+    'power_analysis', 'spc_nonparametric', 'doe_design',  // 审查 2026-09-05 F-drift：与 app.js:511 同步补入
     'distribution_summary', 'proportion_ci',
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
     'spc_cusum', 'spc_ewma',
@@ -182,6 +182,18 @@ side: {
 - `model.params` 可能返回 numpy 数组而非 pandas Series → 用 `np.asarray(model.params)` 不用 `.values`
 - pandas 新版本 `sum(axis=None)` → 跨版本应链式调用 `.sum().sum()`
 - statsmodels 警告消息含 `'failed'` 词 → 不要按此关键词判断分析失败
+
+### 陷阱 8：Gage R&R `d2*` 表索引口径 / 常表方向误判
+
+**现象**：2 操作员 × 小样本时 AV 分量被系统性高估 8~11%（%GRR 偏大偏保守）；或审查误报"d2\* 表倒置"并据此越改越错。
+
+**根因**：`reliability.py:294-298` `_d2_star(k, n_obs)` 用 `n_obs`（零件×重复）做列索引，而 AIAG MSA 4 版的 K2/d2\* 常数**只随操作员数 g 变化**（2→1.411、3→1.91、4→2.24、5→2.48）。代码在 n_obs=20 时取列 m=25 的 1.32 < 1.411 → d2\* 偏小 → **AV 被高估 ~8–11%**（方向=从严，不翻转 %GRR 判定）。
+
+**方向直觉陷阱（2026-09-04 → 2026-09-05 否证）**：真实 d2\* 表**随 m 递增**（m=2→1.128，m=12→3.266；行 g 随 g 递减趋近渐近线），代码方向其实是正确的。2026-09-04 轮"表倒置/AV 低估 25–400%（Critical）"是**误报**——复算时用了 `d2(g)/√m` 的错误归一化（把"个体读数 σ"当成量具 σ），构造出虚假的"真实值"。**任何"D2\* 应递减/表错了"的结论，先按下述检查方法独立交叉后再动手，否则会把正确的表改错。**
+
+**检查方法**：`pytest tests/test_engine/test_edge_cases.py -k gage_rr`——`test_gage_rr_av_matches_anova`（14aa345）用 statsmodels ANOVA 做独立交叉；自查 `av/anova ≈ 1.0`（仅 2 操作员小样本允许 1.08~1.09 级）。**禁止**用"直觉公式"自造 d2\* 期望值当基准。
+
+**修复模板**：AV 查表按操作员数取固定映射（2→1.41、3→1.91、4→2.24、5→2.48）或 K2=5.15/d2\*，不传 `n_obs`；补 `10 零件 × 2 操作员 × 2 重复` 用例钉住回归。
 
 ---
 
@@ -340,6 +352,7 @@ result_b = results_b[0]
 | 测试失败但代码正确 | 检查是否是 statsmodels/pandas 版本差异 | 查看 CI 日志中的版本号 |
 | 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 11 步清单 |
 | `sum(axis=None)` FutureWarning | pandas 弃用 | 改为 `.sum().sum()` 链式调用 |
+| Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
 
 ---
 
@@ -379,3 +392,4 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 架构决策 | `docs/adr/0001-*.md` / `docs/adr/0002-*.md` | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel |
 | 防错契约 | `docs/governance/sentinel-contract.md` | L1-L5 哨兵 + NaN/Inf 守卫清单（新增/修改引擎函数必查） |
 | 配色方案 | `smartsuite/engine/_palette.py` | PALETTE 字典完整定义 |
+| 深度审查模板 | `docs/governance/ai-review-prompt.md` | AI 审查 Prompt（三变更类型 + 假阳性专检 + 对抗验证） |

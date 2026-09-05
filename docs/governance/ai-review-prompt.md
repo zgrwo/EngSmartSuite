@@ -11,7 +11,7 @@
 | :--- | :--- |
 | 单 PR / 单提交 | 复制「二」至「十」全段，附上 `git diff`（限定分支）、触发的工作流与失败日志、变更清单 |
 | 发版前全量审查 | 复制「二」至「十」全段，附上「基线状态」（HEAD / 版本 / tag），按「四.2」先跑基线再分发式审查 |
-| 修复复查（reaudit） | 复制「二」至「十」全段，Report 中声明"只验证上一轮 P0/P1 是否根因消除 + 搜寻修复引入的新缺陷"，并按「七」执行对抗验证 |
+| 修复复查（reaudit） | 复制「二」至「十」全段，Report 中声明"只验证上一轮 P0/P1 是否根因消除 + 搜寻修复引入的新缺陷"，并按「七」执行对抗验证。**先做元批判（见「七.7」）：对上一轮每条 P0/P1 独立重算其方向与量级，不采信旧结论**——旧报告结论本身可能是假阳性（实例：2026-09-05 否证了 2026-09-04 的 d2\* "表倒置" Critical，见「3.7」）。 |
 
 **投喂前检查**：确认变更涉及的文件、触发流程、相关 Commit 齐全；未提供的信息要求审查者在报告里明确标注"缺输入"，禁止脑补。
 
@@ -122,6 +122,14 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 6. `side` 等共享参数语义跨任务不同 → `key@task_name` 覆写，禁共用
 7. statsmodels/pandas 版本兼容三件套
 
+### 3.7 已否证历史结论（reaudit 首查）
+
+> 旧审查报告中的 P0/P1 **未必为真**。reaudit 启动前先读本登记表：凡被否证的旧结论，不再作为"教训"引用，主题词只指向**否证后的最新正确表述**。
+
+| 旧结论 | 否证审查 | 最新正确表述 |
+| :--- | :--- | :--- |
+| d2\* 常数表"方向倒置"（代码自 m 递增=错）：reliability.py:19-137 表数据被系统性地低估 25-400%（2026-09-04 报告 C-1） | 2026-09-05 报告（release-prep）：该次结论是**误判**——"真实 d2\*"用了错误归一化（除以 √m），AIAG 出版表本身随 m 递增 | 表方向正确；真缺陷为「B1」所述 `_d2_star(g, n_obs)` 用 `n_obs`（零件×重复）做列索引，2 操作员小样本 AV 高估 8~11%（P2），方向=从严，不翻转 %GRR/NDC 判定 |
+
 ---
 
 ## 四、审查输入与工作流程
@@ -131,6 +139,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 1. 变更范围：PR 标题/描述、`git diff`（或 commit 列表 + `git show`）、涉及文件清单。
 2. 触发流程：本次变更会触发哪些 GitHub Actions（见 4.4）、各 job 的结果与失败日志。
 3. 基线状态：HEAD、版本、最新 `v*` tag、工作区是否干净。
+4. 发版拓扑（**仅发版前全量**）：远端 `refs/heads/main` 实际 HEAD、远端已发布 `v*` tag 清单、本地 HEAD 与远端 main 的祖先关系（是否分叉）。本地 `origin/*` 引用已知容易过期，须以 `git ls-remote` / 仓库外临时克隆为准（见 4.2）。
 
 ### 4.2 必跑基线（按变更类型裁剪，结论必须引用实测输出）
 
@@ -142,7 +151,9 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | 服务/桥接 | `preprocess_data` 改动必查全部解包调用方 + `pytest tests/test_services/ -q` |
 | 前端/参数面板 | 三点一致性（app.js TASK_PARAMS / PARAM_META / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_cross_consistency.py` |
 | 脚本/门禁 | `pytest tests/scripts/ -q`（治理脚本自测）+ 负向注入验证（见 6.4） |
-| 文档/发版 | `python scripts/verify_docs.py --strict` + `python scripts/falsy_audit.py` + 版本链核对（pyproject/CHANGELOG/manifest/tag） |
+| 文档/发版 | `python scripts/verify_docs.py --strict` + `python scripts/falsy_audit.py` + 版本链核对（pyproject/CHANGELOG/manifest） + **远端拓扑核验（发版前全量）**：`git ls-remote origin refs/heads/main 'refs/tags/v*'` + 仓库外临时克隆判祖先（见「4.2 附注」） |
+
+> **4.2 附注 · 远端拓扑核验**：本地 `origin/*` 引用会过期（2026-09-05 实测 `origin/main` 停在 v1.2.3 的父提交），`git fetch` 在只读审查中不应污染引用——改用 `git ls-remote origin` 取远端真值，再于仓库外临时目录 `git clone --no-checkout --filter=blob:none` 一次，把本地 HEAD 作为额外 remote 注入后 `git merge-base --is-ancestor` 判祖先；分叉（本地 HEAD ≠ 远端 main 祖先）即发行阻塞项。`verify_docs.py` 不校验远端 tag 与拓扑，该步骤是发版前全量的**唯一**版本链守卫。
 
 > 若环境问题导致某步无法执行（如 CI 外缺 CJK 字体影响图表渲染），在报告中**明确声明未执行的步骤**，不挪用旧结论。
 
@@ -195,7 +206,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 ### 维度 B：统计算法（Algorithm）
 
-- B1 **对标语义**：与 scipy/statsmodels/numpy 的**精确定义**一致（ddof、bias、Fisher、R7 分位数、box-cox lambda、置信水平、多重比较校正），禁用隐式默认（历史 bug：d2* 常数表倒置、ZSCORE ddof、截距默认）。
+- B1 **对标语义**：与 scipy/statsmodels/numpy 的**精确定义**一致（ddof、bias、Fisher、R7 分位数、box-cox lambda、置信水平、多重比较校正），禁用隐式默认（历史 bug：ZSCORE ddof、截距默认、d2\* 表索引口径——**注意"d2\* 常数表倒置"已被 2026-09-05 审查否证**，真因是 `_d2_star` 列索引用了 `n_obs` 而非操作员数，见「3.7 已否证历史结论」）。
 - B2 算法选型：回归用稳定分解（QR/SVD），避免条件数平方的数值不稳定路径；pandas 链式 `.sum().sum()`；statsmodels 参数用 `np.asarray` 不依赖 `.values`。
 - B3 边界条件：空数据/单行/常量列/全 NaN/共线列/因子水平 n 与 p 相邻区间/秩亏（四层防线③必覆盖）。
 - B4 组合与维度：DOE 设计生成、因子与水平组合在**分配数组前**检查上限，防组合爆炸；分组子组（subgroup_col）存在性前置校验。
@@ -232,7 +243,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 - F2 注册链：新增/修改分析函数必须走 11 步同步（见 3.3），前端三集合与引擎实际使用一致。
 - F3 手册准确性：user-manual 的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
 - F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义。
-- F5 版本链：pyproject version == CHANGELOG（`## [X]` + `[X]:` 链接成对）== manifest == latest tag。
+- F5 版本链：pyproject version == CHANGELOG（`## [X]` + `[X]:` 链接成对）== manifest == **远端** latest tag（本地 tag 与 `origin/*` 引用会过期，发版前全量按「4.2 附注」核远端）。
 
 ### 维度 G：脚本 / CI / PR / Q&S（Scripts & Flows）
 
@@ -307,8 +318,9 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | 4. 负向注入 | 破坏被测物 → 断言体系必须 FAIL（见 6.4）；修复后转正 | 门禁 / 交叉验证 |
 | 5. 独立参考 | scipy/statsmodels/numpy 独立实现（或手算）与引擎输出并排，权重 1e-9 | 回归 / 统计 |
 | 6. 性能/概率复刻 | 性能声称用与生产相同路径测量；bootstrap/随机类重复采样报告分布 | 性能 / 概率 |
+| 7. 元批判 | reaudit 场景**强制**：对上一轮每条 P0/P1 独立复现并**重算方向与量级**（方法 5 切入），先判定旧结论真伪再谈修复与否；已否证项按「3.7」登记。禁用"旧报告说严重就按严重修"的默认继承 | reaudit / 任何对旧结论的引用 |
 
-**判定规则**：无法给出任何一项对抗验证的 finding 视为"待确认"或放弃；验证失败（输入不能复现所述问题）的 finding 必须删除或降级为 P3 观察项，并说明为什么误报（防止下一个审查者复检踩坑）。
+**判定规则**：无法给出任何一项对抗验证的 finding 视为"待确认"或放弃；验证失败（输入不能复现所述问题）的 finding 必须删除或降级为 P3 观察项，并说明为什么误报（防止下一个审查者复检踩坑）。**证据双向强制**：`✅ 已修复 / 保持项 / 健康声明` 等**正向结论同样必须附 ≥1 项本轮回测证据**，无证据的正向断言标注"未经检验"（2026-09-05 教训：capability 的正面断言被下一统计量实跑打脸，见「3.7」同批）。
 
 ---
 
@@ -355,3 +367,4 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 5. 禁止建议引入架构偏离：engine 不加 flask/xlwings、web 不直接 import engine、不改 Public 签名、不改数据契约（这些是红线，不是建议项）。
 6. 禁止对 Q&S 发现（安全/质量）打"不建议修改"标签后继续合入 P0/P1——阻塞项必须列入 PR 阻断清单。
 7. 禁止把假阳性章（「六」）任意摘除——它是本模板与普通 lint 检查的实质差异所在。
+8. 禁止"清单在列、证据不落盘"：必查项的 grep/测试命令必须**逐条执行并把命令与实测输出写入附录**，不得声明"已核对"却无可查证据（2026-09-05 教训：D2 绝对阈值条目从未被执行，缺陷在报告中漏报）。
