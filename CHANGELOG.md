@@ -2,6 +2,63 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.4](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.3...v1.2.4) (2026-09-05)
+
+
+### 🐛 Bug 修复
+
+* **ci:** consistency job 补装 report extras——verify_cross_consistency 读 xlsx 缺 openpyxl（quality.yml 2026-08-21 同族漏改） ([7310d7b](https://github.com/zgrwo/EngSmartSuite/commit/7310d7b1127d60e12cc590c7778ca27474aeac0e))
+* **engine:** 2026 深度审查数值/边界/语义缺陷簇（P0-P1） ([1615e62](https://github.com/zgrwo/EngSmartSuite/commit/1615e6221ec2954efb698bad406f2b14fd490976))
+* **engine:** taguchi 因子水平校验、bootstrap_ci var 支持、np 图 p_bar 修正 ([6a8021f](https://github.com/zgrwo/EngSmartSuite/commit/6a8021f22d38ee8f39c26dbc0d1a083195a22165))
+* **engine:** 发版前审查修复——规格限isfinite守卫/d2*取∞列/微尺度相对阈值/group_col报错/n_runs陷阱 ([3919a51](https://github.com/zgrwo/EngSmartSuite/commit/3919a51b4c6a67df40f21adbe2887637222090a0))
+* **engine:** 表格显示舍入尺度感知——微尺度预测/异常值不再显示 0.0000（O-1） ([c6197dc](https://github.com/zgrwo/EngSmartSuite/commit/c6197dc8722c0ec75b30870d86d48d543ffdb2eb))
+* **engine:** 逐公式审计处置——效应量更名Hedges g/McNemar精确法提示/九项口径说明入库 ([0fe6e7a](https://github.com/zgrwo/EngSmartSuite/commit/0fe6e7a3c3b6f60e072bac16a5696dbd7ffc8d7b))
+* **scripts/ci:** verify_cross_consistency 断言行修复 + CI 退出码掩码消除 ([7fff218](https://github.com/zgrwo/EngSmartSuite/commit/7fff218b8a917f280b34c25357d5eb3411c2ac8a))
+* **services/web/cli:** 异常日志与文案对齐、power_analysis 默认参数补齐 ([b2ecff6](https://github.com/zgrwo/EngSmartSuite/commit/b2ecff6599181e93d4b1ac6254a3525cc5047807))
+* **src:** 修复审查 2026-09-01 源码问题 (N-1/N-2/N-3/C-1/C-2/C-4~C-10/S-1~S-4/A-1~A-3) ([f4aed25](https://github.com/zgrwo/EngSmartSuite/commit/f4aed25842d86e3ff930473ff0fbd3e0d04b39cf))
+* **web:** 移除引擎不支持的 mad 选项并补 power/correlation 参数可达性 ([78a0f14](https://github.com/zgrwo/EngSmartSuite/commit/78a0f142c0bdf3af37be39190a6a6ef46ccc75c5))
+
+
+### 📄 文档
+
+* 5S 重构——rules/ 并入 docs/ 四分类，审查报告移入 logs/reports/ 不入库 ([9751fae](https://github.com/zgrwo/EngSmartSuite/commit/9751fae3d4d7099d5fdada6f6903157d1841e203))
+* 修复审查 2026-09-01 文档问题 (D-1/D-2/D-4) + 补充复核/修复记录 ([c40cbc9](https://github.com/zgrwo/EngSmartSuite/commit/c40cbc9d0f43991f310f3ec629c855ee3b83c30c))
+* 修正 AGENTS.md 模板计数口径（41 任务+2 方法变体+1 工作流指南） ([dfbbc0f](https://github.com/zgrwo/EngSmartSuite/commit/dfbbc0f9f3a83e0f865c94e6d267feada95f13b1))
+* 同步 np 图 n_col 契约与 taguchi 约束，映射表句去重复方法数 ([ab52d55](https://github.com/zgrwo/EngSmartSuite/commit/ab52d553676daf79e54dd88516fd8402512f2632))
+* 同步审查修复相关契约（power 参数/power_result/p 图文本列语义/模块速览去夸大） ([539ef11](https://github.com/zgrwo/EngSmartSuite/commit/539ef11eb61cce7378bf32d65a7c235319fa944c))
+* 完善审查 Prompt 与开发技能——远端拓扑核验/元批判/否证登记表/d2* 索引口径 ([332ce1e](https://github.com/zgrwo/EngSmartSuite/commit/332ce1e828fd9df2872f4d9033a908f403e0f204))
+* 审查 Prompt 补强——2026-09-05 轮教训回填（isfinite守卫/or default falsy/同族扫描/微尺度展示舍入/GBK/哈希口径） ([dd9238b](https://github.com/zgrwo/EngSmartSuite/commit/dd9238be2023aa054888fd8ed2f2ecd9205877a7))
+* 新增 AI 深度审查 Prompt 模板并登记四类契约文档 ([1c48bcd](https://github.com/zgrwo/EngSmartSuite/commit/1c48bcdf2cedb0170b6968decb037c1b23c406b2))
+* 方法数表达收敛为单一源（数字仅保留于 api-reference，其余移除或改述） ([5470382](https://github.com/zgrwo/EngSmartSuite/commit/5470382f16f3bcff798420d8b82961121d2c682e))
+
+
+### ✅ 测试
+
+* **integration:** 真实数据集/工作流 status-only 测试补数值与不变量断言（14 个 WARN 清零） ([68fc13d](https://github.com/zgrwo/EngSmartSuite/commit/68fc13d9a15969d145d794f3d9ed0e074dac19e6))
+* **scripts:** 方法计数断言改为 TASK_REGISTRY/api-reference 派生，去除 41 字面量 ([126d682](https://github.com/zgrwo/EngSmartSuite/commit/126d6821e249aa98d4bc5ee166a8d57adf5a90b3))
+* 修复审查 2026-09-01 测试问题 (T-1/T-2/T-3/T-4/T-5) + 新增回归与 L1 已知答案测试 ([bd1aa0d](https://github.com/zgrwo/EngSmartSuite/commit/bd1aa0dfb1ef0e09c9afb76f16906420a171bf22))
+* 修正 4 处测试文案 "40"→"41" 残留（review-verify 新发现第 4 项） ([ed9317f](https://github.com/zgrwo/EngSmartSuite/commit/ed9317f87486c73c75b1b1babb167e34085fd641))
+* 恢复 test_r_reference 误删的过程能力分隔注释块 ([eb50bd8](https://github.com/zgrwo/EngSmartSuite/commit/eb50bd86b716c7f99ee3aa68ca60914e12388a83))
+
+
+### ⚙️ CI
+
+* **release:** 新增 tag 触发的构建 job——wheel/sdist attach 到 GitHub Release（此前历次 Release assets 为空） ([cd7acfd](https://github.com/zgrwo/EngSmartSuite/commit/cd7acfdb0d9d73ad702cff35c18c2d541c059fbc))
+
+
+### 🧹 维护
+
+* **ci:** verify_manual_claims 接入 quick job 门禁 + verify_all 覆盖声明同步 ([9b492f7](https://github.com/zgrwo/EngSmartSuite/commit/9b492f7d4c66fbfa4e9eee47683c56b06fdb0b1c))
+* **scripts,ci:** 修复审查 2026-09-01 治理门禁 (G-1~G-8) ([e3d8ea8](https://github.com/zgrwo/EngSmartSuite/commit/e3d8ea87368f37a321ab714dcb18eb5250608f0b))
+* **scripts:** 审查门禁补强——verify_docs tag校验(E1)/ASCII门禁(E2)/AST分层守卫(M-1) ([979ee39](https://github.com/zgrwo/EngSmartSuite/commit/979ee394c33e9747bde1e6ad00bffa8baa8919b2))
+* 忽略 .opencode-goal 会话产物并同步 verify_docs 排除目录 ([2d2693a](https://github.com/zgrwo/EngSmartSuite/commit/2d2693ae49598ed27b238682ceb5d2fa2ad3683b))
+
+
+### 🎨 代码风格
+
+* ruff format generate_images.py ([fd8fe49](https://github.com/zgrwo/EngSmartSuite/commit/fd8fe495c9871b4f548238fdb5e8bac2f9cebc6e))
+* **web:** 左栏整体可滚动（#left-panel overflow-y: auto） ([84d97fa](https://github.com/zgrwo/EngSmartSuite/commit/84d97fa24bb86bc429b53385aabec04788af8a07))
+
 ## [1.2.3](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.2...v1.2.3) (2026-08-29)
 
 
