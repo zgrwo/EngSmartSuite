@@ -1,6 +1,6 @@
 # ============================================================================
 # release.yml — release-please 自动发版 + tag 构建构件
-# 触发：main 分支推送（release-please 推导版本）+ v* tag 推送（构建产物）
+# 触发：main 分支推送（release-please 推导版本）+ release published（构建产物）
 # 机制：从 Conventional Commits 自动推导版本号、生成 CHANGELOG.md、
 #       打开 release PR → 合并后自动打 tag + 建 GitHub Release；
 #       tag 触发时构建 wheel/sdist 并 attach 到 GitHub Release（2026-09-05 补齐）
@@ -15,7 +15,10 @@ name: Release
 on:
   push:
     branches: [main]
-    tags: ['v*']
+  # 2026-09-05：tag 由 release-please 经 API 创建，push 事件不触发；
+  # 必须监听 release published 事件（API 创建 Release 同样触发）
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -37,7 +40,7 @@ jobs:
   # assets 均为空），本 job 补齐"产物发布"承诺。构建源码 = tag 指向的提交
   # （release-please 合并 PR 后打 tag，内容即 main 最新）。
   build-artifacts:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
