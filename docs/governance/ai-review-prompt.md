@@ -50,7 +50,8 @@ web/  (Flask: app.py / api.py / static/app.js)   ← 依赖 services/，禁止�
 services/  (orchestrator / data_io / reporter / audit)   ← 唯一桥接层
   ↓
 engine/  (纯 Python：root_cause / doe_opt / spc_charts / capability /
-          detection / reliability / exploratory + _palette)   ← 零 xlwings/flask
+          detection / reliability / exploratory / spc_monitor 转发层 +
+          _palette / _constants / _utils / _doe_arrays)   ← 零 xlwings/flask
   ↓
 core/   (contracts.py：AnalysisRequest / AnalysisResult；exceptions.py)   ← 仅 pandas+pydantic
 ```
@@ -92,10 +93,10 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 ### 3.5 验证体系（4 层测试防线 + 治理门禁）
 
 ```
-① 数值正确性   tests/test_correctness.py + test_doe_design.py   已知答案 + 手工公式/独立库交叉
-② 数学不变量   tests/test_invariants.py   p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减
-③ 边界模糊     tests/test_edge_cases.py   空数据/单行/全NaN/常量列/共线/n>5000
-④ 差分测试     tests/test_differential.py  CLI vs Web 数值一致
+① 数值正确性   tests/test_engine/test_correctness.py + test_doe_design.py   已知答案 + 手工公式/独立库交叉
+② 数学不变量   tests/test_engine/test_invariants.py   p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减
+③ 边界模糊     tests/test_engine/test_edge_cases.py   空数据/单行/全NaN/常量列/共线/n>5000
+④ 差分测试     tests/test_services/test_differential.py + test_diff_cli_web.py  CLI vs Web 数值一致
 ```
 
 - 数据流转含 `services/data_io.preprocess_data`（**返回多个值的元组解包——历史的 4+ 解包错误**，改动必须核对全部调用方）。
@@ -148,9 +149,9 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | :--- | :--- |
 | 任何变更 | `git status`（确认无未声明改动/残留）+ `git diff --stat`（变更面） |
 | 源代码 | `ruff check src/smartsuite/ scripts/ tests/` + `ruff format --check src/smartsuite/ scripts/ tests/` + 聚焦 pytest（`run_affected_tests.py` 增量判定） |
-| 引擎/数值 | 追加四层防线：`pytest tests/test_correctness.py tests/test_invariants.py tests/test_edge_cases.py -q` + `python scripts/verify_consistency.py --skip-pytest`（41 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
+| 引擎/数值 | 追加四层防线：`pytest tests/test_engine/test_correctness.py tests/test_engine/test_invariants.py tests/test_engine/test_edge_cases.py -q` + `python scripts/verify_consistency.py --skip-pytest`（41 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
 | 服务/桥接 | `preprocess_data` 改动必查全部解包调用方 + `pytest tests/test_services/ -q` |
-| 前端/参数面板 | 三点一致性（app.js TASK_PARAMS / PARAM_META / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_cross_consistency.py` |
+| 前端/参数面板 | 四点一致性（app.js TASK_PARAMS / PARAM_META / PARAM_LABELS / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_cross_consistency.py` |
 | 脚本/门禁 | `pytest tests/scripts/ -q`（治理脚本自测）+ 负向注入验证（见 6.4） |
 | 文档/发版 | `python scripts/verify_docs.py --strict` + `python scripts/falsy_audit.py` + 版本链核对（pyproject/CHANGELOG/manifest） + **远端拓扑核验（发版前全量）**：`git ls-remote origin refs/heads/main 'refs/tags/v*'` + 仓库外临时克隆判祖先（见「4.2 附注」） |
 
@@ -279,7 +280,8 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | 前端→orchestrator→引擎参数错位 | 对照 api-reference 参数名/默认值与 app.js TASK_PARAMS、orchestrator DEFAULT_PARAMS（verify_cross_consistency 只查默认值集合，不查语义） |
 | 列约束三集合与引擎实际使用 | `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 中多/漏/错任务（陷阱 2） |
 | 参数语义共享错配 | `side`（tolerance_interval 的"检验侧" vs spc_nonparametric 的"控制限方向"）等共享参数需 `key@task_name` 覆写 |
-| falsy 参数默认值 | `params.get("alpha", 0.05)` 对显式传 0/False 的处理；空串→float 防护 Path |
+| falsy 参数默认值 | `params.get("alpha", 0.05)` 对显式传 0/False 的处理；空串→float 防护路径（`(ValueError, TypeError)` 捕获 + `np.isfinite` 显式拒绝，见 C1） |
+| 参数可达性 | 前端面板提供引擎不支持的选项（历史：`mad` 选项被移除，78a0f14）/ 引擎支持的参数前端不可达（历史：power/correlation 参数补齐，78a0f14）——前端选项集 ⊆ 引擎能力，双向核对 |
 | preprocess_data 解包 | 返回值元组数变更未同步调用方（历史 4+ 次） |
 | 分组/子组列 | `subgroup_col` 缺列前置校验；类别列基数过大 | 
 
