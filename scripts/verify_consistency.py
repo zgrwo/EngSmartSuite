@@ -124,7 +124,50 @@ check(
 section("1. Architecture Constraints")
 # ============================================================
 # 使用 Python 文件扫描替代 Unix grep，确保跨平台兼容
+import ast as _ast
 import glob as _glob
+
+
+def _ast_import_violations(rel_dir: str, forbidden_prefixes: tuple[str, ...]) -> list[str]:
+    """审查 2026-09-05 M-1：AST 分层守卫 — 扫描目录下全部 .py 的 import 语句。
+
+    grep 口径会漏 `from smartsuite import engine` 形式，故用 AST 精确匹配：
+    Import 的 alias.name 或 ImportFrom 的 module 以 forbidden 前缀开头，
+    以及 `from smartsuite import engine` 特例。返回命中列表（"file:line 语句"）。
+    """
+    violations: list[str] = []
+    base = os.path.join(ROOT, rel_dir)
+    for dirpath, _dirnames, filenames in os.walk(base):
+        for fn in filenames:
+            if not fn.endswith(".py"):
+                continue
+            fpath = os.path.join(dirpath, fn)
+            try:
+                with open(fpath, encoding="utf-8") as fh:
+                    tree = _ast.parse(fh.read())
+            except (OSError, SyntaxError, ValueError):
+                continue
+            for node in _ast.walk(tree):
+                if isinstance(node, _ast.Import):
+                    for alias in node.names:
+                        if alias.name.startswith(forbidden_prefixes):
+                            violations.append(
+                                f"{os.path.relpath(fpath, ROOT)}:{node.lineno} import {alias.name}"
+                            )
+                elif isinstance(node, _ast.ImportFrom):
+                    if node.module and node.module.startswith(forbidden_prefixes):
+                        violations.append(
+                            f"{os.path.relpath(fpath, ROOT)}:{node.lineno}"
+                            f" from {node.module} import ..."
+                        )
+                    elif node.module == "smartsuite" and any(
+                        a.name == "engine" for a in node.names
+                    ):
+                        violations.append(
+                            f"{os.path.relpath(fpath, ROOT)}:{node.lineno}"
+                            " from smartsuite import engine"
+                        )
+    return violations
 
 
 def _grep_files(pattern: str, path_pattern: str) -> tuple[bool, str]:
@@ -145,6 +188,21 @@ def _grep_files(pattern: str, path_pattern: str) -> tuple[bool, str]:
 
 found, details = _grep_files("xlwings", "src/smartsuite/engine/**/*.py")
 check("engine/ has zero xlwings references", not found, details if found else "")
+
+# 审查 2026-09-05 M-1：架构红线 AST 守卫补全（此前仅 xlwings 一条，
+# engine/ 零 flask 与 web/ 不直接依赖 engine 两条属"荣誉准则"，单次 PR 可静默破坏）
+_engine_forbidden = _ast_import_violations("src/smartsuite/engine", ("flask", "xlwings"))
+check(
+    "engine/ has zero flask/xlwings imports (AST)",
+    not _engine_forbidden,
+    "\n".join(_engine_forbidden[:5]),
+)
+_web_engine = _ast_import_violations("src/smartsuite/web", ("smartsuite.engine",))
+check(
+    "web/ does not import smartsuite.engine directly (AST)",
+    not _web_engine,
+    "\n".join(_web_engine[:5]),
+)
 
 # excel/ 目录已移除（ADR-001 修订），如不存在则跳过
 _excel_dir = os.path.join(ROOT, "src", "smartsuite", "excel")

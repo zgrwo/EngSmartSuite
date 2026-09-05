@@ -180,3 +180,50 @@ def test_subdir_undeclared_strict(tmp_path):
     problems = verify_docs.check_subdir_undeclared(root, strict=True)
     assert any("docs/extra.md" in p for p in problems)
     assert verify_docs.check_subdir_undeclared(root, strict=False) == []
+
+
+# ── 向量 6b：git tag 版本漂移（审查 2026-09-05 E1）────────────
+
+
+def test_semver_key_and_latest_tag():
+    assert verify_docs._semver_key("v1.2.3") == (1, 2, 3)
+    assert verify_docs._semver_key("2.0.0") == (2, 0, 0)
+    assert verify_docs._semver_key("v1.2") is None
+    assert verify_docs._latest_semver_tag(["v1.2.2", "v1.2.10", "v2.0.0", "nightly"]) == "v2.0.0"
+    assert verify_docs._latest_semver_tag([]) == ""
+
+
+def test_git_tag_version_detects_behind_chain(monkeypatch):
+    class _FakeRes:
+        stdout = "v1.2.2\nv1.2.3\n"
+
+    monkeypatch.setattr(verify_docs.subprocess, "run", lambda *a, **k: _FakeRes())
+    problems = verify_docs.check_git_tag_version(Path("x"), "1.2.2")
+    assert any("v1.2.3" in p for p in problems)
+
+
+def test_git_tag_version_chain_ahead_or_equal_ok(monkeypatch):
+    class _FakeRes:
+        stdout = "v1.2.2\n"
+
+    monkeypatch.setattr(verify_docs.subprocess, "run", lambda *a, **k: _FakeRes())
+    # 链 > tag = 发版间隙（版本已 bump、tag 待打）；链 == tag 正常
+    assert verify_docs.check_git_tag_version(Path("x"), "1.2.3") == []
+    assert verify_docs.check_git_tag_version(Path("x"), "1.2.2") == []
+
+
+def test_git_tag_version_orphan_tag_surfaces(monkeypatch):
+    class _FakeRes:
+        stdout = "v1.2.2\nv2.0.0\n"  # 模拟孤立 v2.0.0 tag
+
+    monkeypatch.setattr(verify_docs.subprocess, "run", lambda *a, **k: _FakeRes())
+    problems = verify_docs.check_git_tag_version(Path("x"), "1.2.2")
+    assert any("v2.0.0" in p for p in problems)
+
+
+def test_git_tag_version_skips_without_git(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("git not found")
+
+    monkeypatch.setattr(verify_docs.subprocess, "run", _boom)
+    assert verify_docs.check_git_tag_version(Path("x"), "1.2.2") == []

@@ -331,6 +331,56 @@ def check_semantic_consistency(root: Path, doc_files: list[str]) -> list[str]:
 # ── 向量 6：版本一致性 ───────────────────────────────────────
 
 
+def _semver_key(version: str) -> tuple[int, int, int] | None:
+    """解析 vX.Y.Z / X.Y.Z 为可比较元组；非语义化版本返回 None。"""
+    m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version.strip())
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _latest_semver_tag(tags: list[str]) -> str:
+    """从 tag 列表中取最大语义化版本（非 vX.Y.Z 格式忽略）；无则返回空串。"""
+    best_tag, best_key = "", None
+    for tag in tags:
+        key = _semver_key(tag)
+        if key and (best_key is None or key > best_key):
+            best_tag, best_key = tag.strip(), key
+    return best_tag
+
+
+def check_git_tag_version(root: Path, local_version: str) -> list[str]:
+    """审查 2026-09-05 E1：版本链 vs git tag 漂移校验。
+
+    此前三方版本向量（manifest/pyproject/CHANGELOG）全绿仍可能掩盖
+    "本地链落后于已发布 tag"（如孤立 v2.0.0 tag、远端已发 v1.2.3 而本地链 1.2.2）。
+    仅校验"落后"方向：链 > tag 属正常发版间隙（版本已 bump、tag 待 release-please 打出）。
+    git 不可用或无 tag（CI shallow clone 默认不拉 tag）时跳过——面向本地发版前检查。
+    """
+    problems: list[str] = []
+    if not local_version or _semver_key(local_version) is None:
+        return problems
+    try:
+        res = subprocess.run(
+            ["git", "tag", "--list", "v*"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return problems
+    latest = _latest_semver_tag(res.stdout.splitlines())
+    latest_key = _semver_key(latest) if latest else None
+    local_key = _semver_key(local_version)
+    if latest_key and local_key and local_key < latest_key:
+        problems.append(
+            f"[版本漂移] 本地版本链 {local_version} 落后于最新 git tag {latest}——"
+            "请先 git fetch origin --tags 核对远端已发布版本；"
+            "若该 tag 为孤立/过期分叉提交请清理后再发版"
+        )
+    return problems
+
+
 def check_version_consistency(root: Path) -> list[str]:
     problems: list[str] = []
     manifest_path = root / ".release-please-manifest.json"
@@ -371,6 +421,8 @@ def check_version_consistency(root: Path) -> list[str]:
                 f"[版本漂移] .release-please-manifest.json {manifest_version} != "
                 f"CHANGELOG 最新发布版本 {changelog_version}"
             )
+    # 审查 2026-09-05 E1：版本链 vs git tag 漂移（tag 盲区校验）
+    problems += check_git_tag_version(root, pyproject_version)
     return problems
 
 

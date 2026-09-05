@@ -582,7 +582,8 @@ with open(OUTPUT, "w", encoding="utf-8") as f:
     f.write(buf.getvalue())
 print(f"Output: {OUTPUT}")
 # 审查 2026-09-01 G-1：发布前门禁——任一项 DIFF/ERR 即以非零退出码告警
+# 审查 2026-09-05 E2：GBK 控制台打印 ❌ 会触发 UnicodeEncodeError，门禁标记用 ASCII
 if fail_count:
-    print(f"\n❌ {fail_count} 项与手册不一致（详见 {OUTPUT}），门禁失败")
+    print(f"\n[FAIL] {fail_count} 项与手册不一致（详见 {OUTPUT}），门禁失败")
     sys.exit(1)
 print("Done.")
