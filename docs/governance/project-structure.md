@@ -117,7 +117,9 @@ EngSmartSuite/
 │       ├── test_run_affected_tests.py
 │       ├── test_validate_commit_msg.py
 │       ├── test_verify_docs.py
-│       └── test_test_quality_guard.py
+│       ├── test_test_quality_guard.py
+│       ├── test_falsy_audit.py          #   2026-09-06 G3 负向注入转正
+│       └── test_verify_frontend_params.py # 2026-09-06 E4/G4 前后端键集自测
 │
 ├── docs/                           # 项目文档（规范文档 + ADR + 手册）
 │   ├── README.md                   #   文档分类导航
@@ -214,6 +216,7 @@ EngSmartSuite/
 │   ├── retry.py                    #   瞬态错误重试装饰器
 │   ├── verify_consistency.py       #   行为/架构一致性
 │   ├── verify_cross_consistency.py #   Web/CLI 交叉一致性
+│   ├── verify_frontend_params.py   #   前后端参数键集静态一致性
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
 │   ├── falsy_audit.py              #   Falsy 模式审计
 │   ├── gen_requirements.py         #   依赖清单生成

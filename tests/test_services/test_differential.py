@@ -7,6 +7,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from pathlib import Path
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import auto_generate_subgroup_col, preprocess_data
@@ -17,6 +18,8 @@ from smartsuite.services.orchestrator import (
     TASK_REGISTRY,
     orchestrate,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
 
 # ═══════════════════════════════════════════════════════════════
 # 辅助: 模拟 CLI 路径 (直接调用 preprocess + orchestrate)
@@ -449,15 +452,24 @@ def test_cli_web_numerical_parity_all(task):
 
 
 def test_cli_web_default_params_sync():
-    """Web app.js 中的 TASK_PARAMS 与 DEFAULT_PARAMS 应兼容。
+    """前后端参数键集一致性：调用 scripts/verify_frontend_params.py 仓库态守卫。
 
-    确保 Web UI 能正常覆盖所有默认参数。
+    审查 2026-09-06 E4/G4：本函数原仅断言 DEFAULT_PARAMS[task] 是 dict（空转，docstring
+    声称检查 app.js 兼容性但实际未解析前端）；一致性检查已收敛到独立脚本
+    （静态解析 app.js TASK_PARAMS == DEFAULT_PARAMS 键集，含负向自测），此处转正为
+    真实断言——若前端参数面板与后端默认参数漂移，本测试必须 FAIL。
     """
-    # 这是静态检查：DEFAULT_PARAMS 中定义的参数应被 app.js 消费
-    for task, defaults in DEFAULT_PARAMS.items():
-        assert isinstance(defaults, dict), (
-            f"DEFAULT_PARAMS[{task}] 必须是 dict，实际: {type(defaults)}"
-        )
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "verify_frontend_params", ROOT / "scripts" / "verify_frontend_params.py"
+    )
+    vfp = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(vfp)
+    with pytest.raises(SystemExit) as excinfo:
+        vfp.main()
+    assert excinfo.value.code == 0
 
 
 def test_cli_web_specific_parity():

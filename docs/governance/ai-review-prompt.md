@@ -78,7 +78,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 - `_yOnlyTasks`：仅需 Y 列（process_capability/trend_forecast/distribution_summary/proportion_ci/spc_cusum…）
 - `_xOptionalTasks`：X 列可选回退（spc_xbar/spc_attribute/normality_check/anomaly_detect…）
 
-任务注册完整性由 `ci.yml` consistency job 的 5 路集合断言（REGISTRY=DEFAULT_PARAMS=LABELS=GROUPS）+ `engine __all__` 覆盖 + `verify_cross_consistency.py`（前后端参数默认值）强制。
+任务注册完整性由 `ci.yml` consistency job 的 5 路集合断言（REGISTRY=DEFAULT_PARAMS=LABELS=GROUPS）+ `engine __all__` 覆盖 + `verify_frontend_params.py`（静态解析 app.js TASK_PARAMS ↔ DEFAULT_PARAMS 键集，2026-09-06 E4/G4 起）+ `verify_cross_consistency.py`（运行时交叉验证 + 手册 CLAIM）强制。
 
 ### 3.4 哨兵契约 L1-L5 与 NaN/Inf/None 守卫
 
@@ -151,7 +151,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | 源代码 | `ruff check src/smartsuite/ scripts/ tests/` + `ruff format --check src/smartsuite/ scripts/ tests/` + 聚焦 pytest（`run_affected_tests.py` 增量判定） |
 | 引擎/数值 | 追加四层防线：`pytest tests/test_engine/test_correctness.py tests/test_engine/test_invariants.py tests/test_engine/test_edge_cases.py -q` + `python scripts/verify_consistency.py --skip-pytest`（41 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
 | 服务/桥接 | `preprocess_data` 改动必查全部解包调用方 + `pytest tests/test_services/ -q` |
-| 前端/参数面板 | 四点一致性（app.js TASK_PARAMS / PARAM_META / PARAM_LABELS / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_cross_consistency.py` |
+| 前端/参数面板 | 四点一致性（app.js TASK_PARAMS / PARAM_META / PARAM_LABELS / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_frontend_params.py`（键集静态比对）+ `python scripts/verify_cross_consistency.py`（运行时） |
 | 脚本/门禁 | `pytest tests/scripts/ -q`（治理脚本自测）+ 负向注入验证（见 6.4） |
 | 文档/发版 | `python scripts/verify_docs.py --strict` + `python scripts/falsy_audit.py` + 版本链核对（pyproject/CHANGELOG/manifest） + **远端拓扑核验（发版前全量）**：`git ls-remote origin refs/heads/main 'refs/tags/v*'` + 仓库外临时克隆判祖先（见「4.2 附注」） |
 
@@ -186,7 +186,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | [ci.yml `e2e`](../../.github/workflows/ci.yml) | Push/PR | 服务器 30 次探测（失败即红），`tests/test_web_e2e.py` 全部方法；Linux 需 CJK 字体。 |
 | [ci.yml `full`](../../.github/workflows/ci.yml) | main push / dispatch | 矩阵 3 OS × Python 3.10/3.11/3.12/3.13（部分排除），`pytest tests/ -q` + `verify_consistency`（完整嵌套 pytest）。核对 Windows junction `--basetemp` 处理。 |
 | [ci.yml `quality`](../../.github/workflows/ci.yml) | main push / dispatch | 覆盖率 fail-under=70、vulture（过滤 Pydantic `cls` 误报）、pip-audit。 |
-| [ci.yml `consistency`](../../.github/workflows/ci.yml) | 任意分支 | 5 路注册断言（REGISTRY=PARAMS=LABELS=GROUPS）+ `engine` 全部导出 + `verify_cross_consistency`（`set -o pipefail`）。 |
+| [ci.yml `consistency`](../../.github/workflows/ci.yml) | 任意分支 | 5 路注册断言（REGISTRY=PARAMS=LABELS=GROUPS）+ `engine` 全部导出 + `verify_frontend_params`（静态键集比对，2026-09-06 E4/G4 起）+ `verify_cross_consistency`（运行时，`set -o pipefail`）。 |
 | [quality.yml](../../.github/workflows/quality.yml) | PR 涉及 src/scripts/tests/user-manual/api-reference | dependency-review（PR 依赖变更）、test-quality-guard（WARN ≤ 29）、docs-consistency（verify_docs --strict，3.10 兜底）、manual-parity（verify_cross_consistency，需 report extras 读 xlsx）、falsy-audit、architecture-check（verify_consistency 完整）、ruff-check（锁定 0.16.3）。 |
 | [release.yml](../../.github/workflows/release.yml) | main push / release published | main：release-please 开 release PR；release published：构建 wheel/sdist 并 attach 到 GitHub Release（2026-09-05 起，此前历次 Release assets 为空；tag 由 release-please 经 API 创建不触发 push 事件，故监听 release 事件）；tag == pyproject version == manifest == CHANGELOG。 |
 | [security.yml](../../.github/workflows/security.yml) | push / PR / 定时 | CodeQL + pip-audit；依赖改动核对版本上限。 |

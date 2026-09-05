@@ -141,20 +141,20 @@ function clearAll() { selectedY.clear(); selectedX.clear(); selectedCat.clear();
 // ── 参数配置：默认值 + 元数据（类型 & 下拉选项） ──
 const TASK_PARAMS = {
   grid_search:       { ranges: '', direction: 'maximize', n_points: 10 },
-  process_capability:{ usl: '', lsl: '' },
-  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05 },
+  process_capability:{ usl: '', lsl: '', target: '' },
+  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05, group_col: '' },
   trend_forecast:    { forecast_steps: 5 },
   anomaly_detect:    { method: 'iqr', alpha: 0.05, max_outliers: 5 },
   response_surface:  { direction: 'maximize' },
   multi_objective:   { objectives: '', weights: '' },
-  decision_tree:     { max_depth: 5 },
+  decision_tree:     { max_depth: 5, random_state: 42 },
   anova:             { alpha: 0.05, interactions: 0 },
   spc_nonparametric: { side: 'two-sided' },
   spc_cusum:         { k: 0.5, h: 5.0, group_col: '' },
   spc_ewma:          { lam: 0.2, L: 2.7, group_col: '' },
   spc_attribute:     { chart_type: 'p', group_col: '' },
   power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5, alpha: 0.05, target_power: 0.80, current_n: 30, n_groups: 3, p0: 0.5, p1: 0.6 },
-  bootstrap_ci:      { statistic: 'mean', n_bootstrap: 2000, ci_level: 0.95 },
+  bootstrap_ci:      { statistic: 'mean', n_bootstrap: 2000, ci_level: 0.95, random_state: 42 },
   median_ci:         { ci_level: 0.95 },
   quantile_regression:{ quantile: 0.5 },
   tolerance_interval:{ coverage: 0.99, confidence: 0.95, side: 'two-sided' },
@@ -272,6 +272,7 @@ const PARAM_META = {
     options: [['0.1','0.1'], ['0.25','0.25'], ['0.5','0.5 (中位数)'], ['0.75','0.75'], ['0.9','0.9']]
   },
   group_col:      { type: 'column', label: '分组依据', hint: '按此列分系列，不同值=不同颜色的线' },
+  random_state:   { type: 'number', label: '随机种子', hint: '复现随机性（bootstrap/决策树）' },
   part_col:       { type: 'column', label: '部件列', hint: '选择部件标识列' },
   operator_col:   { type: 'column', label: '操作员列', hint: '选择操作员标识列' },
   fit: {

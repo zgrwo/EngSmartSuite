@@ -319,5 +319,10 @@ jobs:
           print(f"OK: All {len(reg_funcs)} registry funcs exported from engine/__init__.py")
           EOF
 
-      - name: 前后端参数默认值一致性
+      - name: 前后端参数键集一致性（静态解析 app.js TASK_PARAMS vs DEFAULT_PARAMS）
+        # 审查 2026-09-06 E4/G4：此前"前后端参数默认值一致性"步骤实跑 verify_cross_consistency
+        # （运行时交叉验证，不含 app.js 解析），前端键漂移无任何自动化拦截。
+        run: python scripts/verify_frontend_params.py
+
+      - name: 全量交叉验证（Web ↔ CLI ↔ 手册 CLAIM）
         run: set -o pipefail && python scripts/verify_cross_consistency.py 2>&1 | tail -5
