@@ -65,7 +65,16 @@ def _breusch_pagan(model, X):
         ess = np.sum((aux_model.fittedvalues - resid_sq_mean) ** 2)
         rss = np.sum((resid_sq - aux_model.fittedvalues) ** 2)
         # 审查 2026-08-19：#完美拟合时 ess=rss=0 → LM=0/0=NaN，返回 None 由调用方显示 N/A
-        if ess + rss <= 1e-12:
+        # 审查 2026-09-05 B3：原绝对阈值 1e-12 误判微尺度真实数据（y~1e-10、残差~1e-13）
+        # → 改双相对判据，任一成立则检验无意义：
+        #   a) 残差仅为浮点舍入水平（rms ≤ 16·eps·y_rms，完美拟合属此类）；
+        #   b) resid_sq 相对变异可忽略（ess+rss ≤ 1e-12·n·mean(resid_sq)²）
+        # 微尺度真实数据的 LM 为量纲无关比值，可正常计算
+        _resid_rms = float(np.sqrt(np.mean(resid_sq)))
+        _y_rms = float(np.sqrt(np.mean(np.asarray(model.model.endog, dtype=float) ** 2)))
+        if _y_rms > 0 and _resid_rms <= 16 * float(np.finfo(float).eps) * _y_rms:
+            return None, None
+        if ess + rss <= 1e-12 * n * float(np.mean(resid_sq)) ** 2:
             return None, None
         lm = n * ess / (ess + rss)
         k = X.shape[1] - 1
@@ -2281,12 +2290,22 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
                     status="error",
                     messages=["fractional_factorial 要求所有因子为 2 水平"],
                 )
-            n_runs = req.params.get("n_runs") or 2 ** len(factors)
+            # 审查 2026-09-05 M-4：`or` falsy 陷阱（n_runs=0 被静默顶替为默认值）
+            n_runs = req.params.get("n_runs")
+            if n_runs is None:
+                n_runs = 2 ** len(factors)
             try:
                 n_runs = int(n_runs)
             except (ValueError, TypeError):
                 return AnalysisResult(
                     task="doe_design", status="error", messages=[f"n_runs 值无效: {n_runs}"]
+                )
+            # M-4 配套：n_runs<=0 显式拒绝（np.log2(0)=-inf 会让 int() 溢出崩溃）
+            if n_runs <= 0:
+                return AnalysisResult(
+                    task="doe_design",
+                    status="error",
+                    messages=[f"n_runs 必须为正整数，当前: {n_runs}"],
                 )
             coded, err = _gen_fractional(factors, n_runs)
             if err:
@@ -2301,14 +2320,21 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
                     messages=["plackett_burman 要求所有因子为 2 水平"],
                 )
             k = len(factors)
-            n_runs = req.params.get("n_runs") or next(
-                (n for n in _PB_SUPPORTED if n - 1 >= k), None
-            )
+            # 审查 2026-09-05 M-4：`or` falsy 陷阱（n_runs=0 被静默顶替为默认值）
+            n_runs = req.params.get("n_runs")
+            if n_runs is None:
+                n_runs = next((n for n in _PB_SUPPORTED if n - 1 >= k), None)
             try:
                 n_runs = int(n_runs)
             except (ValueError, TypeError):
                 return AnalysisResult(
                     task="doe_design", status="error", messages=[f"n_runs 值无效: {n_runs}"]
+                )
+            if n_runs <= 0:
+                return AnalysisResult(
+                    task="doe_design",
+                    status="error",
+                    messages=[f"n_runs 必须为正整数，当前: {n_runs}"],
                 )
             coded, err = _gen_plackett_burman(factors, n_runs)
             if err:

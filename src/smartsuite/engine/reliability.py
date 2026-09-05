@@ -137,22 +137,22 @@ _D2_STAR_ROWS: dict[int, list[tuple[int, float]]] = {
 }
 
 
-def _d2_star(g: int, m: int) -> float:
-    """AIAG d2* 查表：g=操作员数，m=零件数×重复次数；超表范围用最近行/∞列近似。"""
+def _d2_star_infty(g: int) -> float:
+    """AIAG d2* 表 g 行的 m→∞ 列 — AV 分量专用（K2 = 5.15/d2*∞）。
+
+    审查 2026-09-05 B2：AIAG MSA 4 版 p.225 的 K2 常数（2 操作员→3.65=5.15/1.41、
+    3→2.70、4→2.30）只随操作员数变化，不随零件数/重复次数变化。此前按
+    m=零件数×重复次数 取有限列（如 n_obs=20 → 1.31 < 1.41）使 2 操作员小样本
+    AV 高估 8–11%（statsmodels ANOVA 交叉实测，方向=从严）。
+    g>10 时按 10 行近似（差异 <1%），调用方记录日志。
+    """
     if g < 2:
         # g=1（单组）即普通 d2 语义——由调用方处理
         return float(g)
-    row = _D2_STAR_ROWS.get(min(g, 10), _D2_STAR_ROWS[10])
     if g > 10:
-        # 操作员 >10 时按 10 行近似（差异 <1%），调用方记录日志
         logger.info("操作员数 g=%d > 10，d2* 按 g=10 行近似", g)
-    best = row[0]
-    for col_m, val in row:
-        if col_m >= m:
-            best = (col_m, val)
-            break
-        best = (col_m, val)
-    return float(best[1])
+    row = _D2_STAR_ROWS.get(min(g, 10), _D2_STAR_ROWS[10])
+    return float(row[-1][1])
 
 
 def gage_rr(req: AnalysisRequest) -> AnalysisResult:
@@ -294,7 +294,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     n_obs = n_parts * r
     # Round-2 #A3f：AIAG MSA 要求操作员分量用 d2*（g=操作员数 行）而非普通 d2——
     # 普通 d2 使 AV 系统性高估（k=2 时约 25%）；PV 的 g=1 行即普通 d2，无需改
-    d2_o = _d2_star(k, n_obs)
+    # 审查 2026-09-05 B2：d2* 取 g 行 m→∞ 列（K2=5.15/d2*∞ 只随操作员数变化），
+    # 不再按 m=n_obs 取有限列
+    d2_o = _d2_star_infty(k)
     av = np.sqrt(max(0, (x_bar_diff / d2_o) ** 2 - ev**2 / n_obs))
     av_pct = av * sigma_mult
 

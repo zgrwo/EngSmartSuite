@@ -647,7 +647,9 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
             n = len(x_all)
             x_mean = float(np.mean(x_all))
             ssx = float(np.sum((x_all - x_mean) ** 2))
-            if ssx < 1e-15:
+            # 审查 2026-09-05 B3：绝对阈值 1e-15 误判微尺度 X（ssx~1e-25）→ 相对化，
+            # 以 Σx² 量级的 1e-12 倍为常量 X 判据（真常量时 ssx 恒为 0，行为不变）
+            if ssx <= 1e-12 * max(float(np.sum(x_all**2)), 1e-300):
                 # X 列为常量，拟合线为水平线，置信带退化（无意义）
                 pass
             else:

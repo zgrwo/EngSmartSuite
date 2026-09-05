@@ -115,6 +115,8 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     transform = req.params.get("transform")  # None | "boxcox"
 
     # 统一转换为 float（Web UI 端发送数字，CLI/直接调用可能为字符串）
+    # 审查 2026-09-05 C1：float("inf")/float("nan") 不抛 ValueError，需 isfinite
+    # 显式拒绝，否则 cp=inf/cp=nan 等荒谬结果静默输出（sentinel-contract L1）
     if usl is not None:
         try:
             usl = float(usl)
@@ -123,6 +125,12 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
                 task="process_capability",
                 status="error",
                 messages=[f"规格上限 USL 值无效: {usl}，请输入数值"],
+            )
+        if not np.isfinite(usl):
+            return AnalysisResult(
+                task="process_capability",
+                status="error",
+                messages=[f"规格上限 USL 必须为有限数值，当前: {req.params.get('usl')!r}"],
             )
     if lsl is not None:
         try:
@@ -133,11 +141,28 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=[f"规格下限 LSL 值无效: {lsl}，请输入数值"],
             )
+        if not np.isfinite(lsl):
+            return AnalysisResult(
+                task="process_capability",
+                status="error",
+                messages=[f"规格下限 LSL 必须为有限数值，当前: {req.params.get('lsl')!r}"],
+            )
     if target is not None:
         try:
             target = float(target)
         except (ValueError, TypeError):
-            target = None  # 目标值无效时静默忽略
+            # 审查 2026-09-05 C1：目标值无效不再静默置 None（掩盖用户输入错误）
+            return AnalysisResult(
+                task="process_capability",
+                status="error",
+                messages=[f"Cpm 目标值无效: {req.params.get('target')}，请输入数值"],
+            )
+        if not np.isfinite(target):
+            return AnalysisResult(
+                task="process_capability",
+                status="error",
+                messages=[f"Cpm 目标值必须为有限数值，当前: {req.params.get('target')!r}"],
+            )
 
     # ── 规格限有效性校验 (P2 fix: 防止 USL ≤ LSL 导致负 Cp) ──
     if usl is not None and lsl is not None and usl <= lsl:

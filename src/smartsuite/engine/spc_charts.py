@@ -252,7 +252,15 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 2. 提取分组依据 ──
     group_col = req.params.get("group_col")
-    has_groups = bool(group_col and group_col in data.columns)
+    # 审查 2026-09-05 C2：无效分组列此前被静默忽略退化为单系列，
+    # 用户误以为已按分组分析——显式报错（哨兵契约：集合内无效元素显式提示）
+    if group_col and group_col not in data.columns:
+        return AnalysisResult(
+            task="spc_xbar",
+            status="error",
+            messages=[f"分组列「{group_col}」不存在于数据中。可用列: {list(data.columns)[:10]}"],
+        )
+    has_groups = bool(group_col)
     if has_groups:
         group_vals = data[group_col]
         group_names = sorted(group_vals.dropna().unique())
@@ -1959,7 +1967,10 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     values = data.values
 
     # 审查 2026-08-19 #2.5：常量列 → 所有 KS p 为 nan → 假"过程稳定 ✓ CL=nan"
-    if float(np.std(values, ddof=1)) <= 1e-12:
+    # 审查 2026-09-05 B1：绝对阈值误判微尺度数据 → 相对阈值（同 xbar_r_chart #A2l）
+    _mean_abs = abs(float(np.mean(values)))
+    _scale = _mean_abs if _mean_abs > 1e-12 else 1.0
+    if float(np.std(values, ddof=1)) <= 1e-12 * _scale:
         return AnalysisResult(
             task="spc_nonparametric",
             status="error",

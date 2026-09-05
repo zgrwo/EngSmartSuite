@@ -81,6 +81,7 @@ EngSmartSuite/
 │   ├── test_integration_warranty.py#   保修场景
 │   ├── test_master_integration.py  #   全方法集成
 │   ├── test_review_2026_09_fixes.py#   2026-09-01 审查修复回归（跨层）
+│   ├── test_review_2026_09_05_release_prep.py # 2026-09-05 发版前审查修复回归
 │   ├── test_web_e2e.py             #   Web UI E2E
 │   ├── test_workflows.py           #   工作流串联测试
 │   ├── crossval_r/                 #   关键方法交叉验证（手工公式/已知性质；已不再声称 R 参考）

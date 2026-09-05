@@ -83,7 +83,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
-    if float(np.std(data.values, ddof=1)) <= 1e-12:
+    # 审查 2026-09-05 B1：绝对阈值 1e-12 误判微尺度数据（std~1e-13，如单位换算后的
+    # 纳米/微应变数据）→ 相对阈值，复用 spc_xbar 同族修法（spc_charts.py #A2l）
+    _mean_abs = abs(float(np.mean(data.values)))
+    _scale = _mean_abs if _mean_abs > 1e-12 else 1.0
+    if float(np.std(data.values, ddof=1)) <= 1e-12 * _scale:
         return AnalysisResult(
             task="trend_forecast",
             status="error",
