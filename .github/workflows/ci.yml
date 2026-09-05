@@ -290,7 +290,9 @@ jobs:
           cache: pip
 
       - name: 安装依赖
-        run: pip install -e ".[dev]"
+        # 2026-09-05 CI 修复（同族漏改）：verify_cross_consistency 读 tests/test_data.xlsx
+        # 需要 openpyxl（report extras）；quality.yml manual-parity 2026-08-21 已修，此处漏装
+        run: pip install -e ".[dev,report]"
 
       - name: TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性
         run: |
