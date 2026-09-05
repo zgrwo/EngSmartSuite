@@ -308,3 +308,59 @@ def test_trend_forecast_micro_scale_table_not_zero():
     tbl = r.tables["forecast"]
     assert (tbl["预测值"].to_numpy() != 0).all(), "微尺度预测值不应整列显示 0.0000"
     assert (tbl["预测值"].abs() < 1e-8).all(), "预测值应保持微尺度量级"
+
+
+# ── 逐公式审计处置（2026-09-05）：效应量标签 + McNemar 小样本提示 ────
+
+
+def test_ttest_ind_effect_labeled_hedges_g():
+    """审计瑕疵#8：_cohens_d 返回含小样本校正的 Hedges g，两样本分支标签同步。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    np.random.seed(301)
+    g1 = np.random.normal(10, 2, 30)
+    g2 = np.random.normal(12, 2, 30)
+    df = pd.DataFrame({"v": np.concatenate([g1, g2]), "g": ["A"] * 30 + ["B"] * 30})
+    r = hypothesis_test(_mk("hypothesis_test", df, "v", ["g"], {"test": "ttest_ind"}))
+    assert r.status == "ok", r.messages
+    assert r.metadata["effect_name"] == "Hedges g", f"实际: {r.metadata['effect_name']}"
+    # 数值仍为 Hedges g（含校正因子）
+    sp_pool = np.sqrt((29 * g1.var(ddof=1) + 29 * g2.var(ddof=1)) / 58)
+    g_ref = (g1.mean() - g2.mean()) / sp_pool * (1 - 3 / (4 * 60 - 9))
+    assert abs(r.metadata["effect_size"] - g_ref) < 1e-9
+
+
+def test_cohens_d_dispatch_labeled_hedges_g():
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    np.random.seed(302)
+    df = pd.DataFrame(
+        {
+            "v": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(1, 1, 20)]),
+            "g": ["A"] * 20 + ["B"] * 20,
+        }
+    )
+    r = hypothesis_test(_mk("hypothesis_test", df, "v", ["g"], {"test": "cohens_d"}))
+    assert r.status == "ok", r.messages
+    assert r.metadata["effect_name"] == "Hedges g"
+    assert r.metadata["test"].startswith("效应量 Hedges g")
+
+
+def test_mcnemar_small_discordant_warms_exact_binomial():
+    """审计约定#1：b+c<25 时 Yates 校正 + 精确二项复核提示。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    # b=2, c=7（不一致对 9 < 25）
+    col1 = [0] * 10 + [0] * 2 + [1] * 7 + [1] * 11
+    col2 = [0] * 10 + [1] * 2 + [0] * 7 + [1] * 11
+    df = pd.DataFrame({"pre": col1, "post": col2})
+    r = hypothesis_test(_mk("hypothesis_test", df, "post", ["pre", "post"], {"test": "mcnemar"}))
+    assert r.status == "ok", r.messages
+    assert any("精确二项" in m for m in r.messages), f"应提示精确二项复核: {r.messages}"
+    assert "(Yates校正)" in r.metadata["test"]
+    # 大样本分支无提示
+    col1b = [0] * 40 + [0] * 15 + [1] * 25 + [1] * 40
+    col2b = [0] * 40 + [1] * 15 + [0] * 25 + [1] * 40
+    df2 = pd.DataFrame({"pre": col1b, "post": col2b})
+    r2 = hypothesis_test(_mk("hypothesis_test", df2, "post", ["pre", "post"], {"test": "mcnemar"}))
+    assert r2.status == "ok" and not r2.messages

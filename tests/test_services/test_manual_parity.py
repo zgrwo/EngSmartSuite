@@ -178,7 +178,7 @@ def test_manual_4_2_anova(raw_df):
 
 
 def test_manual_4_3_hypothesis_test(raw_df):
-    """手册 §4.3: 假设检验 — p≈0.000, Cohen's d≈1.31"""
+    """手册 §4.3: 假设检验 — p≈0.000, Hedges g≈1.31"""
     r_py, _, r_web, py_st, _, web_st = _compare_3paths(
         "hypothesis_test",
         raw_df,

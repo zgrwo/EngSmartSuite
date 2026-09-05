@@ -926,7 +926,7 @@ def _cohens_d(x, y, warn_list: list[str] | None = None):
     if n1 < 2 or n2 < 2:
         if warn_list is not None:
             warn_list.append(
-                f"⚠ 效应量计算: 样本量不足 (n1={n1}, n2={n2})，Cohen's d 无法可靠估计，已返回 0"
+                f"⚠ 效应量计算: 样本量不足 (n1={n1}, n2={n2})，Hedges g 无法可靠估计，已返回 0"
             )
         return 0.0
     s1, s2 = np.std(x, ddof=1), np.std(y, ddof=1)
@@ -1305,7 +1305,7 @@ def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
 
 
 def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
-    """效应量 Cohen's d（不检验）— 两组标准化均值差异。"""
+    """效应量 Hedges g（不检验）— 两组标准化均值差异（Cohen's d 的小样本无偏校正）。"""
     group_col, group_err = _resolve_group_col(req, "hypothesis_test")
     if group_err is not None:
         return group_err
@@ -1314,7 +1314,7 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(
             task="hypothesis_test",
             status="error",
-            messages=["Cohen's d 需要恰好 2 个分组"],
+            messages=["Hedges g 需要恰好 2 个分组"],
         )
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
@@ -1328,7 +1328,7 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
     d = _cohens_d(g1.values, g2.values, warn_list)
     ci = _cohens_d_ci(d, len(g1), len(g2))
     label = _effect_size_label(abs(d), "cohens_d")
-    test_name = f"效应量 Cohen's d ({groups[0]} vs {groups[1]})"
+    test_name = f"效应量 Hedges g ({groups[0]} vs {groups[1]})"
     fig = Figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
     ax.hist(
@@ -1360,13 +1360,13 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
             )
         },
         figures=[fig],
-        summary=f"Cohen's d={d:.3f} ({label})，95%CI=[{ci[0]:.3f}, {ci[1]:.3f}]",
+        summary=f"Hedges g={d:.3f} ({label})，95%CI=[{ci[0]:.3f}, {ci[1]:.3f}]",
         metadata={
             "test": test_name,
             "statistic": float(d),
             "p_value": None,  # 纯效应量，不检验
             "effect_size": float(d),
-            "effect_name": "Cohen's d",
+            "effect_name": "Hedges g",
             "effect_label": label,
             "effect_size_ci": (float(ci[0]), float(ci[1])),
             "n1": len(g1),
@@ -1976,10 +1976,16 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         # McNemar 检验
         # 小样本 (b+c < 25) 使用 Yates 连续性校正，大样本不做校正
         bc_sum = b + c
+        mcnemar_warns: list[str] = []
         if bc_sum > 0:
             if bc_sum < 25:
                 stat = (abs(b - c) - 1) ** 2 / bc_sum
                 test_name_suffix = " (Yates校正)"
+                # 逐公式审计 2026-09-05 约定#1：不一致对较少时 Yates χ² 仍近似偏激进
+                mcnemar_warns.append(
+                    f"⚠ 配对不一致数 (b+c={bc_sum}) 较小，Yates 校正 χ² 的 p 值可能欠准确，"
+                    f"建议用精确二项检验复核：binomtest(min({b},{c}), {bc_sum}, 0.5)"
+                )
             else:
                 stat = (b - c) ** 2 / bc_sum
                 test_name_suffix = ""
@@ -2018,6 +2024,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
         return AnalysisResult(
             task="hypothesis_test",
+            messages=mcnemar_warns,
             tables={
                 "test_results": pd.DataFrame(
                     {
@@ -2377,7 +2384,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         stat, p = sp_stats.ttest_ind(g1, g2)
         test_name = "独立样本 t 检验"
         effect_size = _cohens_d(g1.values, g2.values, norm_warn)
-        effect_name = "Cohen's d"
+        # 逐公式审计 2026-09-05 瑕疵#8：_cohens_d 实际返回含小样本校正的 Hedges g
+        # （J=1-3/(4N-9)），标签同步更正，避免统计口径误读
+        effect_name = "Hedges g"
         effect_label = _effect_size_label(effect_size, "cohens_d")
 
     alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)

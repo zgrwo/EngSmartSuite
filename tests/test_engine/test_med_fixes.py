@@ -26,7 +26,7 @@ def _make_two_group_data(seed=7):
 
 
 class TestMed1CohensD:
-    """test=cohens_d 应返回 Cohen's d 效应量（不检验），而非静默跑 t 检验。"""
+    """test=cohens_d 应返回 Hedges g 效应量（不检验），而非静默跑 t 检验。"""
 
     def test_cohens_d_not_falling_back_to_ttest(self):
         df = _make_two_group_data()
@@ -40,9 +40,9 @@ class TestMed1CohensD:
             )
         )
         assert r.status == "ok"
-        # 必须命中 cohens_d 专属分支：effect_name 应含 Cohen's d 且非独立样本 t 检验
-        assert r.metadata.get("test") == "效应量 Cohen's d (A vs B)", (
-            f"test 应为 '效应量 Cohen's d'，实际: {r.metadata.get('test')}"
+        # 必须命中 cohens_d 专属分支：effect_name 应为 Hedges g 且非独立样本 t 检验
+        assert r.metadata.get("test") == "效应量 Hedges g (A vs B)", (
+            f"test 应为 '效应量 Hedges g'，实际: {r.metadata.get('test')}"
         )
         # 无显著性检验 → 不应有 p_value 或应为 None
         assert r.metadata.get("p_value") is None

@@ -71,8 +71,14 @@ class AnalysisResult:
 | `jonckheere` | Jonckheere-Terpstra 趋势 | `group_col` |
 | `auto` | 自动选择 (Shapiro-Wilk → t/MWU) | `group_col` |
 | `kruskal` | Kruskal-Wallis H（kruskal_wallis 别名） | `group_col` |
-| `cohens_d` | 效应量 Cohen's d（不检验） | `group_col` |
+| `cohens_d` | 效应量 Hedges g（不检验；含 Cohen's d 小样本无偏校正 J=1−3/(4N−9)） | `group_col` |
 | `correlation` | 相关显著性检验 | `group_col` |
+
+**口径说明**（逐公式审计 2026-09-05）：
+- `ttest_ind` / `cohens_d` 的效应量为 **Hedges g**（合并标准差 d 乘小样本校正因子）；
+- `ttest_paired` 的效应量 d_z = mean(col1−col2)/sd(col1−col2)，**符号与统计量方向一致**；
+- `jonckheere` 报告**双侧** p 值（有序备择如需单侧请自行折半判读）；
+- `mcnemar` 采用混合策略：不一致对 b+c<25 时用 Yates 校正 χ²（并输出精确二项复核提示），否则用未校正 χ²。
 
 ### decision_tree_analysis
 - **Task Key**: `decision_tree`
@@ -90,7 +96,7 @@ class AnalysisResult:
 
 ### contingency_analysis
 - **Task Key**: `contingency`
-- **描述**: 列联表分析 — Chi-square（含小期望频数标注）+ Cramér's V / Odds Ratio（2×2 表）
+- **描述**: 列联表分析 — Chi-square（2×2 表用 Yates 连续性校正；Cramér's V 基于校正 χ²，略偏保守）+ Cramér's V / Odds Ratio（2×2 表）
 - **params**: `alpha` (0.05)
 - **返回**: `contingency_table`, `expected_frequencies`
 - **图**: 堆叠柱状图
@@ -168,7 +174,7 @@ class AnalysisResult:
 
 ### multi_objective_opt
 - **Task Key**: `multi_objective`
-- **描述**: 多目标优化 — 加权期望函数法 + Pareto 前沿 (双目标)
+- **描述**: 多目标优化 — 加权期望函数法 + Pareto 前沿 (双目标)。综合期望 D = Σwᵢ·dᵢ（加权**算术**平均，dᵢ 为 min-max 归一化），非 Derringer-Suich 几何平均
 - **params**: `objectives` (必需: [{col, direction, ...}]), `weights`
 - **返回**: `desirability_scores`, `optimal_parameters`
 - **图**: Pareto 前沿 (双目标) + 方案分解堆叠柱状图
@@ -177,7 +183,7 @@ class AnalysisResult:
 - **Task Key**: `doe_analysis`
 - **描述**: DOE 主效应与交互效应分析，含 Lenth PSE 显著性参考线
 - **params**: `alpha` (0.05)
-- **返回**: `effect_estimates` (含 t 值/p 值/效应量解读)
+- **返回**: `effect_estimates` (含 t 值/p 值/效应量解读)。t 值为**单因子回归 t** 口径（其余因子效应计入残差，正交设计下检验偏保守；效应量本身精确）
 - **图**: Pareto 效应图 + Lenth ME 参考线
 
 ### doe_design
@@ -214,7 +220,7 @@ class AnalysisResult:
 
 ### robust_regression
 - **Task Key**: `robust_regression`
-- **描述**: Huber 稳健回归 — 对异常值不敏感，输出与 OLS 的系数对比
+- **描述**: Huber 稳健回归 — 对异常值不敏感，输出与 OLS 的系数对比（Huber M-估计实现，系数与 statsmodels RLM HuberT 存在 ~1% 内的实现差异）
 - **params**: 无
 - **返回**: `coefficient_comparison`
 - **图**: Huber vs OLS 系数对比柱状图
@@ -334,7 +340,7 @@ class AnalysisResult:
 - **Task Key**: `gage_rr`
 - **描述**: 测量系统分析 (Gage R&R) — X-bar and R 法，评估量具重复性和再现性
 - **params**: `part_col`, `operator_col`, `tolerance`, `sigma_multiplier` (默认 5.15)
-- **返回**: `gage_rr_results`, `ndc` (可区分类别数)
+- **返回**: `gage_rr_results`, `ndc` (可区分类别数；ndc = ⌊1.41·PV/GRR⌋ 取整)
 - **图**: 变异源柱状图 (EV/AV/GRR/PV)
 
 ### tolerance_interval

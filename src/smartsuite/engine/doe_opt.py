@@ -774,7 +774,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
 
 
 def _desirability(vals, direction):
-    """计算期望值（0-1 归一化）。"""
+    """计算期望值（0-1 min-max 归一化，multi_objective 聚合口径见其 docstring）。"""
     vmin, vmax = vals.min(), vals.max()
     rng = vmax - vmin + EPSILON
     if direction == "maximize":
@@ -786,7 +786,13 @@ def _desirability(vals, direction):
 
 
 def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
-    """多目标优化 — 加权期望函数法。"""
+    """多目标优化 — 加权期望函数法。
+
+    聚合口径（逐公式审计 2026-09-05 约定#5）：综合期望 D = Σ wᵢ·dᵢ（加权算术平均），
+    其中 dᵢ 为各目标 min-max 归一化期望值（_desirability）。注意这与
+    Derringer-Suich 经典加权几何平均 D = (∏ dᵢ^wᵢ)^(1/Σw) 不同——算术平均
+    对单目标极值更宽容，权衡取舍可能与几何平均口径的排序不一致。
+    """
     objectives = req.params.get("objectives", [])
     if not objectives:
         return AnalysisResult(
