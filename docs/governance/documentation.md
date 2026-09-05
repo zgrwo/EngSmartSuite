@@ -11,6 +11,7 @@
 | `../specification/api-reference.md` | 开发者/AI | "函数签名是什么？"（**签名唯一信源**） | 任何 Public 接口变更 |
 | `../user-manual/user-manual.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
 | `project-structure.md` | 开发者/AI | "代码在哪？"（**结构唯一信源**） | 文件新增/删除/移动 |
+| `ai-review-prompt.md` | AI 审查代理 | "变更怎么审查？"（审查模板，产出归档 logs/reports/） | 治理契约/陷阱速查变更 |
 | `skills/*.md` | AI 编码 | "Python 有什么陷阱？" | 发现新陷阱 |
 
 ## 禁止事项

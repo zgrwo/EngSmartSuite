@@ -120,6 +120,7 @@ EngSmartSuite/
 ├── docs/                           # 项目文档（规范文档 + ADR + 手册）
 │   ├── README.md                   #   文档分类导航
 │   ├── governance/                 #   治理与基础
+│   │   ├── ai-review-prompt.md     #   AI 深度审查 Prompt 模板
 │   │   ├── context.md              #   术语表
 │   │   ├── documentation.md        #   文档职责
 │   │   ├── falsy-pitfalls.md       #   Falsy 陷阱清单

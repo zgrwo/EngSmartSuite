@@ -243,6 +243,7 @@ EngSmartSuite/
 | [context.md](docs/governance/context.md) | 术语表 |
 | [project-structure.md](docs/governance/project-structure.md) | 结构地图 |
 | [documentation.md](docs/governance/documentation.md) | 文档职责 |
+| [ai-review-prompt.md](docs/governance/ai-review-prompt.md) | AI 深度审查 Prompt 模板（产出归档 logs/reports/） |
 | [sentinel-contract.md](docs/governance/sentinel-contract.md) | 哨兵契约（L1-L5 + NaN/Inf 守卫清单） |
 | [adr-template.md](docs/adr/adr-template.md) | ADR 模板（重大架构决策记录） |
 | [tooling-pitfalls.md](docs/governance/tooling-pitfalls.md) | 工具链陷阱清单（PowerShell/git/CI） |

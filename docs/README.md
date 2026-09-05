@@ -7,7 +7,7 @@
 
 | 类别 | 文档 | 内容 |
 | :--- | :--- | :--- |
-| [governance/](governance/) | 治理与基础 | 术语表、文档职责、项目结构、哨兵契约、陷阱清单 |
+| [governance/](governance/) | 治理与基础 | 术语表、文档职责、项目结构、哨兵契约、陷阱清单、AI 审查 Prompt |
 | [specification/](specification/) | 技术规格 | 项目概述、功能规格、函数签名唯一信源 |
 | [user-manual/](user-manual/) | 用户手册 | 每个函数的详细示例 + 结果解读 |
 | [adr/](adr/) | 架构决策记录 | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel / ADR 模板 |
