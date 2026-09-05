@@ -90,7 +90,7 @@ EngSmartSuite/
 ├── src/                              # 主包（core / engine / services / web）
 ├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
 ├── skills/                           # Skill 定义（领域 5 + 过程 6）
-├── templates/                        # YAML 分析模板 (44 个: 43 任务 + 1 工作流指南)
+├── templates/                        # YAML 分析模板 (44 个: 41 任务 + 2 方法变体 + 1 工作流指南)
 ├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）
 ├── run_smartsuite.bat              # 一键启动脚本（Windows）
 ├── run_smartsuite.sh               # 一键启动脚本（Linux/macOS）
