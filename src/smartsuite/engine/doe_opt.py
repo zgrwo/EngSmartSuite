@@ -1708,7 +1708,12 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
 
     # 系数
     coefs = model.coef_
-    nonzero = np.abs(coefs) > 1e-6
+    # 审查 2026-09-06 R4-1：绝对阈值 1e-6 误判微尺度数据（y~1e-10 → 系数~1e-9 整表
+    # 误标「否」，与 R²=0.99 矛盾）。系数带 y 量纲（模型拟合于 X_scaled、y 未标准化），
+    # 与 2026-09-05 B1/B3 同族改为相对判据：相对最大系数幅值取 1e-6；
+    # 全零模型（Lasso 全压缩）时 max=0 → 阈值 0，全「否」保持本义。
+    _coef_scale = float(np.max(np.abs(coefs)))
+    nonzero = np.abs(coefs) > 1e-6 * _coef_scale
     n_selected = int(np.sum(nonzero))
     r2 = float(model.score(X_scaled, y))
 
@@ -1727,7 +1732,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         {
             "变量": cols + ["(截距)"],
             "标准化系数": list(coefs) + [float(model.intercept_)],
-            "选中": ["是" if abs(c) > 1e-6 else "否" for c in coefs] + ["—"],
+            "选中": ["是" if m else "否" for m in nonzero] + ["—"],
         }
     ).sort_values("标准化系数", key=abs, ascending=False)
 
