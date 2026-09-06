@@ -122,6 +122,7 @@ EngSmartSuite/
 │       ├── test_verify_docs.py
 │       ├── test_test_quality_guard.py
 │       ├── test_falsy_audit.py          #   2026-09-06 G3 负向注入转正
+│       ├── test_manual_claims_freshness.py # 2026-09-06 F-D1 手册新鲜度校验自测
 │       └── test_verify_frontend_params.py # 2026-09-06 E4/G4 前后端键集自测
 │
 ├── docs/                           # 项目文档（规范文档 + ADR + 手册）
@@ -221,6 +222,7 @@ EngSmartSuite/
 │   ├── verify_cross_consistency.py #   Web/CLI 交叉一致性
 │   ├── verify_frontend_params.py   #   前后端参数键集静态一致性
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
+│   ├── manual_claims_freshness.py  #   手册 CLAIM 新鲜度校验（F-D1：手册↔快照↔引擎）
 │   ├── falsy_audit.py              #   Falsy 模式审计
 │   ├── gen_requirements.py         #   依赖清单生成
 │   ├── generate_images.py          #   手册图片生成

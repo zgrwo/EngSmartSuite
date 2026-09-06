@@ -11,6 +11,7 @@ import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 手册新鲜度模块（F-D1）
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import preprocess_data
@@ -21,6 +22,9 @@ buf = io.StringIO()
 
 # 审查 2026-09-01 G-1：失败计数 → 脚本退出码（此前 DIFF 仅记录文本，永远 exit 0）
 fail_count = 0
+# 审查 2026-09-06 F-D1：rpt() 数值 CLAIM 登记簿 → 结尾对手册新鲜度校验
+# （快照值必须仍存在于 user-manual.md 对应章节，防手册内容漂移无门禁）
+CLAIM_LOG: list[tuple] = []
 
 
 def p(*args, **kwargs):
@@ -477,6 +481,9 @@ def rpt(analysis, value_name, manual, actual=None, tolerance=0.001, ok=None):
             match = "ERR"
             disp = str(actual)
     p(f"  {analysis:<24} | {value_name:<25} | {str(manual):<18} | {disp:<18} | {match}")
+    # 审查 2026-09-06 F-D1：数值 CLAIM 登记（含 N/A 场景——手册侧有值才对）
+    if isinstance(manual, (int, float)) and not isinstance(manual, bool):
+        CLAIM_LOG.append((analysis, value_name, manual))
     # 审查 2026-09-01 G-1：非 OK/N/A 计为失败（DIFF/ERR）
     if match not in ("OK", "N/A"):
         fail_count += 1
@@ -577,6 +584,20 @@ p()
 p("=" * 100)
 p("VERIFICATION COMPLETE")
 p("=" * 100)
+
+# ── 手册新鲜度校验（审查 2026-09-06 F-D1）：CLAIM 快照 ↔ user-manual.md ──
+from manual_claims_freshness import check_manual_freshness  # noqa: E402
+
+p()
+p("--- 手册新鲜度校验（CLAIM 快照 ↔ user-manual.md）---")
+_manual_path = os.path.join(PROJECT_ROOT, "docs", "user-manual", "user-manual.md")
+with open(_manual_path, encoding="utf-8") as _f:
+    _manual_text = _f.read()
+_problems = check_manual_freshness(_manual_text, CLAIM_LOG)
+for _prob in _problems:
+    p(f"  [DIFF] {_prob}")
+p(f"  校验数值 CLAIM {len(CLAIM_LOG)} 条，问题 {len(_problems)} 条")
+fail_count += len(_problems)
 
 with open(OUTPUT, "w", encoding="utf-8") as f:
     f.write(buf.getvalue())

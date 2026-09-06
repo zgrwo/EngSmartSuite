@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.doe_opt import regression_analysis
@@ -39,6 +40,9 @@ def test_correlation_known_r():
     result = correlation_analysis(req)
     assert result.status == "ok"
     r = result.tables["correlation_matrix"].loc["y", "x"]
+    # 审查 2026-09-06 F-D6：区间断言对 ±0.01 注入不敏感 → 加 scipy 独立参考比对
+    expected_r = float(sp_stats.pearsonr(df["x"], df["y"]).statistic)
+    assert abs(r - expected_r) < 1e-9, f"与 scipy 独立参考偏离: {r:.6f} vs {expected_r:.6f}"
     assert 0.85 < r < 0.95, f"Expected r≈0.9, got {r:.4f}"
 
 

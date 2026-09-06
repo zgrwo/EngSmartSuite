@@ -258,28 +258,40 @@ class TestRegressionCrossVal:
 
 
 class TestSpcCrossVal:
-    """R 参考: qcc(data, type='xbar', nsigmas=3)"""
+    """R 参考: qcc(data, type='xbar', nsigmas=3)
+
+    审查 2026-09-06 F-D3：引擎契约中 feature_cols[0] 是横坐标（子组由同一
+    X 值下的多行自然形成），并非值列。旧构造把 s1..s4 当值列传入 → 引擎
+    退化为 I-chart（s0 单值图），CL/违规断言全部巧合通过（violations 恰好
+    命中索引 24）。现按引擎契约改为长格式：125 行，每 5 行一个子组。
+    """
+
+    def _long_df(self, data):
+        """宽 (25×5) → 长 (125 行)：y=测量值，x=子组编号（同值 5 行成组）。"""
+        return pd.DataFrame({"y": data.ravel(), "subgroup": np.repeat(np.arange(1, 26), 5)})
 
     def test_xbar_center_line(self):
         """中心线应等于总均值"""
         data = _make_spc_data()
-        # 构建 DataFrame：每行一个子组
-        df = pd.DataFrame(data, columns=[f"s{i}" for i in range(5)])
-        df["subgroup"] = range(1, 26)
         r = orchestrate(
             AnalysisRequest(
                 task="spc_xbar",
-                data=df,
-                target_col="s0",
-                feature_cols=[f"s{i}" for i in range(1, 5)],
-                params={"subgroup_col": "subgroup"},
+                data=self._long_df(data),
+                target_col="y",
+                feature_cols=["subgroup"],
+                params={},
             )
         )
         assert r.status == "ok"
-        # 中心线应接近 50（真实均值）
-        cl = r.metadata.get("center_line", r.metadata.get("xbar_bar"))
-        if cl is not None:
-            assert abs(cl - data.mean()) < 0.5, f"CL={cl}, expected≈{data.mean():.2f}"
+        # 须为 X-bar 建模而非 I-chart 退化（I-chart 下中心线仍是总均值，
+        # 但子组结构与 σ 估计口径全不同——用 chart_type 钉住建模方式）
+        assert r.metadata.get("chart_type") != "i_chart", (
+            f"应按子组建模，实际 chart_type={r.metadata.get('chart_type')}"
+        )
+        # 审查 2026-09-06 F-D3：metadata 键为 xbar_mean（旧断言读不存在的
+        # center_line/xbar_bar 键，`if cl is not None` 恒假 → 整个测试恒真）
+        cl = r.metadata["xbar_mean"]
+        assert abs(cl - data.mean()) < 0.5, f"CL={cl}, expected≈{data.mean():.2f}"
 
     def test_xbar_detects_shift(self):
         """第 20 子组注入偏移，应检出失控（is_stable=False + violations）。"""
@@ -287,15 +299,13 @@ class TestSpcCrossVal:
         # 审查 2026-09-01 T-2：_make_spc_data 仅注入 +3.0（实测不足越限，
         # is_stable 仍为 True）；此处追加 +5.0（合计 +8.0）确保 X-bar 越 ±3σ
         data[19] += 5.0
-        df = pd.DataFrame(data, columns=[f"s{i}" for i in range(5)])
-        df["subgroup"] = range(1, 26)
         r = orchestrate(
             AnalysisRequest(
                 task="spc_xbar",
-                data=df,
-                target_col="s0",
-                feature_cols=[f"s{i}" for i in range(1, 5)],
-                params={"subgroup_col": "subgroup"},
+                data=self._long_df(data),
+                target_col="y",
+                feature_cols=["subgroup"],
+                params={},
             )
         )
         # 应返回正常状态与控制限，并检出第 20 子组的偏移（审查 2026-09-01 T-2：
@@ -305,7 +315,8 @@ class TestSpcCrossVal:
         assert r.metadata["is_stable"] is False, "注入偏移后 X-bar 应判失控"
         viol = r.metadata.get("xbar_violations") or {}
         assert viol, f"应检出 X-bar 违规子组: {r.metadata}"
-        assert 24 in next(iter(viol.values())), f"违规点应为子组 20 (索引 24): {viol}"
+        # 长格式下偏移子组索引为 19（第 20 组）
+        assert 19 in next(iter(viol.values())), f"违规点应为子组 20 (索引 19): {viol}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -330,16 +341,17 @@ class TestCapabilityCrossVal:
             )
         )
         assert r.status == "ok"
-        cp = r.metadata.get("cp")
-        cpk = r.metadata.get("cpk")
-        if cp is not None:
-            # 手动计算
-            sigma = data.std(ddof=1)
-            mu = data.mean()
-            expected_cp = (usl - lsl) / (6 * sigma)
-            expected_cpk = min((usl - mu) / (3 * sigma), (mu - lsl) / (3 * sigma))
-            assert abs(cp - expected_cp) < 0.1, f"Cp: {cp} vs {expected_cp}"
-            assert abs(cpk - expected_cpk) < 0.1, f"Cpk: {cpk} vs {expected_cpk}"
+        # 审查 2026-09-06 F-D3：旧代码 `if cp is not None` 条件断言在 Cp 缺失/None
+        # 时静默跳过（mutation 实证）→ 改键索引 + float 转换：键缺失或 None 直接报错
+        cp = float(r.metadata["cp"])
+        cpk = float(r.metadata["cpk"])
+        # 手动计算
+        sigma = data.std(ddof=1)
+        mu = data.mean()
+        expected_cp = (usl - lsl) / (6 * sigma)
+        expected_cpk = min((usl - mu) / (3 * sigma), (mu - lsl) / (3 * sigma))
+        assert abs(cp - expected_cp) < 0.1, f"Cp: {cp} vs {expected_cp}"
+        assert abs(cpk - expected_cpk) < 0.1, f"Cpk: {cpk} vs {expected_cpk}"
 
     def test_capability_ci_exists(self):
         """过程能力应报告 95% CI"""

@@ -50,6 +50,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      # 审查 2026-09-06 F-D7：release-please 自动链不受影响，但手工建 tag 可绕过
+      # 版本链四向量比对（pyproject==CHANGELOG==manifest==tag）——构建前显式校验
+      - name: 校验 tag 与 pyproject 版本一致
+        run: python -c "import os, tomllib; tag = os.environ['GITHUB_REF_NAME'].lstrip('v'); ver = tomllib.load(open('pyproject.toml','rb'))['project']['version']; print(f'tag={tag} pyproject={ver}'); assert tag == ver, f'release tag {tag} != pyproject version {ver}'"
+
       - name: 构建 wheel 与 sdist
         run: |
           pip install build
