@@ -117,8 +117,9 @@ function autoDetect() {
   selectedY.clear(); selectedX.clear(); selectedCat.clear();
   columnData.forEach(c => {
     const lo = c.name.toLowerCase();
+    // pandas 3 起字符串列 dtype 报 "str"（与后端 _is_text_dtype 口径一致）
     const isCat = catKw.some(k => lo.includes(k.toLowerCase()))
-      || ['object','string','bool'].includes(c.dtype);
+      || ['object','string','str','bool'].includes(c.dtype);
     if (isCat) selectedCat.add(c.name);
     if (yKw.some(k => lo.includes(k.toLowerCase()))) { selectedY.add(c.name); return; }
     if (['float64','int64'].includes(c.dtype) && !isCat) selectedX.add(c.name);

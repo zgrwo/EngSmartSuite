@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -9,6 +10,19 @@ import pandas as pd
 from smartsuite.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
+
+
+def _is_text_dtype(col: pd.Series) -> bool:
+    """文本/类别类列判定（pandas 2.x / 3.x 兼容）。
+
+    pandas 3 起字符串列默认 str dtype（既非 object 也非 string），逐名字符串
+    元组判别（"object"/"string"）会静默漏判——推荐分析、缺失模式高基数检测、
+    隐式日期探测、分组列推断均受影响（2026-09-06 兼容修复）。
+    pd.api.types.is_string_dtype 覆盖 object / str / string / string[pyarrow]
+    全系（字符串类 category 亦为 True）；再显式并上任意 category，维持 2.x
+    对整数编码类别的既有判定语义。
+    """
+    return pd.api.types.is_string_dtype(col) or str(col.dtype) == "category"
 
 
 def validate_data(df: pd.DataFrame, target_col: str, feature_cols: list[str]) -> list[str]:
@@ -69,11 +83,7 @@ def preprocess_data(
         categorical_cols = {
             c
             for c in features
-            if (
-                pd.api.types.is_string_dtype(df[c])
-                or pd.api.types.is_bool_dtype(df[c])
-                or str(df[c].dtype) in ("object", "category")
-            )
+            if (_is_text_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c]))
             and not pd.api.types.is_numeric_dtype(df[c])
         }
 
@@ -226,7 +236,7 @@ def missing_pattern_analysis(df: pd.DataFrame) -> dict:
     high_cardinality: list[dict] = []
     for col in df.columns:
         n_unique = int(df[col].nunique())
-        if n_unique > 50 and str(df[col].dtype) in ("object", "string", "category"):
+        if n_unique > 50 and _is_text_dtype(df[col]):
             high_cardinality.append(
                 {
                     "列名": col,
@@ -277,22 +287,23 @@ def recommend_analysis(df: pd.DataFrame, target_col: str | None = None) -> dict:
     """
     n_rows, n_cols = df.shape
     numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    cat_cols = [
-        c
-        for c in df.columns
-        if str(df[c].dtype) in ("object", "string", "category")
-        and not pd.api.types.is_datetime64_any_dtype(df[c])
-    ]
+    cat_cols = [c for c in df.columns if _is_text_dtype(df[c])]
     binary_cols = [
         c for c in df.columns if c != target_col and 1 <= df[c].nunique(dropna=True) <= 2
     ]
     date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
-    # 启发式检测隐式日期列（object/string 类型但内容可解析为日期）
-    for c in [c for c in df.columns if str(df[c].dtype) in ("object", "string")]:
+    # 启发式检测隐式日期列（文本/类别列但内容可解析为日期）
+    for c in [c for c in df.columns if _is_text_dtype(df[c])]:
         try:
             sample = df[c].dropna().head(20)
             if len(sample) >= 5:
-                converted = pd.to_datetime(sample, errors="coerce")
+                # 消息级抑制：无格式探测时 pandas 必发 "Could not infer format"
+                # UserWarning，属设计内试探路径，不应污染用户日志
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", message="Could not infer format", category=UserWarning
+                    )
+                    converted = pd.to_datetime(sample, errors="coerce")
                 if converted.notna().mean() > 0.8 and c not in date_cols:
                     date_cols.append(c)
         except (ValueError, TypeError, OverflowError):
@@ -524,9 +535,9 @@ def infer_group_col(
         {'group_col': col_name} 或 None（未找到合适的列）
     """
     cat_set = set(categoricals) if categoricals else set()
-    candidates = [
-        c for c in features if c in cat_set or str(df[c].dtype) in ("object", "string", "category")
-    ] or [c for c in features if df[c].nunique() <= 10]
+    candidates = [c for c in features if c in cat_set or _is_text_dtype(df[c])] or [
+        c for c in features if df[c].nunique() <= 10
+    ]
     for col in candidates:
         if df[col].dropna().nunique() == 2:
             return {"group_col": col}

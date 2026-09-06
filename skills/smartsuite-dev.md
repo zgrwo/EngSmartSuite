@@ -182,6 +182,7 @@ side: {
 - `model.params` 可能返回 numpy 数组而非 pandas Series → 用 `np.asarray(model.params)` 不用 `.values`
 - pandas 新版本 `sum(axis=None)` → 跨版本应链式调用 `.sum().sum()`
 - statsmodels 警告消息含 `'failed'` 词 → 不要按此关键词判断分析失败
+- **pandas 3 字符串列默认 `str` dtype**（非 object/string）→ 禁止用 `str(dtype) in ("object", "string", ...)` 逐名判别（pandas 3 下静默漏判，2026-09-06 兼容修复实例：data_io 高基数检测/类别列识别/隐式日期探测/分组列推断四处同族失效）；统一走 `data_io._is_text_dtype`（`pd.api.types.is_string_dtype` + category 并集）
 
 ### 陷阱 8：Gage R&R `d2*` 表索引口径 / 常表方向误判
 
