@@ -134,6 +134,12 @@ def main():
         except FileNotFoundError:
             print(f"错误: 找不到输入文件「{args.input}」，请检查文件路径是否正确", file=sys.stderr)
             sys.exit(1)
+        except (pd.errors.ParserError, pd.errors.EmptyDataError):
+            # 二者均为 ValueError 子类，必须先于 ValueError 分支拦截，
+            # 否则英文 pandas 原文（如 "Error tokenizing data"）直接透给 CLI 用户
+            logger.exception("文件解析失败")
+            print(f"错误: 无法解析文件「{args.input}」，请确认文件格式正确", file=sys.stderr)
+            sys.exit(1)
         except ValueError as e:
             print(f"错误: {e}", file=sys.stderr)
             sys.exit(1)
