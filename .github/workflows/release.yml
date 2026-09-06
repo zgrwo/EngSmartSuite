@@ -1,9 +1,9 @@
 # ============================================================================
-# release.yml — release-please 自动发版 + tag 构建构件
-# 触发：main 分支推送（release-please 推导版本）+ release published（构建产物）
+# release.yml — release-please 自动发版 + 产物构建
+# 触发：main 分支推送（release-please 推导版本、发布 Release 并同 run 构建产物）
 # 机制：从 Conventional Commits 自动推导版本号、生成 CHANGELOG.md、
 #       打开 release PR → 合并后自动打 tag + 建 GitHub Release；
-#       tag 触发时构建 wheel/sdist 并 attach 到 GitHub Release（2026-09-05 补齐）
+#       release_created 时在同一 run 内构建 wheel/sdist 并 attach（2026-09-06 补齐）
 # 前置：
 #   1. 仓库 Settings → Actions → Workflow permissions 允许写权限
 #   2. commit 必须符合 Conventional Commits（见 ci.yml「提交规范检查」，
@@ -16,7 +16,11 @@ on:
   push:
     branches: [main]
   # 2026-09-05：tag 由 release-please 经 API 创建，push 事件不触发；
-  # 必须监听 release published 事件（API 创建 Release 同样触发）
+  # 监听 release published 以覆盖【手工】在 GitHub UI 发布的 Release。
+  # ⚠ release-please 自动链不能用本触发器：它以 GITHUB_TOKEN 发布 Release，
+  # GitHub 规定 GITHUB_TOKEN 触发的事件不级联启动新 run（实证 2026-09-06：
+  # v1.2.5/v1.2.6 assets 为空、历史 release 事件 run 数为 0）——自动链的产物
+  # 构建在 release-please job 内联完成（见 R4-3 步骤）。
   release:
     types: [published]
 
@@ -29,16 +33,45 @@ jobs:
     # tag 推送也触发本 workflow，release-please 只在 main 分支运行
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       # manifest 模式下不得在 with 中设置 release-type（会覆盖 config.json）
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           config-file: .github/release-please/config.json
           manifest-file: .release-please-manifest.json
 
-  # 2026-09-05 新增：历史上 release 从未产出 wheel/sdist（历次 GitHub Release
-  # assets 均为空），本 job 补齐"产物发布"承诺。构建源码 = tag 指向的提交
-  # （release-please 合并 PR 后打 tag，内容即 main 最新）。
+      # ── 审查 2026-09-06 R4-3：自动化发版链的产物构建 ──
+      # release-please 用 GITHUB_TOKEN 发布 Release → release published 事件
+      # 不会触发 build-artifacts job（见上方 ⚠），v1.2.5/v1.2.6 因此空发。
+      # 产物必须在同一 run 内构建上传；checkout 发生在 merge commit 上，
+      # 内容即 tag 指向的提交。
+      - uses: actions/checkout@v7
+        if: steps.release.outputs.release_created == 'true'
+
+      - uses: actions/setup-python@v7
+        if: steps.release.outputs.release_created == 'true'
+        with:
+          python-version: "3.11"
+
+      - name: 构建 wheel 与 sdist
+        if: steps.release.outputs.release_created == 'true'
+        run: |
+          pip install build
+          python -m build
+
+      - name: 上传构件到 GitHub Release
+        if: steps.release.outputs.release_created == 'true'
+        run: gh release upload "${{ steps.release.outputs.tag_name }}" dist/* --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # 仅覆盖【手工】发布的 Release（UI/API 以用户令牌操作 → release 事件正常触发）；
+  # release-please 自动链不走这里（GITHUB_TOKEN 事件抑制，见 release-please job）
   build-artifacts:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
@@ -50,8 +83,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      # 审查 2026-09-06 F-D7：release-please 自动链不受影响，但手工建 tag 可绕过
-      # 版本链四向量比对（pyproject==CHANGELOG==manifest==tag）——构建前显式校验
+      # 审查 2026-09-06 F-D7：手工发布的 Release 绕过 release-please 版本推导，
+      # 可能使 tag 偏离版本链四向量（pyproject==CHANGELOG==manifest==tag）——构建前显式校验
       - name: 校验 tag 与 pyproject 版本一致
         run: python -c "import os, tomllib; tag = os.environ['GITHUB_REF_NAME'].lstrip('v'); ver = tomllib.load(open('pyproject.toml','rb'))['project']['version']; print(f'tag={tag} pyproject={ver}'); assert tag == ver, f'release tag {tag} != pyproject version {ver}'"
 

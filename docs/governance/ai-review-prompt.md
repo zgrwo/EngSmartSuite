@@ -188,7 +188,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | [ci.yml `quality`](../../.github/workflows/ci.yml) | main push / dispatch | 覆盖率 fail-under=70、vulture（过滤 Pydantic `cls` 误报）、pip-audit。 |
 | [ci.yml `consistency`](../../.github/workflows/ci.yml) | 任意分支 | 5 路注册断言（REGISTRY=PARAMS=LABELS=GROUPS）+ `engine` 全部导出 + `verify_frontend_params`（静态键集比对，2026-09-06 E4/G4 起）+ `verify_cross_consistency`（运行时，`set -o pipefail`）。 |
 | [quality.yml](../../.github/workflows/quality.yml) | PR 涉及 src/scripts/tests/user-manual/api-reference | dependency-review（PR 依赖变更）、test-quality-guard（WARN ≤ 29）、docs-consistency（verify_docs --strict，3.10 兜底）、manual-parity（verify_cross_consistency，需 report extras 读 xlsx）、falsy-audit、architecture-check（verify_consistency 完整）、ruff-check（锁定 0.16.3）。 |
-| [release.yml](../../.github/workflows/release.yml) | main push / release published | main：release-please 开 release PR；release published：构建 wheel/sdist 并 attach 到 GitHub Release（2026-09-05 起，此前历次 Release assets 为空；tag 由 release-please 经 API 创建不触发 push 事件，故监听 release 事件）；tag == pyproject version == manifest == CHANGELOG。 |
+| [release.yml](../../.github/workflows/release.yml) | main push / release published | main：release-please 开 release PR，合并后发布 Release 并**在同一 run 内**构建 wheel/sdist 并 attach（2026-09-06 R4-3 起——release-please 以 GITHUB_TOKEN 发布，其 release 事件不级联触发 workflow，实证 v1.2.5/v1.2.6 空发）；release published 触发的 build-artifacts job 仅覆盖**手工**发布；tag == pyproject version == manifest == CHANGELOG。 |
 | [security.yml](../../.github/workflows/security.yml) | push / PR / 定时 | CodeQL + pip-audit；依赖改动核对版本上限。 |
 | [stale.yml](../../.github/workflows/stale.yml) | 每日 | 僵尸 Issue/PR，核对豁免标签。 |
 
