@@ -605,9 +605,10 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     event_col = req.feature_cols[0] if len(req.feature_cols) > 0 else None
     # 2026-08-21 发行前审查 #1：与其余方法统一——分组列优先 params.group_col，
     # 回退 feature_cols[1]（此前仅 feature_cols[1]，前端 group_col 参数无效）
-    group_col = req.params.get("group_col") or (
-        req.feature_cols[1] if len(req.feature_cols) > 1 else None
-    )
+    # 审查 2026-09-06 F-D5：falsy 回退改 is not None——空串显式报错，不静默替换
+    group_col = req.params.get("group_col")
+    if group_col is None:
+        group_col = req.feature_cols[1] if len(req.feature_cols) > 1 else None
 
     if not event_col or event_col not in req.data.columns:
         return AnalysisResult(
@@ -615,7 +616,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=["需要提供事件指示列 (1=失效, 0=删失)"],
         )
-    if group_col and group_col not in req.data.columns:
+    if group_col is not None and group_col not in req.data.columns:
         return AnalysisResult(
             task="survival_analysis",
             status="error",

@@ -287,7 +287,10 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # 分组列优先 params.group_col（Web 面板选择），回退 feature_cols[0]
     # （审查 2026-08-19 #2.17：此前引擎忽略 params.group_col，UI 选择无效）
-    group_col = req.params.get("group_col") or req.feature_cols[0]
+    # 审查 2026-09-06 F-D5：falsy 回退改 is not None——空串显式报错，不静默替换
+    group_col = req.params.get("group_col")
+    if group_col is None:
+        group_col = req.feature_cols[0]
     if group_col not in req.data.columns:
         return AnalysisResult(
             task="box_chart",

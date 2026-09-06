@@ -12,6 +12,7 @@ from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOC
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     durbin_watson,
+    round_for_display,
     safe_float as _safe_float,
     threshold_label,
 )  # 共享工具函数
@@ -1439,10 +1440,10 @@ def roc_analysis(req: AnalysisRequest) -> AnalysisResult:
         tables={
             "roc_points": pd.DataFrame(
                 {
-                    "阈值": thresholds_clean.round(4),
-                    "FPR": fpr.round(4),
-                    "TPR": tpr.round(4),
-                    "Youden_J": (tpr - fpr).round(4),
+                    "阈值": round_for_display(thresholds_clean),
+                    "FPR": round_for_display(fpr),
+                    "TPR": round_for_display(tpr),
+                    "Youden_J": round_for_display(tpr - fpr),
                 }
             ),
             "auc_summary": pd.DataFrame(
@@ -1535,13 +1536,13 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     coef_df = pd.DataFrame(
         {
             "变量": X.columns,
-            "系数": params.round(4),
-            "标准误": np.asarray(model.bse).round(4),
-            "z值": np.asarray(model.tvalues).round(3),
-            "p值": np.asarray(model.pvalues).round(4),
-            "OR (Odds Ratio)": or_vals.round(3),
-            "OR 95%CI下限": or_ci_lower.round(3),
-            "OR 95%CI上限": or_ci_upper.round(3),
+            "系数": round_for_display(params),
+            "标准误": round_for_display(np.asarray(model.bse)),
+            "z值": round_for_display(np.asarray(model.tvalues), 3),
+            "p值": round_for_display(np.asarray(model.pvalues)),
+            "OR (Odds Ratio)": round_for_display(or_vals, 3),
+            "OR 95%CI下限": round_for_display(or_ci_lower, 3),
+            "OR 95%CI上限": round_for_display(or_ci_upper, 3),
         }
     )
 
@@ -1913,10 +1914,10 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
         coef_df = pd.DataFrame(
             {
                 "变量": Xc.columns,
-                "系数": np.asarray(model.params).round(4),
-                "标准误": np.asarray(model.bse).round(4),
-                "t值": np.asarray(model.tvalues).round(3),
-                "p值": np.asarray(model.pvalues).round(4),
+                "系数": round_for_display(np.asarray(model.params)),
+                "标准误": round_for_display(np.asarray(model.bse)),
+                "t值": round_for_display(np.asarray(model.tvalues), 3),
+                "p值": round_for_display(np.asarray(model.pvalues)),
             }
         )
 

@@ -282,3 +282,89 @@ def test_survival_median_zero_not_read_as_na():
     assert r.status == "ok", r.messages
     assert r.metadata["median_survival"] == 0.0
     assert "中位寿命=0" in r.summary and "未达到" not in r.summary
+
+
+# ── 8. O-1 同族：微量表值展示自适应（round_for_display 同步，审查 2026-09-06 F-D4）──
+def test_spc_nonparametric_ppm_scale_tables_not_zeroed():
+    """ppm 量纲数据：控制限/违规值表不得被固定位 4 小数整列归零。"""
+    from smartsuite.engine.spc_monitor import spc_nonparametric
+
+    rng = np.random.RandomState(42)
+    vals = rng.normal(2e-5, 2e-6, 30)
+    vals[10] = 4e-5  # 违规点：低于 5e-5 阈值 → round_for_display 自适应分支精确保留
+    df = pd.DataFrame({"y": vals})
+    r = spc_nonparametric(_req("spc_nonparametric", df, target="y", params={"side": "upper"}))
+    assert r.status == "ok", r.messages
+    limits = r.tables["control_limits"]["值"].astype(float)
+    # CL≈2e-5：旧 f"{v:.4f}" 全列显示 "0.0000"；自适应后应保留量级
+    assert limits.abs().max() >= 1e-6, f"控制限表整列归零: {limits.tolist()}"
+    viol = r.tables["violations"]["值"].astype(float)
+    assert abs(viol.iloc[0] - 4e-5) < 1e-12, f"违规值被吞没: {viol.tolist()}"
+
+
+def test_roc_points_micro_thresholds_not_zeroed():
+    """微尺度评分（阈值 ~1e-5）：ROC 阈值列不得归零——阈值是可操作输出。"""
+    from smartsuite.engine.doe_opt import roc_analysis
+
+    rng = np.random.RandomState(42)
+    n = 200
+    score = rng.uniform(0, 5e-5, n)
+    y = (score > 2.5e-5).astype(int)
+    df = pd.DataFrame({"score": score, "y": y})
+    r = roc_analysis(_req("roc_analysis", df, target="y", features=["score"]))
+    assert r.status == "ok", r.messages
+    th = r.tables["roc_points"]["阈值"].dropna().astype(float)
+    assert th.abs().max() > 1e-5, f"ROC 阈值整列归零: {th.head(8).tolist()}"
+
+
+def test_quantile_coef_table_micro_scale_not_zeroed():
+    """微量纲目标列（y~1e-5）：quantile 系数表不得被固定位 4 小数归零。"""
+    from smartsuite.engine.doe_opt import quantile_regression
+
+    rng = np.random.RandomState(42)
+    n = 200
+    x = rng.normal(0, 1, n)
+    y = 3e-5 * x + rng.normal(0, 1e-6, n)  # 真实系数 3e-5，噪声同比微小时可检出
+    df = pd.DataFrame({"x": x, "y": y})
+    r = quantile_regression(_req("quantile_regression", df, target="y", features=["x"]))
+    assert r.status == "ok", r.messages
+    coef = r.tables["coefficients"]
+    x_row = coef[coef["变量"] == "x"]
+    assert float(x_row["系数"].iloc[0]) != 0.0, "微尺度系数被固定位舍入吞没"
+
+
+# ── 9. falsy 回退显式化（审查 2026-09-06 F-D5）──
+def test_box_chart_empty_group_col_not_silently_substituted():
+    """显式传入空串分组列应报错，而非静默回退 feature_cols[0]（哨兵 L4）。"""
+    from smartsuite.engine.exploratory import box_chart
+
+    rng = np.random.RandomState(3)
+    df = pd.DataFrame({"y": rng.normal(10, 1, 40), "g": ["A", "B"] * 20})
+    r = box_chart(_req("box_chart", df, target="y", features=["g"], params={"group_col": ""}))
+    assert r.status == "error", "空串 group_col 不应被静默替换为 feature_cols[0]"
+    assert any("分组列" in m for m in r.messages)
+
+
+def test_survival_empty_group_col_not_silently_substituted():
+    """显式传入空串分组列应报错，而非静默按无分组分析（哨兵 L4）。"""
+    from smartsuite.engine.reliability import survival_analysis
+
+    rng = np.random.RandomState(5)
+    df = pd.DataFrame(
+        {
+            "time": rng.exponential(10, 30),
+            "event": np.ones(30, dtype=int),
+            "batch": ["X", "Y"] * 15,
+        }
+    )
+    r = survival_analysis(
+        _req(
+            "survival_analysis",
+            df,
+            target="time",
+            features=["event", "batch"],
+            params={"group_col": ""},
+        )
+    )
+    assert r.status == "error", "空串 group_col 不应被静默替换为 feature_cols[1]"
+    assert any("分组列" in m for m in r.messages)

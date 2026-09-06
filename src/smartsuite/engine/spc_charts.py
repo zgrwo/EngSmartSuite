@@ -11,7 +11,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import EPSILON, XBR_CONSTANTS
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import _adjust_xlabels  # 共享 X 轴标签自适应工具
+from smartsuite.engine._utils import _adjust_xlabels, round_for_display  # 共享工具（O-1 同族 F-D4）
 
 logger = logging.getLogger(__name__)
 
@@ -2179,13 +2179,13 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             "control_limits": pd.DataFrame(
                 {
                     "统计量": [k for k, _ in present_pairs],
-                    "值": [f"{v:.4f}" for _, v in present_pairs],
+                    "值": round_for_display([v for _, v in present_pairs]),
                 }
             ),
             "violations": pd.DataFrame(
                 {
                     "序号": violations,
-                    "值": values[violations].round(4),
+                    "值": round_for_display(values[violations]),
                 }
             )
             if violations
