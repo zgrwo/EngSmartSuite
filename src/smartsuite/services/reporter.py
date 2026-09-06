@@ -278,7 +278,10 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
                     img.save(out_buf, format="PNG", optimize=True)
                     out_buf.seek(0)
                     img_b64 = base64.b64encode(out_buf.read()).decode("utf-8")
-                except ImportError:
+                except ImportError:  # pragma: no cover — 见下：PIL 为 matplotlib 硬依赖
+                    # PIL 是 matplotlib PNG 管线（backend_agg.print_png
+                    # → image.imsave）的硬依赖，savefig 成功即证明 PIL 在场，
+                    # 此回退仅在 matplotlib 移除 PIL 依赖的未来版本可达
                     img_b64 = base64.b64encode(buf.read()).decode("utf-8")
                 html_parts.append(
                     f"<h2>📈 图表 {i + 1}</h2>"

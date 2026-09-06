@@ -13,7 +13,9 @@ import tempfile
 import openpyxl
 import pandas as pd
 
-from smartsuite.services.audit import auto_report, batch_analyze, export_workbook
+from smartsuite.core.contracts import AnalysisResult
+from smartsuite.services import audit as audit_module
+from smartsuite.services.audit import auto_report, batch_analyze, export_workbook, process_audit
 
 
 # ── batch_analyze 测试 ──
@@ -232,3 +234,406 @@ def test_auto_report_with_spec_limits(sample_doe_data):
     finally:
         if os.path.exists(path):
             os.unlink(path)
+
+
+# ── process_audit 分支矩阵（canned result 精确控制各检查项走向）──
+
+
+def _ok_result(task: str, metadata: dict | None = None) -> AnalysisResult:
+    return AnalysisResult(task=task, status="ok", summary=f"{task} 正常", metadata=metadata or {})
+
+
+def _err_result(task: str) -> AnalysisResult:
+    return AnalysisResult(task=task, status="error", summary=f"{task} 失败", messages=["失败"])
+
+
+_DF = pd.DataFrame(
+    {
+        "温度": [180.0, 182.0, 185.0, 188.0, 190.0] * 4,
+        "压力": [60.0, 62.0, 65.0, 68.0, 70.0] * 4,
+        "强度": [45.0, 46.0, 47.0, 48.0, 49.0] * 4,
+    }
+)
+
+
+def _audit_with(monkeypatch, script: dict, feature_cols=None, **audit_kw):
+    """按 task 名依次返回脚本化结果（或抛异常），驱动 process_audit 各分支。
+
+    队列顺序 = process_audit 实际调用顺序：
+    correlation → (vif, ≥3 特征) → (capability, 有规格限) → (trend, time_order) → outlier
+    """
+    queue = list(script.items())
+
+    def fake_orchestrate(req):
+        action = queue.pop(0)[1]
+        if isinstance(action, Exception):
+            raise action
+        return action
+
+    monkeypatch.setattr(audit_module, "orchestrate", fake_orchestrate)
+    if feature_cols is None:
+        feature_cols = ["温度", "压力"]
+    return process_audit(_DF, target_col="强度", feature_cols=feature_cols, **audit_kw)
+
+
+def test_process_audit_strong_correlation_marks_good(monkeypatch):
+    """|r|>0.5 → 「✓ 良好」（audit.py:101-108）。"""
+    r = _audit_with(
+        monkeypatch,
+        {"correlation": _ok_result("correlation", {"target_correlations": {"温度": 0.9}})},
+    )
+    row = r["health_checks"].query("检查项 == '关键因子识别'").iloc[0]
+    assert "良好" in row["状态"] and "0.90" in row["详情"]
+
+
+def test_process_audit_orchestrate_crash_isolated_per_check(monkeypatch):
+    """单个分析崩溃 → 该项「✗ 失败」，其余检查继续（audit.py:117-125 等）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": RuntimeError("崩溃"),
+            "process_capability": _ok_result("process_capability", {"cpk": 1.67}),
+            "outlier_consensus": _ok_result("outlier_consensus", {"high_confidence_count": 0}),
+        },
+        usl=55,
+        lsl=35,
+    )
+    checks = r["health_checks"]
+    assert "计算异常 (RuntimeError)" in checks.query("检查项 == '关键因子识别'").iloc[0]["详情"]
+    assert checks[checks["检查项"] == "过程能力"].iloc[0]["状态"].startswith("✓")
+
+
+def test_process_audit_vif_fail_and_high_collinearity(monkeypatch):
+    """VIF 失败 → ✗；high_vif_count>0 → ⚠ 警告（audit.py:136-157）。
+
+    VIF 仅在 ≥3 个数值特征列时执行，队列按实际调用顺序供给。
+    """
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "vif": _err_result("vif"),
+            "outlier_consensus": _ok_result("outlier_consensus", {"high_confidence_count": 0}),
+        },
+        feature_cols=["温度", "压力", "强度"],
+    )
+    assert "失败" in r["health_checks"].query("检查项 == '共线性诊断'").iloc[0]["状态"]
+
+    r2 = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "vif": _ok_result("vif", {"high_vif_count": 2}),
+            "outlier_consensus": _ok_result("outlier_consensus", {"high_confidence_count": 0}),
+        },
+        feature_cols=["温度", "压力", "强度"],
+    )
+    row = r2["health_checks"].query("检查项 == '共线性诊断'").iloc[0]
+    assert "⚠" in row["状态"] and "2 个因子 VIF>5" in row["详情"]
+
+
+def test_process_audit_vif_crash_isolated(monkeypatch):
+    """VIF 计算崩溃 → ✗ 失败（audit.py:158-162）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "vif": ValueError("崩溃"),
+            "outlier_consensus": _ok_result("outlier_consensus", {"high_confidence_count": 0}),
+        },
+        feature_cols=["温度", "压力", "强度"],
+    )
+    assert (
+        "计算异常 (ValueError)"
+        in r["health_checks"].query("检查项 == '共线性诊断'").iloc[0]["详情"]
+    )
+
+
+def test_process_audit_capability_none_cpk(monkeypatch):
+    """能力分析成功但 metadata 无 cpk → 「— 未计算」（audit.py:210-211）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "process_capability": _ok_result("process_capability", {}),
+        },
+        usl=55,
+        lsl=35,
+    )
+    row = r["health_checks"].query("检查项 == '过程能力'").iloc[0]
+    assert row["状态"] == "—" and "未计算" in row["详情"]
+
+
+def test_process_audit_capability_marginal_and_fail(monkeypatch):
+    """Cpk ∈ [1.0,1.33) → ⚠ 勉强；失败结果 → ✗（audit.py:176-201）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "process_capability": _ok_result("process_capability", {"cpk": 1.1}),
+        },
+        usl=55,
+        lsl=35,
+    )
+    assert "勉强" in r["health_checks"].query("检查项 == '过程能力'").iloc[0]["状态"]
+
+    r2 = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "process_capability": _err_result("process_capability"),
+        },
+        usl=55,
+        lsl=35,
+    )
+    assert "失败" in r2["health_checks"].query("检查项 == '过程能力'").iloc[0]["状态"]
+
+
+def test_process_audit_capability_crash_isolated(monkeypatch):
+    """能力计算崩溃 → ✗ 失败（audit.py:212-216）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "process_capability": ZeroDivisionError("崩溃"),
+        },
+        usl=55,
+        lsl=35,
+    )
+    assert (
+        "计算异常 (ZeroDivisionError)"
+        in r["health_checks"].query("检查项 == '过程能力'").iloc[0]["详情"]
+    )
+
+
+def test_process_audit_trend_stable_and_autocorr(monkeypatch):
+    """time_order=True：DW 安全区间 → ✓ 稳定；区间外 → ⚠ 注意（audit.py:219-252）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "trend_forecast": _ok_result("trend_forecast", {"durbin_watson": 2.0}),
+        },
+        time_order=True,
+    )
+    assert "稳定" in r["health_checks"].query("检查项 == '过程稳定性'").iloc[0]["状态"]
+
+    r2 = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "trend_forecast": _ok_result("trend_forecast", {"durbin_watson": 1.0}),
+        },
+        time_order=True,
+    )
+    row = r2["health_checks"].query("检查项 == '过程稳定性'").iloc[0]
+    assert "⚠" in row["状态"] and "自相关" in row["详情"]
+
+
+def test_process_audit_trend_fail_and_crash(monkeypatch):
+    """趋势分析失败与崩溃两条兜底（audit.py:227-234, 253-257）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "trend_forecast": _err_result("trend_forecast"),
+        },
+        time_order=True,
+    )
+    assert "失败" in r["health_checks"].query("检查项 == '过程稳定性'").iloc[0]["状态"]
+
+    r2 = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "trend_forecast": IndexError("崩溃"),
+        },
+        time_order=True,
+    )
+    assert (
+        "计算异常 (IndexError)"
+        in r2["health_checks"].query("检查项 == '过程稳定性'").iloc[0]["详情"]
+    )
+
+
+def test_process_audit_outlier_crash_isolated(monkeypatch):
+    """异常检测崩溃 → ✗ 失败（audit.py:292-296）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {}}),
+            "outlier_consensus": TypeError("崩溃"),
+        },
+    )
+    assert (
+        "计算异常 (TypeError)" in r["health_checks"].query("检查项 == '异常值检测'").iloc[0]["详情"]
+    )
+
+
+def test_process_audit_overall_rating_excellent(monkeypatch):
+    """全部 ✓ → 「优秀 (全部正常)」（audit.py:310-311）。"""
+    r = _audit_with(
+        monkeypatch,
+        {
+            "correlation": _ok_result("correlation", {"target_correlations": {"温度": 0.9}}),
+            "process_capability": _ok_result("process_capability", {"cpk": 1.67}),
+            "outlier_consensus": _ok_result("outlier_consensus", {"high_confidence_count": 0}),
+        },
+        usl=55,
+        lsl=35,
+    )
+    assert r["overall_rating"].startswith("优秀")
+    assert r["score_detail"].startswith("✓")
+
+
+def test_process_audit_overall_rating_variants(monkeypatch):
+    """单项 ⚠ → 「良好 (1 项需关注)」；≥2 项 ⚠ → 「需关注 (多项警告)」（audit.py:306-309）。"""
+    weak_corr = _ok_result("correlation", {"target_correlations": {"温度": 0.2}})
+    good_rest = {
+        "correlation": weak_corr,
+        "process_capability": _ok_result("process_capability", {"cpk": 1.67}),
+        "outlier_consensus": _ok_result("outlier_consensus", {"high_confidence_count": 0}),
+    }
+    r1 = _audit_with(monkeypatch, dict(good_rest), usl=55, lsl=35)
+    assert r1["overall_rating"].startswith("良好")
+
+    r2 = _audit_with(
+        monkeypatch,
+        {
+            **good_rest,
+            "outlier_consensus": _ok_result("outlier_consensus", {"high_confidence_count": 3}),
+        },
+        usl=55,
+        lsl=35,
+    )
+    assert r2["overall_rating"].startswith("需关注")
+
+
+# ── batch_analyze / auto_report / export_workbook 补充分支 ──
+
+
+def test_batch_analyze_default_task_list(sample_doe_data, monkeypatch):
+    """不传 tasks → 默认 6 任务清单（audit.py:324-332）。"""
+    ran = []
+    real_orchestrate = audit_module.orchestrate
+
+    def spy(req):
+        ran.append(req.task)
+        return real_orchestrate(req)
+
+    monkeypatch.setattr(audit_module, "orchestrate", spy)
+    result = batch_analyze(sample_doe_data, target_col="强度", feature_cols=["料温", "模温"])
+    assert ran == [
+        "correlation",
+        "regression",
+        "vif",
+        "anova",
+        "normality_check",
+        "distribution_summary",
+    ]
+    assert result["summary"].endswith("tasks OK")
+
+
+def test_batch_analyze_orchestrate_crash_graceful(sample_doe_data, monkeypatch):
+    """orchestrate 本身崩溃 → 单任务降级 error，批处理不中断（audit.py:348-353）。"""
+
+    def boom(req):
+        raise RuntimeError("崩溃")
+
+    monkeypatch.setattr(audit_module, "orchestrate", boom)
+    result = batch_analyze(
+        sample_doe_data,
+        target_col="强度",
+        feature_cols=["料温"],
+        tasks=["correlation", "anova"],
+    )
+    for task in ("correlation", "anova"):
+        assert result["results"][task]["status"] == "error"
+        assert "执行失败" in result["results"][task]["summary"]
+
+
+def test_auto_report_regression_fail_fallback_summary(tmp_path, monkeypatch):
+    """回归建模失败 → 汇总注明「回归建模失败」（audit.py:419-427）。
+
+    feature_cols 缺省 → 自动选择数值列（audit.py:386-388）。
+    """
+    tiny = pd.DataFrame({"强度": [45.0, 46.0], "温度": [180.0, 182.0]})
+    out = tmp_path / "report.html"
+    result = auto_report(
+        tiny,
+        target_col="强度",
+        output_path=str(out),
+    )
+    assert os.path.exists(out)
+    assert "output_path" in result
+
+
+def test_export_workbook_default_tasks(sample_doe_data, tmp_path, monkeypatch):
+    """不传 tasks → 默认 6 任务（audit.py:469-477）；None 值写入空串（audit.py:512-513）。"""
+    out = tmp_path / "wb.xlsx"
+    ran = []
+    real_orchestrate = audit_module.orchestrate
+
+    def spy(req):
+        ran.append(req.task)
+        return real_orchestrate(req)
+
+    monkeypatch.setattr(audit_module, "orchestrate", spy)
+    export_workbook(
+        sample_doe_data, target_col="强度", feature_cols=["料温", "模温"], output_path=str(out)
+    )
+    assert ran[0] == "correlation" and len(ran) == 6
+    assert out.exists()
+
+
+def test_export_workbook_canned_table_with_none_and_nan(tmp_path, monkeypatch):
+    """表格含 None/NaN/np 值 → 分别写空串/NaN/数值（audit.py:510-522）。"""
+    table = pd.DataFrame(
+        {
+            "数值": [1.5, float("nan")],
+            "文本": pd.Series(["ok", None], dtype=object),
+        }
+    )
+    canned = AnalysisResult(task="correlation", status="ok", summary="canned", tables={"t": table})
+
+    def fake_orchestrate(req):
+        return canned
+
+    monkeypatch.setattr(audit_module, "orchestrate", fake_orchestrate)
+    out = tmp_path / "wb2.xlsx"
+    export_workbook(
+        pd.DataFrame({"强度": [1.0, 2.0]}),
+        target_col="强度",
+        feature_cols=["强度"],
+        output_path=str(out),
+        tasks=["correlation"],
+    )
+    wb = openpyxl.load_workbook(out)
+    ws = wb["correlation_summary"]
+    values = [ws.cell(row=6, column=c).value for c in range(1, 3)] + [
+        ws.cell(row=7, column=c).value for c in range(1, 3)
+    ]
+    assert 1.5 in values and "ok" in values, f"数值与文本应原样写入: {values}"
+    assert "NaN" in values, "NaN 应写作字符串「NaN」防 openpyxl 崩溃"
+    assert values[3] in ("", None), "None 应写空串（openpyxl 回读为 None）"
+
+
+def test_export_workbook_task_crash_continues(tmp_path, monkeypatch):
+    """单任务 orchestrate 崩溃 → 记警告继续下一任务（audit.py:525-527）。"""
+
+    def boom(req):
+        raise RuntimeError("崩溃")
+
+    monkeypatch.setattr(audit_module, "orchestrate", boom)
+    out = tmp_path / "wb3.xlsx"
+    export_workbook(
+        pd.DataFrame({"强度": [1.0, 2.0]}),
+        target_col="强度",
+        feature_cols=["强度"],
+        output_path=str(out),
+        tasks=["correlation", "anova"],
+    )
+    assert out.exists()
+    wb = openpyxl.load_workbook(out)
+    assert wb.sheetnames == ["导出状态"], "全部任务失败应只剩状态 Sheet"
+    assert "所有分析任务均失败" in wb["导出状态"]["A1"].value

@@ -274,3 +274,56 @@ def test_check_core_deps_raises_friendly_import_error(monkeypatch):
         pkg.check_core_deps()
     assert "缺少必要的核心依赖包" in str(ei.value)
     assert "pip install" in str(ei.value)
+
+
+# ── 异常翻译表（orchestrate 兜底分支，覆盖 248-294）──
+
+
+def _raise(exc):
+    def _fn(req):
+        raise exc
+
+    return _fn
+
+
+def test_orchestrate_smartsuite_error_returns_chinese_error(monkeypatch):
+    """引擎抛 SmartSuiteError → 兜底为 status=error 中文消息（orchestrator.py:248-260）。"""
+    from smartsuite.core.exceptions import AnalysisError
+    from smartsuite.services import orchestrator as orch
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(AnalysisError("矩阵病态")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    result = orchestrate(req)
+    assert result.status == "error"
+    assert "分析执行失败: 矩阵病态" in result.messages[0]
+    assert "请联系开发者" in result.messages[1]
+
+
+def test_orchestrate_known_exception_detail_map(monkeypatch):
+    """ValueError/KeyError 命中翻译表 → 中文工艺术语，不暴露异常原文（orchestrator.py:261-294）。"""
+    from smartsuite.services import orchestrator as orch
+
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ValueError("bad data")))
+    r1 = orchestrate(req)
+    assert r1.status == "error"
+    assert "数据格式不符合分析要求" in r1.messages[0]
+    assert "bad data" not in r1.messages[0], "不得泄漏异常原文"
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(KeyError("内部键")))
+    r2 = orchestrate(req)
+    assert "键不存在" in r2.messages[0], "KeyError 应翻译为数据处理异常提示"
+
+
+def test_orchestrate_unmapped_exception_falls_back_to_generic(monkeypatch):
+    """翻译表未登记的异常类型 → 通用中文兜底（orchestrator.py:286）。"""
+    from smartsuite.services import orchestrator as orch
+
+    class ExoticError(Exception):
+        pass
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ExoticError("mystery")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    result = orchestrate(req)
+    assert result.status == "error"
+    assert "分析计算过程中出现异常" in result.messages[0]

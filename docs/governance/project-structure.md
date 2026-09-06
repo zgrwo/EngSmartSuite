@@ -111,7 +111,10 @@ EngSmartSuite/
 │   │   ├── test_diff_cli_web.py    #   CLI/Web 差分一致性
 │   │   ├── test_round2_fixes.py    #   审查回归修复验证
 │   │   ├── test_upload_limits.py   #   Web 上传限制校验
-│   │   └── test_manual_parity.py   #   Web/CLI/Python/手册 四路一致性
+│   │   ├── test_manual_parity.py   #   Web/CLI/Python/手册 四路一致性
+│   │   ├── test_web_app_routes.py  #   Web 路由直测（app.py 分支/安全/清理）
+│   │   ├── test_web_api.py         #   Web API 内部机制（序列化/合并矩阵/兜底）
+│   │   └── test_cli_paths.py       #   CLI 分支补测（模板/输入/校验/输出）
 │   └── scripts/                    #   治理脚本测试
 │       ├── test_retry.py
 │       ├── test_run_affected_tests.py
