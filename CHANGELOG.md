@@ -2,6 +2,31 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.5](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.4...v1.2.5) (2026-09-06)
+
+
+### 🐛 Bug 修复
+
+* **ci:** release 构建 job 改用 release published 触发——release-please 经 API 建 tag 不触发 push 事件 ([9d73a38](https://github.com/zgrwo/EngSmartSuite/commit/9d73a38227e314fc592e7fa7b0cc0bc73432b1c3))
+* **cli:** pandas 解析异常不再泄漏英文原文 ([17b35dc](https://github.com/zgrwo/EngSmartSuite/commit/17b35dc7d339644b3e7ffc2435324df09be7ab0c))
+* **engine:** lasso 选中标注阈值相对化——微尺度数据整表误标「否」(R4-1) ([581a2da](https://github.com/zgrwo/EngSmartSuite/commit/581a2da175b31a29f56ddc744ab3591c8e2b62c5))
+* **engine:** O-1 同族 round_for_display 同步 + falsy 回退显式化(F-D4/F-D5) ([7896632](https://github.com/zgrwo/EngSmartSuite/commit/7896632e08beb8cb22cf331dbd9dfdc00020965f))
+* **engine:** 发版前审查修复——ACF 分母判据相对化(B3)/falsy_audit 负向注入转正自测(G3)/模板版本链措辞对齐(F1) ([5ad6579](https://github.com/zgrwo/EngSmartSuite/commit/5ad65797918e6e53428e3405fc67795f7e8bae0c))
+* **scripts:** 前后端参数键集一致性门禁(E4/G4)——verify_frontend_params 静态比对+app.js 补齐 4 个不可达参数+ci.yml 步骤名纠正+空转断言转正 ([770ee68](https://github.com/zgrwo/EngSmartSuite/commit/770ee68867313121499ac42e41c05c1aeb11abea))
+* **scripts:** 手册新鲜度门禁 + falsy_audit BoolOp 扫描 + 测试防线加固(F-D1/F-D2/F-D3/F-D6/F-D7) ([061b080](https://github.com/zgrwo/EngSmartSuite/commit/061b08003cfa9b8082fa308728b69251ebfa8c2b))
+* **services:** pandas 3 兼容——字符串列 str dtype 判别统一助手 ([df58954](https://github.com/zgrwo/EngSmartSuite/commit/df58954ebcece19ef61ef140f0fb35d1249860b6))
+
+
+### 📄 文档
+
+* 审查 Prompt 去伪存真——四层防线测试路径修正为实际子目录/前端四点一致性/engine 模块补全/新增参数可达性检查 ([8aab28b](https://github.com/zgrwo/EngSmartSuite/commit/8aab28b57712f24ad7f509cef30517827da9fdb8))
+* 审查 Prompt 同步 release 构建触发方式（release published 事件） ([cc7f41b](https://github.com/zgrwo/EngSmartSuite/commit/cc7f41b8bb88c7acf00bc924a2260142cf9cab60))
+
+
+### ✅ 测试
+
+* **services:** 应用层测试补全至 100% 覆盖 ([f8f4de1](https://github.com/zgrwo/EngSmartSuite/commit/f8f4de15a37f82aada09f338862f0281d36434a6))
+
 ## [1.2.4](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.3...v1.2.4) (2026-09-05)
 
 
