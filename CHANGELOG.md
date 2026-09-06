@@ -2,6 +2,13 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.7](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.6...v1.2.7) (2026-09-06)
+
+
+### 🐛 Bug 修复
+
+* **ci:** release-please 同 run 构建上传产物——修复 GITHUB_TOKEN 事件抑制 (R4-3) ([25fca1f](https://github.com/zgrwo/EngSmartSuite/commit/25fca1f0495803f40786c5b925e2bb86a1d029a4))
+
 ## [1.2.6](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.5...v1.2.6) (2026-09-06)
 
 
