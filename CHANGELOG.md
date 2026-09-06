@@ -2,6 +2,13 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.6](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.5...v1.2.6) (2026-09-06)
+
+
+### 🧹 维护
+
+* **deps-dev:** bump ruff from 0.16.3 to 0.16.5 ([3e506ca](https://github.com/zgrwo/EngSmartSuite/commit/3e506cae053a7e703476bb872cda02e588bdf90e))
+
 ## [1.2.5](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.4...v1.2.5) (2026-09-06)
 
 
