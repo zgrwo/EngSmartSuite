@@ -5,7 +5,7 @@ import os
 import tempfile
 from logging.handlers import RotatingFileHandler
 
-__version__ = "1.2.4"
+__version__ = "1.2.5"
 
 
 def setup_logging(log_dir: str | None = None, console_level: int = logging.INFO):
