@@ -84,3 +84,12 @@ XBR_CONSTANTS: dict[int, tuple[float, float, float]] = {
     24: (0.157, 0.452, 1.548),
     25: (0.153, 0.459, 1.541),
 }
+
+# ── 工艺参数反解 (inverse_solve) ──
+INVERSE_MIN_HISTORY = 10  # 建模所需最少历史行数
+INVERSE_MAX_REQUESTS = 200  # 单次最大请求行数（保护 Web 同步请求）
+INVERSE_ATTAIN_N = 2048  # 可达性 Latin Hypercube 采样点数
+INVERSE_REG_LAMBDA = 0.02  # 参数偏移正则强度
+INVERSE_LAM_TIME = 0.05  # 时间偏移正则强度
+INVERSE_DE_MAXITER = 30  # 树模型差分进化迭代数
+INVERSE_DE_POPSIZE = 7  # 树模型差分进化种群
