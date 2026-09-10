@@ -381,6 +381,26 @@ def test_reachable_range_contains_solution_and_widens_with_time():
     assert lo.shape == (1,)
 
 
+def test_reachable_range_extracts_time_from_bounds():
+    df = _rate_history()
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    bounds = resolve_bounds(df, roles, {"time_adjustable": "true", "time_min": 30, "time_max": 120})
+    assert "FixedTime" in bounds
+    incoming = {"IncomingZ1": 1.1, "FixedTime": 60.0}
+    lo_auto, hi_auto = reachable_range(forward, incoming, bounds, n=1024, seed=0)
+    lo_exp, hi_exp = reachable_range(
+        forward, incoming, bounds, n=1024, seed=0, time_bounds=(30.0, 120.0)
+    )
+    assert np.array_equal(lo_auto, lo_exp)
+    assert np.array_equal(hi_auto, hi_exp)
+    fixed_bounds = {k: v for k, v in bounds.items() if k != "FixedTime"}
+    lo_fixed, hi_fixed = reachable_range(
+        forward, {"IncomingZ1": 1.1, "FixedTime": 60.0}, fixed_bounds, n=1024, seed=0
+    )
+    assert np.all(hi_auto - lo_auto > hi_fixed - lo_fixed)
+
+
 def test_reachable_range_forward_contains_solved_solution_and_is_deterministic():
     df = _linear_history()
     roles = resolve_roles(df, {})

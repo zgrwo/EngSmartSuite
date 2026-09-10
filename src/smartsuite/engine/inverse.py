@@ -793,7 +793,8 @@ def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
         n: 采样点数，须 >= 2，否则抛中文 ValueError。
         seed: 采样随机种子，同 seed 结果确定。
         time_bounds: rate 模型可调时间区间；非 None 且 `forward.uses_time` 时
-            把 time 作为额外采样维度；None 时时间取 incoming_row 固定值。
+            把 time 作为额外采样维度；None 时若 `bounds` 含时间列则自动取其区间
+            （镜像 `solve_one`），否则时间取 incoming_row 固定值并记录警告。
 
     返回:
         (lo, hi)：每个输出列的最小/最大可达值，shape 均为 (n_outputs,)。
@@ -804,10 +805,14 @@ def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
     n = int(n)
     if n < 2:
         raise ValueError(f"采样点数 n 必须 >= 2（当前 {n}），无法评估可达范围")
-    incoming_row = incoming_row or {}
+    if incoming_row is None:
+        incoming_row = {}
+    uses_time = bool(getattr(forward, "uses_time", False))
+    time_col = getattr(forward, "time_col", None)
     param_names: list[str] = []
     lo_list: list[float] = []
     hi_list: list[float] = []
+    time_pair: tuple[float, float] | None = None
     for name, pair in bounds.items():
         lo = _bound_value(pair, 0)
         hi = _bound_value(pair, 1)
@@ -815,11 +820,14 @@ def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
             raise ValueError(f"参数「{name}」的边界无效（{pair!r}），无法进行可达性采样")
         if hi < lo:
             lo, hi = hi, lo
+        if uses_time and name == time_col:
+            if time_bounds is None:
+                time_pair = (float(lo), float(hi))
+            continue
         param_names.append(name)
         lo_list.append(float(lo))
         hi_list.append(float(hi))
-    time_pair: tuple[float, float] | None = None
-    if getattr(forward, "uses_time", False) and time_bounds is not None:
+    if uses_time and time_bounds is not None:
         t_lo = _bound_value(time_bounds, 0)
         t_hi = _bound_value(time_bounds, 1)
         if not (np.isfinite(t_lo) and np.isfinite(t_hi)):
@@ -827,12 +835,11 @@ def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
         if t_hi < t_lo:
             t_lo, t_hi = t_hi, t_lo
         time_pair = (float(t_lo), float(t_hi))
-        time_col = getattr(forward, "time_col", None)
-        if time_col in param_names:
-            index = param_names.index(time_col)
-            param_names.pop(index)
-            lo_list.pop(index)
-            hi_list.pop(index)
+    if uses_time and time_pair is None:
+        logger.warning(
+            "时间未作为可调维度参与可达性采样（bounds 无时间列且未提供 time_bounds），"
+            "可达范围为时间固定假设"
+        )
     if not param_names and time_pair is None:
         raise ValueError("可调参数与时间边界均为空，无法进行可达性采样")
     sampler = qmc.LatinHypercube(
