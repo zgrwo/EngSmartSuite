@@ -2,7 +2,9 @@ import logging
 
 import numpy as np
 import pandas as pd
+import pytest
 
+from smartsuite.engine._constants import INVERSE_LAM_TIME
 from smartsuite.engine.inverse import (
     fit_forward,
     fit_rate_forward,
@@ -249,3 +251,117 @@ def test_optimal_time_analytic():
         (30.0, 120.0),
     )
     assert 30.0 <= t <= 120.0
+
+
+class _StubRateForward:
+    """最小 duck-typing 速率模型：r = intercept + slope·VariableU1。"""
+
+    uses_time = True
+    has_tree = False
+    time_col = "FixedTime"
+
+    def __init__(self, intercept=0.002, slope=0.0004):
+        self.intercept = intercept
+        self.slope = slope
+
+    def predict_rate(self, incoming, u):
+        return np.array([self.intercept + self.slope * float(u["VariableU1"])])
+
+    def predict_output(self, incoming, u, time):
+        rate = self.predict_rate(incoming, u)[0]
+        return np.array([float(incoming["IncomingZ1"]) - rate * float(time)])
+
+
+def test_optimal_time_weight_scaling():
+    forward = _StubRateForward()
+    incoming = {"IncomingZ1": 1.1, "FixedTime": 60.0}
+    target = np.array([0.94])
+    scale = np.array([0.02])
+    weights = np.array([4.0])
+    u = {"VariableU1": 5.0}
+    t = optimal_time(forward, incoming, target, scale, weights, u, (40.0, 60.0))
+    a_ = (1.1 - 0.94) / 0.02
+    b_ = (0.002 + 0.0004 * 5.0) / 0.02
+    c_ = INVERSE_LAM_TIME / (60.0 - 40.0) ** 2
+    expected = (4.0 * b_ * a_ + c_ * 60.0) / (4.0 * b_ * b_ + c_)
+    unweighted = (b_ * a_ + c_ * 60.0) / (b_ * b_ + c_)
+    assert t == pytest.approx(expected, rel=1e-9)
+    assert t != pytest.approx(unweighted, rel=1e-6)
+
+
+def test_optimal_time_uses_incoming_time_anchor(caplog):
+    forward = _StubRateForward()
+    target = np.array([0.94])
+    scale = np.array([0.02])
+    weights = np.array([1.0])
+    u = {"VariableU1": 5.0}
+    anchored = optimal_time(
+        forward, {"IncomingZ1": 1.1, "FixedTime": 60.0}, target, scale, weights, u, (40.0, 60.0)
+    )
+    with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
+        fallback = optimal_time(
+            forward, {"IncomingZ1": 1.1}, target, scale, weights, u, (40.0, 60.0)
+        )
+    assert any("回退时间区间中点" in r.message for r in caplog.records)
+    a_ = (1.1 - 0.94) / 0.02
+    b_ = (0.002 + 0.0004 * 5.0) / 0.02
+    c_ = INVERSE_LAM_TIME / (60.0 - 40.0) ** 2
+    expected_anchored = (b_ * a_ + c_ * 60.0) / (b_ * b_ + c_)
+    expected_fallback = (b_ * a_ + c_ * 50.0) / (b_ * b_ + c_)
+    assert anchored == pytest.approx(expected_anchored, rel=1e-9)
+    assert fallback == pytest.approx(expected_fallback, rel=1e-9)
+    assert anchored != pytest.approx(fallback)
+
+
+def test_solve_one_gbm_uses_differential_evolution():
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    forward, _ = fit_forward(df, roles, model="gbm", random_state=42)
+    incoming = {"IncomingA": 1.1}
+    known = {"VariableU1": 5.0, "VariableU2": 3.0}
+    target = np.ravel(forward.predict(pd.DataFrame([{**incoming, **known}])))
+    scale = df[roles.output].std().to_numpy()
+    baseline = df[roles.variable].median().to_dict()
+    baseline_pred = np.ravel(forward.predict(pd.DataFrame([{**incoming, **baseline}])))
+    u, pred, info = solve_one(
+        forward,
+        incoming,
+        target,
+        scale,
+        np.ones(2),
+        resolve_bounds(df, roles, {}),
+        baseline,
+        {"random_state": 42},
+    )
+    assert "differential" in info["method"].lower()
+    assert np.isfinite(pred).all()
+    assert all(np.isfinite(value) for value in u.values())
+    assert abs(u["VariableU1"] - 5.0) < 0.5
+    assert abs(u["VariableU2"] - 3.0) < 0.5
+    baseline_sigma = np.abs((baseline_pred - target) / scale)
+    solved_sigma = np.abs(info["residual_sigma"])
+    assert solved_sigma.max() < baseline_sigma.max()
+
+
+def test_resolve_bounds_explicit_override_invalid_fallback_and_zero_width(caplog):
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    explicit = resolve_bounds(
+        df,
+        roles,
+        {"variable_bounds": '{"VariableU1": [4.5, 6.5], "VariableU2": [2.5, 3.5]}'},
+    )
+    assert explicit["VariableU1"] == (4.5, 6.5)
+    assert explicit["VariableU2"] == (2.5, 3.5)
+    with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
+        fallback = resolve_bounds(df, roles, {"variable_bounds": "{不是合法JSON"})
+    assert any("JSON" in r.message for r in caplog.records)
+    assert fallback["VariableU1"] == (
+        float(df["VariableU1"].min()),
+        float(df["VariableU1"].max()),
+    )
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
+        constant = resolve_bounds(df, roles, {"variable_bounds": {"VariableU1": [5.0, 5.0]}})
+    assert constant["VariableU1"] == (5.0, 5.0)
+    assert any("宽度为 0" in r.message for r in caplog.records)

@@ -439,14 +439,27 @@ def _sanitize_weights(weights) -> np.ndarray:
 
 
 def _time_anchor(forward, incoming, time_bounds) -> tuple[float, float]:
+    """解析时间正则锚点 (t0, tau)。
+
+    契约：调用方必须把**有限的历史时间中位数**放入 ``incoming[forward.time_col]``；
+    缺失或非有限时回退时间区间中点为兜底路径（记录警告）。tau 为区间宽度，
+    宽度无效时回退 1.0。
+    """
     lo = safe_float(time_bounds[0], 0.0)
     hi = safe_float(time_bounds[1], 0.0)
-    t0 = 0.5 * (lo + hi)
     time_col = getattr(forward, "time_col", None)
+    t0 = None
     if time_col and isinstance(incoming, dict) and time_col in incoming:
         value = safe_float(incoming[time_col], float("nan"))
         if np.isfinite(value):
-            t0 = value
+            t0 = float(value)
+    if t0 is None:
+        t0 = 0.5 * (lo + hi)
+        logger.warning(
+            "时间锚点缺失：incoming 未提供时间列「%s」的有限取值，已回退时间区间中点 %g",
+            time_col or "?",
+            t0,
+        )
     scale = hi - lo
     if not np.isfinite(scale) or scale <= 0:
         scale = 1.0
@@ -507,7 +520,14 @@ def optimal_time(forward, incoming, target, scale, weights, u, time_bounds) -> f
 
     闭式解 t*(u) = (Σ_j w_j·b_j·a_j + c·t0) / (Σ_j w_j·b_j² + c)，其中
     a_j=(Inc_j−y*_j)/s_j、b_j=r_j/s_j、c=INVERSE_LAM_TIME/τ²；t0 优先取
-    incoming 中时间列的取值（调用方应合并历史中位数），否则取区间中点。
+    incoming 中时间列的取值（契约：调用方须把有限的历史时间中位数放入该键），
+    缺失时回退区间中点并告警。
+
+    参数合同：`scale` 为 weight_mode 尺度（std/range/none 所得，**不含**
+    output_weights）；`weights` 为各输出 output_weights（默认 1.0）。目标函数
+    权重 w_j = weights_j，与 scale 相乘构成 §4.3 的 w_j·((ŷ_j−y*_j)/s_j)²。
+    本 profile 对 t 使用含 w_j 的严格闭式解（spec §4.3 含权目标；spec §4.2
+    简式省略 w_j，以含权式为准）。
     """
     lo = safe_float(time_bounds[0], 0.0)
     hi = safe_float(time_bounds[1], 0.0)
@@ -539,6 +559,9 @@ def solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, p
     """对单条请求行反解可调参数（rate 模型含解析时间）。
 
     目标函数：Σ_j w_j·((ŷ_j−y*_j)/s_j)² + reg_lambda·Σ_k ((u_k−u0_k)/range_k)²。
+    参数合同：`scale` 为 weight_mode 尺度（**不含** output_weights），
+    `weights` 为 output_weights（默认 1.0），二者相乘构成目标权重 w_j；
+    与 `optimal_time` 的传入口径一致，调用方不得在 scale 中重复乘 output_weights。
     平滑模型用 L-BFGS-B 多起点（基准点 + max_starts-1 个随机起点，种子固定）；
     树模型用 differential_evolution + L-BFGS-B polish；rate 模型的时间按
     `optimal_time` 解析求解（bounds 含 time 时）。宽度为 0 的参数按常数处理。
