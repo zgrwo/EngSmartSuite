@@ -486,3 +486,100 @@ def test_inverse_solve_fit_only_and_errors():
     )
     result = inverse_parameter_solve(bad)
     assert result.status == "error" and result.messages
+
+
+def _variable_time_history(n=40, seed=3):
+    rng = np.random.default_rng(seed)
+    inc = rng.normal(1.1, 0.05, n)
+    t = rng.uniform(45, 90, n)
+    u1 = rng.uniform(4, 8, n)
+    y = 1.3 - 0.06 * u1 + 0.05 * inc - 0.001 * t
+    return pd.DataFrame({"IncomingA": inc, "VariableTime": t, "VariableU1": u1, "OutputY1": y})
+
+
+def _variable_time_frame():
+    hist = _variable_time_history()
+    req = pd.DataFrame(
+        {"IncomingA": [1.1], "VariableTime": [None], "VariableU1": [None], "OutputY1": [1.0]}
+    )
+    return pd.concat([hist, req], ignore_index=True)
+
+
+def test_time_adjustable_false_does_not_optimize_variable_time():
+    hist = _variable_time_history()
+    roles = resolve_roles(hist, {"time_col": "VariableTime"})
+    bounds = resolve_bounds(hist, roles, {"time_col": "VariableTime", "time_adjustable": "false"})
+    assert "VariableTime" not in bounds
+    assert "VariableU1" in bounds
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=_variable_time_frame(),
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "time_col": "VariableTime", "time_adjustable": "false"},
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["time_adjustable"] is False
+    rec = result.tables["recommendations"]
+    assert len(rec) == 1
+    median = float(hist["VariableTime"].median())
+    assert rec.iloc[0]["VariableTime"] == pytest.approx(median, abs=1e-9)
+    assert any("不可调" in message for message in result.messages)
+
+
+def test_time_adjustable_true_includes_variable_time():
+    hist = _variable_time_history()
+    roles = resolve_roles(hist, {"time_col": "VariableTime"})
+    bounds = resolve_bounds(
+        hist,
+        roles,
+        {"time_col": "VariableTime", "time_adjustable": "true", "time_min": 30, "time_max": 120},
+    )
+    assert bounds["VariableTime"] == (30.0, 120.0)
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=_variable_time_frame(),
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "time_col": "VariableTime",
+                "time_adjustable": "true",
+                "time_min": 30,
+                "time_max": 120,
+            },
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["time_adjustable"] is True
+    rec = result.tables["recommendations"]
+    assert len(rec) == 1
+    assert 30.0 <= rec.iloc[0]["VariableTime"] <= 120.0
+    assert abs(rec.iloc[0]["VariableU1"] - 5.0) < 0.5
+
+
+def test_inverse_solve_all_requests_fail_summary():
+    hist = _variable_time_history()
+    req = pd.DataFrame(
+        {"IncomingA": [1.1], "VariableTime": [None], "VariableU1": [None], "OutputY1": [1.0]}
+    )
+    df = pd.concat(
+        [hist.drop(columns=["VariableU1"]), req.drop(columns=["VariableU1"])], ignore_index=True
+    )
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=df,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "time_col": "VariableTime", "time_adjustable": "false"},
+        )
+    )
+    assert result.status == "ok"
+    assert len(result.tables["recommendations"]) == 0
+    assert "均未能求解" in result.summary
+    assert "未检测到请求行" not in result.summary
+    assert any("反解失败" in message for message in result.messages)

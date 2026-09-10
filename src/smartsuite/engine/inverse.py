@@ -477,16 +477,21 @@ def resolve_bounds(history, roles, params) -> dict[str, tuple[float, float]]:
     """解析可调参数与时间的优化边界。
 
     优先使用显式 `variable_bounds`（dict 或 JSON 字符串），否则取历史 min/max；
-    时间列仅在 `time_adjustable=true` 时纳入，边界取 `time_min/time_max`
-    （空字符串或缺失时回退历史 min/max）。候选区间宽度为 0 的参数视为
-    常数，不参与优化并记录警告。
+    时间列（`roles.time`）**仅当 `time_adjustable=true`** 时作为可优化维度进入
+    bounds，边界取 `time_min/time_max`（空字符串或缺失时回退历史 min/max）。
+    `time_adjustable=false` 时时间列即使位于 `roles.variable` 也被排除
+    （调用方须把历史中位数作为固定输入注入请求行）。候选区间宽度为 0 的参数
+    视为常数，不参与优化并记录警告。
     """
     explicit = _safe_json_dict(params.get("variable_bounds"), "variable_bounds")
     unknown = [key for key in explicit if key not in roles.variable]
     if unknown:
         logger.warning("variable_bounds 中的参数不在可调列中，已忽略: %s", unknown)
+    time_adjustable = bool(roles.time) and _as_bool(params.get("time_adjustable"), False)
     bounds: dict[str, tuple[float, float]] = {}
     for col in roles.variable:
+        if col == roles.time and not time_adjustable:
+            continue
         values = pd.to_numeric(history[col], errors="coerce").dropna()
         lo = float(values.min()) if not values.empty else 0.0
         hi = float(values.max()) if not values.empty else 0.0
@@ -506,7 +511,7 @@ def resolve_bounds(history, roles, params) -> dict[str, tuple[float, float]]:
                 "参数「%s」候选区间宽度为 0（[%g, %g]），视为常数不参与优化", col, lo, hi
             )
         bounds[col] = (float(lo), float(hi))
-    if roles.time and _as_bool(params.get("time_adjustable"), False):
+    if roles.time and time_adjustable:
         values = pd.to_numeric(history[roles.time], errors="coerce").dropna()
         if values.empty:
             logger.warning("时间列「%s」历史无有效数值，无法确定时间边界，已跳过", roles.time)
@@ -1117,6 +1122,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 raise ValueError(
                     "rate 模型需要时间列 time_col（列名含 time/时间 的可调或固定列），请显式指定"
                 )
+        time_adjustable = bool(roles.time) and _as_bool(params.get("time_adjustable"), False)
         unknown_bounds = [
             key for key in bounds_map if key not in roles.variable and key != roles.time
         ]
@@ -1242,6 +1248,13 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 used_features.update(cols)
         else:
             used_features.update(forward.feature_cols)
+        # 时间列是模型所需输入且不可调时，按历史中位数注入请求行；
+        # rate 模型无论是否可调都注入中位数（作为时间正则锚点 t0）
+        inject_time = (
+            bool(time_col) and time_median is not None and (is_rate or time_col in used_features)
+        )
+        if inject_time and not time_adjustable and not request.empty:
+            messages.append(f"时间列「{time_col}」不可调，已按历史中位数 {time_median:g} 处理")
 
         recommendation_rows: list[dict] = []
         prediction_rows: list[dict] = []
@@ -1269,7 +1282,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                     incoming[col] = value
                 elif col in used_features:
                     invalid_inputs.append(col)
-            if is_rate and time_col:
+            if inject_time:
                 incoming[time_col] = time_median
             targets: list[float] = []
             invalid_targets: list[str] = []
@@ -1417,7 +1430,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
         else:
             choice_desc = model
         summary_parts = [
-            f"工艺参数反解完成：历史 {len(history)} 行，请求 {n_solved} 行",
+            f"工艺参数反解完成：历史 {len(history)} 行，请求 {len(request)} 行",
             f"模型 {choice_desc}",
         ]
         if n_solved:
@@ -1428,20 +1441,23 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 )
             if at_bound_total:
                 summary_parts.append(f"{at_bound_total} 个参数触界")
-        else:
+            if n_failed:
+                summary_parts.append(f"{n_failed} 条请求未能求解")
+        elif request.empty:
             summary_parts.append("未检测到请求行，仅输出模型质量评估")
-        if n_failed:
-            summary_parts.append(f"{n_failed} 条请求未能求解")
-        if len(skipped):
-            summary_parts.append(f"跳过 {len(skipped)} 行")
+        else:
+            summary_parts.append(f"请求 {len(request)} 行均未能求解")
         summary = "；".join(summary_parts) + "。"
 
+        time_rec_cols = (
+            [time_col] if time_col and time_col not in bounds and (is_rate or inject_time) else []
+        )
         rec_columns = (
             ["请求行号"]
             + list(roles.incoming)
             + [f"目标{col}" for col in roles.output]
             + list(bounds)
-            + ([time_col] if is_rate and time_col and time_col not in bounds else [])
+            + time_rec_cols
             + ["状态"]
         )
         pred_columns = (
@@ -1481,7 +1497,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 "model_choice": model_choice,
                 "rate_feature_choice": rate_feature_choice,
                 "bounds": {name: [float(pair[0]), float(pair[1])] for name, pair in bounds.items()},
-                "time_adjustable": bool(time_col and time_col in bounds),
+                "time_adjustable": bool(time_adjustable),
                 "time_stats": time_stats,
                 "residual_summary": {
                     "n_solved": n_solved,
