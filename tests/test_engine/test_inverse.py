@@ -78,8 +78,11 @@ def test_fit_forward_auto_selects_and_predicts():
     roles = resolve_roles(df, {})
     forward, quality = fit_forward(df, roles, model="auto", random_state=42)
     assert len(forward.feature_cols) == 3
-    assert quality["Output"].tolist() == ["OutputY1", "OutputY2"]
-    assert quality.loc[quality["选用"], "LOO_R2"].min() > 0.8
+    assert quality["Output"].unique().tolist() == ["OutputY1", "OutputY2"]
+    assert len(quality) == 8  # 2 输出 × 4 候选（spec §4.5 全候选对比表）
+    sel = quality[quality["选用"]]
+    assert sel["Output"].tolist() == ["OutputY1", "OutputY2"]
+    assert sel["LOO_R2"].min() > 0.8
     pred = forward.predict(df[forward.feature_cols].head(3))
     assert pred.shape == (3, 2)
 
@@ -90,3 +93,4 @@ def test_fit_forward_fixed_model():
     forward, quality = fit_forward(df, roles, model="linear", random_state=42)
     assert forward.choice == ["linear", "linear"]
     assert not forward.has_tree
+    assert len(quality) == 2

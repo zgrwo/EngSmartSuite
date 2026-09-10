@@ -1,11 +1,13 @@
 """工艺参数反解模块：列角色识别与历史行/请求行分类。"""
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
 from sklearn.linear_model import LinearRegression, RidgeCV
@@ -155,7 +157,9 @@ def fit_forward(history, roles, model="auto", random_state=42):
             raise ValueError("所有候选特征列均为常量，无法建模")
         for kind in candidates:
             est = _build_candidate(kind, random_state)
-            pred = cross_val_predict(est, X, y, cv=LeaveOneOut())
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ConvergenceWarning)
+                pred = cross_val_predict(est, X, y, cv=LeaveOneOut())
             r2 = r2_score(y, pred)
             quality_rows.append(
                 {
@@ -176,6 +180,4 @@ def fit_forward(history, roles, model="auto", random_state=42):
                 row["选用"] = True
     if dropped:
         logger.warning("常量列已从特征中剔除: %s", dropped)
-    quality = pd.DataFrame(quality_rows)
-    selected = quality[quality["选用"]].reset_index(drop=True)
-    return ForwardModel(feature_cols, models, choices), selected
+    return ForwardModel(feature_cols, models, choices), pd.DataFrame(quality_rows)
