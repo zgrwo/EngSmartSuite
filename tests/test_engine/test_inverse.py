@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -157,15 +159,20 @@ def test_fit_rate_forward_records_pairing_fallback():
     fwd, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
     assert fwd.pairing_note is not None
     assert "配对" in fwd.pairing_note
+    assert "共用" in fwd.pairing_note
     assert "IncomingA→OutputY" in fwd.pairing_note
 
 
-def test_fit_rate_forward_skips_row_with_nan_rate_feature():
+def test_fit_rate_forward_skips_row_with_nan_rate_feature(caplog):
     df = _rate_history()
-    df.loc[0, "IncomingZ1"] = np.nan
+    df["IncomingZ2"] = np.linspace(0.5, 0.9, len(df))
+    df.loc[0, "IncomingZ2"] = np.nan
     roles = resolve_roles(df, {"time_col": "FixedTime"})
-    fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
+        fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    assert not quality.empty
     assert quality.loc[quality["选用"], "LOO_R2"].min() > 0.8
+    assert any("剔除" in r.message for r in caplog.records)
     complete = df.dropna().iloc[0]
     pred = fwd.predict_output(complete.to_dict(), {"VariableU1": 5.0}, time=60.0)
     assert pred.shape == (1,)
