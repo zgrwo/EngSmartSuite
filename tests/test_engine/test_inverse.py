@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.stats import qmc  # noqa: F401  (仅注释性引用，实际使用在引擎内)
 
 from smartsuite.engine._constants import INVERSE_LAM_TIME
 from smartsuite.engine.inverse import (
@@ -10,6 +11,7 @@ from smartsuite.engine.inverse import (
     fit_rate_forward,
     optimal_time,
     pair_incoming_output,
+    reachable_range,
     resolve_bounds,
     resolve_roles,
     solve_one,
@@ -365,3 +367,47 @@ def test_resolve_bounds_explicit_override_invalid_fallback_and_zero_width(caplog
         constant = resolve_bounds(df, roles, {"variable_bounds": {"VariableU1": [5.0, 5.0]}})
     assert constant["VariableU1"] == (5.0, 5.0)
     assert any("宽度为 0" in r.message for r in caplog.records)
+
+
+def test_reachable_range_contains_solution_and_widens_with_time():
+    df = _rate_history()
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    bounds = resolve_bounds(df, roles, {})
+    lo, hi = reachable_range(
+        forward, {"IncomingZ1": 1.1}, bounds, n=1024, seed=0, time_bounds=(30.0, 120.0)
+    )
+    assert (hi > lo).all()
+    assert lo.shape == (1,)
+
+
+def test_reachable_range_forward_contains_solved_solution_and_is_deterministic():
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    bounds = resolve_bounds(df, roles, {})
+    incoming = {"IncomingA": 1.1}
+    target = np.array([1.3 - 0.06 * 5.0 + 0.05 * 1.1, 0.9 - 0.04 * 3.0])
+    scale = df[roles.output].std().to_numpy()
+    _, pred, _ = solve_one(
+        forward,
+        incoming,
+        target,
+        scale,
+        np.ones(2),
+        bounds,
+        df[roles.variable].median().to_dict(),
+        {"random_state": 42},
+    )
+    lo, hi = reachable_range(forward, incoming, bounds, n=1024, seed=7)
+    lo2, hi2 = reachable_range(forward, incoming, bounds, n=1024, seed=7)
+    assert lo.shape == (2,)
+    assert (lo <= pred).all()
+    assert (pred <= hi).all()
+    assert np.array_equal(lo, lo2)
+    assert np.array_equal(hi, hi2)
+    constant = resolve_bounds(
+        df, roles, {"variable_bounds": {"VariableU1": [5.0, 5.0], "VariableU2": [3.0, 3.0]}}
+    )
+    lo_c, hi_c = reachable_range(forward, incoming, constant, n=256, seed=7)
+    assert np.allclose(lo_c, hi_c)

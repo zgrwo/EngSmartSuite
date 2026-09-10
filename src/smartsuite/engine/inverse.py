@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 from scipy.optimize import differential_evolution, minimize
+from scipy.stats import qmc
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -725,3 +726,135 @@ def solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, p
     if time_value is not None:
         info["time"] = float(time_value)
     return u_result, np.asarray(pred, dtype=float), info
+
+
+def _sampled_feature_frame(cols, incoming_row, param_index, samples, n) -> pd.DataFrame:
+    """按采样矩阵构造特征表：可调参数取采样列，其余列取 incoming_row 固定值。"""
+    data = {}
+    for col in cols:
+        if col in param_index:
+            data[col] = samples[:, param_index[col]]
+            continue
+        value = incoming_row.get(col) if incoming_row else None
+        number = safe_float(value, float("nan"))
+        if value is None or not np.isfinite(number):
+            raise ValueError(f"前向模型特征列「{col}」缺少有效取值，无法评估可达性")
+        data[col] = np.full(n, float(number))
+    return pd.DataFrame(data, columns=list(cols))
+
+
+def _sampled_rate_matrix(forward, incoming_row, param_index, samples, n) -> np.ndarray:
+    """向量化速率预测：每输出一列，shape (n, n_outputs)。"""
+    rates = []
+    for cols, model in zip(forward.rate_feature_cols, forward.models, strict=True):
+        data = {}
+        for col in cols:
+            if col in param_index:
+                data[col] = samples[:, param_index[col]]
+            else:
+                data[col] = np.full(n, _rate_feature_value(col, incoming_row, None))
+        features = pd.DataFrame(data, columns=list(cols))
+        rates.append(np.ravel(np.asarray(model.predict(features), dtype=float)))
+    return np.column_stack(rates)
+
+
+def _sampled_rate_offsets(forward, incoming_row, param_index, samples, n) -> np.ndarray:
+    """向量化来料截距：每输出一列，shape (n, n_outputs)。"""
+    values = []
+    for col in forward.incoming_cols:
+        if col in param_index:
+            values.append(samples[:, param_index[col]])
+        else:
+            values.append(np.full(n, _rate_feature_value(col, incoming_row, None)))
+    return np.column_stack(values)
+
+
+def _sample_time_values(forward, incoming_row, time_pair, samples, param_count, n) -> np.ndarray:
+    if time_pair is not None:
+        return np.asarray(samples[:, param_count], dtype=float)
+    if not getattr(forward, "uses_time", False):
+        return np.zeros(n, dtype=float)
+    time_col = getattr(forward, "time_col", None)
+    value = incoming_row.get(time_col) if incoming_row else None
+    number = safe_float(value, float("nan"))
+    if value is None or not np.isfinite(number):
+        raise ValueError(f"rate 模型缺少时间列「{time_col}」的取值，无法评估可达性")
+    return np.full(n, float(number))
+
+
+def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
+    """拉丁超立方采样评估参数盒内各输出的可达范围（spec §4.4）。
+
+    参数:
+        forward: 前向模型（`ForwardModel` 或 `RateForwardModel`）。
+        incoming_row: 请求行的来料/固定列取值 dict（rate 模型的 time 固定值也从此取）。
+        bounds: 可调参数边界 {参数名: (下限, 上限)}；**为空时抛中文 ValueError**
+            （退化输入不静默传播）。
+        n: 采样点数，须 >= 2，否则抛中文 ValueError。
+        seed: 采样随机种子，同 seed 结果确定。
+        time_bounds: rate 模型可调时间区间；非 None 且 `forward.uses_time` 时
+            把 time 作为额外采样维度；None 时时间取 incoming_row 固定值。
+
+    返回:
+        (lo, hi)：每个输出列的最小/最大可达值，shape 均为 (n_outputs,)。
+        参数/时间边界非有限、特征缺失或预测非有限时抛中文 ValueError。
+    """
+    if not bounds:
+        raise ValueError("可调参数边界为空，无法进行可达性采样")
+    n = int(n)
+    if n < 2:
+        raise ValueError(f"采样点数 n 必须 >= 2（当前 {n}），无法评估可达范围")
+    incoming_row = incoming_row or {}
+    param_names: list[str] = []
+    lo_list: list[float] = []
+    hi_list: list[float] = []
+    for name, pair in bounds.items():
+        lo = _bound_value(pair, 0)
+        hi = _bound_value(pair, 1)
+        if not (np.isfinite(lo) and np.isfinite(hi)):
+            raise ValueError(f"参数「{name}」的边界无效（{pair!r}），无法进行可达性采样")
+        if hi < lo:
+            lo, hi = hi, lo
+        param_names.append(name)
+        lo_list.append(float(lo))
+        hi_list.append(float(hi))
+    time_pair: tuple[float, float] | None = None
+    if getattr(forward, "uses_time", False) and time_bounds is not None:
+        t_lo = _bound_value(time_bounds, 0)
+        t_hi = _bound_value(time_bounds, 1)
+        if not (np.isfinite(t_lo) and np.isfinite(t_hi)):
+            raise ValueError(f"时间边界无效（{time_bounds!r}），无法进行可达性采样")
+        if t_hi < t_lo:
+            t_lo, t_hi = t_hi, t_lo
+        time_pair = (float(t_lo), float(t_hi))
+        time_col = getattr(forward, "time_col", None)
+        if time_col in param_names:
+            index = param_names.index(time_col)
+            param_names.pop(index)
+            lo_list.pop(index)
+            hi_list.pop(index)
+    if not param_names and time_pair is None:
+        raise ValueError("可调参数与时间边界均为空，无法进行可达性采样")
+    sampler = qmc.LatinHypercube(
+        d=len(param_names) + (1 if time_pair is not None else 0), seed=seed
+    )
+    unit = sampler.random(n)
+    lo_arr = np.asarray(lo_list + ([time_pair[0]] if time_pair is not None else []), dtype=float)
+    hi_arr = np.asarray(hi_list + ([time_pair[1]] if time_pair is not None else []), dtype=float)
+    samples = lo_arr + unit * (hi_arr - lo_arr)
+    param_index = {name: i for i, name in enumerate(param_names)}
+    if isinstance(forward, RateForwardModel):
+        rates = _sampled_rate_matrix(forward, incoming_row, param_index, samples, n)
+        offsets = _sampled_rate_offsets(forward, incoming_row, param_index, samples, n)
+        times = _sample_time_values(forward, incoming_row, time_pair, samples, len(param_names), n)
+        pred = offsets - rates * times[:, None]
+    else:
+        features = _sampled_feature_frame(
+            forward.feature_cols, incoming_row, param_index, samples, n
+        )
+        pred = np.asarray(forward.predict(features), dtype=float)
+    if pred.ndim == 1:
+        pred = pred.reshape(-1, 1)
+    if not np.isfinite(pred).all():
+        raise ValueError("可达性采样预测包含非有限值（NaN/Inf），请检查模型与输入数据")
+    return pred.min(axis=0), pred.max(axis=0)
