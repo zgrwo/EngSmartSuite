@@ -16,6 +16,13 @@ from sklearn.model_selection import LeaveOneOut, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 
+from smartsuite.engine._constants import (
+    INVERSE_RATE_MIN_ROWS,
+    INVERSE_RATE_RIDGE_ALPHA_MAX,
+    INVERSE_RATE_RIDGE_ALPHA_MIN,
+    INVERSE_RATE_RIDGE_ALPHA_N,
+)
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PREFIXES = {
@@ -235,6 +242,7 @@ class RateForwardModel:
     feature_choice: list[str]
     uses_time: bool = True
     random_state: int = 42
+    pairing_note: str | None = None
 
     @property
     def has_tree(self) -> bool:
@@ -264,39 +272,68 @@ def fit_rate_forward(history, roles, time_col, random_state=42):
     if not time_col or time_col not in history.columns:
         raise ValueError("rate 模型需要有效的时间列 time_col")
     time_values = pd.to_numeric(history[time_col], errors="coerce")
-    valid_time = time_values.notna()
+    time_array = time_values.to_numpy(float)
+    valid_time = np.isfinite(time_array) & (time_array != 0)
     if not valid_time.any():
-        raise ValueError("rate 模型需要有效的时间列 time_col")
+        raise ValueError("rate 模型需要有效的时间列 time_col（非缺失且非零）")
     pairs = pair_incoming_output(roles.incoming, roles.output)
     if len(pairs) < len(roles.output):
         raise ValueError("来料列少于输出列且无法配对，无法建立速率模型")
+    pairing_note = None
+    if not all(
+        _strip_role_prefix(inc_col) == _strip_role_prefix(out_col) for inc_col, out_col in pairs
+    ):
+        mode = "共用" if len(roles.incoming) == 1 else "顺序"
+        detail = "、".join(f"{inc_col}→{out_col}" for inc_col, out_col in pairs)
+        pairing_note = f"来料与输出未能按后缀完全配对，已按{mode}方式配对：{detail}"
+        logger.warning(pairing_note)
     params_cols = list(dict.fromkeys(c for c in roles.fixed + roles.variable if c != time_col))
     all_cols = list(
         dict.fromkeys(c for c in roles.incoming + roles.fixed + roles.variable if c != time_col)
     )
+    union_cols = list(dict.fromkeys(params_cols + all_cols))
     candidates = [
         name_cols for name_cols in (("params", params_cols), ("all", all_cols)) if name_cols[1]
     ]
     if not candidates:
         raise ValueError("无可用速率特征列，无法建立速率模型")
-    dropped = int((~valid_time).sum())
-    if dropped:
-        logger.warning("速率模型丢弃 %d 行缺少时间值的记录", dropped)
+    dropped_time = int((~valid_time).sum())
+    if dropped_time:
+        logger.warning("速率模型丢弃 %d 行缺少有效时间值的记录", dropped_time)
     train = history.loc[valid_time]
     train_time = time_values.loc[valid_time].to_numpy(float)
+    finite_union = np.isfinite(train[union_cols].to_numpy(float)).all(axis=1)
     quality_rows = []
     models, feature_choice, rate_feature_cols = [], [], []
     for out_col, (inc_col, _) in zip(roles.output, pairs, strict=True):
         y = pd.to_numeric(train[out_col], errors="coerce").to_numpy(float)
         inc = pd.to_numeric(train[inc_col], errors="coerce").to_numpy(float)
-        mask = np.isfinite(y) & np.isfinite(inc) & np.isfinite(train_time)
-        if mask.sum() < 2:
-            raise ValueError(f"输出「{out_col}」的有效历史不足，无法建立速率模型")
+        mask = np.isfinite(y) & np.isfinite(inc) & finite_union
+        if mask.sum() < INVERSE_RATE_MIN_ROWS:
+            raise ValueError(
+                f"输出「{out_col}」的速率模型有效历史不足"
+                f"（{int(mask.sum())} 行 < {INVERSE_RATE_MIN_ROWS} 行），"
+                "请检查来料/输出/速率特征列的缺失值"
+            )
+        dropped = int(len(mask) - mask.sum())
+        if dropped:
+            logger.warning(
+                "输出「%s」的速率模型剔除 %d 行含缺失/非有限特征的数据", out_col, dropped
+            )
         rate = (inc[mask] - y[mask]) / train_time[mask]
         best_name, best_r2, best_model, best_cols = None, -np.inf, None, None
         for name, cols in candidates:
             X = train[cols][mask]
-            est = make_pipeline(StandardScaler(), RidgeCV(alphas=np.logspace(-3, 3, 25)))
+            est = make_pipeline(
+                StandardScaler(),
+                RidgeCV(
+                    alphas=np.logspace(
+                        np.log10(INVERSE_RATE_RIDGE_ALPHA_MIN),
+                        np.log10(INVERSE_RATE_RIDGE_ALPHA_MAX),
+                        INVERSE_RATE_RIDGE_ALPHA_N,
+                    )
+                ),
+            )
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ConvergenceWarning)
                 pred = cross_val_predict(est, X, rate, cv=LeaveOneOut())
@@ -326,6 +363,7 @@ def fit_rate_forward(history, roles, time_col, random_state=42):
             models=models,
             feature_choice=feature_choice,
             random_state=random_state,
+            pairing_note=pairing_note,
         ),
         pd.DataFrame(quality_rows),
     )

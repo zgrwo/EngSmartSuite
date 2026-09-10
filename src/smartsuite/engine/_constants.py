@@ -93,3 +93,7 @@ INVERSE_REG_LAMBDA = 0.02  # 参数偏移正则强度
 INVERSE_LAM_TIME = 0.05  # 时间偏移正则强度
 INVERSE_DE_MAXITER = 30  # 树模型差分进化迭代数
 INVERSE_DE_POPSIZE = 7  # 树模型差分进化种群
+INVERSE_RATE_RIDGE_ALPHA_MIN = 1e-3  # 速率 RidgeCV 最小 alpha
+INVERSE_RATE_RIDGE_ALPHA_MAX = 1e3  # 速率 RidgeCV 最大 alpha
+INVERSE_RATE_RIDGE_ALPHA_N = 25  # 速率 RidgeCV alpha 数量（对数等距）
+INVERSE_RATE_MIN_ROWS = 2  # 速率模型最少有效行数

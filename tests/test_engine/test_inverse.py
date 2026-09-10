@@ -123,6 +123,7 @@ def test_fit_rate_forward_recovers_output():
     df = _rate_history()
     roles = resolve_roles(df, {"time_col": "FixedTime"})
     fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    assert fwd.pairing_note is None
     assert quality.loc[quality["选用"], "LOO_R2"].min() > 0.8
     row = df.iloc[0]
     pred = fwd.predict_output(row.to_dict(), {"VariableU1": 5.0}, time=60.0)
@@ -148,3 +149,35 @@ def test_rate_forward_predict_rate_matches_physics():
     rate = fwd.predict_rate(df.iloc[0].to_dict(), {"VariableU1": 5.0})
     assert rate.shape == (1,)
     assert abs(rate[0] - (0.002 + 0.0004 * 5.0)) < 1e-6
+
+
+def test_fit_rate_forward_records_pairing_fallback():
+    df = _rate_history().rename(columns={"IncomingZ1": "IncomingA", "OutputZ1": "OutputY"})
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    fwd, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    assert fwd.pairing_note is not None
+    assert "配对" in fwd.pairing_note
+    assert "IncomingA→OutputY" in fwd.pairing_note
+
+
+def test_fit_rate_forward_skips_row_with_nan_rate_feature():
+    df = _rate_history()
+    df.loc[0, "IncomingZ1"] = np.nan
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    assert quality.loc[quality["选用"], "LOO_R2"].min() > 0.8
+    complete = df.dropna().iloc[0]
+    pred = fwd.predict_output(complete.to_dict(), {"VariableU1": 5.0}, time=60.0)
+    assert pred.shape == (1,)
+
+
+def test_fit_rate_forward_all_zero_time_raises_chinese():
+    df = _rate_history()
+    df["FixedTime"] = 0.0
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    try:
+        fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    except ValueError as exc:
+        assert "时间" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("时间全为 0 应报错")
