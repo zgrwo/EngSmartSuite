@@ -358,9 +358,15 @@ def _collect_tested_names(tests_dir: Path) -> set[str]:
 def _collect_tested_method_names(tests_dir: Path) -> set[str]:
     """收集测试中所有属性调用名（任意基对象），仅供类方法缺测判定。
 
-    实例方法调用（forward.predict(...)）的接收者类型无法静态确定；与模块级函数
-    不同，此宽松口径的漏检风险低：模块级函数仍走 _collect_tested_names 的严格口径，
-    避免 labels.index() 等同名调用掩盖 src 函数缺测（审查 #R2 语义保留）。
+    实例方法调用（forward.predict(...)）的接收者类型无法静态确定，不做接收者解析；
+    模块级函数仍走 _collect_tested_names 的严格口径，避免 labels.index() 等同名调用
+    掩盖 src 函数缺测（审查 #R2 语义保留）。
+
+    已知局限（接受的静态启发式取舍，收紧需显式决策）：类方法若与常见容器/库方法同名
+    （get/update/items/keys/fit/predict 等），会被测试中对无关对象（dict、DataFrame、
+    estimator 等）的同名属性调用掩盖而漏检。该行为由
+    test_class_method_false_negative_pinned_for_generic_name 钉死——将来收紧口径会
+    先使该测试失败，强制显式更新取舍。
     """
     tested: set[str] = set()
     for p in tests_dir.rglob("test_*.py"):
