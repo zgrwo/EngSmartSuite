@@ -5,10 +5,12 @@ import pandas as pd
 import pytest
 from scipy.stats import qmc  # noqa: F401  (仅注释性引用，实际使用在引擎内)
 
+from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine._constants import INVERSE_LAM_TIME
 from smartsuite.engine.inverse import (
     fit_forward,
     fit_rate_forward,
+    inverse_parameter_solve,
     optimal_time,
     pair_incoming_output,
     reachable_range,
@@ -431,3 +433,56 @@ def test_reachable_range_forward_contains_solved_solution_and_is_deterministic()
     )
     lo_c, hi_c = reachable_range(forward, incoming, constant, n=256, seed=7)
     assert np.allclose(lo_c, hi_c)
+
+
+def _e2e_frame(n=40, seed=2):
+    hist = _linear_history(n=n, seed=seed)
+    req = pd.DataFrame(
+        {
+            "IncomingA": [1.15],
+            "VariableU1": [None],
+            "VariableU2": [None],
+            "OutputY1": [1.3 - 0.06 * 5.5 + 0.05 * 1.15],
+            "OutputY2": [0.9 - 0.04 * 2.5],
+        }
+    )
+    return pd.concat([hist, req], ignore_index=True)
+
+
+def test_inverse_solve_end_to_end():
+    df = _e2e_frame()
+    req = AnalysisRequest(
+        task="inverse_solve",
+        data=df,
+        target_col="",
+        feature_cols=[],
+        params={"model": "linear", "random_state": 42},
+    )
+    result = inverse_parameter_solve(req)
+    assert result.status == "ok"
+    assert set(result.tables) == {
+        "recommendations",
+        "predictions",
+        "model_quality",
+        "reachable_ranges",
+    }
+    assert len(result.tables["recommendations"]) == 1
+    assert len(result.figures) >= 2
+    assert "反解" in result.summary
+
+
+def test_inverse_solve_fit_only_and_errors():
+    hist = _linear_history()
+    req = AnalysisRequest(
+        task="inverse_solve", data=hist, target_col="", feature_cols=[], params={"model": "linear"}
+    )
+    assert inverse_parameter_solve(req).status == "ok"
+    bad = AnalysisRequest(
+        task="inverse_solve",
+        data=pd.DataFrame({"A": [1.0]}),
+        target_col="",
+        feature_cols=[],
+        params={},
+    )
+    result = inverse_parameter_solve(bad)
+    assert result.status == "error" and result.messages
