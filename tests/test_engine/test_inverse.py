@@ -6,8 +6,11 @@ import pandas as pd
 from smartsuite.engine.inverse import (
     fit_forward,
     fit_rate_forward,
+    optimal_time,
     pair_incoming_output,
+    resolve_bounds,
     resolve_roles,
+    solve_one,
     split_rows,
 )
 
@@ -188,3 +191,61 @@ def test_fit_rate_forward_all_zero_time_raises_chinese():
         assert "时间" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("时间全为 0 应报错")
+
+
+def test_solve_one_recovers_known_parameters():
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    bounds = resolve_bounds(df, roles, {})
+    incoming = {"IncomingA": 1.1}
+    target = np.array([1.3 - 0.06 * 5.0 + 0.05 * 1.1, 0.9 - 0.04 * 3.0])
+    scale = df[roles.output].std().to_numpy()
+    u, pred, info = solve_one(
+        forward,
+        incoming,
+        target,
+        scale,
+        np.ones(2),
+        bounds,
+        df[roles.variable].median().to_dict(),
+        {"random_state": 42},
+    )
+    assert abs(u["VariableU1"] - 5.0) < 0.1
+    assert abs(u["VariableU2"] - 3.0) < 0.1
+    assert all(info["at_bound"][k] in (True, False) for k in u)
+
+
+def test_solve_one_deterministic():
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    args = (
+        forward,
+        {"IncomingA": 1.1},
+        np.array([0.98, 0.78]),
+        df[roles.output].std().to_numpy(),
+        np.ones(2),
+        resolve_bounds(df, roles, {}),
+        df[roles.variable].median().to_dict(),
+        {"random_state": 42},
+    )
+    u1, _, _ = solve_one(*args)
+    u2, _, _ = solve_one(*args)
+    assert u1 == u2
+
+
+def test_optimal_time_analytic():
+    df = _rate_history()
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    t = optimal_time(
+        forward,
+        {"IncomingZ1": 1.1, "FixedTime": 60.0},
+        np.array([1.1 - 0.004 * 60]),
+        np.array([0.02]),
+        np.ones(1),
+        {"VariableU1": 5.0},
+        (30.0, 120.0),
+    )
+    assert 30.0 <= t <= 120.0
