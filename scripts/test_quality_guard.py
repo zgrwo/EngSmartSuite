@@ -271,24 +271,41 @@ def check_naming(tests_dir: Path) -> list[str]:
     return problems
 
 
+def _is_property(node) -> bool:
+    """是否为 property/cached_property 装饰的方法。
+
+    属性是不可 Call 的数据访问器，测试以实例属性读取形态验证（如 assert fwd.has_tree）、
+    不存在 `X.prop(...)` 调用；纳入缺测检查会永久误报（inverse.ForwardModel.has_tree 首例）。
+    """
+    for dec in node.decorator_list:
+        if isinstance(dec, ast.Name) and dec.id in ("property", "cached_property"):
+            return True
+        if isinstance(dec, ast.Attribute) and dec.attr in ("property", "cached_property"):
+            return True
+    return False
+
+
 def _iter_public_funcs(tree: ast.Module):
-    """模块级公共函数 + 类的公共方法（审查 #P1-8：此前类方法不检查）。
+    """产出公共 API：模块级函数 + 类公共方法，附来源标记 (node, is_method)。
 
     函数内嵌套闭包（bootstrap 的 stat_fn、装饰器工厂的 wrapper 等）是内部实现，
     不视为公共 API；装饰器包装的 pydantic validator 单独豁免（EXEMPT_FUNCS）。
     AsyncFunctionDef 与 FunctionDef 同等对待（审查 #R2 前瞻）。
+    property/cached_property 访问器豁免调用式缺测检查（_is_property）。
     """
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith(
             "_"
         ):
-            yield node
+            yield node, False
         elif isinstance(node, ast.ClassDef):
             for sub in node.body:
-                if isinstance(
-                    sub, (ast.FunctionDef, ast.AsyncFunctionDef)
-                ) and not sub.name.startswith("_"):
-                    yield sub
+                if (
+                    isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and not sub.name.startswith("_")
+                    and not _is_property(sub)
+                ):
+                    yield sub, True
 
 
 def _src_imported_names(tree: ast.Module) -> set[str]:
@@ -338,12 +355,32 @@ def _collect_tested_names(tests_dir: Path) -> set[str]:
     return tested
 
 
+def _collect_tested_method_names(tests_dir: Path) -> set[str]:
+    """收集测试中所有属性调用名（任意基对象），仅供类方法缺测判定。
+
+    实例方法调用（forward.predict(...)）的接收者类型无法静态确定；与模块级函数
+    不同，此宽松口径的漏检风险低：模块级函数仍走 _collect_tested_names 的严格口径，
+    避免 labels.index() 等同名调用掩盖 src 函数缺测（审查 #R2 语义保留）。
+    """
+    tested: set[str] = set()
+    for p in tests_dir.rglob("test_*.py"):
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                tested.add(node.func.attr)
+    return tested
+
+
 def check_missing_tests(src_dir: Path, tests_dir: Path) -> list[str]:
     """src/ 公共函数 vs tests/ 测试引用对应检测（防"改代码没更测试"）。"""
     problems: list[str] = []
     if not src_dir.is_dir() or not tests_dir.is_dir():
         return problems
     tested = _collect_tested_names(tests_dir)
+    tested_methods = _collect_tested_method_names(tests_dir)
     for p in sorted(src_dir.rglob("*.py")):
         # 审查 #R2：__init__.py 内的公共函数（如 check_core_deps）也应纳入检查；
         # 仅跳过纯 re-export（__all__ 引用或 from X import *）的声明文件
@@ -355,8 +392,9 @@ def check_missing_tests(src_dir: Path, tests_dir: Path) -> list[str]:
             tree = ast.parse(p.read_text(encoding="utf-8"))
         except (OSError, SyntaxError):
             continue
-        for node in _iter_public_funcs(tree):
-            if node.name not in tested and node.name not in EXEMPT_FUNCS:
+        for node, is_method in _iter_public_funcs(tree):
+            known = node.name in tested_methods if is_method else node.name in tested
+            if not known and node.name not in EXEMPT_FUNCS:
                 rel = _rel(p)
                 problems.append(f"[FAIL] {rel}:{node.name} 无对应测试引用——新增公共函数必须配测试")
     return problems
