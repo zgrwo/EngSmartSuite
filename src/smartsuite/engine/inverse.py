@@ -3,7 +3,16 @@
 import logging
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
+from sklearn.linear_model import LinearRegression, RidgeCV
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.model_selection import LeaveOneOut, cross_val_predict
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +23,8 @@ DEFAULT_PREFIXES = {
     "output": ("output", "输出"),
     "target": ("target", "目标"),
 }
+
+MODEL_KINDS = ("linear", "poly", "gpr", "gbm")
 
 
 @dataclass
@@ -86,3 +97,85 @@ def split_rows(df: pd.DataFrame, roles: RoleMap):
             reasons.append("行类型无法判定（变量与输出组合不完整）")
         skipped.append((int(idx), "; ".join(reasons)))
     return history, request, skipped
+
+
+def _build_candidate(kind: str, random_state: int):
+    if kind == "linear":
+        return make_pipeline(StandardScaler(), LinearRegression())
+    if kind == "poly":
+        return make_pipeline(
+            PolynomialFeatures(2, include_bias=False),
+            StandardScaler(),
+            RidgeCV(alphas=np.logspace(-3, 3, 13)),
+        )
+    if kind == "gpr":
+        kernel = ConstantKernel(1.0, (1e-2, 1e3)) * Matern(
+            length_scale=3.0, length_scale_bounds=(0.5, 50.0), nu=1.5
+        ) + WhiteKernel(noise_level=0.05, noise_level_bounds=(1e-4, 1.0))
+        return make_pipeline(
+            StandardScaler(),
+            GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=random_state),
+        )
+    if kind == "gbm":
+        return GradientBoostingRegressor(
+            n_estimators=300, max_depth=2, learning_rate=0.05, random_state=random_state
+        )
+    raise ValueError(f"未知模型: {kind}")
+
+
+@dataclass
+class ForwardModel:
+    feature_cols: list[str]
+    models: list
+    choice: list[str]
+
+    def predict(self, x: pd.DataFrame) -> np.ndarray:
+        return np.column_stack([m.predict(x[self.feature_cols]) for m in self.models])
+
+    @property
+    def has_tree(self) -> bool:
+        return "gbm" in self.choice
+
+
+def fit_forward(history, roles, model="auto", random_state=42):
+    feature_cols = [
+        c
+        for c in roles.incoming + roles.variable + roles.fixed
+        if history[c].nunique(dropna=True) > 1
+    ]
+    dropped = [c for c in roles.incoming + roles.variable + roles.fixed if c not in feature_cols]
+    X = history[feature_cols]
+    quality_rows = []
+    models, choices = [], []
+    for out_col in roles.output:
+        y = history[out_col].to_numpy(float)
+        candidates = MODEL_KINDS if model == "auto" else (model,)
+        best_kind, best_r2, best_model = None, -np.inf, None
+        if len(feature_cols) == 0:
+            raise ValueError("所有候选特征列均为常量，无法建模")
+        for kind in candidates:
+            est = _build_candidate(kind, random_state)
+            pred = cross_val_predict(est, X, y, cv=LeaveOneOut())
+            r2 = r2_score(y, pred)
+            quality_rows.append(
+                {
+                    "Output": out_col,
+                    "候选": kind,
+                    "LOO_R2": round(float(r2), 3),
+                    "LOO_MAE": round(float(mean_absolute_error(y, pred)), 4),
+                    "选用": False,
+                }
+            )
+            if r2 > best_r2:
+                best_kind, best_r2, best_model = kind, r2, est
+        best_model.fit(X, y)
+        models.append(best_model)
+        choices.append(best_kind)
+        for row in quality_rows:
+            if row["Output"] == out_col and row["候选"] == best_kind:
+                row["选用"] = True
+    if dropped:
+        logger.warning("常量列已从特征中剔除: %s", dropped)
+    quality = pd.DataFrame(quality_rows)
+    selected = quality[quality["选用"]].reset_index(drop=True)
+    return ForwardModel(feature_cols, models, choices), selected
