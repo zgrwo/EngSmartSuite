@@ -1,7 +1,13 @@
 import numpy as np
 import pandas as pd
 
-from smartsuite.engine.inverse import fit_forward, resolve_roles, split_rows
+from smartsuite.engine.inverse import (
+    fit_forward,
+    fit_rate_forward,
+    pair_incoming_output,
+    resolve_roles,
+    split_rows,
+)
 
 
 def test_resolve_roles_auto_prefix():
@@ -94,3 +100,51 @@ def test_fit_forward_fixed_model():
     assert forward.choice == ["linear", "linear"]
     assert not forward.has_tree
     assert len(quality) == 2
+
+
+def _rate_history(n=40, seed=1):
+    rng = np.random.default_rng(seed)
+    inc = rng.normal(1.1, 0.05, n)
+    u = rng.uniform(4, 8, n)
+    t = rng.uniform(45, 90, n)
+    rate = 0.002 + 0.0004 * u
+    y = inc - rate * t
+    return pd.DataFrame({"IncomingZ1": inc, "VariableU1": u, "FixedTime": t, "OutputZ1": y})
+
+
+def test_pair_incoming_output_by_suffix():
+    assert pair_incoming_output(["IncomingZ1", "IncomingZ2"], ["OutputZ1", "OutputZ2"]) == [
+        ("IncomingZ1", "OutputZ1"),
+        ("IncomingZ2", "OutputZ2"),
+    ]
+
+
+def test_fit_rate_forward_recovers_output():
+    df = _rate_history()
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    assert quality.loc[quality["选用"], "LOO_R2"].min() > 0.8
+    row = df.iloc[0]
+    pred = fwd.predict_output(row.to_dict(), {"VariableU1": 5.0}, time=60.0)
+    assert pred.shape == (1,)
+
+
+def test_rate_requires_time_col():
+    df = _rate_history().drop(columns=["FixedTime"])
+    roles = resolve_roles(df, {})
+    try:
+        fit_rate_forward(df, roles, None, random_state=42)
+    except ValueError as exc:
+        assert "time" in str(exc).lower() or "时间" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("缺时间列应报错")
+
+
+def test_rate_forward_predict_rate_matches_physics():
+    df = _rate_history()
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    fwd, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    assert fwd.uses_time and not fwd.has_tree
+    rate = fwd.predict_rate(df.iloc[0].to_dict(), {"VariableU1": 5.0})
+    assert rate.shape == (1,)
+    assert abs(rate[0] - (0.002 + 0.0004 * 5.0)) < 1e-6

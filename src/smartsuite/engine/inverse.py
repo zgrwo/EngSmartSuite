@@ -181,3 +181,151 @@ def fit_forward(history, roles, model="auto", random_state=42):
     if dropped:
         logger.warning("常量列已从特征中剔除: %s", dropped)
     return ForwardModel(feature_cols, models, choices), pd.DataFrame(quality_rows)
+
+
+def _strip_role_prefix(name: str) -> str:
+    lowered = name.lower()
+    for prefix in ("incoming", "output", "来料", "输出"):
+        if lowered.startswith(prefix.lower()):
+            return name[len(prefix) :]
+    return name
+
+
+def pair_incoming_output(incoming, output) -> list[tuple[str, str]]:
+    """按去前缀后的列名后缀配对来料与输出；无法配对时回退共用/顺序配对。"""
+    incoming_cols = [str(c) for c in incoming]
+    output_cols = [str(c) for c in output]
+    pairs: list[tuple[str, str]] = []
+    for out_col in output_cols:
+        suffix = _strip_role_prefix(out_col)
+        match = next((inc for inc in incoming_cols if _strip_role_prefix(inc) == suffix), None)
+        if match is None:
+            pairs = []
+            break
+        pairs.append((match, out_col))
+    if pairs or not output_cols:
+        return pairs
+    if len(incoming_cols) == 1:
+        return [(incoming_cols[0], out_col) for out_col in output_cols]
+    return list(zip(incoming_cols, output_cols, strict=False))
+
+
+def _rate_feature_value(col: str, incoming_row, u) -> float:
+    for source in (u, incoming_row):
+        if source is None or col not in source:
+            continue
+        value = source[col]
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"速率特征列「{col}」的取值不是数值: {value!r}") from None
+        if not np.isfinite(number):
+            raise ValueError(f"速率特征列「{col}」的取值无效（NaN/Inf），请检查输入")
+        return number
+    raise ValueError(f"速率特征缺少列「{col}」的取值")
+
+
+@dataclass
+class RateForwardModel:
+    incoming_cols: list[str]
+    rate_feature_cols: list[list[str]]
+    models: list
+    feature_choice: list[str]
+    uses_time: bool = True
+    random_state: int = 42
+
+    @property
+    def has_tree(self) -> bool:
+        return False
+
+    def predict_rate(self, incoming_row: dict, u: dict) -> np.ndarray:
+        rates = []
+        for cols, model in zip(self.rate_feature_cols, self.models, strict=True):
+            values = {col: _rate_feature_value(col, incoming_row, u) for col in cols}
+            features = pd.DataFrame([values], columns=cols)
+            rates.append(float(np.ravel(model.predict(features))[0]))
+        return np.asarray(rates, dtype=float)
+
+    def predict_output(self, incoming_row: dict, u: dict, time: float) -> np.ndarray:
+        offsets = np.asarray(
+            [_rate_feature_value(col, incoming_row, u) for col in self.incoming_cols], dtype=float
+        )
+        return offsets - self.predict_rate(incoming_row, u) * float(time)
+
+
+def fit_rate_forward(history, roles, time_col, random_state=42):
+    """速率物理先验模型：Y_j = Inc_j - r_j(z)·t，r_j 用 StandardScaler + RidgeCV。
+
+    速率特征二选一（逐输出按 LOO R² 选优）：params = fixed + variable；
+    all = incoming + fixed + variable。time_col 不参与速率特征（防止速率依赖预报时间）。
+    """
+    if not time_col or time_col not in history.columns:
+        raise ValueError("rate 模型需要有效的时间列 time_col")
+    time_values = pd.to_numeric(history[time_col], errors="coerce")
+    valid_time = time_values.notna()
+    if not valid_time.any():
+        raise ValueError("rate 模型需要有效的时间列 time_col")
+    pairs = pair_incoming_output(roles.incoming, roles.output)
+    if len(pairs) < len(roles.output):
+        raise ValueError("来料列少于输出列且无法配对，无法建立速率模型")
+    params_cols = list(dict.fromkeys(c for c in roles.fixed + roles.variable if c != time_col))
+    all_cols = list(
+        dict.fromkeys(c for c in roles.incoming + roles.fixed + roles.variable if c != time_col)
+    )
+    candidates = [
+        name_cols for name_cols in (("params", params_cols), ("all", all_cols)) if name_cols[1]
+    ]
+    if not candidates:
+        raise ValueError("无可用速率特征列，无法建立速率模型")
+    dropped = int((~valid_time).sum())
+    if dropped:
+        logger.warning("速率模型丢弃 %d 行缺少时间值的记录", dropped)
+    train = history.loc[valid_time]
+    train_time = time_values.loc[valid_time].to_numpy(float)
+    quality_rows = []
+    models, feature_choice, rate_feature_cols = [], [], []
+    for out_col, (inc_col, _) in zip(roles.output, pairs, strict=True):
+        y = pd.to_numeric(train[out_col], errors="coerce").to_numpy(float)
+        inc = pd.to_numeric(train[inc_col], errors="coerce").to_numpy(float)
+        mask = np.isfinite(y) & np.isfinite(inc) & np.isfinite(train_time)
+        if mask.sum() < 2:
+            raise ValueError(f"输出「{out_col}」的有效历史不足，无法建立速率模型")
+        rate = (inc[mask] - y[mask]) / train_time[mask]
+        best_name, best_r2, best_model, best_cols = None, -np.inf, None, None
+        for name, cols in candidates:
+            X = train[cols][mask]
+            est = make_pipeline(StandardScaler(), RidgeCV(alphas=np.logspace(-3, 3, 25)))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ConvergenceWarning)
+                pred = cross_val_predict(est, X, rate, cv=LeaveOneOut())
+            r2 = r2_score(rate, pred)
+            quality_rows.append(
+                {
+                    "Output": out_col,
+                    "候选": name,
+                    "LOO_R2": round(float(r2), 3),
+                    "LOO_MAE": round(float(mean_absolute_error(rate, pred)), 6),
+                    "选用": False,
+                }
+            )
+            if r2 > best_r2:
+                best_name, best_r2, best_model, best_cols = name, r2, est, cols
+        best_model.fit(train[best_cols][mask], rate)
+        models.append(best_model)
+        feature_choice.append(best_name)
+        rate_feature_cols.append(list(best_cols))
+        for row in quality_rows:
+            if row["Output"] == out_col and row["候选"] == best_name:
+                row["选用"] = True
+    return (
+        RateForwardModel(
+            incoming_cols=[pair[0] for pair in pairs],
+            rate_feature_cols=rate_feature_cols,
+            models=models,
+            feature_choice=feature_choice,
+            random_state=random_state,
+        ),
+        pd.DataFrame(quality_rows),
+    )
