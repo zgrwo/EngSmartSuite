@@ -25,6 +25,7 @@ from smartsuite.engine import (
     gage_rr,
     grid_search,
     hypothesis_test,
+    inverse_parameter_solve,
     lasso_regression,
     logistic_regression,
     median_ci,
@@ -61,6 +62,7 @@ TASK_REGISTRY = {
     "response_surface": response_surface_analysis,
     "grid_search": grid_search,
     "multi_objective": multi_objective_opt,
+    "inverse_solve": inverse_parameter_solve,
     "doe_analysis": doe_analysis,
     "doe_design": doe_design,
     "spc_xbar": xbar_r_chart,
@@ -125,6 +127,25 @@ DEFAULT_PARAMS = {
     "response_surface": {"direction": "maximize"},
     "grid_search": {"ranges": None, "direction": "maximize", "n_points": 10},
     "multi_objective": {"objectives": None, "weights": None},
+    "inverse_solve": {
+        "model": "auto",
+        "incoming_cols": "",
+        "variable_cols": "",
+        "fixed_cols": "",
+        "output_cols": "",
+        "target_cols": "",
+        "time_col": "",
+        "time_adjustable": "false",
+        "time_min": "",
+        "time_max": "",
+        "variable_bounds": "",
+        "output_weights": "",
+        "weight_mode": "std",
+        "reg_lambda": 0.02,
+        "attain_tol": 0.5,
+        "max_starts": 10,
+        "random_state": 42,
+    },
     "doe_analysis": {"alpha": 0.05},
     "doe_design": {
         "factors": None,
@@ -315,6 +336,7 @@ TASK_LABELS = {
     "response_surface": "响应面分析",
     "grid_search": "网格搜索寻优",
     "multi_objective": "多目标优化",
+    "inverse_solve": "工艺参数反解",
     "doe_analysis": "DOE效应估计",
     "doe_design": "DOE实验设计",
     "roc_analysis": "ROC/AUC分析",
@@ -389,6 +411,7 @@ TASK_GROUPS = {
     ],
     "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval", "survival_analysis"],
 }
+TASK_GROUPS["建模优化"].append("inverse_solve")
 
 # ── 需要保留原始类别列的任务（不做 One-Hot 编码）──
 # 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
@@ -404,6 +427,7 @@ RAW_CAT_TASKS: set[str] = {
     "spc_attribute",
     "scatter_plot",
 }
+RAW_CAT_TASKS.add("inverse_solve")
 
 # ── 不需要目标列 (Y 列) 的任务 ──
 # 这些引擎函数不使用 req.target_col，Web 层通过此常量判断是否允许不选 Y 列
@@ -415,6 +439,7 @@ NO_TARGET_TASKS: set[str] = {
     "multi_objective",
     "doe_design",
 }
+NO_TARGET_TASKS.add("inverse_solve")
 
 # ── 完全无需输入数据的任务（纯参数计算，不读 req.data）──
 # Web 层通过此常量跳过「请先上传数据文件」的拦截，并传入空 DataFrame。

@@ -230,6 +230,14 @@ except ImportError as e:
         "请确保已安装所有核心依赖：pip install smartsuite"
     ) from e
 
+try:
+    from smartsuite.engine.inverse import inverse_parameter_solve
+except ImportError as e:
+    raise ImportError(
+        f"SmartSuite 引擎初始化失败 (inverse): {e}\n"
+        "请确保已安装所有核心依赖：pip install smartsuite"
+    ) from e
+
 __all__ = [
     "CPK_GOOD",
     "CPK_MINIMUM",
@@ -254,6 +262,7 @@ __all__ = [
     "response_surface_analysis",
     "grid_search",
     "multi_objective_opt",
+    "inverse_parameter_solve",
     "doe_analysis",
     "doe_design",
     "roc_analysis",
