@@ -47,6 +47,7 @@ EXCLUDED_DIRS = {
     ".pytest_cache",
     ".qoder",
     ".ruff_cache",
+    ".superpowers",  # Superpowers 会话产物（.gitignore 已忽略）
     ".venv",
     "build",
     "logs",
