@@ -2,6 +2,51 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.3.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.7...v1.3.0) (2026-09-11)
+
+
+### ✨ 新功能
+
+* **engine:** inverse_solve 前向模型候选与 LOO 门控选型 ([d613af9](https://github.com/zgrwo/EngSmartSuite/commit/d613af921904125c5e7822b8482f832ffeeb2eca))
+* **engine:** inverse_solve 可达性采样分析 ([c24da99](https://github.com/zgrwo/EngSmartSuite/commit/c24da990a168620211725dc98e90194e1ab7851e))
+* **engine:** inverse_solve 引擎入口与结果组装 ([3767ead](https://github.com/zgrwo/EngSmartSuite/commit/3767ead9e163c7f8078b428392a2a93f5a353941))
+* **engine:** inverse_solve 约束求解器与解析时间优化 ([a38cc7c](https://github.com/zgrwo/EngSmartSuite/commit/a38cc7c81783f02628ad567e673ed9d752e5b500))
+* **engine:** inverse_solve 角色识别与行分类基础层 ([4421760](https://github.com/zgrwo/EngSmartSuite/commit/44217602eafaf70ed801249ce4e5ba4c9df40455))
+* **engine:** inverse_solve 速率物理模型与来料-输出配对 ([cb020d6](https://github.com/zgrwo/EngSmartSuite/commit/cb020d67e71b361bf76699d6ff8a41fec28e218d))
+* **inverse:** 列角色勾选/请求行录入与模型方程结果表 ([4b81e4b](https://github.com/zgrwo/EngSmartSuite/commit/4b81e4b9b6ad65060d4301d3625fe063a1ce44f7))
+* **services:** 注册 inverse_solve 任务与一致性冒烟规格 ([acf2730](https://github.com/zgrwo/EngSmartSuite/commit/acf2730f018bba04bf3b73f2ba9bebee63e03019))
+* **web:** inverse_solve 参数面板与列约束同步 ([811919e](https://github.com/zgrwo/EngSmartSuite/commit/811919e559ccd736e5459567b6fac771997ffa26))
+
+
+### 🐛 Bug 修复
+
+* **engine:** inverse_solve 可达范围自动提取 bounds 时间区间 ([4dd57b3](https://github.com/zgrwo/EngSmartSuite/commit/4dd57b3cf77edc44032beeaa7080243168199cec))
+* **engine:** inverse_solve 时间可调语义贯通与全失败摘要修正 ([fc4e8c9](https://github.com/zgrwo/EngSmartSuite/commit/fc4e8c984c789e5f4d253912014469bb98c32048))
+* **engine:** inverse_solve 权重/时间锚合同钉死与求解器路径测试 ([8e64856](https://github.com/zgrwo/EngSmartSuite/commit/8e64856ac35cb8f058c2fbf901f398f7e52ba9e7))
+* **engine:** inverse_solve 质量表恢复全候选并抑制 LOO 收敛噪声 ([283ce9e](https://github.com/zgrwo/EngSmartSuite/commit/283ce9ef91617bbec106678cf42f240bacc8e0d5))
+* **engine:** inverse_solve 速率模型回退提示/常量归位/特征有限性守卫 ([00a72a7](https://github.com/zgrwo/EngSmartSuite/commit/00a72a78f30daf619c57085e2e0784bc295a8c3b))
+* **inverse:** 修复发版审查 R-1..R-8（auto 规模预算/相对容差/版本链/工具版本） ([db9fa41](https://github.com/zgrwo/EngSmartSuite/commit/db9fa41cface7efd14f944c4746f799949dc1054))
+* **inverse:** 修复审查 F1-F7（方程量级判据/请求行防护/门禁） ([ff19a46](https://github.com/zgrwo/EngSmartSuite/commit/ff19a46b6b04ced14fee5b1e7747aaacd17394ce))
+* **scripts:** 测试质量守卫属性豁免与实例方法调用计入缺测检测 ([e5dd867](https://github.com/zgrwo/EngSmartSuite/commit/e5dd8676095fdc45a8c89377652ded352d2382b1))
+
+
+### 📄 文档
+
+* **inverse:** 同步 API/手册/术语/结构树与计数锚点 ([54f1d84](https://github.com/zgrwo/EngSmartSuite/commit/54f1d843fcbff1ad35dc4601af0a5cbe4f27d399))
+
+
+### ✅ 测试
+
+* **engine:** inverse_solve 速率 NaN 守卫回归测试改用非配对特征列 ([a5d1311](https://github.com/zgrwo/EngSmartSuite/commit/a5d1311dbc8370352f5657fe14ff4bc99b354b64))
+* **inverse:** 差分/集成/E2E 与三路径对等覆盖 + 验收数据入库 ([7f8e1d6](https://github.com/zgrwo/EngSmartSuite/commit/7f8e1d63cc0ed8273f130bd7727bce71e4b7ee83))
+* **scripts:** 钉住类方法缺测宽松口径的已知漏检并更正文档 ([c7b47f2](https://github.com/zgrwo/EngSmartSuite/commit/c7b47f20c873790a7c85092f4c0419b793f4ca82))
+
+
+### 🧹 维护
+
+* **inverse:** 交叉一致性、示例图生成与手册配图 ([2a21fe1](https://github.com/zgrwo/EngSmartSuite/commit/2a21fe122073abef463e07c763d96ff4b14764c2))
+* **scripts:** verify_docs 严格模式豁免 .superpowers 会话目录 ([74cb64b](https://github.com/zgrwo/EngSmartSuite/commit/74cb64b4e12beb8459274eb3f9532c632bbbdc56))
+
 ## [1.2.7](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.6...v1.2.7) (2026-09-06)
 
 
