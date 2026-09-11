@@ -42,6 +42,7 @@
 | | response_surface | 响应曲面分析 |
 | | grid_search | 网格搜索寻优 |
 | | multi_objective | 多目标优化（Pareto） |
+| | inverse_solve | 工艺参数反解（反求可调参数/时间 + 可达性） |
 | | doe_analysis | DOE 效应估计（全因子/部分因子） |
 | | roc_analysis | ROC/AUC 分析 |
 | | logistic_regression | Logistic 回归 |

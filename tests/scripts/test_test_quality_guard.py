@@ -242,6 +242,66 @@ def test_class_method_missing_test_detected(tmp_path):
     assert any("public_method" in p for p in problems)
 
 
+def test_public_property_exempt_but_sibling_method_still_flagged(tmp_path):
+    """property/cached_property 不可调用故豁免缺测；同类普通方法仍须被检（负向注入）。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(
+        root,
+        "src/pkg/mod.py",
+        (
+            "import functools\n"
+            "\n"
+            "class Model:\n"
+            "    @property\n"
+            "    def ready(self):\n"
+            "        return True\n"
+            "\n"
+            "    @functools.cached_property\n"
+            "    def cached_flag(self):\n"
+            "        return True\n"
+            "\n"
+            "    def run(self):\n"
+            "        return 1\n"
+        ),
+    )
+    _write(root, "tests/test_mod.py", "def test_other():\n    assert True\n")
+    problems = guard.check_missing_tests(src, tests)
+    assert not any("ready" in p for p in problems)
+    assert not any("cached_flag" in p for p in problems)
+    assert any("run" in p for p in problems)
+
+
+def test_instance_method_call_counts_as_tested(tmp_path):
+    """实例方法调用（forward.predict(...)）接收者类型未知，按方法名宽松计入已测。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(
+        root,
+        "src/pkg/mod.py",
+        "class Model:\n    def compute(self):\n        return 1\n",
+    )
+    _write(
+        root,
+        "tests/test_mod.py",
+        "from pkg.mod import Model\ndef test_compute():\n    m = Model()\n    assert m.compute() == 1\n",
+    )
+    assert guard.check_missing_tests(src, tests) == []
+
+
+def test_module_function_not_masked_by_attr_call(tmp_path):
+    """模块级函数仍走严格口径：df.compute() 不能掩盖 src 模块级 compute 缺测（#R2）。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(root, "src/pkg/mod.py", "def compute():\n    return 1\n")
+    _write(root, "tests/test_mod.py", "def test_x():\n    df = object()\n    df.compute()\n")
+    problems = guard.check_missing_tests(src, tests)
+    assert any("compute" in p for p in problems)
+
+
 def test_comment_mention_not_counted_as_tested(tmp_path):
     """函数名只出现在注释/字符串里不算已测（此前 re.findall 匹配全文）。"""
     root = tmp_path / "repo"
@@ -313,3 +373,27 @@ def test_max_warn_within_limit_passes(tmp_path, capsys):
     )
     rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests"), "--max-warn", "1"])
     assert rc == 0
+
+
+# ── 类方法宽松口径的已知漏检（钉死取舍，fix round 2）──────────
+
+
+def test_class_method_false_negative_pinned_for_generic_name(tmp_path):
+    """钉死已知局限（接受的静态启发式取舍，非期望行为）：类公共方法与常见容器方法
+    同名时，无关的 dict.get(...) 调用会使其被认作已测而漏检。收紧口径将先使本测试
+    失败，强制显式更新取舍。"""
+    root = tmp_path / "repo"
+    src = root / "src"
+    tests = root / "tests"
+    _write(
+        root,
+        "src/pkg/mod.py",
+        "class Cache:\n    def get(self, key):\n        return None\n",
+    )
+    _write(
+        root,
+        "tests/test_mod.py",
+        "def test_dict_get():\n    d = {'k': 1}\n    assert d.get('k') == 1\n",
+    )
+    problems = guard.check_missing_tests(src, tests)
+    assert not any("mod.py:get" in p for p in problems)

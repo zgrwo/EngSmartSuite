@@ -50,6 +50,7 @@ EngSmartSuite/
 │       │   ├── capability.py       #   过程能力 (Cp/Cpk, Sigma Level, 统计容许区间)
 │       │   ├── detection.py        #   异常检测 (trend_forecast, changepoint...)
 │       │   ├── reliability.py      #   可靠性/MSA (gage_rr, tolerance_interval, survival_analysis)
+│       │   ├── inverse.py          #   工艺参数反解 (inverse_solve: 角色识别/前向建模/约束求解)
 │       │   └── exploratory.py      #   探索性分析 (box_chart, scatter_plot...)
 │       │
 │       ├── services/               # ② 应用服务层：唯一桥接层
@@ -71,6 +72,8 @@ EngSmartSuite/
 ├── tests/                          # 测试
 │   ├── __init__.py
 │   ├── conftest.py                 #   共享 fixtures
+│   ├── Data.xlsx                   #   inverse_solve 真实批次验收数据（历史 33 行）
+│   ├── examples.xlsx               #   inverse_solve 验收请求行（11 行，可调参数留空）
 │   ├── test_data.xlsx              #   通用测试数据
 │   ├── test_chemical_data.xlsx     #   化工批次数据
 │   ├── test_reliability_data.xlsx  #   可靠性数据
@@ -100,6 +103,7 @@ EngSmartSuite/
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_fuzz.py            #   模糊测试
 │   │   ├── test_med_fixes.py       #   审查 MED 问题修复回归
+│   │   ├── test_inverse.py         #   工艺参数反解（角色/建模/求解/可达/端到端）
 │   │   └── test_new_functions.py   #   新函数验证
 │   ├── test_services/              #   服务层单元测试
 │   │   ├── __init__.py
@@ -162,7 +166,7 @@ EngSmartSuite/
 │   ├── verification-before-completion/
 │   └── subagent-driven-development/
 │
-├── templates/                      # YAML 分析模板 (44 个) + new_analysis.py + README.md
+├── templates/                      # YAML 分析模板 (45 个) + new_analysis.py + README.md
 │   ├── README.md                   #   模板目录说明
 │   ├── new_analysis.py             #   新方法脚手架（11 步注册链模板）
 │   ├── example_anomaly_detect.yaml
@@ -183,6 +187,7 @@ EngSmartSuite/
 │   ├── example_hypothesis_test.yaml
 │   ├── example_hypothesis_test_kruskal.yaml
 │   ├── example_hypothesis_test_mcnemar.yaml
+│   ├── example_inverse_solve.yaml
 │   ├── example_lasso_regression.yaml
 │   ├── example_logistic_regression.yaml
 │   ├── example_median_ci.yaml

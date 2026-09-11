@@ -149,7 +149,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | :--- | :--- |
 | 任何变更 | `git status`（确认无未声明改动/残留）+ `git diff --stat`（变更面） |
 | 源代码 | `ruff check src/smartsuite/ scripts/ tests/` + `ruff format --check src/smartsuite/ scripts/ tests/` + 聚焦 pytest（`run_affected_tests.py` 增量判定） |
-| 引擎/数值 | 追加四层防线：`pytest tests/test_engine/test_correctness.py tests/test_engine/test_invariants.py tests/test_engine/test_edge_cases.py -q` + `python scripts/verify_consistency.py --skip-pytest`（41 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
+| 引擎/数值 | 追加四层防线：`pytest tests/test_engine/test_correctness.py tests/test_engine/test_invariants.py tests/test_engine/test_edge_cases.py -q` + `python scripts/verify_consistency.py --skip-pytest`（42 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
 | 服务/桥接 | `preprocess_data` 改动必查全部解包调用方 + `pytest tests/test_services/ -q` |
 | 前端/参数面板 | 四点一致性（app.js TASK_PARAMS / PARAM_META / PARAM_LABELS / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_frontend_params.py`（键集静态比对）+ `python scripts/verify_cross_consistency.py`（运行时） |
 | 脚本/门禁 | `pytest tests/scripts/ -q`（治理脚本自测）+ 负向注入验证（见 6.4） |
@@ -241,7 +241,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 ### 维度 F：文档一致性（Docs）
 
-- F1 数字基准：签名总数以 [api-reference.md](../specification/api-reference.md) 为唯一信源；41 任务文字在任何文档中不得硬编码成别的数（**审查者当轮重测数量，模板中的 41 为 2026-09-05 快照**）。
+- F1 数字基准：签名总数以 [api-reference.md](../specification/api-reference.md) 为唯一信源；42 任务文字在任何文档中不得硬编码成别的数（**审查者当轮重测数量，模板中的 42 为 2026-09-10 快照**）。
 - F2 注册链：新增/修改分析函数必须走 11 步同步（见 3.3），前端三集合与引擎实际使用一致。
 - F3 手册准确性：user-manual 的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
 - F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义；**`skills/*.md` 陷阱清单与源码同步**（历史：smartsuite-dev.md `_yOnlyTasks` 缺 `doe_design` 而 app.js 已含，2026-09-05 F-drift）。

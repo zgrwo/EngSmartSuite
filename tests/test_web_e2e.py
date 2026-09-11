@@ -102,6 +102,18 @@ ALL_TASKS = [
             ]
         },
     ),
+    (
+        "inverse_solve",
+        [""],
+        [],
+        [],
+        {
+            "incoming_cols": "熔体温度",
+            "variable_cols": "模具温度",
+            "output_cols": "不良率",
+            "model": "linear",
+        },
+    ),
     ("spc_nonparametric", ["不良率"], [], [], {}),
     ("box_chart", ["不良率"], ["原料类型"], ["原料类型"], {}),
     ("scatter_plot", ["不良率"], ["熔体温度"], [], {"fit": "linear"}),

@@ -94,6 +94,12 @@ TASKS_TO_TEST = [
     ("robust_regression", "y", ["x1", "x2"]),
     ("grid_search", "y", ["x1"], {"ranges": {"x1": (5, 15)}, "n_points": 5}),
     ("multi_objective", "y", ["x1", "x2"], {"objectives": [{"col": "y", "direction": "maximize"}]}),
+    (
+        "inverse_solve",
+        "",
+        [],
+        {"incoming_cols": "x1", "variable_cols": "x2", "output_cols": "y", "model": "linear"},
+    ),
     ("spc_attribute", "y", [], {"chart_type": "c"}),
     ("gage_rr", "y", ["group", "binary"], {"part_col": "group", "operator_col": "binary"}),
 ]

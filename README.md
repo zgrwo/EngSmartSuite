@@ -49,12 +49,13 @@ python run_server.py
 | 可靠性/寿命 | Kaplan-Meier、Weibull 拟合、Log-rank、容差区间 |
 | 假设检验 | t / 配对 / Mann-Whitney / Wilcoxon / Kruskal-Wallis / McNemar / KS 等 17 种 |
 | 回归分析 | 多元 OLS / Lasso / Huber / 分位数 / Logistic（不含逐步/PLS） |
+| 工艺参数反解 | 已知来料与输出目标，反求可调参数/时间（含可达性判定与模型质量表） |
 | DoE | 全因子 / 部分因子 / Plackett-Burman / 田口 / Box-Behnken / CCD |
 | 功效/样本量 | t / ANOVA / 比例检验的所需样本量与已达功效 |
 | 异常/变点/趋势 | 异常检测、变点识别、趋势预测、离群共识 |
 | 探索性 | 箱线图、散点图、Bootstrap/中位数/比例置信区间 |
 
-> 模块能力以 [docs/specification/api-reference.md](docs/specification/api-reference.md)（41 个任务签名唯一信源）为准，上表仅为概览。
+> 模块能力以 [docs/specification/api-reference.md](docs/specification/api-reference.md)（42 个任务签名唯一信源）为准，上表仅为概览。
 
 ---
 

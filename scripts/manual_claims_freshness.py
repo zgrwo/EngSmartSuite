@@ -25,6 +25,8 @@ SECTION_BY_ANALYSIS = {
     "process_capability": "7.5",
     "trend_forecast": "7.6",
     "bootstrap_ci": "8.1",
+    # 审查 2026-09-11 F6：inverse_solve model_equations 方程系数纳入新鲜度校验
+    "inverse_solve": "6.12",
 }
 
 # 章节标题定位：### 4.1 …（要求后续不是数字，防 4.1 前缀误配 4.10）
@@ -39,6 +41,10 @@ def _normalize(text: str) -> str:
     for dash in ("\u2212", "\u2013", "\u2011"):  # − – ‑
         text = text.replace(dash, "-")
     text = text.replace("\uff0c", ",")  # ， → ,
+    # 空格式运算符负号「 - 0.008057」→ 紧贴「-0.008057」：方程表系数（如
+    # inverse_solve 前向方程）负号前有空格，若不归一化则 tokenizer 只取正值，
+    # 负系数 CLAIM 永远无法命中（审查 2026-09-11 F6）
+    text = re.sub(r"(?<=[\s(（])-\s+(?=\d)", "-", text)
     return text
 
 
@@ -70,6 +76,12 @@ ANCHOR_PATTERNS = {
     ("proportion_ci", "Wilson lower"): r"Wilson Score",
     ("proportion_ci", "Wilson upper"): r"Wilson Score",
     ("proportion_ci", "point estimate"): r"\|\s*点估计\s*\|",
+    # inverse_solve：model_equations 「前向方程 | 不良率」行（方程系数同线）
+    ("inverse_solve", "方程截距"): r"\|\s*前向方程\s*\|\s*不良率\s*\|",
+    ("inverse_solve", "熔体温度系数"): r"\|\s*前向方程\s*\|\s*不良率\s*\|",
+    ("inverse_solve", "模具温度系数"): r"\|\s*前向方程\s*\|\s*不良率\s*\|",
+    # LOO R² 声明在 §6.12 正文行
+    ("inverse_solve", "LOO R²"): r"LOO R²",
 }
 
 

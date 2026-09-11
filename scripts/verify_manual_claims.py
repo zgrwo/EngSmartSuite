@@ -8,6 +8,9 @@ import os
 import sys
 
 import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+from sklearn.model_selection import LeaveOneOut, cross_val_predict
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
@@ -446,6 +449,29 @@ bc_upper = float(res.metadata.get("ci_upper", float("nan")))
 p(f"  点估计={bc_point:.4f}, CI=[{bc_lower:.4f}, {bc_upper:.4f}]")
 
 # ────────────────────────────────────────────────────────
+# 11. INVERSE_SOLVE (6.12) — 方程系数独立 OLS 校验（审查 2026-09-11 F6）
+# ────────────────────────────────────────────────────────
+p()
+p("=" * 70)
+p("11. INVERSE_SOLVE (6.12)")
+p("=" * 70)
+
+_iv = df_raw[[C_MELT, C_MOLD, C_DEF]].dropna()
+_iv_model = LinearRegression().fit(_iv[[C_MELT, C_MOLD]], _iv[C_DEF])
+iv_intercept = float(_iv_model.intercept_)
+iv_coef_melt = float(_iv_model.coef_[0])
+iv_coef_mold = float(_iv_model.coef_[1])
+_iv_pred = cross_val_predict(
+    LinearRegression(), _iv[[C_MELT, C_MOLD]], _iv[C_DEF], cv=LeaveOneOut()
+)
+iv_loo_r2 = float(r2_score(_iv[C_DEF], _iv_pred))
+p(
+    f"  独立 OLS（{len(_iv)} 行）: 截距={iv_intercept:.6f}, "
+    f"{LABEL[C_MELT]}={iv_coef_melt:.8f}, {LABEL[C_MOLD]}={iv_coef_mold:.8f}, "
+    f"LOO R²={iv_loo_r2:.6f}"
+)
+
+# ────────────────────────────────────────────────────────
 # FINAL COMPARISON REPORT
 # ────────────────────────────────────────────────────────
 p()
@@ -579,6 +605,14 @@ p("--- 8.1 BOOTSTRAP_CI ---")
 rpt("bootstrap_ci", "点估计", 4.2491, round(bc_point, 4), 0.001)
 rpt("bootstrap_ci", "CI 下限", 4.1740, round(bc_lower, 4), 0.001)
 rpt("bootstrap_ci", "CI 上限", 4.3244, round(bc_upper, 4), 0.001)
+
+p()
+p("--- 6.12 INVERSE_SOLVE ---")
+# 手册 §6.12 model_equations 前向方程（独立 OLS 复核；引擎 linear 与 raw OLS 等价）
+rpt("inverse_solve", "方程截距", 6.334, round(iv_intercept, 4), 0.001)
+rpt("inverse_solve", "熔体温度系数", -0.008057, round(iv_coef_melt, 6), 5e-6)
+rpt("inverse_solve", "模具温度系数", -0.007928, round(iv_coef_mold, 6), 5e-6)
+rpt("inverse_solve", "LOO R²", -0.002, round(iv_loo_r2, 4), 0.001)
 
 p()
 p("=" * 100)

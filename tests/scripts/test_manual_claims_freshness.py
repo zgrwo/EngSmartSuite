@@ -124,6 +124,22 @@ def test_range_string_claims_checked_per_number():
     assert len(problems) == 1, f"区间端点漂移应报: {problems}"
 
 
+def test_spaced_operator_minus_negative_claim():
+    """方程表「6.334 - 0.008057」的空格式负系数应可命中负值 CLAIM（F6 回归）。"""
+    text = (
+        "### 6.12 工艺参数反解 (`inverse_solve`)\n\n"
+        "| 前向方程 | 不良率 | `不良率 = 6.334 - 0.008057·熔体温度 - 0.250·模具温度` |\n"
+    )
+    claims = [
+        ("inverse_solve", "方程截距", 6.334),
+        ("inverse_solve", "模具温度系数", -0.25),
+    ]
+    assert freshness.check_manual_freshness(text, claims) == []
+    tampered = text.replace("0.250", "0.350")
+    problems = freshness.check_manual_freshness(tampered, claims)
+    assert len(problems) == 1 and "模具温度系数" in problems[0]
+
+
 def test_real_manual_sections_locatable():
     """真实手册结构守卫：SECTION_BY_ANALYSIS 中的每个章节标题都能定位。"""
     manual_path = ROOT / "docs" / "user-manual" / "user-manual.md"

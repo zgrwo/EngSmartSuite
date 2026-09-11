@@ -163,6 +163,27 @@ def test_version_consistency(tmp_path):
     assert any("1.0.2" in p for p in problems)
 
 
+def test_version_consistency_checks_init_extra_file(tmp_path):
+    """R-7：release-please extra-files 的 __init__.py __version__ 纳入版本链。"""
+    root = build_repo(tmp_path)
+    (root / "pyproject.toml").write_text('[project]\nversion = "1.0.1"\n', encoding="utf-8")
+    (root / ".release-please-manifest.json").write_text(
+        json.dumps({".": "1.0.1"}), encoding="utf-8"
+    )
+    (root / "CHANGELOG.md").write_text("# Changelog\n\n## [1.0.1] - 2026-01-01\n", encoding="utf-8")
+    pkg = root / "src" / "smartsuite"
+    pkg.mkdir()
+    init = pkg / "__init__.py"
+    init.write_text('__version__ = "1.0.1"\n', encoding="utf-8")
+    assert verify_docs.check_version_consistency(root) == []
+    init.write_text('__version__ = "1.0.0"\n', encoding="utf-8")
+    problems = verify_docs.check_version_consistency(root)
+    assert any("__init__.py" in p and "1.0.0" in p for p in problems)
+    init.write_text("# 缺少版本声明\n", encoding="utf-8")
+    problems = verify_docs.check_version_consistency(root)
+    assert any("缺少 __version__" in p for p in problems)
+
+
 # ── 向量 7：未声明文件（--strict）────────────────────────────
 
 

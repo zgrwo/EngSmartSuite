@@ -1,0 +1,29 @@
+# 工艺参数反解 — 已知来料与输出目标，反求可调参数（含时间旋钮）
+# 列角色自动识别：前缀 Incoming/来料、Variable/变量/可调、Fixed/固定、Output/输出、Target/目标
+# 请求行：可调参数留空 + 来料与输出目标填数；历史行：全部填数
+task: inverse_solve
+target_col: ""
+feature_cols: []
+params:
+  model: auto
+  # auto 规模预算（R-1）：n>500 仅评估 linear/poly；n>2000 由 LOO 切 5 折；
+  # gpr 仅支持 n≤2000。大数据建议显式选择 linear/gbm。
+  incoming_cols: ""
+  variable_cols: ""
+  fixed_cols: ""
+  output_cols: ""
+  target_cols: ""
+  time_col: ""
+  time_adjustable: "false"
+  time_min: ""
+  time_max: ""
+  variable_bounds: ""
+  output_weights: ""
+  weight_mode: std
+  reg_lambda: 0.02
+  attain_tol: 0.5
+  max_starts: 10
+  random_state: 42
+  # 请求行也可在界面/API 经 request_rows 录入（[{列名: 数值}, ...]）；
+  # CLI 一般留空，改用数据文件中的留空行（可调参数留空）
+  request_rows: ""

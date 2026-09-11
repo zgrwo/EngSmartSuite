@@ -266,6 +266,11 @@ TASK_SPEC = {
         ["a", "b"],
         {"objectives": [{"col": "target", "direction": "maximize"}]},
     ),
+    "inverse_solve": (
+        "",
+        [],
+        {"incoming_cols": "a,b", "variable_cols": "c", "output_cols": "target", "model": "linear"},
+    ),
     "doe_design": (
         "",
         [],

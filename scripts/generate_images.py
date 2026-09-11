@@ -128,6 +128,16 @@ METHOD_CONFIGS: dict[str, dict] = {
         "features": ["x1", "x2"],
         "params": {"objectives": [{"col": "y", "direction": "maximize"}]},
     },
+    "inverse_solve": {
+        "target": "",
+        "features": [],
+        "params": {
+            "incoming_cols": "IncomingA",
+            "variable_cols": "VariableU1",
+            "output_cols": "OutputY1",
+            "model": "auto",
+        },
+    },
     "doe_analysis": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
     "response_surface": {"target": "y", "features": ["x1", "x2"], "params": {}},
     "robust_regression": {"target": "y", "features": ["x1", "x2"], "params": {}},
@@ -161,6 +171,14 @@ def _make_method_data(method_name: str, base: pd.DataFrame) -> pd.DataFrame:
         out = base.copy()
         out["分组"] = np.where(base["group"] == "A", "组1", "组2")
         return out
+    if method_name == "inverse_solve":
+        # 历史行 + 一行请求（可调参数留空，输出目标给定）
+        inc = rng.normal(100, 5, n)
+        u = rng.uniform(10, 30, n)
+        y = 50.0 + 0.5 * inc + 1.2 * u
+        hist = pd.DataFrame({"IncomingA": inc, "VariableU1": u, "OutputY1": y})
+        request = pd.DataFrame({"IncomingA": [105.0], "VariableU1": [None], "OutputY1": [130.0]})
+        return pd.concat([hist, request], ignore_index=True)
     return base
 
 

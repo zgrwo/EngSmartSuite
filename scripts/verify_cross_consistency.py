@@ -122,6 +122,18 @@ TEST_CASES = [
             ]
         },
     ),
+    (
+        "inverse_solve",
+        "",
+        [],
+        [],
+        {
+            "incoming_cols": "熔体温度",
+            "variable_cols": "模具温度",
+            "output_cols": "不良率",
+            "model": "linear",
+        },
+    ),
     ("doe_analysis", "不良率", ["熔体温度", "模具温度", "注射压力"], [], {}),
     (
         "doe_design",
