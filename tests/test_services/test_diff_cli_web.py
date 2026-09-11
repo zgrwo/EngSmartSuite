@@ -1,4 +1,4 @@
-"""CLI (orchestrate) vs Web (run_analysis) numerical parity — all 41 methods.
+"""CLI (orchestrate) vs Web (run_analysis) numerical parity — all 42 methods.
 
 由原 tests/_diff_cli_web.py 模块级脚本改造（审查 2026-08-19 #3.3）：
 - 原文件名不匹配 pytest python_files=["test_*.py"] 收集规则，且无 test_* 函数，
@@ -308,6 +308,18 @@ PARITY_CASES = [
             ]
         },
     ),
+    (
+        "inverse_solve",
+        "",
+        [],
+        [],
+        {
+            "incoming_cols": "熔体温度",
+            "variable_cols": "模具温度",
+            "output_cols": "不良率",
+            "model": "linear",
+        },
+    ),
     ("roc_analysis", "首件合格", ["熔体温度"], [], {}),
     ("logistic_regression", "保养日", X, [], {}),
     ("box_chart", Y, [], [CAT], {}),
@@ -320,8 +332,8 @@ PARITY_CASES = [
 
 
 def test_parity_case_count():
-    """41 个任务必须全部覆盖（含注册表核对）。"""
-    assert len(PARITY_CASES) == 41
+    """42 个任务必须全部覆盖（含注册表核对）。"""
+    assert len(PARITY_CASES) == 42
     registered = set(TASK_REGISTRY.keys())
     covered = {c[0] for c in PARITY_CASES}
     assert covered == registered, f"差分清单与注册表不一致: {covered ^ registered}"

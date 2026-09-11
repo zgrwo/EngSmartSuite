@@ -505,13 +505,13 @@ def test_manual_spc_xbar(raw_df):
 
 
 # ═══════════════════════════════════════════════════════════
-# 综合: 全量 41 方法三路径行为一致
+# 综合: 全量 42 方法三路径行为一致
 # ═══════════════════════════════════════════════════════════
 
 
 @pytest.mark.parametrize("task", sorted(TASK_REGISTRY.keys()))
 def test_all_methods_3path_behavior(raw_df, task):
-    """所有 41 个方法在三条路径上行为一致（status + summary 非空）。
+    """所有 42 个方法在三条路径上行为一致（status + summary 非空）。
 
     不要求所有方法都成功（部分方法对测试数据不适用），
     但要求三条路径返回相同的行为模式（都 ok 或都 error）。
@@ -527,6 +527,7 @@ def test_all_methods_3path_behavior(raw_df, task):
         "response_surface": ("不良率", ["熔体温度", "模具温度"], False),
         "grid_search": ("不良率", ["熔体温度", "注射压力"], False),
         "multi_objective": ("不良率", ["熔体温度", "注射压力"], False),
+        "inverse_solve": ("", [], True),
         "doe_analysis": ("不良率", ["熔体温度", "注射压力"], False),
         "doe_design": ("", [], False),
         "spc_xbar": ("不良率", [], False),
@@ -596,6 +597,11 @@ def test_all_methods_3path_behavior(raw_df, task):
         extra_params["method"] = "full_factorial"
         extra_params["factors"] = [{"name": "A", "levels": [1, 2]}]
         extra_params["randomize"] = False
+    elif task == "inverse_solve":
+        extra_params["incoming_cols"] = "熔体温度"
+        extra_params["variable_cols"] = "模具温度"
+        extra_params["output_cols"] = "不良率"
+        extra_params["model"] = "linear"
 
     # 运行三条路径
     r_py = path_python(task, raw_df, target, features, extra_params, raw_cat=raw_cat)

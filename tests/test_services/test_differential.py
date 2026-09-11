@@ -230,6 +230,11 @@ def _params_for(task: str):
         params["n_points"] = 5
     elif task == "multi_objective":
         params["objectives"] = [{"col": "y", "direction": "maximize"}]
+    elif task == "inverse_solve":
+        params["incoming_cols"] = "x1"
+        params["variable_cols"] = "x2"
+        params["output_cols"] = "y"
+        params["model"] = "linear"
     elif task == "doe_analysis":
         params["alpha"] = 0.05
     elif task == "doe_design":
