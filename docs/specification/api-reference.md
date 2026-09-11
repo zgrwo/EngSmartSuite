@@ -1,6 +1,6 @@
 # SmartSuite API Reference
 
-> 全部 41 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
+> 全部 42 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
 > 开发规范 → `AGENTS.md` | 开发陷阱 → `skills/smartsuite-dev.md` | 场景选择 → `skills/analysis-decision-tree.md` | 术语 → `docs/governance/context.md`
 
 ## 数据契约
@@ -178,6 +178,15 @@ class AnalysisResult:
 - **params**: `objectives` (必需: [{col, direction, ...}]), `weights`
 - **返回**: `desirability_scores`, `optimal_parameters`
 - **图**: Pareto 前沿 (双目标) + 方案分解堆叠柱状图
+
+### inverse_parameter_solve
+- **Task Key**: `inverse_solve`
+- **描述**: 通用工艺参数反解 — 已知来料与输出目标，在参数盒约束内反解可调参数（支持时间类旋钮与速率物理模型），并给出可达性判定
+- **params**: 列角色 `incoming_cols`/`variable_cols`/`fixed_cols`/`output_cols`/`target_cols`（逗号分隔，留空按前缀 incoming/来料、variable/变量/可调、fixed/固定、output/输出、target/目标 自动识别）、`time_col`; 模型 `model` (`auto`/`linear`/`poly`/`gpr`/`gbm`/`rate`); 时间旋钮 `time_adjustable` (默认 false)、`time_min`/`time_max`; 优化 `variable_bounds`/`output_weights` (JSON)、`weight_mode` (`std`/`range`/`none`)、`reg_lambda` (0.02)、`attain_tol` (0.5σ)、`max_starts` (10)、`random_state` (42)
+- **返回**: `recommendations` (推荐参数+状态)、`predictions` (预测+偏差σ+可达)、`model_quality` (LOO 候选门控)、`reachable_ranges` (采样可达范围)
+- **图**: 推荐参数 vs 历史范围 + 各请求输出偏差σ条形图
+- **行分类**：可调参数（含可调时间）完整的行为历史行；可调参数留空、来料与输出有值的行为请求行
+- **无需目标列**：仅读数据列角色与 `params`，已注册进 `NO_TARGET_TASKS` + `RAW_CAT_TASKS`
 
 ### doe_analysis
 - **Task Key**: `doe_analysis`

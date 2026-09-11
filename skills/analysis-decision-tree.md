@@ -19,6 +19,7 @@
 │   └── 多组方差相等 → variance_test
 │
 ├── "最优参数是什么？"
+│   ├── 已知目标输出，反求可调参数/时间 → inverse_solve
 │   ├── 先设计实验方案（全因子/部分因子/田口/BB/CCD） → doe_design
 │   ├── 建立 Y=f(X) 公式 → regression
 │   ├── 两参数可视化最优区 → response_surface
