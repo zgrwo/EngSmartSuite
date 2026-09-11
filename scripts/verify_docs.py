@@ -409,6 +409,26 @@ def check_version_consistency(root: Path) -> list[str]:
             f"[版本漂移] .release-please-manifest.json 版本 {manifest_version} != "
             f"pyproject.toml 版本 {pyproject_version}"
         )
+    # 审查 2026-09-11 R-7：release-please extra-files（__init__.py __version__）
+    # 纳入版本向量——此前只查 manifest/pyproject/CHANGELOG，手工改动可静默漂移
+    init_path = root / "src" / "smartsuite" / "__init__.py"
+    if init_path.exists():
+        m_init = re.search(
+            r'^__version__\s*=\s*["\']([^"\']+)["\']',
+            init_path.read_text(encoding="utf-8", errors="replace"),
+            re.MULTILINE,
+        )
+        init_version = m_init.group(1).strip() if m_init else ""
+        if not init_version:
+            problems.append(
+                "[版本漂移] src/smartsuite/__init__.py 缺少 __version__"
+                "（release-please extra-files 契约，版本链四向量无法闭合）"
+            )
+        elif pyproject_version and init_version != pyproject_version:
+            problems.append(
+                f"[版本漂移] pyproject.toml 版本 {pyproject_version} != "
+                f"src/smartsuite/__init__.py __version__ {init_version}"
+            )
     changelog_path = root / "CHANGELOG.md"
     if changelog_path.exists():
         m2 = re.search(

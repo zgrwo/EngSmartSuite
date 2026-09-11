@@ -97,3 +97,8 @@ INVERSE_RATE_RIDGE_ALPHA_MIN = 1e-3  # 速率 RidgeCV 最小 alpha
 INVERSE_RATE_RIDGE_ALPHA_MAX = 1e3  # 速率 RidgeCV 最大 alpha
 INVERSE_RATE_RIDGE_ALPHA_N = 25  # 速率 RidgeCV alpha 数量（对数等距）
 INVERSE_RATE_MIN_ROWS = 2  # 速率模型最少有效行数
+# 审查 2026-09-11 R-1：候选筛选 CV 规模预算（防 LOO 在大 n 下 O(n) 次全量拟合爆炸）
+INVERSE_CV_LOO_MAX_ROWS = 2000  # ≤ 该行数用 LOO（精确）；超过改用 5 折 CV
+INVERSE_AUTO_CANDIDATE_MAX_ROWS = 500  # auto 超过该行数只评估 linear/poly（跳过 GPR/GBM）
+INVERSE_POLY_MAX_TERMS = 100  # auto 中 poly 展开列数上限，超过则跳过 poly 候选
+INVERSE_GPR_MAX_ROWS = 2000  # GPR 候选硬上限（显式选择超过时中文报错，防 O(n³) 假死）

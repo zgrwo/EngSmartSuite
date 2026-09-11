@@ -1104,7 +1104,7 @@ _本方法仅输出数值表格和系数对比，不生成图表。_
 | `incoming_cols` | 勾选 `熔体温度` | 来料条件列（请求行中给出） |
 | `variable_cols` | 勾选 `模具温度` | 可调参数列（待反解；请求行留空） |
 | `output_cols` | 勾选 `不良率` | 输出列（请求行中给定期望目标） |
-| `model` | `linear` | 前向模型：`auto` 按 LOO R² 自动门控，可选 `linear`/`poly`/`gpr`/`gbm`/`rate` |
+| `model` | `linear`（默认） | 前向模型：`auto` 按 CV R² 自动门控（n>500 仅评估 `linear`/`poly`，n>2000 由 LOO 切 5 折，详见 补充备注），可选 `linear`/`poly`/`gpr`（n≤2000）/`gbm`/`rate` |
 | `time_adjustable` | `false` | 时间类旋钮：`true` 时 `time_col` 参与寻优（配合 `time_min`/`time_max`） |
 | `weight_mode` | `std` | 多输出偏差归一化口径：`std`/`range`/`none` |
 
@@ -1142,13 +1142,14 @@ _本方法仅输出数值表格和系数对比，不生成图表。_
 
 - **可达优先看状态列**：`可达` 表示在当前参数盒内能达到目标；`不可达` 会给出超出阈值（默认 0.5σ）的输出与偏差，应先确认目标是否写错或放宽参数范围。
 - **参数触界是边界信号**：推荐值顶到历史范围边界时，说明最优解在可行域边缘，需实验确认能否放宽。
-- **模型质量决定可信度**：`model_quality` 表给出各输出的候选模型 LOO R²；R² 低（<0.3）时反解结果不建议直接用于调机。
+- **模型质量决定可信度**：`model_quality` 表给出各输出的候选模型交叉验证 R²（`CV方案` 列标注 LOO 或 5 折）；R² 低（<0.3）时反解结果不建议直接用于调机。
 - **方程表决定可换算性**：`model_equations` 中线性/poly/rate 给出原始单位方程与解析反解，可直接手算核对；反解公式为**未含 `reg_lambda` 正则**的解析解，与推荐值可能有偏差（推荐值以 `recommendations` 表为准）；`gpr`/`gbm` 为核方法/树集成，标注"无解析表达式"，只能按推荐值执行。
 - **rate 模型**（`model=rate`）基于"输出=来料−速率×时间"的物理假设，适合时间类工艺；时间不可调时按历史中位数处理，可调时用解析 profile 寻优。
 
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='inverse_solve', params={'incoming_cols':'熔体温度','variable_cols':'模具温度','output_cols':'不良率','model':'linear'}, ...))`
+- **`auto` 规模预算**：历史 n>500 时 `auto` 仅评估 `linear`/`poly`（跳过 GPR/GBM 并消息提示）；n>2000 时候选筛选由 LOO 切换为 5 折（`model_quality.CV方案` 标注）；`gpr` 硬上限 n≤2000，超限中文报错。大数据建议显式选择 `linear`/`gbm`。
 - **界面录入请求行**：Web UI 反演请求行表格 → `params.request_rows`（`[{'列名': 数值}]`，可调参数无需出现）；固定列缺省时按历史中位数处理。
 - **CLI 模板**：`templates/example_inverse_solve.yaml`（列角色按前缀自动识别；请求行写入数据文件）
 - **列名前缀约定**：`Incoming*`/`来料*`、`Variable*`/`可调*`、`Fixed*`/`固定*`、`Output*`/`输出*`，可留空角色参数由引擎自动识别。

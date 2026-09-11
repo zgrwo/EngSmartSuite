@@ -16,18 +16,22 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
 from sklearn.linear_model import LinearRegression, RidgeCV
 from sklearn.metrics import mean_absolute_error, r2_score
-from sklearn.model_selection import LeaveOneOut, cross_val_predict
+from sklearn.model_selection import KFold, LeaveOneOut, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import (
     INVERSE_ATTAIN_N,
+    INVERSE_AUTO_CANDIDATE_MAX_ROWS,
+    INVERSE_CV_LOO_MAX_ROWS,
     INVERSE_DE_MAXITER,
     INVERSE_DE_POPSIZE,
+    INVERSE_GPR_MAX_ROWS,
     INVERSE_LAM_TIME,
     INVERSE_MAX_REQUESTS,
     INVERSE_MIN_HISTORY,
+    INVERSE_POLY_MAX_TERMS,
     INVERSE_RATE_MIN_ROWS,
     INVERSE_RATE_RIDGE_ALPHA_MAX,
     INVERSE_RATE_RIDGE_ALPHA_MIN,
@@ -220,11 +224,60 @@ def _build_candidate(kind: str, random_state: int):
     raise ValueError(f"未知模型: {kind}")
 
 
+def _fast_predictor(model):
+    """构造与 StandardScaler+（线性/Ridge/多项式）pipeline 等价的快速预测函数。
+
+    求解器目标函数按单行调用 predict 数千次，sklearn pipeline 的逐次输入校验
+    是主要开销（实测 33 行 × 11 请求约 115s 花在校验）；可解析结构改为纯 numpy
+    等价式计算（差异 ~1e-15）。不可解析（GPR/GBM 等）返回 None，走原 pipeline。
+    """
+    steps = getattr(model, "named_steps", None)
+    if not steps:
+        return None
+    scaler = steps.get("standardscaler")
+    if scaler is None:
+        return None
+    mean = np.ravel(np.asarray(scaler.mean_, dtype=float))
+    scale = np.ravel(np.asarray(scaler.scale_, dtype=float))
+    if "linearregression" in steps:
+        reg = steps["linearregression"]
+        coef = np.ravel(np.asarray(reg.coef_, dtype=float))
+        intercept = float(np.ravel(np.asarray(reg.intercept_, dtype=float))[0])
+        raw_coef = coef / scale
+        raw_intercept = intercept - float(np.sum(coef * mean / scale))
+        return lambda x: x @ raw_coef + raw_intercept
+    if "polynomialfeatures" in steps and "ridgecv" in steps:
+        poly = steps["polynomialfeatures"]
+        reg = steps["ridgecv"]
+        coef = np.ravel(np.asarray(reg.coef_, dtype=float))
+        intercept = float(np.ravel(np.asarray(reg.intercept_, dtype=float))[0])
+        weights = coef / scale
+        raw_intercept = intercept - float(np.sum(coef * mean / scale))
+        powers = np.asarray(poly.powers_, dtype=int)
+
+        def _poly_predict(x: np.ndarray) -> float:
+            basis = np.prod(np.power(x, powers), axis=1)
+            return float(basis @ weights + raw_intercept)
+
+        return _poly_predict
+    if "ridgecv" in steps:
+        # 速率模型：StandardScaler + RidgeCV
+        reg = steps["ridgecv"]
+        coef = np.ravel(np.asarray(reg.coef_, dtype=float))
+        intercept = float(np.ravel(np.asarray(reg.intercept_, dtype=float))[0])
+        raw_coef = coef / scale
+        raw_intercept = intercept - float(np.sum(coef * mean / scale))
+        return lambda x: x @ raw_coef + raw_intercept
+    return None
+
+
 @dataclass
 class ForwardModel:
     feature_cols: list[str]
     models: list
     choice: list[str]
+    note: str | None = None
+    fast: list | None = None
 
     def predict(self, x: pd.DataFrame) -> np.ndarray:
         return np.column_stack([m.predict(x[self.feature_cols]) for m in self.models])
@@ -232,6 +285,38 @@ class ForwardModel:
     @property
     def has_tree(self) -> bool:
         return "gbm" in self.choice
+
+
+def _cv_split(n_rows: int, random_state: int, kind: str):
+    """候选筛选交叉验证方案（R-1：控制拟合次数，防候选门控成本爆炸）。
+
+    GPR 恒用 5 折（LOO 会把拟合次数放大 n 倍且单次成本 O(n³)）；其余候选在
+    n ≤ INVERSE_CV_LOO_MAX_ROWS 时用精确 LOO，超过改用 5 折。返回 (splitter, 标签)。
+    """
+    if kind == "gpr" or n_rows > INVERSE_CV_LOO_MAX_ROWS:
+        splits = max(2, min(5, int(n_rows)))
+        return KFold(n_splits=splits, shuffle=True, random_state=random_state), "5折"
+    return LeaveOneOut(), "LOO"
+
+
+def _auto_candidates(n_rows: int, feature_count: int) -> tuple[tuple[str, ...], list[str]]:
+    """auto 候选与规模削减说明（R-1）。显式模型不受候选削减影响。"""
+    candidates: tuple[str, ...] = MODEL_KINDS
+    notes: list[str] = []
+    if n_rows > INVERSE_AUTO_CANDIDATE_MAX_ROWS:
+        skipped = [kind for kind in candidates if kind in ("gpr", "gbm")]
+        candidates = tuple(kind for kind in candidates if kind in ("linear", "poly"))
+        notes.append(
+            f"历史 n={n_rows} 超过 {INVERSE_AUTO_CANDIDATE_MAX_ROWS}，"
+            f"auto 已跳过候选：{'、'.join(skipped)}"
+        )
+    poly_terms = feature_count * (feature_count + 3) // 2
+    if "poly" in candidates and poly_terms > INVERSE_POLY_MAX_TERMS:
+        candidates = tuple(kind for kind in candidates if kind != "poly")
+        notes.append(
+            f"poly 展开列数 {poly_terms} 超过 {INVERSE_POLY_MAX_TERMS}，auto 已跳过候选：poly"
+        )
+    return candidates, notes
 
 
 def fit_forward(history, roles, model="auto", random_state=42):
@@ -244,24 +329,35 @@ def fit_forward(history, roles, model="auto", random_state=42):
     X = history[feature_cols]
     quality_rows = []
     models, choices = [], []
+    n_rows = len(history)
+    if model == "gpr" and n_rows > INVERSE_GPR_MAX_ROWS:
+        raise ValueError(
+            f"高斯过程 GPR 仅支持历史 n ≤ {INVERSE_GPR_MAX_ROWS}（当前 {n_rows}），"
+            "请选择 linear/poly/gbm/rate 或减少数据量"
+        )
+    if model == "auto":
+        candidates, auto_notes = _auto_candidates(n_rows, len(feature_cols))
+    else:
+        candidates, auto_notes = (model,), []
     for out_col in roles.output:
         y = history[out_col].to_numpy(float)
-        candidates = MODEL_KINDS if model == "auto" else (model,)
         best_kind, best_r2, best_model = None, -np.inf, None
         if len(feature_cols) == 0:
             raise ValueError("所有候选特征列均为常量，无法建模")
         for kind in candidates:
+            cv, cv_label = _cv_split(n_rows, random_state, kind)
             est = _build_candidate(kind, random_state)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ConvergenceWarning)
-                pred = cross_val_predict(est, X, y, cv=LeaveOneOut())
+                pred = cross_val_predict(est, X, y, cv=cv)
             r2 = r2_score(y, pred)
             quality_rows.append(
                 {
                     "Output": out_col,
                     "候选": kind,
-                    "LOO_R2": round(float(r2), 3),
-                    "LOO_MAE": round(float(mean_absolute_error(y, pred)), 4),
+                    "CV方案": cv_label,
+                    "CV_R2": round(float(r2), 3),
+                    "CV_MAE": round(float(mean_absolute_error(y, pred)), 4),
                     "选用": False,
                 }
             )
@@ -275,7 +371,14 @@ def fit_forward(history, roles, model="auto", random_state=42):
                 row["选用"] = True
     if dropped:
         logger.warning("常量列已从特征中剔除: %s", dropped)
-    return ForwardModel(feature_cols, models, choices), pd.DataFrame(quality_rows)
+    note = "；".join(auto_notes) if auto_notes else None
+    if note:
+        logger.warning(note)
+    fast = [_fast_predictor(model_item) for model_item in models]
+    return (
+        ForwardModel(feature_cols, models, choices, note=note, fast=fast),
+        pd.DataFrame(quality_rows),
+    )
 
 
 def _strip_role_prefix(name: str) -> str:
@@ -332,6 +435,7 @@ class RateForwardModel:
     random_state: int = 42
     pairing_note: str | None = None
     time_col: str | None = None
+    fast_rate: list | None = None
 
     @property
     def has_tree(self) -> bool:
@@ -339,10 +443,17 @@ class RateForwardModel:
 
     def predict_rate(self, incoming_row: dict, u: dict) -> np.ndarray:
         rates = []
-        for cols, model in zip(self.rate_feature_cols, self.models, strict=True):
+        for index, (cols, model) in enumerate(
+            zip(self.rate_feature_cols, self.models, strict=True)
+        ):
             values = {col: _rate_feature_value(col, incoming_row, u) for col in cols}
-            features = pd.DataFrame([values], columns=cols)
-            rates.append(float(np.ravel(model.predict(features))[0]))
+            fast = self.fast_rate[index] if self.fast_rate else None
+            if fast is not None:
+                features = np.asarray([[values[col] for col in cols]], dtype=float)
+                rates.append(float(np.ravel(fast(features))[0]))
+            else:
+                features = pd.DataFrame([values], columns=cols)
+                rates.append(float(np.ravel(model.predict(features))[0]))
         return np.asarray(rates, dtype=float)
 
     def predict_output(self, incoming_row: dict, u: dict, time: float) -> np.ndarray:
@@ -394,6 +505,7 @@ def fit_rate_forward(history, roles, time_col, random_state=42):
     finite_union = np.isfinite(train[union_cols].to_numpy(float)).all(axis=1)
     quality_rows = []
     models, feature_choice, rate_feature_cols = [], [], []
+    cv, cv_label = _cv_split(len(train), random_state, "linear")
     for out_col, (inc_col, _) in zip(roles.output, pairs, strict=True):
         y = pd.to_numeric(train[out_col], errors="coerce").to_numpy(float)
         inc = pd.to_numeric(train[inc_col], errors="coerce").to_numpy(float)
@@ -425,14 +537,15 @@ def fit_rate_forward(history, roles, time_col, random_state=42):
             )
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", ConvergenceWarning)
-                pred = cross_val_predict(est, X, rate, cv=LeaveOneOut())
+                pred = cross_val_predict(est, X, rate, cv=cv)
             r2 = r2_score(rate, pred)
             quality_rows.append(
                 {
                     "Output": out_col,
                     "候选": name,
-                    "LOO_R2": round(float(r2), 3),
-                    "LOO_MAE": round(float(mean_absolute_error(rate, pred)), 6),
+                    "CV方案": cv_label,
+                    "CV_R2": round(float(r2), 3),
+                    "CV_MAE": round(float(mean_absolute_error(rate, pred)), 6),
                     "选用": False,
                 }
             )
@@ -454,6 +567,7 @@ def fit_rate_forward(history, roles, time_col, random_state=42):
             random_state=random_state,
             pairing_note=pairing_note,
             time_col=time_col,
+            fast_rate=[_fast_predictor(model_item) for model_item in models],
         ),
         pd.DataFrame(quality_rows),
     )
@@ -734,6 +848,13 @@ def solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, p
                 np.asarray(forward.predict_output(row, u_dict, time_value), dtype=float)
             )
             return pred, float(time_value)
+        fast = getattr(forward, "fast", None)
+        if fast is not None and all(predictor is not None for predictor in fast):
+            values = np.asarray([[row[col] for col in forward.feature_cols]], dtype=float)
+            pred = np.asarray(
+                [float(np.ravel(predictor(values))[0]) for predictor in fast], dtype=float
+            )
+            return pred, None
         pred = np.ravel(np.asarray(forward.predict(pd.DataFrame([row])), dtype=float))
         return pred, None
 
@@ -952,7 +1073,7 @@ def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
     return pred.min(axis=0), pred.max(axis=0)
 
 
-_LOW_LOO_R2 = 0.3  # spec §5：选中模型 LOO R² 低于该值提示"可解释性弱"
+_LOW_CV_R2 = 0.3  # spec §5：选中模型 CV R² 低于该值提示"可解释性弱"（n>2000 为 5 折）
 _INVERSE_MODELS = ("auto", "linear", "poly", "gpr", "gbm", "rate")
 _WEIGHT_MODES = ("std", "range", "none")
 _DEFAULT_ATTAIN_TOL = 0.5  # spec §3 attain_tol 默认值
@@ -1442,7 +1563,8 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
     task = "inverse_solve"
     messages: list[str] = []
     try:
-        df = req.data
+        # R-5：角色解析会把角色列强制转数值——在副本上操作，遵守引擎不变式
+        df = req.data.copy()
         params = dict(req.params or {})
         model = str(params.get("model") or "auto").strip().lower()
         if model not in _INVERSE_MODELS:
@@ -1574,6 +1696,8 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
             )
         else:
             forward, quality = fit_forward(history, roles, model=model, random_state=seed)
+            if getattr(forward, "note", None):
+                messages.append(forward.note)
             dropped_features = [
                 c
                 for c in roles.incoming + roles.variable + roles.fixed
@@ -1586,15 +1710,16 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
         selected = quality[quality["选用"]] if not quality.empty else quality
         choice_label = "速率特征" if is_rate else "模型"
         for _, q_row in selected.iterrows():
-            r2 = safe_float(q_row["LOO_R2"], float("nan"))
+            r2 = safe_float(q_row["CV_R2"], float("nan"))
             if not np.isfinite(r2):
                 messages.append(
-                    f"输出「{q_row['Output']}」模型质量无法评估（LOO R² 非有限），反解结果仅供参考"
+                    f"输出「{q_row['Output']}」模型质量无法评估"
+                    f"（{q_row['CV方案']} R² 非有限），反解结果仅供参考"
                 )
-            elif r2 < _LOW_LOO_R2:
+            elif r2 < _LOW_CV_R2:
                 messages.append(
                     f"输出「{q_row['Output']}」所选{choice_label}（{q_row['候选']}）可解释性弱"
-                    f"（LOO R²={r2:.3f}），反解结果仅供参考"
+                    f"（{q_row['CV方案']} R²={r2:.3f}），反解结果仅供参考"
                 )
 
         bounds = resolve_bounds(history, roles, params)
@@ -1771,7 +1896,10 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 n_reachable += 1
 
             for out_col, lo_v, hi_v, tgt in zip(roles.output, lo_arr, hi_arr, targets, strict=True):
-                inside = float(lo_v) - 1e-9 <= tgt <= float(hi_v) + 1e-9
+                bound_tol = 1e-9 * max(
+                    abs(float(lo_v)), abs(float(hi_v)), abs(float(hi_v) - float(lo_v)), 1e-300
+                )
+                inside = float(lo_v) - bound_tol <= tgt <= float(hi_v) + bound_tol
                 reachable_rows.append(
                     {
                         "请求行号": label,

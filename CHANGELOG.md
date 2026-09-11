@@ -385,7 +385,7 @@
 
 - η² CI 和 Cramér's V CI 边界计算（使用 CDF 反演替代 SF）
 
-## [0.1.0] - 2026-07-25
+## [0.1.0](https://github.com/zgrwo/EngSmartSuite/releases/tag/v0.1.0) - 2026-07-25
 
 ### Added
 
@@ -408,5 +408,3 @@
 - `AnalysisRequest / AnalysisResult` 统一数据契约
 - `TASK_REGISTRY` 40 任务路由
 - services/ 为唯一桥接层
-
-[0.1.0]: https://github.com/zgrwo/EngSmartSuite/releases/tag/v0.1.0

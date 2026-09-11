@@ -152,7 +152,7 @@ const TASK_PARAMS = {
   anomaly_detect:    { method: 'iqr', alpha: 0.05, max_outliers: 5 },
   response_surface:  { direction: 'maximize' },
   multi_objective:   { objectives: '', weights: '' },
-  inverse_solve:     { model: 'auto', incoming_cols: '', variable_cols: '', fixed_cols: '', output_cols: '', target_cols: '', time_col: '', time_adjustable: 'false', time_min: '', time_max: '', variable_bounds: '', output_weights: '', weight_mode: 'std', reg_lambda: 0.02, attain_tol: 0.5, max_starts: 10, random_state: 42, request_rows: [] },
+  inverse_solve:     { model: 'linear', incoming_cols: '', variable_cols: '', fixed_cols: '', output_cols: '', target_cols: '', time_col: '', time_adjustable: 'false', time_min: '', time_max: '', variable_bounds: '', output_weights: '', weight_mode: 'std', reg_lambda: 0.02, attain_tol: 0.5, max_starts: 10, random_state: 42, request_rows: [] },
   decision_tree:     { max_depth: 5, random_state: 42 },
   anova:             { alpha: 0.05, interactions: 0 },
   spc_nonparametric: { side: 'two-sided' },
@@ -316,8 +316,8 @@ const PARAM_META = {
   model: {
     type: 'select', label: '前向模型',
     options: [
-      ['auto', '自动门控 (LOO R² 选优)'], ['linear', '线性回归'], ['poly', '二次多项式 Ridge'],
-      ['gpr', '高斯过程 GPR'], ['gbm', '梯度提升 GBM'], ['rate', '速率物理模型'],
+      ['auto', '自动门控 (CV R² 选优；大数据自动缩减候选)'], ['linear', '线性回归'], ['poly', '二次多项式 Ridge'],
+      ['gpr', '高斯过程 GPR (n≤2000)'], ['gbm', '梯度提升 GBM'], ['rate', '速率物理模型'],
     ]
   },
   weight_mode: {

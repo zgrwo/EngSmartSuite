@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -102,7 +104,7 @@ def test_fit_forward_auto_selects_and_predicts():
     assert len(quality) == 8  # 2 输出 × 4 候选（spec §4.5 全候选对比表）
     sel = quality[quality["选用"]]
     assert sel["Output"].tolist() == ["OutputY1", "OutputY2"]
-    assert sel["LOO_R2"].min() > 0.8
+    assert sel["CV_R2"].min() > 0.8
     pred = forward.predict(df[forward.feature_cols].head(3))
     assert pred.shape == (3, 2)
 
@@ -138,7 +140,7 @@ def test_fit_rate_forward_recovers_output():
     roles = resolve_roles(df, {"time_col": "FixedTime"})
     fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
     assert fwd.pairing_note is None
-    assert quality.loc[quality["选用"], "LOO_R2"].min() > 0.8
+    assert quality.loc[quality["选用"], "CV_R2"].min() > 0.8
     row = df.iloc[0]
     pred = fwd.predict_output(row.to_dict(), {"VariableU1": 5.0}, time=60.0)
     assert pred.shape == (1,)
@@ -183,7 +185,7 @@ def test_fit_rate_forward_skips_row_with_nan_rate_feature(caplog):
     with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
         fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
     assert not quality.empty
-    assert quality.loc[quality["选用"], "LOO_R2"].min() > 0.8
+    assert quality.loc[quality["选用"], "CV_R2"].min() > 0.8
     assert any("剔除" in r.message for r in caplog.records)
     complete = df.dropna().iloc[0]
     pred = fwd.predict_output(complete.to_dict(), {"VariableU1": 5.0}, time=60.0)
@@ -874,3 +876,198 @@ def test_inverse_solve_request_rows_truncated_before_materialize(monkeypatch):
     assert result.status == "ok"
     assert result.metadata["n_request"] == 2
     assert any("超过上限 2 条" in message for message in result.messages)
+
+
+def test_fit_forward_auto_caps_candidates_for_large_n(monkeypatch):
+    """R-1：auto 超行数上限时跳过 GPR/GBM 并给出中文说明（保持 LOO）。"""
+    from smartsuite.engine import inverse as inverse_module
+
+    assert inverse_module.INVERSE_AUTO_CANDIDATE_MAX_ROWS == 500  # 默认预算锚点
+    monkeypatch.setattr(inverse_module, "INVERSE_AUTO_CANDIDATE_MAX_ROWS", 50)
+    df = _linear_history(n=60)
+    roles = resolve_roles(df, {})
+    forward, quality = fit_forward(df, roles, model="auto", random_state=42)
+    assert set(forward.choice) <= {"linear", "poly"}
+    assert set(quality["候选"]) == {"linear", "poly"}
+    assert set(quality["CV方案"]) == {"LOO"}
+    assert forward.note and "跳过" in forward.note and "gpr" in forward.note
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=df,
+            target_col="",
+            feature_cols=[],
+            params={"model": "auto", "random_state": 42},
+        )
+    )
+    assert result.status == "ok"
+    assert any("auto 已跳过候选" in message for message in result.messages)
+
+
+def test_fit_forward_large_n_uses_kfold(monkeypatch):
+    """R-1：超行数上限时候选筛选由 LOO 切换为 5 折（O(n)→O(5)）。"""
+    from smartsuite.engine import inverse as inverse_module
+
+    assert inverse_module.INVERSE_CV_LOO_MAX_ROWS == 2000  # 默认预算锚点
+    monkeypatch.setattr(inverse_module, "INVERSE_CV_LOO_MAX_ROWS", 100)
+    df = _linear_history(n=150)
+    roles = resolve_roles(df, {})
+    started = time.perf_counter()
+    _, quality = fit_forward(df, roles, model="linear", random_state=42)
+    assert time.perf_counter() - started < 60
+    assert set(quality["CV方案"]) == {"5折"}
+
+
+def test_fit_forward_gpr_large_n_raises_chinese(monkeypatch):
+    """R-1：显式 GPR 超过硬上限中文报错，防 O(n³) 假死。"""
+    from smartsuite.engine import inverse as inverse_module
+
+    assert inverse_module.INVERSE_GPR_MAX_ROWS == 2000  # 默认预算锚点
+    monkeypatch.setattr(inverse_module, "INVERSE_GPR_MAX_ROWS", 100)
+    df = _linear_history(n=150)
+    roles = resolve_roles(df, {})
+    try:
+        fit_forward(df, roles, model="gpr", random_state=42)
+    except ValueError as exc:
+        assert "GPR" in str(exc) and "100" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("显式 GPR 超限应中文报错")
+
+
+def test_fit_forward_auto_skips_poly_for_wide_features(monkeypatch):
+    """R-1：poly 展开列数超上限时 auto 跳过 poly 并说明。"""
+    from smartsuite.engine import inverse as inverse_module
+
+    assert inverse_module.INVERSE_POLY_MAX_TERMS == 100  # 默认预算锚点
+    monkeypatch.setattr(inverse_module, "INVERSE_POLY_MAX_TERMS", 20)
+    rng = np.random.default_rng(0)
+    n = 50
+    data = {f"VariableU{i}": rng.uniform(4, 8, n) for i in range(1, 7)}  # 6 列 → 27 项
+    data["IncomingA"] = rng.normal(1.1, 0.05, n)
+    data["OutputY1"] = 1.0 + sum(0.05 * data[f"VariableU{i}"] for i in range(1, 7))
+    df = pd.DataFrame(data)
+    roles = resolve_roles(df, {})
+    forward, quality = fit_forward(df, roles, model="auto", random_state=42)
+    assert "poly" not in set(quality["候选"])
+    assert forward.note and "poly" in forward.note
+
+
+def test_fast_predictor_matches_pipeline_predictions():
+    """求解器快速路径与 sklearn pipeline 预测数值一致（linear/poly/rate）。"""
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    for model in ("linear", "poly"):
+        forward, _ = fit_forward(df, roles, model=model, random_state=42)
+        assert forward.fast and all(item is not None for item in forward.fast)
+        sample = df[forward.feature_cols].head(5)
+        expected = forward.predict(sample)
+        for col_index, predictor in enumerate(forward.fast):
+            got = np.asarray(
+                [
+                    float(np.ravel(predictor(sample.iloc[r].to_numpy(dtype=float)[None, :]))[0])
+                    for r in range(len(sample))
+                ]
+            )
+            assert np.allclose(got, expected[:, col_index], rtol=1e-9, atol=1e-9)
+
+    rate_df = _rate_history()
+    rate_roles = resolve_roles(rate_df, {"time_col": "FixedTime"})
+    rate_forward, _ = fit_rate_forward(rate_df, rate_roles, "FixedTime", random_state=42)
+    assert rate_forward.fast_rate and all(item is not None for item in rate_forward.fast_rate)
+    row = rate_df.iloc[0].to_dict()
+    u_values = {"VariableU1": 5.0}
+    rates = rate_forward.predict_rate(row, u_values)
+    for index, (cols, predictor) in enumerate(
+        zip(rate_forward.rate_feature_cols, rate_forward.fast_rate, strict=True)
+    ):
+        # 与 _rate_feature_value 同口径：可调参数取值优先于历史行取值
+        values = np.asarray([[u_values.get(c, row[c]) for c in cols]], dtype=float)
+        assert float(np.ravel(predictor(values))[0]) == pytest.approx(float(rates[index]), rel=1e-9)
+
+
+def test_reachable_range_inside_flag_scales_with_output_magnitude():
+    """R-2：微尺度输出的「是否在内」不得被绝对 epsilon 吞没。"""
+    rng = np.random.default_rng(0)
+    n = 40
+    inc = rng.normal(1.1, 0.05, n)
+    u = rng.uniform(4, 8, n)
+    micro = pd.DataFrame(
+        {"IncomingA": inc, "VariableU1": u, "OutputY1": (1.3 - 0.06 * u + 0.05 * inc) * 1e-12}
+    )
+    y_far = float(micro["OutputY1"].max()) * 1.5
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=micro,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "random_state": 42,
+                "request_rows": [{"IncomingA": 1.1, "OutputY1": y_far}],
+            },
+        )
+    )
+    assert result.status == "ok"
+    assert result.tables["reachable_ranges"].iloc[0]["是否在内"] == "否"
+
+    normal = pd.DataFrame(
+        {"IncomingA": inc, "VariableU1": u, "OutputY1": 1.3 - 0.06 * u + 0.05 * inc}
+    )
+    y_in = float(1.3 - 0.06 * 5.0 + 0.05 * 1.1)
+    result2 = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=normal,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "random_state": 42,
+                "request_rows": [{"IncomingA": 1.1, "OutputY1": y_in}],
+            },
+        )
+    )
+    assert result2.tables["reachable_ranges"].iloc[0]["是否在内"] == "是"
+
+
+def test_inverse_solve_does_not_mutate_input_dataframe():
+    """R-5：角色列强制数值化只作用于副本，不违反引擎输入不变式。"""
+    hist = _linear_history()
+    hist["IncomingA"] = hist["IncomingA"].map(lambda v: f"{v:.6f}")  # 文本 dtype
+    original_dtype = hist["IncomingA"].dtype
+    original = hist["IncomingA"].copy()
+    assert not pd.api.types.is_numeric_dtype(original_dtype)
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42},
+        )
+    )
+    assert result.status == "ok"
+    assert hist["IncomingA"].dtype == original_dtype
+    assert hist["IncomingA"].equals(original)
+
+
+def test_inverse_solve_real_batch_acceptance():
+    """R-4：真实批次验收数据（Data.xlsx 33 行 + examples.xlsx 11 请求）端到端。"""
+    data_dir = Path(__file__).resolve().parents[1]
+    history = pd.read_excel(data_dir / "Data.xlsx")
+    requests = pd.read_excel(data_dir / "examples.xlsx")
+    df = pd.concat([history, requests], ignore_index=True)
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=df,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42},
+        )
+    )
+    assert result.status == "ok", result.messages
+    assert result.metadata["n_history"] == len(history)
+    assert result.metadata["n_request"] == len(requests)
+    assert len(result.tables["recommendations"]) == len(requests)

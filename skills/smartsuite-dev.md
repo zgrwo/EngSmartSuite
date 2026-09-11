@@ -85,6 +85,7 @@ color=PALETTE["anomaly"]["primary"]    # 红色异常线
 const _noTargetNeeded = new Set([
     'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective',
     'doe_design',  // 审查 2026-09-01 D-4：与 app.js 同步补入（DOE 设计仅依赖参数）
+    'inverse_solve',  // 审查 2026-09-11 R-3：与 app.js:697 同步（反解自管理列角色）
 ]);
 
 // _yOnlyTasks: 仅需 Y 列即可运行的任务（无需选择 X 列）
@@ -95,6 +96,7 @@ const _yOnlyTasks = new Set([
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
     'spc_cusum', 'spc_ewma',
     'grid_search',
+    'inverse_solve',  // 审查 2026-09-11 R-3：与 app.js:710 同步
 ]);
 
 // _xOptionalTasks: X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
