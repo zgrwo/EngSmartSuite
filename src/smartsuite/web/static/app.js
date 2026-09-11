@@ -148,6 +148,7 @@ const TASK_PARAMS = {
   anomaly_detect:    { method: 'iqr', alpha: 0.05, max_outliers: 5 },
   response_surface:  { direction: 'maximize' },
   multi_objective:   { objectives: '', weights: '' },
+  inverse_solve:     { model: 'auto', incoming_cols: '', variable_cols: '', fixed_cols: '', output_cols: '', target_cols: '', time_col: '', time_adjustable: 'false', time_min: '', time_max: '', variable_bounds: '', output_weights: '', weight_mode: 'std', reg_lambda: 0.02, attain_tol: 0.5, max_starts: 10, random_state: 42 },
   decision_tree:     { max_depth: 5, random_state: 42 },
   anova:             { alpha: 0.05, interactions: 0 },
   spc_nonparametric: { side: 'two-sided' },
@@ -307,6 +308,23 @@ const PARAM_META = {
     type: 'select', label: '随机化',
     options: [['true', '随机化运行顺序'], ['false', '固定标准顺序']]
   },
+  // inverse_solve: 工艺参数反解（模型/权重/时间旋钮/时间列）
+  model: {
+    type: 'select', label: '前向模型',
+    options: [
+      ['auto', '自动门控 (LOO R² 选优)'], ['linear', '线性回归'], ['poly', '二次多项式 Ridge'],
+      ['gpr', '高斯过程 GPR'], ['gbm', '梯度提升 GBM'], ['rate', '速率物理模型'],
+    ]
+  },
+  weight_mode: {
+    type: 'select', label: '偏差权重口径',
+    options: [['std', '标准差归一化'], ['range', '极差归一化'], ['none', '不加权']]
+  },
+  time_adjustable: {
+    type: 'select', label: '时间是否可调',
+    options: [['false', '固定 (取历史中位数)'], ['true', '可调 (参与寻优)']]
+  },
+  time_col: { type: 'column', label: '时间/时长列', hint: 'rate 模型必需；留空自动识别含 time/时间 的列' },
 };
 
 // 参数标签（中文显示名）
@@ -333,11 +351,24 @@ const PARAM_LABELS = {
   seed: '随机种子', center_points: '中心点重复数', n_runs: '运行数',
   'method@doe_design': '设计方法', 'alpha@doe_design': 'CCD 轴向距离 α',
   'method@correlation': '相关方法', 'side@spc_nonparametric': '控制限方向',
+  model: '前向模型', incoming_cols: '来料列 (逗号分隔)', variable_cols: '可调参数列 (逗号分隔)',
+  fixed_cols: '固定参数列 (逗号分隔)', output_cols: '输出列 (逗号分隔)',
+  target_cols: '目标列 (逗号分隔)', time_col: '时间/时长列', time_adjustable: '时间是否可调',
+  time_min: '时间下限', time_max: '时间上限', variable_bounds: '参数边界 (JSON)',
+  output_weights: '输出权重 (JSON)', weight_mode: '偏差权重口径', reg_lambda: '正则强度 λ',
+  attain_tol: '达到阈值 (σ)', max_starts: '优化起点数',
 };
 
 const PARAM_HINTS = {
   ranges: '格式: 料温:180,220; 模具温度:40,80',
   objectives: '格式: 强度:maximize; 不良率:minimize',
+  incoming_cols: '逗号分隔列名；留空自动识别前缀 incoming/来料',
+  variable_cols: '可调参数列（逗号分隔）；留空自动识别 variable/变量/可调',
+  fixed_cols: '固定工况列（逗号分隔）；留空自动识别 fixed/固定',
+  output_cols: '输出列（逗号分隔）；留空自动识别 output/输出',
+  target_cols: '可留空（默认与输出列同名匹配）',
+  variable_bounds: '格式: {"注射压力":[50,90]}；留空用各列历史范围',
+  output_weights: '格式: {"拉伸强度":2.0}；留空按等权',
 };
 
 // ── DOE 因子编辑器（每个因子单独一行：因子名 + 水平）──
@@ -503,6 +534,7 @@ async function runAnalysis(task) {
   // 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
   const _noTargetNeeded = new Set([
     'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective', 'doe_design',
+    'inverse_solve',
   ]);
   if (!_noTargetNeeded.has(task) && !selectedY.size) {
     alert('请至少选择一个 Y 列'); return;
@@ -515,6 +547,7 @@ async function runAnalysis(task) {
     'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
     'spc_cusum', 'spc_ewma',
     'grid_search',
+    'inverse_solve',
   ]);
   // X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
   const _xOptionalTasks = new Set([
