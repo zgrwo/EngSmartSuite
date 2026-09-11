@@ -145,6 +145,7 @@ DEFAULT_PARAMS = {
         "attain_tol": 0.5,
         "max_starts": 10,
         "random_state": 42,
+        "request_rows": None,
     },
     "doe_analysis": {"alpha": 0.05},
     "doe_design": {

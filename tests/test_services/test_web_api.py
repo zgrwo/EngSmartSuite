@@ -100,3 +100,37 @@ def test_run_analysis_per_target_exception_returns_error_row(monkeypatch):
         assert "分析异常" in r["messages"][0]
         assert r["tables"] == {} and r["charts"] == []
     assert all("_merged_correlation" not in r["tables"] for r in results)
+
+
+def test_run_analysis_inverse_request_rows_path():
+    """Web API 路径透传 params.request_rows → 仅历史数据也能反解（反演数据录入接口）。"""
+    rng = np.random.default_rng(5)
+    n = 40
+    incoming = rng.normal(1.1, 0.05, n)
+    u1 = rng.uniform(4, 8, n)
+    u2 = rng.uniform(2, 4, n)
+    hist = pd.DataFrame(
+        {
+            "IncomingA": incoming,
+            "VariableU1": u1,
+            "VariableU2": u2,
+            "OutputY1": 1.3 - 0.06 * u1 + 0.05 * incoming,
+            "OutputY2": 0.9 - 0.04 * u2,
+        }
+    )
+    params = {
+        "model": "linear",
+        "random_state": 42,
+        "request_rows": [
+            {
+                "IncomingA": 1.15,
+                "OutputY1": 1.3 - 0.06 * 5.5 + 0.05 * 1.15,
+                "OutputY2": 0.9 - 0.04 * 2.5,
+            }
+        ],
+    }
+    results = run_analysis("inverse_solve", hist, [""], [], [], params)
+    assert len(results) == 1
+    assert results[0]["status"] == "ok"
+    assert results[0]["metadata"]["n_request"] == 1
+    assert "recommendations" in results[0]["tables"]

@@ -22,3 +22,6 @@ params:
   attain_tol: 0.5
   max_starts: 10
   random_state: 42
+  # 请求行也可在界面/API 经 request_rows 录入（[{列名: 数值}, ...]）；
+  # CLI 一般留空，改用数据文件中的留空行（可调参数留空）
+  request_rows: ""

@@ -1,3 +1,4 @@
+import json
 import logging
 
 import numpy as np
@@ -8,6 +9,8 @@ from scipy.stats import qmc  # noqa: F401  (仅注释性引用，实际使用在
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine._constants import INVERSE_LAM_TIME
 from smartsuite.engine.inverse import (
+    _build_model_equations,
+    _raw_linear_coefficients,
     fit_forward,
     fit_rate_forward,
     inverse_parameter_solve,
@@ -465,6 +468,7 @@ def test_inverse_solve_end_to_end():
         "predictions",
         "model_quality",
         "reachable_ranges",
+        "model_equations",
     }
     assert len(result.tables["recommendations"]) == 1
     assert len(result.figures) >= 2
@@ -583,3 +587,211 @@ def test_inverse_solve_all_requests_fail_summary():
     assert "均未能求解" in result.summary
     assert "未检测到请求行" not in result.summary
     assert any("反解失败" in message for message in result.messages)
+
+
+def test_inverse_solve_accepts_request_rows_list():
+    """Web UI 表格录入的请求行经 params.request_rows 传入，无需数据中留空行。"""
+    hist = _linear_history()
+    rows = [
+        {
+            "IncomingA": 1.15,
+            "OutputY1": 1.3 - 0.06 * 5.5 + 0.05 * 1.15,
+            "OutputY2": 0.9 - 0.04 * 2.5,
+        }
+    ]
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42, "request_rows": rows},
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["n_history"] == len(hist)
+    assert result.metadata["n_request"] == 1
+    rec = result.tables["recommendations"]
+    assert len(rec) == 1
+    assert abs(rec.iloc[0]["VariableU1"] - 5.5) < 0.5
+    assert any("已追加" in message for message in result.messages)
+
+
+def test_inverse_solve_request_rows_json_and_string_numbers():
+    """request_rows 支持 JSON 字符串与字符串数值（前端序列化路径）。"""
+    hist = _linear_history()
+    rows = json.dumps(
+        [
+            {
+                "IncomingA": "1.15",
+                "OutputY1": str(1.3 - 0.06 * 5.5 + 0.05 * 1.15),
+                "OutputY2": "0.8",
+            }
+        ]
+    )
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42, "request_rows": rows},
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["n_request"] == 1
+    assert len(result.tables["recommendations"]) == 1
+
+
+def test_inverse_solve_role_cols_as_lists():
+    """前端勾选组以列表下发列角色（_split_param_cols 列表分支 + 请求行录入）。"""
+    hist = _linear_history()
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "random_state": 42,
+                "incoming_cols": ["IncomingA"],
+                "variable_cols": ["VariableU1", "VariableU2"],
+                "output_cols": ["OutputY1", "OutputY2"],
+                "request_rows": [
+                    {
+                        "IncomingA": 1.15,
+                        "OutputY1": 1.3 - 0.06 * 5.5 + 0.05 * 1.15,
+                        "OutputY2": 0.8,
+                    }
+                ],
+            },
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["n_request"] == 1
+    rec = result.tables["recommendations"]
+    assert len(rec) == 1
+    assert abs(rec.iloc[0]["VariableU2"] - 2.5) < 0.5
+
+
+def test_inverse_solve_request_rows_invalid_and_unknown_columns():
+    """request_rows 非法结构 → 中文报错；未知列忽略并提示。"""
+    hist = _linear_history()
+    bad = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "request_rows": ["bad"]},
+        )
+    )
+    assert bad.status == "error"
+    assert any("request_rows" in message for message in bad.messages)
+    for invalid in ("{不是JSON", {"列": 1}):
+        result = inverse_parameter_solve(
+            AnalysisRequest(
+                task="inverse_solve",
+                data=hist,
+                target_col="",
+                feature_cols=[],
+                params={"model": "linear", "request_rows": invalid},
+            )
+        )
+        assert result.status == "error"
+        assert any("request_rows" in message for message in result.messages)
+    unknown = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "random_state": 42,
+                "request_rows": [
+                    {
+                        "IncomingA": 1.15,
+                        "OutputY1": 1.0,
+                        "OutputY2": 0.8,
+                        "不存在列": 1,
+                    }
+                ],
+            },
+        )
+    )
+    assert unknown.status == "ok"
+    assert any("已忽略" in message for message in unknown.messages)
+
+
+def test_raw_linear_coefficients_match_raw_ols():
+    """原始单位系数换算与直接 OLS 拟合一致（方程与模型预测同源）。"""
+    from sklearn.linear_model import LinearRegression
+
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    raw_model = LinearRegression().fit(df[forward.feature_cols], df["OutputY1"])
+    intercept, coefs = _raw_linear_coefficients(forward.models[0])
+    assert intercept == pytest.approx(float(raw_model.intercept_), rel=1e-9, abs=1e-9)
+    assert np.allclose(coefs, raw_model.coef_, rtol=1e-9, atol=1e-9)
+
+
+def test_build_model_equations_linear_forward_and_inverse():
+    """线性模型：前向方程含各可调参数项，反解公式逐参数逐输出给出。"""
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    bounds = resolve_bounds(df, roles, {})
+    table = _build_model_equations(forward, roles, bounds, {"reg_lambda": 0.02}, "std")
+    assert list(table.columns) == ["类型", "对象", "表达式", "说明"]
+    forward_rows = table[table["类型"] == "前向方程"]
+    assert forward_rows["对象"].tolist() == ["OutputY1", "OutputY2"]
+    first = forward_rows.iloc[0]["表达式"]
+    assert first.startswith("OutputY1 = ") and "IncomingA" in first and "VariableU1" in first
+    inverse_rows = table[table["类型"] == "反解公式"]
+    assert set(inverse_rows["对象"]) == {
+        "OutputY1 → VariableU1",
+        "OutputY1 → VariableU2",
+        "OutputY2 → VariableU1",
+        "OutputY2 → VariableU2",
+    }
+    example = inverse_rows[inverse_rows["对象"] == "OutputY1 → VariableU1"].iloc[0]["表达式"]
+    assert example.startswith("VariableU1 = (目标OutputY1 − ")
+    zero_row = inverse_rows[inverse_rows["对象"] == "OutputY1 → VariableU2"].iloc[0]
+    assert zero_row["表达式"] == "—" and "系数≈0" in zero_row["说明"]
+    objective = table[table["类型"] == "优化目标"]
+    assert len(objective) == 1 and "λ" in objective.iloc[0]["表达式"]
+
+
+def test_build_model_equations_poly_and_gbm_notes():
+    """poly 展开原始单位二次项；GBM 明确标注无解析表达式。"""
+    df = _linear_history()
+    roles = resolve_roles(df, {})
+    bounds = resolve_bounds(df, roles, {})
+    poly_forward, _ = fit_forward(df, roles, model="poly", random_state=42)
+    poly_table = _build_model_equations(poly_forward, roles, bounds, {"reg_lambda": 0.02}, "std")
+    poly_expr = poly_table[poly_table["类型"] == "前向方程"].iloc[0]["表达式"]
+    assert "^2" in poly_expr and "VariableU1^2" in poly_expr
+    assert (poly_table[poly_table["类型"] == "反解公式"]["表达式"] == "—").all()
+    gbm_forward, _ = fit_forward(df, roles, model="gbm", random_state=42)
+    gbm_table = _build_model_equations(gbm_forward, roles, bounds, {"reg_lambda": 0.02}, "std")
+    gbm_forward_rows = gbm_table[gbm_table["类型"] == "前向方程"]
+    assert (gbm_forward_rows["表达式"] == "—").all()
+    assert gbm_forward_rows["说明"].str.contains("无解析").all()
+
+
+def test_build_model_equations_rate_time_formula():
+    """速率模型：前向方程 = 来料 − 速率·t，时间给出解析反解。"""
+    df = _rate_history()
+    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    bounds = resolve_bounds(df, roles, {"time_col": "FixedTime", "time_adjustable": "true"})
+    table = _build_model_equations(forward, roles, bounds, {"reg_lambda": 0.02}, "std")
+    forward_expr = table[table["类型"] == "前向方程"].iloc[0]["表达式"]
+    assert "IncomingZ1" in forward_expr and "·t" in forward_expr
+    time_row = table[table["对象"] == "OutputZ1 → FixedTime"].iloc[0]
+    assert time_row["表达式"].startswith("FixedTime = (IncomingZ1 − 目标OutputZ1) / (")
+    objective = table[table["类型"] == "优化目标"].iloc[0]["表达式"]
+    assert "τ" in objective

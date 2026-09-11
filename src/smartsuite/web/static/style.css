@@ -113,6 +113,26 @@ table tr:hover td { background: #f0f4ff; }
 }
 .factor-row input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(63,81,181,0.15); }
 .factor-row .btn-sm { flex: none; }
+/* inverse_solve 列角色勾选组 */
+.col-checks { display: flex; flex-wrap: wrap; gap: 3px 8px; max-height: 140px; overflow-y: auto;
+  padding: 5px 6px; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+.col-check { display: inline-flex; align-items: center; gap: 3px; font-size: 11px;
+  max-width: 100%; cursor: pointer; }
+.col-check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-check input { margin: 0; flex: none; }
+/* inverse_solve 反演请求行卡片 */
+.request-card { border: 1px solid var(--border); border-radius: 4px; background: #fff;
+  padding: 6px; margin-bottom: 6px; }
+.request-card .request-head { display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; font-weight: 600; color: #555; margin-bottom: 4px; }
+.request-card .request-head .btn-sm { padding: 0 6px; line-height: 18px; }
+.request-card .request-field { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
+.request-card .request-field label { flex: 0 0 42%; font-size: 11px; color: #666;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-card .request-field input { flex: 1; min-width: 0; padding: 3px 5px;
+  border: 1px solid #ccc; border-radius: 3px; font-size: 12px; font-family: inherit; }
+.request-card .request-field input:focus { border-color: var(--accent); outline: none;
+  box-shadow: 0 0 0 2px rgba(63,81,181,0.15); }
 .param-select {
   width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
   font-size: 13px; font-family: inherit; background: #fff; cursor: pointer;

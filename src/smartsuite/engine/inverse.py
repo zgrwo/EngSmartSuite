@@ -68,6 +68,61 @@ def _split_param_cols(value) -> list[str]:
     return [part.strip() for part in str(value).split(",") if part.strip()]
 
 
+def _coerce_request_value(value):
+    """请求行取值归一：数值字符串转 float，空字符串转 None。"""
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return value
+    return value
+
+
+def _parse_request_rows(value) -> list[dict]:
+    """解析界面/API 录入的请求行（对象列表或其 JSON 字符串）。
+
+    空值返回 []；非列表或含非对象行时抛中文 ValueError（入口转为 status=error）。
+    数值字符串统一转 float，避免追加后与历史数据 dtype 冲突。
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        if not value.strip():
+            return []
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            raise ValueError("参数「request_rows」不是有效的 JSON 字符串") from None
+    if not isinstance(value, list):
+        raise ValueError('参数「request_rows」必须是对象列表（每行形如 {"列名": 数值}）')
+    rows: list[dict] = []
+    for i, row in enumerate(value, start=1):
+        if not isinstance(row, dict):
+            raise ValueError(f"参数「request_rows」第 {i} 行不是对象：{row!r}")
+        rows.append({str(k): _coerce_request_value(v) for k, v in row.items()})
+    return rows
+
+
+def _append_request_rows(df: pd.DataFrame, rows: list[dict], messages: list[str]) -> pd.DataFrame:
+    """把录入的请求行追加到数据末尾（可调参数留空 → 引擎按请求行分类）。
+
+    未知列名忽略并把警告写入 messages；原数据行顺序与索引语义保持不变。
+    """
+    unknown = sorted({key for row in rows for key in row if key not in df.columns})
+    if unknown:
+        messages.append(f"request_rows 中以下列不存在于数据中，已忽略：{unknown}")
+    appended = pd.DataFrame(rows, columns=list(df.columns))
+    messages.append(f"已追加 {len(rows)} 条界面录入的请求行（可调参数留空，按请求行处理）")
+    return pd.concat([df, appended], ignore_index=True)
+
+
 def _match_by_prefix(columns, prefixes) -> list[str]:
     lowered = [(c, str(c).lower()) for c in columns]
     return [c for c, low in lowered if low.startswith(tuple(p.lower() for p in prefixes))]
@@ -966,6 +1021,239 @@ def _pair_targets(target_cols, output_cols) -> dict[str, str]:
     return pairs
 
 
+def _fmt_num(value: float) -> str:
+    """方程系数格式化：4 位有效数字并去除末尾 0（如 0.05000 → 0.05）。"""
+    number = float(value)
+    if number == 0:
+        return "0"
+    text = f"{number:.4g}"
+    if "e" in text or "E" in text:
+        return text
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _linear_expression(intercept: float, cols: list[str], coefs) -> str:
+    """原始单位线性表达式 b0 + b1·x1 − b2·x2（|系数|<1e-12 的项省略）。"""
+    expr = _fmt_num(intercept)
+    for col, coef in zip(cols, np.ravel(np.asarray(coefs, dtype=float)), strict=True):
+        coef = float(coef)
+        if abs(coef) < 1e-12:
+            continue
+        expr += f" {'+' if coef > 0 else '-'} {_fmt_num(abs(coef))}·{col}"
+    return expr
+
+
+def _raw_linear_coefficients(model):
+    """把 StandardScaler + 线性/Ridge pipeline 换算为原始单位系数 (截距, 系数)。
+
+    输入/输出关系：ŷ = b0' + Σ b_i·(x_i−μ_i)/σ_i = b0 + Σ (b_i/σ_i)·x_i，
+    故 b0 = b0' − Σ b_i·μ_i/σ_i。非该结构返回 None。
+    """
+    steps = getattr(model, "named_steps", None)
+    if not steps:
+        return None
+    scaler = steps.get("standardscaler")
+    reg = steps.get("linearregression")
+    if reg is None:
+        reg = steps.get("ridgecv")
+    if scaler is None or reg is None:
+        return None
+    coef = np.ravel(np.asarray(reg.coef_, dtype=float))
+    intercept = float(np.ravel(np.asarray(reg.intercept_, dtype=float))[0])
+    mean = np.ravel(np.asarray(scaler.mean_, dtype=float))
+    scale = np.ravel(np.asarray(scaler.scale_, dtype=float))
+    return intercept - float(np.sum(coef * mean / scale)), coef / scale
+
+
+def _raw_poly_expression(model, cols: list[str]) -> str | None:
+    """把 PolynomialFeatures + StandardScaler + Ridge pipeline 展开为原始单位多项式。"""
+    steps = getattr(model, "named_steps", None)
+    if not steps:
+        return None
+    poly = steps.get("polynomialfeatures")
+    scaler = steps.get("standardscaler")
+    reg = steps.get("ridgecv")
+    if poly is None or scaler is None or reg is None:
+        return None
+    coef = np.ravel(np.asarray(reg.coef_, dtype=float))
+    intercept = float(np.ravel(np.asarray(reg.intercept_, dtype=float))[0])
+    mean = np.ravel(np.asarray(scaler.mean_, dtype=float))
+    scale = np.ravel(np.asarray(scaler.scale_, dtype=float))
+    weights = coef / scale
+    expr = _fmt_num(intercept - float(np.sum(coef * mean / scale)))
+    for row_idx, powers in enumerate(poly.powers_):
+        weight = float(weights[row_idx])
+        if abs(weight) < 1e-12:
+            continue
+        term = (
+            "·".join(
+                name if int(power) == 1 else f"{name}^{int(power)}"
+                for name, power in zip(cols, powers, strict=True)
+                if power > 0
+            )
+            or "1"
+        )
+        expr += f" {'+' if weight > 0 else '-'} {_fmt_num(abs(weight))}·{term}"
+    return expr
+
+
+def _forward_equation(kind: str, model, cols: list[str], out_col: str) -> tuple[str | None, str]:
+    """单个输出的前向方程（原始单位）；无解析式返回 (None, 中文说明)。"""
+    if kind == "linear":
+        raw = _raw_linear_coefficients(model)
+        if raw is not None:
+            return (
+                f"{out_col} = {_linear_expression(raw[0], cols, raw[1])}",
+                "线性回归（原始单位）",
+            )
+    if kind == "poly":
+        expr = _raw_poly_expression(model, cols)
+        if expr is not None:
+            return f"{out_col} = {expr}", "二次多项式 Ridge（原始单位）"
+    if kind == "gpr":
+        return None, "高斯过程核方法无解析表达式（预测由核函数加权给出）"
+    if kind == "gbm":
+        return None, "梯度提升树集成无解析表达式（预测由各回归树求和给出）"
+    return None, f"模型 {kind} 无解析表达式"
+
+
+def _rate_equation(forward, index: int, out_col: str) -> tuple[str | None, str]:
+    """速率模型单输出方程：Y = 来料 − 速率(z)·t（速率为原始单位线性式）。"""
+    raw = _raw_linear_coefficients(forward.models[index])
+    inc_col = forward.incoming_cols[index]
+    cols = list(forward.rate_feature_cols[index])
+    if raw is None:
+        return None, "速率模型无解析表达式（速率项非线性）"
+    return (
+        f"{out_col} = {inc_col} − ({_linear_expression(raw[0], cols, raw[1])})·t",
+        "速率物理模型（输出=来料−速率×时间，原始单位）",
+    )
+
+
+def _inverse_formula_rows(forward, roles, bounds) -> list[dict]:
+    """逐可调参数给出解析反解公式；不可解析的模型注明数值优化。"""
+    rows: list[dict] = []
+    adjustable = [name for name, pair in bounds.items() if pair[1] > pair[0]]
+    if not adjustable:
+        return rows
+    if isinstance(forward, RateForwardModel):
+        time_col = forward.time_col
+        for index, out_col in enumerate(roles.output):
+            raw = _raw_linear_coefficients(forward.models[index])
+            inc_col = forward.incoming_cols[index]
+            rate_expr = (
+                _linear_expression(raw[0], list(forward.rate_feature_cols[index]), raw[1])
+                if raw is not None
+                else None
+            )
+            for name in adjustable:
+                if name == time_col and rate_expr is not None:
+                    rows.append(
+                        {
+                            "类型": "反解公式",
+                            "对象": f"{out_col} → {name}",
+                            "表达式": f"{name} = ({inc_col} − 目标{out_col}) / ({rate_expr})",
+                            "说明": (
+                                "速率模型时间解析反解；其余可调项取推荐值，"
+                                "多输出时按加权目标解析（见优化目标）"
+                            ),
+                        }
+                    )
+                else:
+                    rows.append(
+                        {
+                            "类型": "反解公式",
+                            "对象": f"{out_col} → {name}",
+                            "表达式": "—",
+                            "说明": "速率模型非时间参数无闭式反解，采用数值优化（见优化目标）",
+                        }
+                    )
+        return rows
+    for index, out_col in enumerate(roles.output):
+        kind = forward.choice[index]
+        feature_cols = list(forward.feature_cols)
+        raw = _raw_linear_coefficients(forward.models[index]) if kind == "linear" else None
+        for name in adjustable:
+            if name not in feature_cols:
+                continue
+            if raw is None:
+                rows.append(
+                    {
+                        "类型": "反解公式",
+                        "对象": f"{out_col} → {name}",
+                        "表达式": "—",
+                        "说明": f"{kind} 模型无解析反解，采用数值优化（见优化目标）",
+                    }
+                )
+                continue
+            intercept, coefs = raw
+            position = feature_cols.index(name)
+            coef_u = float(coefs[position])
+            if abs(coef_u) < 1e-12:
+                rows.append(
+                    {
+                        "类型": "反解公式",
+                        "对象": f"{out_col} → {name}",
+                        "表达式": "—",
+                        "说明": f"该参数在「{out_col}」方程中系数≈0，无法由该输出反解",
+                    }
+                )
+                continue
+            rest_cols = [c for i, c in enumerate(feature_cols) if i != position]
+            rows.append(
+                {
+                    "类型": "反解公式",
+                    "对象": f"{out_col} → {name}",
+                    "表达式": (
+                        f"{name} = (目标{out_col} − "
+                        f"({_linear_expression(intercept, rest_cols, np.delete(coefs, position))})) "
+                        f"/ ({_fmt_num(coef_u)})"
+                    ),
+                    "说明": "线性模型解析反解；多可调参数时其余项取推荐值，多输出时按加权目标寻优",
+                }
+            )
+    return rows
+
+
+def _objective_row(forward, bounds, params, weight_mode: str) -> dict:
+    """优化目标函数（含实际 λ 与权重口径），供非线性模型对照。"""
+    lam = safe_float(params.get("reg_lambda"), INVERSE_REG_LAMBDA)
+    expr = "min Σ_j w_j·((ŷ_j − y*_j)/s_j)² + λ·Σ_k((u_k − u0_k)/range_k)²"
+    adjustable = [name for name, pair in bounds.items() if pair[1] > pair[0]]
+    if isinstance(forward, RateForwardModel) and getattr(forward, "time_col", None) in adjustable:
+        expr += " + c·((t − t0)/τ)²"
+    if not adjustable:
+        expr = "—"
+        note = "无可调参数（variable_cols 为空或候选区间宽度为 0）"
+    else:
+        note = (
+            f"λ={_fmt_num(lam)}；w_j 为输出权重（默认 1），尺度 s_j 按 {weight_mode} 口径；"
+            "线性模型解析/L-BFGS-B 多起点，树模型差分进化"
+        )
+    return {"类型": "优化目标", "对象": "全部可调参数", "表达式": expr, "说明": note}
+
+
+def _build_model_equations(forward, roles, bounds, params, weight_mode: str) -> pd.DataFrame:
+    """组装 model_equations 表：前向方程（逐输出）+ 反解公式（逐参数）+ 优化目标。"""
+    rows: list[dict] = []
+    if isinstance(forward, RateForwardModel):
+        for index, out_col in enumerate(roles.output):
+            expr, note = _rate_equation(forward, index, out_col)
+            rows.append({"类型": "前向方程", "对象": out_col, "表达式": expr or "—", "说明": note})
+    else:
+        feature_cols = list(forward.feature_cols)
+        for index, out_col in enumerate(roles.output):
+            expr, note = _forward_equation(
+                forward.choice[index], forward.models[index], feature_cols, out_col
+            )
+            rows.append({"类型": "前向方程", "对象": out_col, "表达式": expr or "—", "说明": note})
+    rows.extend(_inverse_formula_rows(forward, roles, bounds))
+    rows.append(_objective_row(forward, bounds, params, weight_mode))
+    return pd.DataFrame(rows, columns=["类型", "对象", "表达式", "说明"])
+
+
 def _figure_parameter_comparison(history, bounds, roles, recommendations):
     cols = list(bounds) or list(roles.variable)
     fig = Figure(figsize=(max(len(cols) * 1.4, 6.5), 4.5))
@@ -1104,6 +1392,10 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
             params, "output_weights", messages, "已按各输出权重 1.0 处理"
         )
 
+        request_rows = _parse_request_rows(params.get("request_rows"))
+        if request_rows:
+            df = _append_request_rows(df, request_rows, messages)
+
         roles = resolve_roles(df, params)
         if is_rate and not roles.time:
             candidates = [
@@ -1222,6 +1514,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
             messages.append(
                 f"以下参数候选区间宽度为 0，已视为常数不参与优化：{'、'.join(zero_width)}"
             )
+        equations = _build_model_equations(forward, roles, bounds, params, weight_mode)
         baseline = {
             col: float(pd.to_numeric(history[col], errors="coerce").dropna().median())
             for col in roles.variable
@@ -1484,6 +1777,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 "predictions": pd.DataFrame(prediction_rows, columns=pred_columns),
                 "model_quality": quality,
                 "reachable_ranges": pd.DataFrame(reachable_rows, columns=reach_columns),
+                "model_equations": equations,
             },
             figures=[
                 _figure_parameter_comparison(history, bounds, roles, recommendation_rows),
