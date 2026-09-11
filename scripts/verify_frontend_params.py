@@ -6,6 +6,8 @@ verify_frontend_params.py — 前后端参数键集静态一致性门禁（审�
   1. 前端任务集 == TASK_REGISTRY 任务集（无缺/多余任务）
   2. 每任务前端键集 == 后端键集（无前端多余 = 引擎不支持但面板可设；
      无后端多余 = 引擎参数前端不可达）
+  3. inverse_solve 列角色勾选前缀 INVERSE_PREFIXES == 引擎 DEFAULT_PREFIXES
+     （2026-09-11 审查 F4：双份 SSOT 漂移会导致勾选组预勾选错列）
 发现差异即 FAIL 并 exit 1。
 
 历史背景：该一致性此前无任何自动化——ci.yml consistency job 步骤名
@@ -20,10 +22,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from smartsuite.engine.inverse import DEFAULT_PREFIXES
 from smartsuite.services.orchestrator import DEFAULT_PARAMS, TASK_REGISTRY
 
 APP_JS = ROOT / "src" / "smartsuite" / "web" / "static" / "app.js"
 TASK_PARAMS_MARKER = "const TASK_PARAMS ="
+INVERSE_PREFIX_MARKER = "const INVERSE_PREFIXES ="
 
 
 def extract_task_params(js_text: str) -> dict[str, set[str]]:
@@ -55,6 +59,31 @@ def extract_task_params(js_text: str) -> dict[str, set[str]]:
     return tasks
 
 
+def extract_inverse_prefixes(js_text: str) -> dict[str, list[str]] | None:
+    """提取 app.js 的 INVERSE_PREFIXES（缺常量返回 None）。"""
+    pos = js_text.find(INVERSE_PREFIX_MARKER)
+    if pos < 0:
+        return None
+    start = pos + len(INVERSE_PREFIX_MARKER)
+    depth, end = 0, start
+    while end < len(js_text):
+        c = js_text[end]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        end += 1
+    body = js_text[start:end]
+    result: dict[str, list[str]] = {}
+    for m in re.finditer(r"(\w+):\s*\[([^\]]*)\]", body):
+        result[m.group(1)] = [
+            part.strip().strip("'\"") for part in m.group(2).split(",") if part.strip()
+        ]
+    return result
+
+
 def check(js_path: Path = APP_JS) -> list[str]:
     """返回问题列表；空列表 = 一致。"""
     problems: list[str] = []
@@ -71,6 +100,21 @@ def check(js_path: Path = APP_JS) -> list[str]:
             problems.append(
                 f"[{task}] 键集不一致: 前端独有={sorted(fk - bk)} 后端独有={sorted(bk - fk)}"
             )
+    frontend_prefixes = extract_inverse_prefixes(js_text)
+    if frontend_prefixes is None:
+        problems.append("[inverse_solve] app.js 缺少 INVERSE_PREFIXES 常量")
+    else:
+        expected_keys = {f"{role}_cols" for role in DEFAULT_PREFIXES}
+        for role, prefixes in DEFAULT_PREFIXES.items():
+            key = f"{role}_cols"
+            if frontend_prefixes.get(key) != list(prefixes):
+                problems.append(
+                    f"[inverse_solve] 列角色前缀漂移: {key} "
+                    f"前端={frontend_prefixes.get(key)} 后端={list(prefixes)}"
+                )
+        extra = sorted(set(frontend_prefixes) - expected_keys)
+        if extra:
+            problems.append(f"[inverse_solve] 前端独有列角色前缀组: {extra}")
     return problems
 
 

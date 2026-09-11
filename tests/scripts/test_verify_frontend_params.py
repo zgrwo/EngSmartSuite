@@ -28,6 +28,27 @@ def test_real_repo_frontend_backend_keys_equal():
     assert vfp.check() == []
 
 
+def test_inverse_prefix_drift_detected(tmp_path):
+    """负向：列角色勾选前缀与引擎 DEFAULT_PREFIXES 漂移 → 必须点名（F4 门禁）。"""
+    text = vfp.APP_JS.read_text(encoding="utf-8")
+    assert "['incoming', '来料']" in text, "前置条件：app.js 含预期前缀定义"
+    js = tmp_path / "app.js"
+    js.write_text(text.replace("['incoming', '来料']", "['incoming']"), encoding="utf-8")
+    problems = vfp.check(js_path=js)
+    assert any("incoming_cols" in p and "前缀漂移" in p for p in problems), problems
+
+
+def test_inverse_prefix_missing_detected(tmp_path):
+    """负向：app.js 抽掉 INVERSE_PREFIXES 常量 → 必须点名。"""
+    text = vfp.APP_JS.read_text(encoding="utf-8")
+    js = tmp_path / "app.js"
+    js.write_text(
+        text.replace("const INVERSE_PREFIXES =", "const _RENAMED_PREFIXES ="), encoding="utf-8"
+    )
+    problems = vfp.check(js_path=js)
+    assert any("INVERSE_PREFIXES" in p for p in problems), problems
+
+
 def test_frontend_extra_key_detected(tmp_path):
     """负向：前端面板提供引擎不支持的参数（历史 mad 案例）→ 必须点名。"""
     js = _make_js(tmp_path, "{ anova: { alpha: 0.05, unsupported_opt: 1 } }")

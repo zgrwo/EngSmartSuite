@@ -524,11 +524,24 @@ function addRequestRow() {
   if (!incoming.length || !outputs.length) return;
   const index = editor.querySelectorAll('.request-card').length;
   editor.insertAdjacentHTML('beforeend', requestCardHtml(index, {}, incoming, fixed, outputs));
+  renumberRequestRows();
 }
 
 function removeRequestRow(btn) {
   const card = btn.closest('.request-card');
-  if (card) card.remove();
+  if (card) {
+    card.remove();
+    renumberRequestRows();
+  }
+}
+
+function renumberRequestRows() {
+  // 删除/新增后重排行号，避免出现重复或跳号（如 1,3,3）
+  const editor = document.getElementById('request-editor');
+  if (!editor) return;
+  editor.querySelectorAll('.request-card .request-head span').forEach((el, i) => {
+    el.textContent = '请求行 ' + (i + 1);
+  });
 }
 
 function collectRequestRows() {

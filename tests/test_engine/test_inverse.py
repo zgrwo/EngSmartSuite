@@ -760,7 +760,7 @@ def test_build_model_equations_linear_forward_and_inverse():
     example = inverse_rows[inverse_rows["对象"] == "OutputY1 → VariableU1"].iloc[0]["表达式"]
     assert example.startswith("VariableU1 = (目标OutputY1 − ")
     zero_row = inverse_rows[inverse_rows["对象"] == "OutputY1 → VariableU2"].iloc[0]
-    assert zero_row["表达式"] == "—" and "系数≈0" in zero_row["说明"]
+    assert zero_row["表达式"] == "—" and "量级可忽略" in zero_row["说明"]
     objective = table[table["类型"] == "优化目标"]
     assert len(objective) == 1 and "λ" in objective.iloc[0]["表达式"]
 
@@ -793,5 +793,84 @@ def test_build_model_equations_rate_time_formula():
     assert "IncomingZ1" in forward_expr and "·t" in forward_expr
     time_row = table[table["对象"] == "OutputZ1 → FixedTime"].iloc[0]
     assert time_row["表达式"].startswith("FixedTime = (IncomingZ1 − 目标OutputZ1) / (")
+    assert "未含时间正则" in time_row["说明"]
     objective = table[table["类型"] == "优化目标"].iloc[0]["表达式"]
     assert "τ" in objective
+
+
+def test_build_model_equations_keeps_small_coefficient_with_large_scale():
+    """F1 回归：小系数（1e-13）× 大量纲（1e12）不得被量级判据静默丢弃。"""
+    n = 60
+    rng = np.random.default_rng(0)
+    x = np.linspace(-1e12, 1e12, n)
+    u = rng.uniform(4.0, 8.0, n)  # 非共线：u 不可由 x 仿射表出
+    df = pd.DataFrame({"IncomingX": x, "VariableU1": u, "OutputY1": 0.5 + 1e-13 * x + 1.0 * u})
+    roles = resolve_roles(df, {})
+    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    bounds = resolve_bounds(df, roles, {})
+    table = _build_model_equations(forward, roles, bounds, {"reg_lambda": 0.02}, "std", history=df)
+    forward_expr = table[table["类型"] == "前向方程"].iloc[0]["表达式"]
+    assert "1e-13·IncomingX" in forward_expr
+    inverse_expr = table[table["类型"] == "反解公式"].iloc[0]["表达式"]
+    assert "IncomingX" in inverse_expr, "大量纲小系数项必须在反解公式中保留"
+
+
+def test_parse_request_rows_truncates_and_returns_count():
+    """F3：解析阶段按上限截断并返回截断条数（追加物化前完成）。"""
+    from smartsuite.engine.inverse import _parse_request_rows
+
+    rows, truncated = _parse_request_rows([{"a": i} for i in range(5)], 2)
+    assert len(rows) == 2 and truncated == 3
+    assert [row["a"] for row in rows] == [0.0, 1.0]
+    rows, truncated = _parse_request_rows(None)
+    assert rows == [] and truncated == 0
+
+
+def test_inverse_solve_request_rows_variable_values_ignored():
+    """F2：request_rows 携带可调参数值时显式忽略并提示，不静默并入历史。"""
+    hist = _linear_history()
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "random_state": 42,
+                "request_rows": [
+                    {
+                        "IncomingA": 1.15,
+                        "VariableU1": 5.0,
+                        "OutputY1": 1.3 - 0.06 * 5.5 + 0.05 * 1.15,
+                        "OutputY2": 0.8,
+                    }
+                ],
+            },
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["n_history"] == len(hist)
+    assert result.metadata["n_request"] == 1
+    assert any("可调参数取值已忽略" in message for message in result.messages)
+
+
+def test_inverse_solve_request_rows_truncated_before_materialize(monkeypatch):
+    """F3：request_rows 超过上限时先截断，再进入行分类与求解。"""
+    from smartsuite.engine import inverse as inverse_module
+
+    monkeypatch.setattr(inverse_module, "INVERSE_MAX_REQUESTS", 2)
+    hist = _linear_history()
+    rows = [{"IncomingA": 1.15, "OutputY1": 1.0, "OutputY2": 0.8} for _ in range(5)]
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42, "request_rows": rows},
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["n_request"] == 2
+    assert any("超过上限 2 条" in message for message in result.messages)
