@@ -6,8 +6,9 @@ target_col: ""
 feature_cols: []
 params:
   model: auto
-  # auto 规模预算（R-1）：n>500 仅评估 linear/poly；n>2000 由 LOO 切 5 折；
-  # gpr 仅支持 n≤2000。大数据建议显式选择 linear/gbm。
+  # auto 规模预算（R-1/C-2）：n>500 仅评估 linear/poly；n>2000 由 LOO 切 5 折；
+  # gpr 仅支持 n≤2000；显式 gbm n>500 自动切 5 折。大数据建议显式选择 linear。
+  # max_starts 上限 50（超出按上限处理并提示，保护 Web 同步请求）。
   incoming_cols: ""
   variable_cols: ""
   fixed_cols: ""

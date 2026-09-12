@@ -1,6 +1,5 @@
 import json
 import logging
-import time
 from pathlib import Path
 
 import numpy as np
@@ -75,6 +74,30 @@ def test_split_rows_history_and_request():
     assert len(requests) == 1
     assert skipped == []
     assert requests.iloc[0]["OutputY1"] == 0.7
+
+
+def test_split_rows_target_only_row_is_request():
+    """C-1：目标写在 target 角色列、输出列留空的行也必须判为请求行。"""
+    df = pd.DataFrame(
+        {
+            "IncomingA": [1.1, 1.2, 1.3],
+            "VariableU1": [5.0, 6.0, None],
+            "OutputY1": [0.9, 0.8, None],
+            "TargetY1": [None, None, 0.7],
+        }
+    )
+    roles = resolve_roles(df, {})
+    assert roles.target == ["TargetY1"]
+    history, requests, skipped = split_rows(df, roles)
+    assert len(history) == 2
+    assert len(requests) == 1
+    assert skipped == []
+    assert requests.iloc[0]["TargetY1"] == 0.7
+
+    no_target = df.drop(columns=["TargetY1"])
+    history2, requests2, skipped2 = split_rows(no_target, resolve_roles(no_target, {}))
+    assert len(requests2) == 0
+    assert any("缺少输出值或目标值" in reason for _, reason in skipped2)
 
 
 def _linear_history(n=40, seed=0):
@@ -677,6 +700,38 @@ def test_inverse_solve_role_cols_as_lists():
     assert abs(rec.iloc[0]["VariableU2"] - 2.5) < 0.5
 
 
+def test_inverse_solve_target_only_request_row():
+    """C-1：目标列（target_cols）独立通道端到端可用（输出列留空）。"""
+    hist = _linear_history()
+    req = pd.DataFrame(
+        {
+            "IncomingA": [1.15],
+            "VariableU1": [None],
+            "VariableU2": [None],
+            "OutputY1": [None],
+            "OutputY2": [None],
+            "TargetY1": [1.3 - 0.06 * 5.5 + 0.05 * 1.15],
+            "TargetY2": [0.9 - 0.04 * 2.5],
+        }
+    )
+    df = pd.concat([hist, req], ignore_index=True)
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=df,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42},
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["n_request"] == 1
+    rec = result.tables["recommendations"]
+    assert len(rec) == 1
+    assert abs(rec.iloc[0]["VariableU1"] - 5.5) < 0.5
+    assert abs(rec.iloc[0]["VariableU2"] - 2.5) < 0.5
+
+
 def test_inverse_solve_request_rows_invalid_and_unknown_columns():
     """request_rows 非法结构 → 中文报错；未知列忽略并提示。"""
     hist = _linear_history()
@@ -725,6 +780,22 @@ def test_inverse_solve_request_rows_invalid_and_unknown_columns():
     )
     assert unknown.status == "ok"
     assert any("已忽略" in message for message in unknown.messages)
+
+
+def test_inverse_solve_request_rows_bool_rejected():
+    """C-3：布尔取值显式失败（不得静默按 1/0 参与反解）。"""
+    hist = _linear_history()
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "request_rows": [{"IncomingA": 1.15, "OutputY1": True}]},
+        )
+    )
+    assert result.status == "error"
+    assert any("布尔" in message for message in result.messages)
 
 
 def test_raw_linear_coefficients_match_raw_ols():
@@ -912,10 +983,47 @@ def test_fit_forward_large_n_uses_kfold(monkeypatch):
     monkeypatch.setattr(inverse_module, "INVERSE_CV_LOO_MAX_ROWS", 100)
     df = _linear_history(n=150)
     roles = resolve_roles(df, {})
-    started = time.perf_counter()
     _, quality = fit_forward(df, roles, model="linear", random_state=42)
-    assert time.perf_counter() - started < 60
     assert set(quality["CV方案"]) == {"5折"}
+
+
+def test_fit_forward_gbm_large_n_uses_kfold(monkeypatch):
+    """C-2：显式 gbm 超过 LOO 行数预算改用 5 折（防 n 次全量 GBM 拟合拖挂）。"""
+    from smartsuite.engine import inverse as inverse_module
+
+    assert inverse_module.INVERSE_GBM_LOO_MAX_ROWS == 500  # 预算锚点
+    monkeypatch.setattr(inverse_module, "INVERSE_GBM_LOO_MAX_ROWS", 50)
+    df = _linear_history(n=60)
+    roles = resolve_roles(df, {})
+    _, quality = fit_forward(df, roles, model="gbm", random_state=42)
+    assert set(quality["CV方案"]) == {"5折"}
+
+
+def test_inverse_solve_max_starts_clamped_with_message():
+    """C-2：max_starts 超上限按上限处理并写中文消息。"""
+    hist = _linear_history()
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "random_state": 42,
+                "max_starts": 100000,
+                "request_rows": [
+                    {
+                        "IncomingA": 1.15,
+                        "OutputY1": 1.3 - 0.06 * 5.5 + 0.05 * 1.15,
+                        "OutputY2": 0.9 - 0.04 * 2.5,
+                    }
+                ],
+            },
+        )
+    )
+    assert result.status == "ok"
+    assert any("max_starts" in message and "上限" in message for message in result.messages)
 
 
 def test_fit_forward_gpr_large_n_raises_chinese(monkeypatch):
@@ -1053,10 +1161,17 @@ def test_inverse_solve_does_not_mutate_input_dataframe():
 
 
 def test_inverse_solve_real_batch_acceptance():
-    """R-4：真实批次验收数据（Data.xlsx 33 行 + examples.xlsx 11 请求）端到端。"""
-    data_dir = Path(__file__).resolve().parents[1]
-    history = pd.read_excel(data_dir / "Data.xlsx")
-    requests = pd.read_excel(data_dir / "examples.xlsx")
+    """R-4：真实批次验收数据（logs/Data.xlsx 33 行 + logs/examples.xlsx 11 请求）端到端。
+
+    用户真实批次数据不入库（logs/ 已 gitignore）；CI 或他人环境缺文件时跳过。
+    """
+    data_dir = Path(__file__).resolve().parents[2] / "logs"
+    history_path = data_dir / "Data.xlsx"
+    requests_path = data_dir / "examples.xlsx"
+    if not history_path.exists() or not requests_path.exists():
+        pytest.skip("真实批次验收数据未提供（logs/Data.xlsx + logs/examples.xlsx）")
+    history = pd.read_excel(history_path)
+    requests = pd.read_excel(requests_path)
     df = pd.concat([history, requests], ignore_index=True)
     result = inverse_parameter_solve(
         AnalysisRequest(

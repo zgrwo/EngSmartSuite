@@ -27,9 +27,11 @@ from smartsuite.engine._constants import (
     INVERSE_CV_LOO_MAX_ROWS,
     INVERSE_DE_MAXITER,
     INVERSE_DE_POPSIZE,
+    INVERSE_GBM_LOO_MAX_ROWS,
     INVERSE_GPR_MAX_ROWS,
     INVERSE_LAM_TIME,
     INVERSE_MAX_REQUESTS,
+    INVERSE_MAX_STARTS,
     INVERSE_MIN_HISTORY,
     INVERSE_POLY_MAX_TERMS,
     INVERSE_RATE_MIN_ROWS,
@@ -115,6 +117,12 @@ def _parse_request_rows(value, limit: int | None = None) -> tuple[list[dict], in
     for i, row in enumerate(value, start=1):
         if not isinstance(row, dict):
             raise ValueError(f"参数「request_rows」第 {i} 行不是对象：{row!r}")
+        for key, raw in row.items():
+            if isinstance(raw, bool):
+                raise ValueError(
+                    f"参数「request_rows」第 {i} 行的「{key}」为布尔值（{raw!r}），"
+                    "请改用 0/1 数值（审查 2026-09-13 C-3）"
+                )
         rows.append({str(k): _coerce_request_value(v) for k, v in row.items()})
     return rows, truncated
 
@@ -175,25 +183,36 @@ def resolve_roles(df: pd.DataFrame, params: dict) -> RoleMap:
 
 
 def split_rows(df: pd.DataFrame, roles: RoleMap):
+    """行分类：历史行（变量+输出完整）/ 请求行（变量留空 + 来料完整 + 目标可用）。
+
+    请求行的目标可用 = 输出列完整 **或** target 角色列存在取值（审查 2026-09-13
+    C-1：此前只认输出列，target_cols 通道被架空）；逐输出的目标优先级在解算
+    循环中仍为 target 列优先、输出列回退。
+    """
     var_cols = roles.variable + (
         [roles.time] if roles.time and roles.time not in roles.variable else []
     )
     has_vars = df[var_cols].notna().all(axis=1) if var_cols else pd.Series(False, index=df.index)
     out_ok = df[roles.output].notna().all(axis=1)
+    target_ok = (
+        df[roles.target].notna().any(axis=1) if roles.target else pd.Series(False, index=df.index)
+    )
     incoming_ok = (
         df[roles.incoming].notna().all(axis=1)
         if roles.incoming
         else pd.Series(True, index=df.index)
     )
     history = df[has_vars & out_ok]
-    request = df[(~has_vars) & incoming_ok & out_ok]
+    request = df[(~has_vars) & incoming_ok & (out_ok | target_ok)]
     skipped = []
     for idx in df.index:
         if idx in history.index or idx in request.index:
             continue
         reasons = []
-        if var_cols and not has_vars.loc[idx] and not out_ok.loc[idx]:
-            reasons.append("缺少输出值")
+        if not out_ok.loc[idx] and not target_ok.loc[idx]:
+            reasons.append("缺少输出值或目标值")
+        if not incoming_ok.loc[idx]:
+            reasons.append("缺少来料条件")
         if not reasons:
             reasons.append("行类型无法判定（变量与输出组合不完整）")
         skipped.append((int(idx), "; ".join(reasons)))
@@ -290,10 +309,16 @@ class ForwardModel:
 def _cv_split(n_rows: int, random_state: int, kind: str):
     """候选筛选交叉验证方案（R-1：控制拟合次数，防候选门控成本爆炸）。
 
-    GPR 恒用 5 折（LOO 会把拟合次数放大 n 倍且单次成本 O(n³)）；其余候选在
+    GPR 恒用 5 折（LOO 会把拟合次数放大 n 倍且单次成本 O(n³)）；显式 GBM 在
+    n > INVERSE_GBM_LOO_MAX_ROWS 时改用 5 折（单次 GBM 拟合 ~0.1s/行，LOO×n
+    在 n≈1000 时已达分钟级，审查 2026-09-13 C-2）；其余候选在
     n ≤ INVERSE_CV_LOO_MAX_ROWS 时用精确 LOO，超过改用 5 折。返回 (splitter, 标签)。
     """
-    if kind == "gpr" or n_rows > INVERSE_CV_LOO_MAX_ROWS:
+    if (
+        kind == "gpr"
+        or (kind == "gbm" and n_rows > INVERSE_GBM_LOO_MAX_ROWS)
+        or n_rows > INVERSE_CV_LOO_MAX_ROWS
+    ):
         splits = max(2, min(5, int(n_rows)))
         return KFold(n_splits=splits, shuffle=True, random_state=random_state), "5折"
     return LeaveOneOut(), "LOO"
@@ -783,7 +808,10 @@ def solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, p
         raise ValueError("目标值包含缺失或非有限数值，无法反解")
 
     reg_lambda = safe_float(params.get("reg_lambda"), INVERSE_REG_LAMBDA)
-    max_starts = max(int(safe_float(params.get("max_starts"), 10)), 1)
+    max_starts = min(
+        max(int(safe_float(params.get("max_starts"), _DEFAULT_MAX_STARTS)), 1),
+        INVERSE_MAX_STARTS,
+    )
     random_state = int(safe_float(params.get("random_state"), 42))
 
     is_rate = isinstance(forward, RateForwardModel)
@@ -1554,8 +1582,8 @@ def _figure_residuals(predictions, output_cols, attain_tol):
 def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
     """工艺参数反解入口：角色识别 → 行分类 → 前向建模 → 逐请求求解与可达性 → 结果组装。
 
-    参数 (params): spec §3 共 17 键；数值一律经 safe_float、JSON 参数经安全解析，
-    解析失败回退默认并把警告写入 messages。
+    参数 (params): 共 18 键（spec §3 17 键 + 请求行录入 `request_rows`）；数值一律经
+    safe_float、JSON 参数经安全解析，解析失败回退默认并把警告写入 messages。
 
     返回四表、两图、中文 summary 与 metadata；数据/参数错误返回
     ``status="error"`` + 中文 messages，不抛 traceback。
@@ -1582,9 +1610,14 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
             params, "reg_lambda", INVERSE_REG_LAMBDA, messages
         )
         attain_tol = _parse_float_param(params, "attain_tol", _DEFAULT_ATTAIN_TOL, messages)
-        params["max_starts"] = _parse_float_param(
-            params, "max_starts", _DEFAULT_MAX_STARTS, messages
-        )
+        max_starts = _parse_float_param(params, "max_starts", _DEFAULT_MAX_STARTS, messages)
+        if max_starts > INVERSE_MAX_STARTS:
+            messages.append(
+                f"参数「max_starts」={max_starts:g} 超过上限 {INVERSE_MAX_STARTS}，"
+                f"已按上限 {INVERSE_MAX_STARTS} 处理"
+            )
+            max_starts = float(INVERSE_MAX_STARTS)
+        params["max_starts"] = max_starts
         seed = int(_parse_float_param(params, "random_state", _DEFAULT_RANDOM_STATE, messages))
         params["random_state"] = seed
         params["time_min"] = _parse_optional_float(params, "time_min", messages)
@@ -2007,6 +2040,9 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 "n_history": int(len(history)),
                 "n_request": int(len(request)),
                 "n_skipped": int(len(skipped) + n_failed),
+                # 审查 2026-09-13 C-4：拆分行分类跳过与请求求解失败（旧键保留兼容）
+                "n_skipped_rows": int(len(skipped)),
+                "n_failed_requests": int(n_failed),
                 "model_choice": model_choice,
                 "rate_feature_choice": rate_feature_choice,
                 "bounds": {name: [float(pair[0]), float(pair[1])] for name, pair in bounds.items()},

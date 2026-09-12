@@ -102,3 +102,6 @@ INVERSE_CV_LOO_MAX_ROWS = 2000  # ≤ 该行数用 LOO（精确）；超过改�
 INVERSE_AUTO_CANDIDATE_MAX_ROWS = 500  # auto 超过该行数只评估 linear/poly（跳过 GPR/GBM）
 INVERSE_POLY_MAX_TERMS = 100  # auto 中 poly 展开列数上限，超过则跳过 poly 候选
 INVERSE_GPR_MAX_ROWS = 2000  # GPR 候选硬上限（显式选择超过时中文报错，防 O(n³) 假死）
+# 审查 2026-09-13 C-2：资源预算上限（Web 同步请求防拖挂）
+INVERSE_GBM_LOO_MAX_ROWS = 500  # 显式 gbm 超过该行数改用 5 折（防 LOO×n 次 GBM 拟合）
+INVERSE_MAX_STARTS = 50  # max_starts 硬上限（超出按上限处理并提示）
