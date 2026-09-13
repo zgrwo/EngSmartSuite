@@ -2,6 +2,15 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.3.1](https://github.com/zgrwo/EngSmartSuite/compare/v1.3.0...v1.3.1) (2026-09-13)
+
+
+### 🐛 Bug 修复
+
+* **inverse:** 修复全量审查 C-1/G-1/C-2..C-4（target_cols/门禁捕获/资源上限） ([a369011](https://github.com/zgrwo/EngSmartSuite/commit/a369011d70db3df53ecd0c621f568ccd9ccb27b8))
+* **inverse:** 修复发版审查 N-1..N-7（GBM 恒 5 折/预算边界/falsy/门禁/验收） ([3d55cd4](https://github.com/zgrwo/EngSmartSuite/commit/3d55cd4c2920a6d67906cd97a7c707d2bb108418))
+* **inverse:** 发布前全量审查修复（C-1/G-1/C-2..C-4 + N-1..N-7） ([ff4bdc0](https://github.com/zgrwo/EngSmartSuite/commit/ff4bdc05c072d6d4709d797b8378441295b9f16c))
+
 ## [1.3.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.2.7...v1.3.0) (2026-09-11)
 
 
