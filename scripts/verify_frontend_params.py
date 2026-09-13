@@ -9,8 +9,10 @@ verify_frontend_params.py — 前后端参数静态一致性门禁（审查 2026
   3. inverse_solve 列角色勾选前缀 INVERSE_PREFIXES == 引擎 DEFAULT_PREFIXES
      （2026-09-11 审查 F4：双份 SSOT 漂移会导致勾选组预勾选错列）
   4. 简单标量默认值一致（2026-09-13 审查 F-2：键集相等但默认值可静默漂移，
-     如 inverse model 前端 linear / 后端 auto）；有意差异须在
-     KNOWN_DEFAULT_DIFFERENCES 登记，登记失配或过期同样 FAIL。
+     如 inverse model 前端 linear / 后端 auto）；带引号数值（'0.05'）归一后比较
+     （N-2）；有意差异须在 KNOWN_DEFAULT_DIFFERENCES 登记，登记失配或过期同样 FAIL。
+  5. 非空数组/对象默认值不参与标量比对，出现即 FAIL 并要求在
+     KNOWN_COMPOUND_DEFAULTS 显式登记豁免（N-3：复合默认值解析超出静态标量口径）。
 发现差异即 FAIL 并 exit 1。
 
 历史背景：该一致性此前无任何自动化——ci.yml consistency job 步骤名
@@ -40,8 +42,14 @@ KNOWN_DEFAULT_DIFFERENCES = {
     ("inverse_solve", "model"): ("linear", "auto"),
 }
 
+# 复合默认值豁免登记（N-3）：本门禁只比对简单标量；非空数组/对象默认值出现
+# 即 FAIL，需在此登记（task, key）确认后豁免。当前 42 任务无复合默认值。
+KNOWN_COMPOUND_DEFAULTS: set[tuple[str, str]] = set()
+
 # 任务块：task: { ... }（括号配平在 _task_blocks 中完成）
 _TASK_BLOCK_RE = re.compile(r"(\w+):\s*\{")
+# 复合默认值起始：key: [ 或 key: {
+_COMPOUND_OPEN_RE = re.compile(r"(\w+)\s*:\s*([\[\{])")
 # 简单标量默认值：'str' / "str" / 数字 / true|false / 空数组（复杂结构跳过）
 _VALUE_RE = re.compile(
     r"(\w+)\s*:\s*"
@@ -104,17 +112,35 @@ def extract_task_param_values(js_text: str) -> dict[str, dict[str, object]]:
     return values
 
 
+def _compound_default_keys(block: str) -> list[str]:
+    """任务块内非空数组/对象默认值的键（空 [] / {} 视为前端不下发，跳过）。"""
+    keys: list[str] = []
+    for m in _COMPOUND_OPEN_RE.finditer(block):
+        closer = "]" if m.group(2) == "[" else "}"
+        if block[m.end() :].lstrip()[:1] != closer:
+            keys.append(m.group(1))
+    return keys
+
+
 def _normalize_default(value):
-    """默认值归一：空串/空数组/None → None（前端不下发 = 引擎默认），布尔字符串化。"""
+    """默认值归一：空串/空数组/None → None（前端不下发 = 引擎默认），
+
+    布尔字符串化；带引号数值尝试转 float（N-2：'0.05' 与后端 0.05 语义等价）。
+    """
     if value is None:
         return None
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
     if isinstance(value, bool):
         return str(value).lower()
     if isinstance(value, (int, float)):
         return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return text
     if isinstance(value, list) and not value:
         return None
     return None
@@ -203,6 +229,13 @@ def check(js_path: Path = APP_JS) -> list[str]:
                 f"[{task}] 键集不一致: 前端独有={sorted(fk - bk)} 后端独有={sorted(bk - fk)}"
             )
     problems.extend(_check_default_differences(extract_task_param_values(js_text)))
+    for task, block in _task_blocks(js_text).items():
+        for key in _compound_default_keys(block):
+            if (task, key) not in KNOWN_COMPOUND_DEFAULTS:
+                problems.append(
+                    f"[{task}] 复合默认值 {key} 未受比对（门禁仅校验标量），"
+                    "请在 KNOWN_COMPOUND_DEFAULTS 登记豁免"
+                )
     frontend_prefixes = extract_inverse_prefixes(js_text)
     if frontend_prefixes is None:
         problems.append("[inverse_solve] app.js 缺少 INVERSE_PREFIXES 常量")

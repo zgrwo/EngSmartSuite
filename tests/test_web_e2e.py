@@ -112,6 +112,7 @@ ALL_TASKS = [
             "variable_cols": "模具温度",
             "output_cols": "不良率",
             "model": "linear",
+            "request_rows": [{"熔体温度": 208.5, "不良率": 4.392}],
         },
     ),
     ("spc_nonparametric", ["不良率"], [], [], {}),

@@ -27,7 +27,6 @@ from smartsuite.engine._constants import (
     INVERSE_CV_LOO_MAX_ROWS,
     INVERSE_DE_MAXITER,
     INVERSE_DE_POPSIZE,
-    INVERSE_GBM_LOO_MAX_ROWS,
     INVERSE_GPR_MAX_ROWS,
     INVERSE_LAM_TIME,
     INVERSE_MAX_REQUESTS,
@@ -159,7 +158,7 @@ def _match_by_prefix(columns, prefixes) -> list[str]:
     return [c for c, low in lowered if low.startswith(tuple(p.lower() for p in prefixes))]
 
 
-def resolve_roles(df: pd.DataFrame, params: dict) -> RoleMap:
+def _resolve_roles(df: pd.DataFrame, params: dict) -> RoleMap:
     roles = RoleMap()
     for role, prefixes in DEFAULT_PREFIXES.items():
         explicit = _split_param_cols(params.get(f"{role}_cols"))
@@ -168,7 +167,7 @@ def resolve_roles(df: pd.DataFrame, params: dict) -> RoleMap:
         if missing:
             raise ValueError(f"参数指定的{role}_cols列不存在: {missing}")
         setattr(roles, role, cols)
-    time_col = str(params.get("time_col") or "").strip()
+    time_col = _str_param(params, "time_col", "")
     if time_col and time_col not in df.columns:
         raise ValueError(f"参数指定的 time_col 列不存在: {time_col}")
     roles.time = time_col or None
@@ -182,7 +181,7 @@ def resolve_roles(df: pd.DataFrame, params: dict) -> RoleMap:
     return roles
 
 
-def split_rows(df: pd.DataFrame, roles: RoleMap):
+def _split_rows(df: pd.DataFrame, roles: RoleMap):
     """行分类：历史行（变量+输出完整）/ 请求行（变量留空 + 来料完整 + 目标可用）。
 
     请求行的目标可用 = 输出列完整 **或** target 角色列存在取值（审查 2026-09-13
@@ -309,16 +308,12 @@ class ForwardModel:
 def _cv_split(n_rows: int, random_state: int, kind: str):
     """候选筛选交叉验证方案（R-1：控制拟合次数，防候选门控成本爆炸）。
 
-    GPR 恒用 5 折（LOO 会把拟合次数放大 n 倍且单次成本 O(n³)）；显式 GBM 在
-    n > INVERSE_GBM_LOO_MAX_ROWS 时改用 5 折（单次 GBM 拟合 ~0.1s/行，LOO×n
-    在 n≈1000 时已达分钟级，审查 2026-09-13 C-2）；其余候选在
-    n ≤ INVERSE_CV_LOO_MAX_ROWS 时用精确 LOO，超过改用 5 折。返回 (splitter, 标签)。
+    GPR/GBM 恒用 5 折（LOO 会把拟合次数放大 n 倍；GPR 单次成本 O(n³)，GBM
+    单次拟合亦随 n 增长，n≈500 时 LOO 已达分钟级悬崖，审查 2026-09-13 N-1）；
+    其余候选在 n ≤ INVERSE_CV_LOO_MAX_ROWS 时用精确 LOO，超过改用 5 折。
+    返回 (splitter, 标签)。
     """
-    if (
-        kind == "gpr"
-        or (kind == "gbm" and n_rows > INVERSE_GBM_LOO_MAX_ROWS)
-        or n_rows > INVERSE_CV_LOO_MAX_ROWS
-    ):
+    if kind in ("gpr", "gbm") or n_rows > INVERSE_CV_LOO_MAX_ROWS:
         splits = max(2, min(5, int(n_rows)))
         return KFold(n_splits=splits, shuffle=True, random_state=random_state), "5折"
     return LeaveOneOut(), "LOO"
@@ -328,11 +323,11 @@ def _auto_candidates(n_rows: int, feature_count: int) -> tuple[tuple[str, ...], 
     """auto 候选与规模削减说明（R-1）。显式模型不受候选削减影响。"""
     candidates: tuple[str, ...] = MODEL_KINDS
     notes: list[str] = []
-    if n_rows > INVERSE_AUTO_CANDIDATE_MAX_ROWS:
+    if n_rows >= INVERSE_AUTO_CANDIDATE_MAX_ROWS:
         skipped = [kind for kind in candidates if kind in ("gpr", "gbm")]
         candidates = tuple(kind for kind in candidates if kind in ("linear", "poly"))
         notes.append(
-            f"历史 n={n_rows} 超过 {INVERSE_AUTO_CANDIDATE_MAX_ROWS}，"
+            f"历史 n={n_rows} 达到 {INVERSE_AUTO_CANDIDATE_MAX_ROWS}，"
             f"auto 已跳过候选：{'、'.join(skipped)}"
         )
     poly_terms = feature_count * (feature_count + 3) // 2
@@ -344,7 +339,7 @@ def _auto_candidates(n_rows: int, feature_count: int) -> tuple[tuple[str, ...], 
     return candidates, notes
 
 
-def fit_forward(history, roles, model="auto", random_state=42):
+def _fit_forward(history, roles, model="auto", random_state=42):
     feature_cols = [
         c
         for c in roles.incoming + roles.variable + roles.fixed
@@ -414,7 +409,7 @@ def _strip_role_prefix(name: str) -> str:
     return name
 
 
-def pair_incoming_output(incoming, output) -> list[tuple[str, str]]:
+def _pair_incoming_output(incoming, output) -> list[tuple[str, str]]:
     """按去前缀后的列名后缀配对来料与输出；无法配对时回退共用/顺序配对。"""
     incoming_cols = [str(c) for c in incoming]
     output_cols = [str(c) for c in output]
@@ -488,7 +483,7 @@ class RateForwardModel:
         return offsets - self.predict_rate(incoming_row, u) * float(time)
 
 
-def fit_rate_forward(history, roles, time_col, random_state=42):
+def _fit_rate_forward(history, roles, time_col, random_state=42):
     """速率物理先验模型：Y_j = Inc_j - r_j(z)·t，r_j 用 StandardScaler + RidgeCV。
 
     速率特征二选一（逐输出按 LOO R² 选优）：params = fixed + variable；
@@ -501,7 +496,7 @@ def fit_rate_forward(history, roles, time_col, random_state=42):
     valid_time = np.isfinite(time_array) & (time_array != 0)
     if not valid_time.any():
         raise ValueError("rate 模型需要有效的时间列 time_col（非缺失且非零）")
-    pairs = pair_incoming_output(roles.incoming, roles.output)
+    pairs = _pair_incoming_output(roles.incoming, roles.output)
     if len(pairs) < len(roles.output):
         raise ValueError("来料列少于输出列且无法配对，无法建立速率模型")
     pairing_note = None
@@ -686,7 +681,7 @@ def _time_anchor(forward, incoming, time_bounds) -> tuple[float, float]:
     return float(t0), float(scale)
 
 
-def resolve_bounds(history, roles, params) -> dict[str, tuple[float, float]]:
+def _resolve_bounds(history, roles, params) -> dict[str, tuple[float, float]]:
     """解析可调参数与时间的优化边界。
 
     优先使用显式 `variable_bounds`（dict 或 JSON 字符串），否则取历史 min/max；
@@ -740,7 +735,7 @@ def resolve_bounds(history, roles, params) -> dict[str, tuple[float, float]]:
     return bounds
 
 
-def optimal_time(forward, incoming, target, scale, weights, u, time_bounds) -> float:
+def _optimal_time(forward, incoming, target, scale, weights, u, time_bounds) -> float:
     """固定参数 u 时时间 t 的解析最优（profile），并裁剪到 time_bounds。
 
     闭式解 t*(u) = (Σ_j w_j·b_j·a_j + c·t0) / (Σ_j w_j·b_j² + c)，其中
@@ -780,16 +775,16 @@ def optimal_time(forward, incoming, target, scale, weights, u, time_bounds) -> f
     return float(np.clip(t_star, lo, hi))
 
 
-def solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, params):
+def _solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, params):
     """对单条请求行反解可调参数（rate 模型含解析时间）。
 
     目标函数：Σ_j w_j·((ŷ_j−y*_j)/s_j)² + reg_lambda·Σ_k ((u_k−u0_k)/range_k)²。
     参数合同：`scale` 为 weight_mode 尺度（**不含** output_weights），
     `weights` 为 output_weights（默认 1.0），二者相乘构成目标权重 w_j；
-    与 `optimal_time` 的传入口径一致，调用方不得在 scale 中重复乘 output_weights。
+    与 `_optimal_time` 的传入口径一致，调用方不得在 scale 中重复乘 output_weights。
     平滑模型用 L-BFGS-B 多起点（基准点 + max_starts-1 个随机起点，种子固定）；
     树模型用 differential_evolution + L-BFGS-B polish；rate 模型的时间按
-    `optimal_time` 解析求解（bounds 含 time 时）。宽度为 0 的参数按常数处理。
+    `_optimal_time` 解析求解（bounds 含 time 时）。宽度为 0 的参数按常数处理。
 
     返回 (u, pred, info)：u 为参数名→推荐值；pred 为预测输出数组；
     info 含 `at_bound`（每参数是否触界）、`residual_sigma`（每输出偏差 σ）、
@@ -865,7 +860,7 @@ def solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, p
         u_dict = {name: row[name] for name in optimized}
         if is_rate:
             if time_bounds is not None:
-                time_value = optimal_time(
+                time_value = _optimal_time(
                     forward, row, target_arr, scale_arr, weight_arr, u_dict, time_bounds
                 )
             else:
@@ -1016,7 +1011,7 @@ def _sample_time_values(forward, incoming_row, time_pair, samples, param_count, 
     return np.full(n, float(number))
 
 
-def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
+def _reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
     """拉丁超立方采样评估参数盒内各输出的可达范围（spec §4.4）。
 
     参数:
@@ -1028,7 +1023,7 @@ def reachable_range(forward, incoming_row, bounds, n, seed, time_bounds=None):
         seed: 采样随机种子，同 seed 结果确定。
         time_bounds: rate 模型可调时间区间；非 None 且 `forward.uses_time` 时
             把 time 作为额外采样维度；None 时若 `bounds` 含时间列则自动取其区间
-            （镜像 `solve_one`），否则时间取 incoming_row 固定值并记录警告。
+            （镜像 `_solve_one`），否则时间取 incoming_row 固定值并记录警告。
 
     返回:
         (lo, hi)：每个输出列的最小/最大可达值，shape 均为 (n_outputs,)。
@@ -1107,6 +1102,15 @@ _WEIGHT_MODES = ("std", "range", "none")
 _DEFAULT_ATTAIN_TOL = 0.5  # spec §3 attain_tol 默认值
 _DEFAULT_MAX_STARTS = 10  # spec §3 max_starts 默认值
 _DEFAULT_RANDOM_STATE = 42  # spec §3 random_state 默认值
+
+
+def _str_param(params, key, default) -> str:
+    """取字符串参数（N-7）：None/空白回退默认值，其余（含数值 0）按字面转换。"""
+    raw = params.get(key)
+    if raw is None:
+        return default
+    text = str(raw).strip()
+    return text if text else default
 
 
 def _parse_float_param(params, key, default, messages) -> float:
@@ -1594,12 +1598,12 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
         # R-5：角色解析会把角色列强制转数值——在副本上操作，遵守引擎不变式
         df = req.data.copy()
         params = dict(req.params or {})
-        model = str(params.get("model") or "auto").strip().lower()
+        model = _str_param(params, "model", "auto").lower()
         if model not in _INVERSE_MODELS:
             raise ValueError(f"参数「model」取值无效（{model}），可选：{'/'.join(_INVERSE_MODELS)}")
         params["model"] = model
         is_rate = model == "rate"
-        weight_mode = str(params.get("weight_mode") or "std").strip().lower()
+        weight_mode = _str_param(params, "weight_mode", "std").lower()
         if weight_mode not in _WEIGHT_MODES:
             messages.append(
                 f"参数「weight_mode」取值无效（{params.get('weight_mode')!r}），已回退默认 std"
@@ -1611,7 +1615,10 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
         )
         attain_tol = _parse_float_param(params, "attain_tol", _DEFAULT_ATTAIN_TOL, messages)
         max_starts = _parse_float_param(params, "max_starts", _DEFAULT_MAX_STARTS, messages)
-        if max_starts > INVERSE_MAX_STARTS:
+        if max_starts <= 0:
+            messages.append(f"参数「max_starts」={max_starts:g} 应为正整数，已按 1 处理")
+            max_starts = 1.0
+        elif max_starts > INVERSE_MAX_STARTS:
             messages.append(
                 f"参数「max_starts」={max_starts:g} 超过上限 {INVERSE_MAX_STARTS}，"
                 f"已按上限 {INVERSE_MAX_STARTS} 处理"
@@ -1638,7 +1645,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 f"request_rows 超过上限 {INVERSE_MAX_REQUESTS} 条，已截断为前 "
                 f"{INVERSE_MAX_REQUESTS} 条（丢弃 {truncated} 条）"
             )
-        roles = resolve_roles(df, params)
+        roles = _resolve_roles(df, params)
         if request_rows:
             df = _append_request_rows(df, request_rows, messages, variable_cols=roles.variable)
         if is_rate and not roles.time:
@@ -1670,7 +1677,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
         if unknown_weights:
             messages.append(f"output_weights 中的列不在输出列中，已忽略：{unknown_weights}")
 
-        history, request, skipped = split_rows(df, roles)
+        history, request, skipped = _split_rows(df, roles)
         if len(history) < INVERSE_MIN_HISTORY:
             raise ValueError(
                 f"历史数据不足（至少 {INVERSE_MIN_HISTORY} 行），当前有效历史 {len(history)} 行"
@@ -1684,10 +1691,10 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
             request = request.iloc[:INVERSE_MAX_REQUESTS]
 
         if is_rate:
-            # 速率模型在 fit_rate_forward 内按输出做特征有限性掩码
+            # 速率模型在 _fit_rate_forward 内按输出做特征有限性掩码
             clean_cols = list(roles.output)
         else:
-            # 仅清理会进入前向模型的特征列（常量列由 fit_forward 剔除，无需清行）
+            # 仅清理会进入前向模型的特征列（常量列由 _fit_forward 剔除，无需清行）
             clean_cols = [
                 col
                 for col in roles.incoming + roles.variable + roles.fixed
@@ -1721,14 +1728,14 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
             raise ValueError(f"时间列「{time_col}」在历史中无有效数值，无法建立速率模型")
 
         if is_rate:
-            forward, quality = fit_rate_forward(history, roles, time_col, random_state=seed)
+            forward, quality = _fit_rate_forward(history, roles, time_col, random_state=seed)
             if getattr(forward, "pairing_note", None):
                 messages.append(forward.pairing_note)
             messages.append(
                 "rate 模型基于时间线性速率假设（输出=来料−速率×时间），时间外推结论需实验验证"
             )
         else:
-            forward, quality = fit_forward(history, roles, model=model, random_state=seed)
+            forward, quality = _fit_forward(history, roles, model=model, random_state=seed)
             if getattr(forward, "note", None):
                 messages.append(forward.note)
             dropped_features = [
@@ -1755,7 +1762,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                     f"（{q_row['CV方案']} R²={r2:.3f}），反解结果仅供参考"
                 )
 
-        bounds = resolve_bounds(history, roles, params)
+        bounds = _resolve_bounds(history, roles, params)
         zero_width = [name for name, pair in bounds.items() if not (pair[1] - pair[0] > 0)]
         if zero_width:
             messages.append(
@@ -1856,10 +1863,10 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                     )
 
             try:
-                u, pred, info = solve_one(
+                u, pred, info = _solve_one(
                     forward, incoming, target_arr, scale, weights, bounds, baseline, params
                 )
-                lo_arr, hi_arr = reachable_range(
+                lo_arr, hi_arr = _reachable_range(
                     forward,
                     incoming,
                     bounds,

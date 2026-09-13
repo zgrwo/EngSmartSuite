@@ -1104,7 +1104,7 @@ _本方法仅输出数值表格和系数对比，不生成图表。_
 | `incoming_cols` | 勾选 `熔体温度` | 来料条件列（请求行中给出） |
 | `variable_cols` | 勾选 `模具温度` | 可调参数列（待反解；请求行留空） |
 | `output_cols` | 勾选 `不良率` | 输出列（请求行中给定期望目标） |
-| `model` | `linear`（默认） | 前向模型：`auto` 按 CV R² 自动门控（n>500 仅评估 `linear`/`poly`，n>2000 由 LOO 切 5 折，详见 补充备注），可选 `linear`/`poly`/`gpr`（n≤2000）/`gbm`（n>500 自动切 5 折）/`rate` |
+| `model` | `linear`（默认） | 前向模型：`auto` 按 CV R² 自动门控（n≥500 仅评估 `linear`/`poly`，n>2000 由 LOO 切 5 折，详见 补充备注），可选 `linear`/`poly`/`gpr`（n≤2000）/`gbm`（恒用 5 折）/`rate` |
 | `time_adjustable` | `false` | 时间类旋钮：`true` 时 `time_col` 参与寻优（配合 `time_min`/`time_max`） |
 | `weight_mode` | `std` | 多输出偏差归一化口径：`std`/`range`/`none` |
 
@@ -1149,7 +1149,7 @@ _本方法仅输出数值表格和系数对比，不生成图表。_
 #### 补充备注
 
 - **Python API**：`orchestrate(AnalysisRequest(task='inverse_solve', params={'incoming_cols':'熔体温度','variable_cols':'模具温度','output_cols':'不良率','model':'linear'}, ...))`
-- **`auto` 规模预算**：历史 n>500 时 `auto` 仅评估 `linear`/`poly`（跳过 GPR/GBM 并消息提示）；n>2000 时候选筛选由 LOO 切换为 5 折（`model_quality.CV方案` 标注）；`gpr` 硬上限 n≤2000，超限中文报错；显式 `gbm` 在 n>500 时同样自动切 5 折。大数据建议显式选择 `linear`；`gbm` 适合 n≤500 的场景。
+- **`auto` 规模预算**：历史 n≥500 时 `auto` 仅评估 `linear`/`poly`（跳过 GPR/GBM 并消息提示）；n>2000 时候选筛选由 LOO 切换为 5 折（`model_quality.CV方案` 标注）；`gpr` 硬上限 n≤2000，超限中文报错；`gbm` 恒用 5 折（不做 LOO，候选评估成本有界）。大数据建议显式选择 `linear`；`gbm` 适合 n≤500 的场景。
 - **资源上限**：`max_starts` 上限 50（超出按 50 处理并消息提示，保护 Web 同步请求）；单次请求行数上限 200、历史至少 10 行。
 - **目标列（`target_cols`）**：请求行的目标既可写在输出列，也可写在勾选/指定的目标列；两者都有时目标列优先。目标列留空的行按输出列回退。
 - **界面录入请求行**：Web UI 反演请求行表格 → `params.request_rows`（`[{'列名': 数值}]`，可调参数无需出现）；固定列缺省时按历史中位数处理。

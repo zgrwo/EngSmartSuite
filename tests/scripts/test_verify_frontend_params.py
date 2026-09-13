@@ -111,3 +111,40 @@ def test_stale_whitelist_detected(tmp_path):
     js.write_text(changed, encoding="utf-8")
     problems = vfp.check(js_path=js)
     assert any("白名单过期" in p and "model" in p for p in problems), problems
+
+
+# ── N-2/N-3 归一化与复合默认值守卫（2026-09-13 reaudit）────────
+
+
+def test_quoted_numeric_default_not_reported_as_drift(tmp_path):
+    """N-2：前端带引号数值（'0.05'）与后端 0.05 语义等价，不得误报漂移。"""
+    js = _make_js(tmp_path, "{ anova: { alpha: '0.05' } }")
+    problems = vfp.check(js_path=js)
+    assert not any("默认值漂移" in p and "alpha" in p for p in problems), problems
+
+
+def test_normalize_default_quoted_number():
+    """N-2：_normalize_default 对带引号数值归一为 float，字符串/布尔语义不变。"""
+    assert vfp._normalize_default("0.05") == 0.05
+    assert vfp._normalize_default(" 2 ") == 2.0
+    assert vfp._normalize_default("true") == "true"
+    assert vfp._normalize_default("") is None
+
+
+def test_compound_default_flagged_for_registration(tmp_path):
+    """N-3：非空数组默认值不在标量口径内 → 必须点名要求登记豁免。"""
+    js = _make_js(
+        tmp_path, "{ inverse_solve: { model: 'linear' }, anova: { alpha: 0.05, weights: [1, 2] } }"
+    )
+    problems = vfp.check(js_path=js)
+    assert any("anova" in p and "weights" in p and "复合默认值" in p for p in problems), problems
+
+
+def test_registered_compound_default_is_exempt(monkeypatch, tmp_path):
+    """N-3：已登记的复合默认值不再点名（豁免入口生效）。"""
+    monkeypatch.setattr(vfp, "KNOWN_COMPOUND_DEFAULTS", {("anova", "weights")})
+    js = _make_js(
+        tmp_path, "{ inverse_solve: { model: 'linear' }, anova: { alpha: 0.05, weights: [1, 2] } }"
+    )
+    problems = vfp.check(js_path=js)
+    assert not any("复合默认值" in p for p in problems), problems

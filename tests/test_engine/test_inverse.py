@@ -12,16 +12,16 @@ from smartsuite.engine._constants import INVERSE_LAM_TIME
 from smartsuite.engine.inverse import (
     _build_model_equations,
     _raw_linear_coefficients,
-    fit_forward,
-    fit_rate_forward,
+    _fit_forward,
+    _fit_rate_forward,
     inverse_parameter_solve,
-    optimal_time,
-    pair_incoming_output,
-    reachable_range,
-    resolve_bounds,
-    resolve_roles,
-    solve_one,
-    split_rows,
+    _optimal_time,
+    _pair_incoming_output,
+    _reachable_range,
+    _resolve_bounds,
+    _resolve_roles,
+    _solve_one,
+    _split_rows,
 )
 
 
@@ -35,7 +35,7 @@ def test_resolve_roles_auto_prefix():
             "OutputY1": [5.0],
         }
     )
-    roles = resolve_roles(df, {})
+    roles = _resolve_roles(df, {})
     assert roles.incoming == ["IncomingA", "IncomingB"]
     assert roles.variable == ["VariableU1"]
     assert roles.fixed == ["FixedT"]
@@ -44,7 +44,7 @@ def test_resolve_roles_auto_prefix():
 
 def test_resolve_roles_param_override_and_chinese_prefix():
     df = pd.DataFrame({"来料A": [1.0], "可调U": [2.0], "输出Y": [3.0]})
-    roles = resolve_roles(df, {"incoming_cols": "来料A"})
+    roles = _resolve_roles(df, {"incoming_cols": "来料A"})
     assert roles.incoming == ["来料A"]
     assert roles.variable == ["可调U"]
     assert roles.output == ["输出Y"]
@@ -53,7 +53,7 @@ def test_resolve_roles_param_override_and_chinese_prefix():
 def test_resolve_roles_missing_output_raises_chinese():
     df = pd.DataFrame({"IncomingA": [1.0]})
     try:
-        resolve_roles(df, {})
+        _resolve_roles(df, {})
     except ValueError as exc:
         assert "输出" in str(exc)
     else:  # pragma: no cover
@@ -68,8 +68,8 @@ def test_split_rows_history_and_request():
             "OutputY1": [0.9, 0.8, 0.7],
         }
     )
-    roles = resolve_roles(df, {})
-    history, requests, skipped = split_rows(df, roles)
+    roles = _resolve_roles(df, {})
+    history, requests, skipped = _split_rows(df, roles)
     assert len(history) == 2
     assert len(requests) == 1
     assert skipped == []
@@ -86,16 +86,16 @@ def test_split_rows_target_only_row_is_request():
             "TargetY1": [None, None, 0.7],
         }
     )
-    roles = resolve_roles(df, {})
+    roles = _resolve_roles(df, {})
     assert roles.target == ["TargetY1"]
-    history, requests, skipped = split_rows(df, roles)
+    history, requests, skipped = _split_rows(df, roles)
     assert len(history) == 2
     assert len(requests) == 1
     assert skipped == []
     assert requests.iloc[0]["TargetY1"] == 0.7
 
     no_target = df.drop(columns=["TargetY1"])
-    history2, requests2, skipped2 = split_rows(no_target, resolve_roles(no_target, {}))
+    history2, requests2, skipped2 = _split_rows(no_target, _resolve_roles(no_target, {}))
     assert len(requests2) == 0
     assert any("缺少输出值或目标值" in reason for _, reason in skipped2)
 
@@ -120,8 +120,8 @@ def _linear_history(n=40, seed=0):
 
 def test_fit_forward_auto_selects_and_predicts():
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, quality = fit_forward(df, roles, model="auto", random_state=42)
+    roles = _resolve_roles(df, {})
+    forward, quality = _fit_forward(df, roles, model="auto", random_state=42)
     assert len(forward.feature_cols) == 3
     assert quality["Output"].unique().tolist() == ["OutputY1", "OutputY2"]
     assert len(quality) == 8  # 2 输出 × 4 候选（spec §4.5 全候选对比表）
@@ -134,8 +134,8 @@ def test_fit_forward_auto_selects_and_predicts():
 
 def test_fit_forward_fixed_model():
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, quality = fit_forward(df, roles, model="linear", random_state=42)
+    roles = _resolve_roles(df, {})
+    forward, quality = _fit_forward(df, roles, model="linear", random_state=42)
     assert forward.choice == ["linear", "linear"]
     assert not forward.has_tree
     assert len(quality) == 2
@@ -152,7 +152,7 @@ def _rate_history(n=40, seed=1):
 
 
 def test_pair_incoming_output_by_suffix():
-    assert pair_incoming_output(["IncomingZ1", "IncomingZ2"], ["OutputZ1", "OutputZ2"]) == [
+    assert _pair_incoming_output(["IncomingZ1", "IncomingZ2"], ["OutputZ1", "OutputZ2"]) == [
         ("IncomingZ1", "OutputZ1"),
         ("IncomingZ2", "OutputZ2"),
     ]
@@ -160,8 +160,8 @@ def test_pair_incoming_output_by_suffix():
 
 def test_fit_rate_forward_recovers_output():
     df = _rate_history()
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
-    fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
+    fwd, quality = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
     assert fwd.pairing_note is None
     assert quality.loc[quality["选用"], "CV_R2"].min() > 0.8
     row = df.iloc[0]
@@ -171,9 +171,9 @@ def test_fit_rate_forward_recovers_output():
 
 def test_rate_requires_time_col():
     df = _rate_history().drop(columns=["FixedTime"])
-    roles = resolve_roles(df, {})
+    roles = _resolve_roles(df, {})
     try:
-        fit_rate_forward(df, roles, None, random_state=42)
+        _fit_rate_forward(df, roles, None, random_state=42)
     except ValueError as exc:
         assert "time" in str(exc).lower() or "时间" in str(exc)
     else:  # pragma: no cover
@@ -182,8 +182,8 @@ def test_rate_requires_time_col():
 
 def test_rate_forward_predict_rate_matches_physics():
     df = _rate_history()
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
-    fwd, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
+    fwd, _ = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
     assert fwd.uses_time and not fwd.has_tree
     rate = fwd.predict_rate(df.iloc[0].to_dict(), {"VariableU1": 5.0})
     assert rate.shape == (1,)
@@ -192,8 +192,8 @@ def test_rate_forward_predict_rate_matches_physics():
 
 def test_fit_rate_forward_records_pairing_fallback():
     df = _rate_history().rename(columns={"IncomingZ1": "IncomingA", "OutputZ1": "OutputY"})
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
-    fwd, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
+    fwd, _ = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
     assert fwd.pairing_note is not None
     assert "配对" in fwd.pairing_note
     assert "共用" in fwd.pairing_note
@@ -204,9 +204,9 @@ def test_fit_rate_forward_skips_row_with_nan_rate_feature(caplog):
     df = _rate_history()
     df["IncomingZ2"] = np.linspace(0.5, 0.9, len(df))
     df.loc[0, "IncomingZ2"] = np.nan
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
     with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
-        fwd, quality = fit_rate_forward(df, roles, "FixedTime", random_state=42)
+        fwd, quality = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
     assert not quality.empty
     assert quality.loc[quality["选用"], "CV_R2"].min() > 0.8
     assert any("剔除" in r.message for r in caplog.records)
@@ -218,9 +218,9 @@ def test_fit_rate_forward_skips_row_with_nan_rate_feature(caplog):
 def test_fit_rate_forward_all_zero_time_raises_chinese():
     df = _rate_history()
     df["FixedTime"] = 0.0
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
     try:
-        fit_rate_forward(df, roles, "FixedTime", random_state=42)
+        _fit_rate_forward(df, roles, "FixedTime", random_state=42)
     except ValueError as exc:
         assert "时间" in str(exc)
     else:  # pragma: no cover
@@ -229,13 +229,13 @@ def test_fit_rate_forward_all_zero_time_raises_chinese():
 
 def test_solve_one_recovers_known_parameters():
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
-    bounds = resolve_bounds(df, roles, {})
+    roles = _resolve_roles(df, {})
+    forward, _ = _fit_forward(df, roles, model="linear", random_state=42)
+    bounds = _resolve_bounds(df, roles, {})
     incoming = {"IncomingA": 1.1}
     target = np.array([1.3 - 0.06 * 5.0 + 0.05 * 1.1, 0.9 - 0.04 * 3.0])
     scale = df[roles.output].std().to_numpy()
-    u, pred, info = solve_one(
+    u, pred, info = _solve_one(
         forward,
         incoming,
         target,
@@ -252,28 +252,28 @@ def test_solve_one_recovers_known_parameters():
 
 def test_solve_one_deterministic():
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    roles = _resolve_roles(df, {})
+    forward, _ = _fit_forward(df, roles, model="linear", random_state=42)
     args = (
         forward,
         {"IncomingA": 1.1},
         np.array([0.98, 0.78]),
         df[roles.output].std().to_numpy(),
         np.ones(2),
-        resolve_bounds(df, roles, {}),
+        _resolve_bounds(df, roles, {}),
         df[roles.variable].median().to_dict(),
         {"random_state": 42},
     )
-    u1, _, _ = solve_one(*args)
-    u2, _, _ = solve_one(*args)
+    u1, _, _ = _solve_one(*args)
+    u2, _, _ = _solve_one(*args)
     assert u1 == u2
 
 
 def test_optimal_time_analytic():
     df = _rate_history()
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
-    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
-    t = optimal_time(
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    t = _optimal_time(
         forward,
         {"IncomingZ1": 1.1, "FixedTime": 60.0},
         np.array([1.1 - 0.004 * 60]),
@@ -311,7 +311,7 @@ def test_optimal_time_weight_scaling():
     scale = np.array([0.02])
     weights = np.array([4.0])
     u = {"VariableU1": 5.0}
-    t = optimal_time(forward, incoming, target, scale, weights, u, (40.0, 60.0))
+    t = _optimal_time(forward, incoming, target, scale, weights, u, (40.0, 60.0))
     a_ = (1.1 - 0.94) / 0.02
     b_ = (0.002 + 0.0004 * 5.0) / 0.02
     c_ = INVERSE_LAM_TIME / (60.0 - 40.0) ** 2
@@ -327,11 +327,11 @@ def test_optimal_time_uses_incoming_time_anchor(caplog):
     scale = np.array([0.02])
     weights = np.array([1.0])
     u = {"VariableU1": 5.0}
-    anchored = optimal_time(
+    anchored = _optimal_time(
         forward, {"IncomingZ1": 1.1, "FixedTime": 60.0}, target, scale, weights, u, (40.0, 60.0)
     )
     with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
-        fallback = optimal_time(
+        fallback = _optimal_time(
             forward, {"IncomingZ1": 1.1}, target, scale, weights, u, (40.0, 60.0)
         )
     assert any("回退时间区间中点" in r.message for r in caplog.records)
@@ -347,21 +347,21 @@ def test_optimal_time_uses_incoming_time_anchor(caplog):
 
 def test_solve_one_gbm_uses_differential_evolution():
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, _ = fit_forward(df, roles, model="gbm", random_state=42)
+    roles = _resolve_roles(df, {})
+    forward, _ = _fit_forward(df, roles, model="gbm", random_state=42)
     incoming = {"IncomingA": 1.1}
     known = {"VariableU1": 5.0, "VariableU2": 3.0}
     target = np.ravel(forward.predict(pd.DataFrame([{**incoming, **known}])))
     scale = df[roles.output].std().to_numpy()
     baseline = df[roles.variable].median().to_dict()
     baseline_pred = np.ravel(forward.predict(pd.DataFrame([{**incoming, **baseline}])))
-    u, pred, info = solve_one(
+    u, pred, info = _solve_one(
         forward,
         incoming,
         target,
         scale,
         np.ones(2),
-        resolve_bounds(df, roles, {}),
+        _resolve_bounds(df, roles, {}),
         baseline,
         {"random_state": 42},
     )
@@ -377,8 +377,8 @@ def test_solve_one_gbm_uses_differential_evolution():
 
 def test_resolve_bounds_explicit_override_invalid_fallback_and_zero_width(caplog):
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    explicit = resolve_bounds(
+    roles = _resolve_roles(df, {})
+    explicit = _resolve_bounds(
         df,
         roles,
         {"variable_bounds": '{"VariableU1": [4.5, 6.5], "VariableU2": [2.5, 3.5]}'},
@@ -386,7 +386,7 @@ def test_resolve_bounds_explicit_override_invalid_fallback_and_zero_width(caplog
     assert explicit["VariableU1"] == (4.5, 6.5)
     assert explicit["VariableU2"] == (2.5, 3.5)
     with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
-        fallback = resolve_bounds(df, roles, {"variable_bounds": "{不是合法JSON"})
+        fallback = _resolve_bounds(df, roles, {"variable_bounds": "{不是合法JSON"})
     assert any("JSON" in r.message for r in caplog.records)
     assert fallback["VariableU1"] == (
         float(df["VariableU1"].min()),
@@ -394,17 +394,17 @@ def test_resolve_bounds_explicit_override_invalid_fallback_and_zero_width(caplog
     )
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="smartsuite.engine.inverse"):
-        constant = resolve_bounds(df, roles, {"variable_bounds": {"VariableU1": [5.0, 5.0]}})
+        constant = _resolve_bounds(df, roles, {"variable_bounds": {"VariableU1": [5.0, 5.0]}})
     assert constant["VariableU1"] == (5.0, 5.0)
     assert any("宽度为 0" in r.message for r in caplog.records)
 
 
 def test_reachable_range_contains_solution_and_widens_with_time():
     df = _rate_history()
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
-    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
-    bounds = resolve_bounds(df, roles, {})
-    lo, hi = reachable_range(
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    bounds = _resolve_bounds(df, roles, {})
+    lo, hi = _reachable_range(
         forward, {"IncomingZ1": 1.1}, bounds, n=1024, seed=0, time_bounds=(30.0, 120.0)
     )
     assert (hi > lo).all()
@@ -413,19 +413,21 @@ def test_reachable_range_contains_solution_and_widens_with_time():
 
 def test_reachable_range_extracts_time_from_bounds():
     df = _rate_history()
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
-    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
-    bounds = resolve_bounds(df, roles, {"time_adjustable": "true", "time_min": 30, "time_max": 120})
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    bounds = _resolve_bounds(
+        df, roles, {"time_adjustable": "true", "time_min": 30, "time_max": 120}
+    )
     assert "FixedTime" in bounds
     incoming = {"IncomingZ1": 1.1, "FixedTime": 60.0}
-    lo_auto, hi_auto = reachable_range(forward, incoming, bounds, n=1024, seed=0)
-    lo_exp, hi_exp = reachable_range(
+    lo_auto, hi_auto = _reachable_range(forward, incoming, bounds, n=1024, seed=0)
+    lo_exp, hi_exp = _reachable_range(
         forward, incoming, bounds, n=1024, seed=0, time_bounds=(30.0, 120.0)
     )
     assert np.array_equal(lo_auto, lo_exp)
     assert np.array_equal(hi_auto, hi_exp)
     fixed_bounds = {k: v for k, v in bounds.items() if k != "FixedTime"}
-    lo_fixed, hi_fixed = reachable_range(
+    lo_fixed, hi_fixed = _reachable_range(
         forward, {"IncomingZ1": 1.1, "FixedTime": 60.0}, fixed_bounds, n=1024, seed=0
     )
     assert np.all(hi_auto - lo_auto > hi_fixed - lo_fixed)
@@ -433,13 +435,13 @@ def test_reachable_range_extracts_time_from_bounds():
 
 def test_reachable_range_forward_contains_solved_solution_and_is_deterministic():
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
-    bounds = resolve_bounds(df, roles, {})
+    roles = _resolve_roles(df, {})
+    forward, _ = _fit_forward(df, roles, model="linear", random_state=42)
+    bounds = _resolve_bounds(df, roles, {})
     incoming = {"IncomingA": 1.1}
     target = np.array([1.3 - 0.06 * 5.0 + 0.05 * 1.1, 0.9 - 0.04 * 3.0])
     scale = df[roles.output].std().to_numpy()
-    _, pred, _ = solve_one(
+    _, pred, _ = _solve_one(
         forward,
         incoming,
         target,
@@ -449,17 +451,17 @@ def test_reachable_range_forward_contains_solved_solution_and_is_deterministic()
         df[roles.variable].median().to_dict(),
         {"random_state": 42},
     )
-    lo, hi = reachable_range(forward, incoming, bounds, n=1024, seed=7)
-    lo2, hi2 = reachable_range(forward, incoming, bounds, n=1024, seed=7)
+    lo, hi = _reachable_range(forward, incoming, bounds, n=1024, seed=7)
+    lo2, hi2 = _reachable_range(forward, incoming, bounds, n=1024, seed=7)
     assert lo.shape == (2,)
     assert (lo <= pred).all()
     assert (pred <= hi).all()
     assert np.array_equal(lo, lo2)
     assert np.array_equal(hi, hi2)
-    constant = resolve_bounds(
+    constant = _resolve_bounds(
         df, roles, {"variable_bounds": {"VariableU1": [5.0, 5.0], "VariableU2": [3.0, 3.0]}}
     )
-    lo_c, hi_c = reachable_range(forward, incoming, constant, n=256, seed=7)
+    lo_c, hi_c = _reachable_range(forward, incoming, constant, n=256, seed=7)
     assert np.allclose(lo_c, hi_c)
 
 
@@ -536,8 +538,8 @@ def _variable_time_frame():
 
 def test_time_adjustable_false_does_not_optimize_variable_time():
     hist = _variable_time_history()
-    roles = resolve_roles(hist, {"time_col": "VariableTime"})
-    bounds = resolve_bounds(hist, roles, {"time_col": "VariableTime", "time_adjustable": "false"})
+    roles = _resolve_roles(hist, {"time_col": "VariableTime"})
+    bounds = _resolve_bounds(hist, roles, {"time_col": "VariableTime", "time_adjustable": "false"})
     assert "VariableTime" not in bounds
     assert "VariableU1" in bounds
     result = inverse_parameter_solve(
@@ -560,8 +562,8 @@ def test_time_adjustable_false_does_not_optimize_variable_time():
 
 def test_time_adjustable_true_includes_variable_time():
     hist = _variable_time_history()
-    roles = resolve_roles(hist, {"time_col": "VariableTime"})
-    bounds = resolve_bounds(
+    roles = _resolve_roles(hist, {"time_col": "VariableTime"})
+    bounds = _resolve_bounds(
         hist,
         roles,
         {"time_col": "VariableTime", "time_adjustable": "true", "time_min": 30, "time_max": 120},
@@ -732,6 +734,44 @@ def test_inverse_solve_target_only_request_row():
     assert abs(rec.iloc[0]["VariableU2"] - 2.5) < 0.5
 
 
+def test_inverse_solve_partial_target_missing_counts_failed_request():
+    """N-6：请求行只提供部分目标 → 失败分支计数 + 中文消息，不静默出结果。"""
+    hist = _linear_history()
+    req = pd.DataFrame(
+        {
+            "IncomingA": [1.15],
+            "VariableU1": [None],
+            "VariableU2": [None],
+            "OutputY1": [None],
+            "OutputY2": [None],
+            "TargetY1": [1.3 - 0.06 * 5.5 + 0.05 * 1.15],
+            "TargetY2": [None],
+        }
+    )
+    df = pd.concat([hist, req], ignore_index=True)
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=df,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42},
+        )
+    )
+    assert result.status == "ok"
+    assert result.metadata["n_request"] == 1
+    assert result.metadata["n_failed_requests"] == 1
+    assert (
+        result.metadata["n_skipped"]
+        == result.metadata["n_skipped_rows"] + result.metadata["n_failed_requests"]
+    )
+    assert any(
+        "请求行" in message and "目标缺失或无效" in message and "OutputY2" in message
+        for message in result.messages
+    )
+    assert result.tables["recommendations"].empty
+
+
 def test_inverse_solve_request_rows_invalid_and_unknown_columns():
     """request_rows 非法结构 → 中文报错；未知列忽略并提示。"""
     hist = _linear_history()
@@ -803,8 +843,8 @@ def test_raw_linear_coefficients_match_raw_ols():
     from sklearn.linear_model import LinearRegression
 
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
+    roles = _resolve_roles(df, {})
+    forward, _ = _fit_forward(df, roles, model="linear", random_state=42)
     raw_model = LinearRegression().fit(df[forward.feature_cols], df["OutputY1"])
     intercept, coefs = _raw_linear_coefficients(forward.models[0])
     assert intercept == pytest.approx(float(raw_model.intercept_), rel=1e-9, abs=1e-9)
@@ -814,9 +854,9 @@ def test_raw_linear_coefficients_match_raw_ols():
 def test_build_model_equations_linear_forward_and_inverse():
     """线性模型：前向方程含各可调参数项，反解公式逐参数逐输出给出。"""
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
-    bounds = resolve_bounds(df, roles, {})
+    roles = _resolve_roles(df, {})
+    forward, _ = _fit_forward(df, roles, model="linear", random_state=42)
+    bounds = _resolve_bounds(df, roles, {})
     table = _build_model_equations(forward, roles, bounds, {"reg_lambda": 0.02}, "std")
     assert list(table.columns) == ["类型", "对象", "表达式", "说明"]
     forward_rows = table[table["类型"] == "前向方程"]
@@ -841,14 +881,14 @@ def test_build_model_equations_linear_forward_and_inverse():
 def test_build_model_equations_poly_and_gbm_notes():
     """poly 展开原始单位二次项；GBM 明确标注无解析表达式。"""
     df = _linear_history()
-    roles = resolve_roles(df, {})
-    bounds = resolve_bounds(df, roles, {})
-    poly_forward, _ = fit_forward(df, roles, model="poly", random_state=42)
+    roles = _resolve_roles(df, {})
+    bounds = _resolve_bounds(df, roles, {})
+    poly_forward, _ = _fit_forward(df, roles, model="poly", random_state=42)
     poly_table = _build_model_equations(poly_forward, roles, bounds, {"reg_lambda": 0.02}, "std")
     poly_expr = poly_table[poly_table["类型"] == "前向方程"].iloc[0]["表达式"]
     assert "^2" in poly_expr and "VariableU1^2" in poly_expr
     assert (poly_table[poly_table["类型"] == "反解公式"]["表达式"] == "—").all()
-    gbm_forward, _ = fit_forward(df, roles, model="gbm", random_state=42)
+    gbm_forward, _ = _fit_forward(df, roles, model="gbm", random_state=42)
     gbm_table = _build_model_equations(gbm_forward, roles, bounds, {"reg_lambda": 0.02}, "std")
     gbm_forward_rows = gbm_table[gbm_table["类型"] == "前向方程"]
     assert (gbm_forward_rows["表达式"] == "—").all()
@@ -858,9 +898,9 @@ def test_build_model_equations_poly_and_gbm_notes():
 def test_build_model_equations_rate_time_formula():
     """速率模型：前向方程 = 来料 − 速率·t，时间给出解析反解。"""
     df = _rate_history()
-    roles = resolve_roles(df, {"time_col": "FixedTime"})
-    forward, _ = fit_rate_forward(df, roles, "FixedTime", random_state=42)
-    bounds = resolve_bounds(df, roles, {"time_col": "FixedTime", "time_adjustable": "true"})
+    roles = _resolve_roles(df, {"time_col": "FixedTime"})
+    forward, _ = _fit_rate_forward(df, roles, "FixedTime", random_state=42)
+    bounds = _resolve_bounds(df, roles, {"time_col": "FixedTime", "time_adjustable": "true"})
     table = _build_model_equations(forward, roles, bounds, {"reg_lambda": 0.02}, "std")
     forward_expr = table[table["类型"] == "前向方程"].iloc[0]["表达式"]
     assert "IncomingZ1" in forward_expr and "·t" in forward_expr
@@ -878,9 +918,9 @@ def test_build_model_equations_keeps_small_coefficient_with_large_scale():
     x = np.linspace(-1e12, 1e12, n)
     u = rng.uniform(4.0, 8.0, n)  # 非共线：u 不可由 x 仿射表出
     df = pd.DataFrame({"IncomingX": x, "VariableU1": u, "OutputY1": 0.5 + 1e-13 * x + 1.0 * u})
-    roles = resolve_roles(df, {})
-    forward, _ = fit_forward(df, roles, model="linear", random_state=42)
-    bounds = resolve_bounds(df, roles, {})
+    roles = _resolve_roles(df, {})
+    forward, _ = _fit_forward(df, roles, model="linear", random_state=42)
+    bounds = _resolve_bounds(df, roles, {})
     table = _build_model_equations(forward, roles, bounds, {"reg_lambda": 0.02}, "std", history=df)
     forward_expr = table[table["类型"] == "前向方程"].iloc[0]["表达式"]
     assert "1e-13·IncomingX" in forward_expr
@@ -956,8 +996,8 @@ def test_fit_forward_auto_caps_candidates_for_large_n(monkeypatch):
     assert inverse_module.INVERSE_AUTO_CANDIDATE_MAX_ROWS == 500  # 默认预算锚点
     monkeypatch.setattr(inverse_module, "INVERSE_AUTO_CANDIDATE_MAX_ROWS", 50)
     df = _linear_history(n=60)
-    roles = resolve_roles(df, {})
-    forward, quality = fit_forward(df, roles, model="auto", random_state=42)
+    roles = _resolve_roles(df, {})
+    forward, quality = _fit_forward(df, roles, model="auto", random_state=42)
     assert set(forward.choice) <= {"linear", "poly"}
     assert set(quality["候选"]) == {"linear", "poly"}
     assert set(quality["CV方案"]) == {"LOO"}
@@ -982,21 +1022,38 @@ def test_fit_forward_large_n_uses_kfold(monkeypatch):
     assert inverse_module.INVERSE_CV_LOO_MAX_ROWS == 2000  # 默认预算锚点
     monkeypatch.setattr(inverse_module, "INVERSE_CV_LOO_MAX_ROWS", 100)
     df = _linear_history(n=150)
-    roles = resolve_roles(df, {})
-    _, quality = fit_forward(df, roles, model="linear", random_state=42)
+    roles = _resolve_roles(df, {})
+    _, quality = _fit_forward(df, roles, model="linear", random_state=42)
     assert set(quality["CV方案"]) == {"5折"}
 
 
-def test_fit_forward_gbm_large_n_uses_kfold(monkeypatch):
-    """C-2：显式 gbm 超过 LOO 行数预算改用 5 折（防 n 次全量 GBM 拟合拖挂）。"""
+def test_fit_forward_gbm_always_uses_kfold():
+    """N-1：gbm 恒用 5 折（LOO×n 次拟合随 n 增长，n 接近预算时达分钟级悬崖）。"""
+    df = _linear_history(n=60)
+    roles = _resolve_roles(df, {})
+    _, quality = _fit_forward(df, roles, model="gbm", random_state=42)
+    assert set(quality["CV方案"]) == {"5折"}
+
+
+def test_cv_split_gbm_boundary_rows_keep_kfold():
+    """N-1：GBM 在预算边界行数（500）不回落 LOO。"""
     from smartsuite.engine import inverse as inverse_module
 
-    assert inverse_module.INVERSE_GBM_LOO_MAX_ROWS == 500  # 预算锚点
-    monkeypatch.setattr(inverse_module, "INVERSE_GBM_LOO_MAX_ROWS", 50)
-    df = _linear_history(n=60)
-    roles = resolve_roles(df, {})
-    _, quality = fit_forward(df, roles, model="gbm", random_state=42)
-    assert set(quality["CV方案"]) == {"5折"}
+    for n_rows in (10, 499, 500):
+        _, label = inverse_module._cv_split(n_rows, 42, "gbm")
+        assert label == "5折", f"n={n_rows} 应恒用 5 折"
+
+
+def test_auto_candidates_boundary_at_budget_rows():
+    """N-1：auto 候选判据含边界（n=500 即削候选，n=499 保留全候选）。"""
+    from smartsuite.engine import inverse as inverse_module
+
+    cands_at, notes_at = inverse_module._auto_candidates(500, 2)
+    assert cands_at == ("linear", "poly")
+    assert notes_at and "500" in notes_at[0]
+    cands_below, notes_below = inverse_module._auto_candidates(499, 2)
+    assert cands_below == ("linear", "poly", "gpr", "gbm")
+    assert notes_below == []
 
 
 def test_inverse_solve_max_starts_clamped_with_message():
@@ -1026,6 +1083,90 @@ def test_inverse_solve_max_starts_clamped_with_message():
     assert any("max_starts" in message and "上限" in message for message in result.messages)
 
 
+def test_inverse_solve_max_starts_non_positive_warns_and_clamps():
+    """N-7：max_starts≤0 显式中文提示并按 1 处理（不再静默钳位）。"""
+    hist = _linear_history()
+    for value in (0, -3):
+        result = inverse_parameter_solve(
+            AnalysisRequest(
+                task="inverse_solve",
+                data=hist,
+                target_col="",
+                feature_cols=[],
+                params={
+                    "model": "linear",
+                    "random_state": 42,
+                    "max_starts": value,
+                    "request_rows": [
+                        {
+                            "IncomingA": 1.15,
+                            "OutputY1": 1.3 - 0.06 * 5.0 + 0.05 * 1.15,
+                            "OutputY2": 0.9 - 0.04 * 3.0,
+                        }
+                    ],
+                },
+            )
+        )
+        assert result.status == "ok"
+        assert any(
+            "max_starts" in message and "按 1 处理" in message for message in result.messages
+        ), value
+
+
+def test_inverse_solve_model_zero_raises_chinese():
+    """N-7：model=数值 0 不再被空值回退吞掉，显式中文报错。"""
+    hist = _linear_history()
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={"model": 0, "random_state": 42},
+        )
+    )
+    assert result.status == "error"
+    assert any("model" in message for message in result.messages)
+
+
+def test_inverse_solve_weight_mode_zero_warns_and_falls_back():
+    """N-7：weight_mode=数值 0 不再静默回退，中文提示后回退 std。"""
+    hist = _linear_history()
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=hist,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "linear",
+                "weight_mode": 0,
+                "random_state": 42,
+                "request_rows": [
+                    {
+                        "IncomingA": 1.15,
+                        "OutputY1": 1.3 - 0.06 * 5.0 + 0.05 * 1.15,
+                        "OutputY2": 0.9 - 0.04 * 3.0,
+                    }
+                ],
+            },
+        )
+    )
+    assert result.status == "ok"
+    assert any("weight_mode" in message and "回退" in message for message in result.messages)
+
+
+def test_resolve_roles_time_col_zero_not_treated_as_empty():
+    """N-7：time_col=数值 0 不再被当作空值回退自动识别，显式报列不存在。"""
+    df = pd.DataFrame({0: [1.0, 2.0], "IncomingA": [1.1, 1.2], "OutputY": [0.9, 0.8]})
+    try:
+        _resolve_roles(df, {"time_col": 0})
+    except ValueError as exc:
+        assert "time_col" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("time_col=0 应显式报列不存在，而非静默回退")
+
+
 def test_fit_forward_gpr_large_n_raises_chinese(monkeypatch):
     """R-1：显式 GPR 超过硬上限中文报错，防 O(n³) 假死。"""
     from smartsuite.engine import inverse as inverse_module
@@ -1033,9 +1174,9 @@ def test_fit_forward_gpr_large_n_raises_chinese(monkeypatch):
     assert inverse_module.INVERSE_GPR_MAX_ROWS == 2000  # 默认预算锚点
     monkeypatch.setattr(inverse_module, "INVERSE_GPR_MAX_ROWS", 100)
     df = _linear_history(n=150)
-    roles = resolve_roles(df, {})
+    roles = _resolve_roles(df, {})
     try:
-        fit_forward(df, roles, model="gpr", random_state=42)
+        _fit_forward(df, roles, model="gpr", random_state=42)
     except ValueError as exc:
         assert "GPR" in str(exc) and "100" in str(exc)
     else:  # pragma: no cover
@@ -1054,8 +1195,8 @@ def test_fit_forward_auto_skips_poly_for_wide_features(monkeypatch):
     data["IncomingA"] = rng.normal(1.1, 0.05, n)
     data["OutputY1"] = 1.0 + sum(0.05 * data[f"VariableU{i}"] for i in range(1, 7))
     df = pd.DataFrame(data)
-    roles = resolve_roles(df, {})
-    forward, quality = fit_forward(df, roles, model="auto", random_state=42)
+    roles = _resolve_roles(df, {})
+    forward, quality = _fit_forward(df, roles, model="auto", random_state=42)
     assert "poly" not in set(quality["候选"])
     assert forward.note and "poly" in forward.note
 
@@ -1063,9 +1204,9 @@ def test_fit_forward_auto_skips_poly_for_wide_features(monkeypatch):
 def test_fast_predictor_matches_pipeline_predictions():
     """求解器快速路径与 sklearn pipeline 预测数值一致（linear/poly/rate）。"""
     df = _linear_history()
-    roles = resolve_roles(df, {})
+    roles = _resolve_roles(df, {})
     for model in ("linear", "poly"):
-        forward, _ = fit_forward(df, roles, model=model, random_state=42)
+        forward, _ = _fit_forward(df, roles, model=model, random_state=42)
         assert forward.fast and all(item is not None for item in forward.fast)
         sample = df[forward.feature_cols].head(5)
         expected = forward.predict(sample)
@@ -1079,8 +1220,8 @@ def test_fast_predictor_matches_pipeline_predictions():
             assert np.allclose(got, expected[:, col_index], rtol=1e-9, atol=1e-9)
 
     rate_df = _rate_history()
-    rate_roles = resolve_roles(rate_df, {"time_col": "FixedTime"})
-    rate_forward, _ = fit_rate_forward(rate_df, rate_roles, "FixedTime", random_state=42)
+    rate_roles = _resolve_roles(rate_df, {"time_col": "FixedTime"})
+    rate_forward, _ = _fit_rate_forward(rate_df, rate_roles, "FixedTime", random_state=42)
     assert rate_forward.fast_rate and all(item is not None for item in rate_forward.fast_rate)
     row = rate_df.iloc[0].to_dict()
     u_values = {"VariableU1": 5.0}
@@ -1160,10 +1301,90 @@ def test_inverse_solve_does_not_mutate_input_dataframe():
     assert hist["IncomingA"].equals(original)
 
 
+def _synthetic_batch_frames(n_history: int = 33, n_request: int = 11, seed: int = 7):
+    """脱敏同构批次：列名/规模与真实批次一致（15 列、常数列、离散可调参数）。
+
+    N-4：真实批次数据不入库导致 CI 无验收载体；本函数合成同构样本供 CI 回归，
+    真实数据验收仍由 test_inverse_solve_real_batch_acceptance 在本机执行。
+    """
+    rng = np.random.default_rng(seed)
+    g = rng.uniform(1.05, 1.20, n_history)
+    history = pd.DataFrame(
+        {
+            "IncomingZ1": g,
+            "IncomingZ2": g - rng.uniform(0.0, 0.05, n_history),
+            "IncomingZ3": g - rng.uniform(0.0, 0.05, n_history),
+            "IncomingZ4": g - rng.uniform(0.0, 0.08, n_history),
+            "IncomingBow": rng.integers(131, 332, n_history).astype(float),
+            "VariableU1": rng.integers(5, 9, n_history).astype(float),
+            "VariableU2": rng.integers(2, 5, n_history).astype(float),
+            "VariableU3": rng.integers(2, 5, n_history).astype(float),
+            "FixedU4": 3.0,
+            "VariableU5": rng.integers(2, 5, n_history).astype(float),
+            "FixedTime": 60.0,
+        }
+    )
+    coefs = [
+        (0.80, 0.10, -0.010, -0.020),
+        (0.70, 0.12, -0.008, -0.015),
+        (0.60, 0.15, -0.006, -0.012),
+        (0.50, 0.18, -0.004, -0.010),
+    ]
+    for suffix, (a1, a2, b1, b2) in zip(("Z1", "Z2", "Z3", "Z4"), coefs, strict=True):
+        history[f"Output{suffix}"] = (
+            0.05
+            + a1 * history["IncomingZ1"]
+            + a2 * history["IncomingZ2"]
+            + b1 * history["VariableU1"]
+            + b2 * history["VariableU2"]
+            + rng.normal(0.0, 0.002, n_history)
+        )
+    requests = pd.DataFrame(
+        {
+            "IncomingZ1": rng.uniform(1.06, 1.18, n_request),
+            "IncomingZ2": rng.uniform(1.06, 1.16, n_request),
+            "IncomingZ3": rng.uniform(1.06, 1.16, n_request),
+            "IncomingZ4": rng.uniform(1.02, 1.12, n_request),
+            "IncomingBow": rng.integers(131, 332, n_request).astype(float),
+            "VariableU1": np.nan,
+            "VariableU2": np.nan,
+            "VariableU3": np.nan,
+            "FixedU4": np.nan,
+            "VariableU5": np.nan,
+            "FixedTime": np.nan,
+        }
+    )
+    for suffix, (a1, a2, b1, b2) in zip(("Z1", "Z2", "Z3", "Z4"), coefs, strict=True):
+        requests[f"Output{suffix}"] = (
+            0.05 + a1 * requests["IncomingZ1"] + a2 * requests["IncomingZ2"] + b1 * 6.0 + b2 * 3.0
+        )
+    return history, requests
+
+
+def test_inverse_solve_synthetic_batch_acceptance():
+    """N-4：脱敏同构批次（33 历史 + 11 请求、真实列名形态）端到端，补 CI 验收。"""
+    history, requests = _synthetic_batch_frames()
+    df = pd.concat([history, requests], ignore_index=True)
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=df,
+            target_col="",
+            feature_cols=[],
+            params={"model": "linear", "random_state": 42},
+        )
+    )
+    assert result.status == "ok", result.messages
+    assert result.metadata["n_history"] == len(history)
+    assert result.metadata["n_request"] == len(requests)
+    assert len(result.tables["recommendations"]) == len(requests)
+
+
 def test_inverse_solve_real_batch_acceptance():
     """R-4：真实批次验收数据（logs/Data.xlsx 33 行 + logs/examples.xlsx 11 请求）端到端。
 
-    用户真实批次数据不入库（logs/ 已 gitignore）；CI 或他人环境缺文件时跳过。
+    用户真实批次数据不入库（logs/ 已 gitignore）；CI 或他人环境缺文件时跳过，
+    CI 的同构回归见 test_inverse_solve_synthetic_batch_acceptance（N-4）。
     """
     data_dir = Path(__file__).resolve().parents[2] / "logs"
     history_path = data_dir / "Data.xlsx"
