@@ -72,8 +72,6 @@ EngSmartSuite/
 ├── tests/                          # 测试
 │   ├── __init__.py
 │   ├── conftest.py                 #   共享 fixtures
-│   ├── Data.xlsx                   #   inverse_solve 真实批次验收数据（历史 33 行）
-│   ├── examples.xlsx               #   inverse_solve 验收请求行（11 行，可调参数留空）
 │   ├── test_data.xlsx              #   通用测试数据
 │   ├── test_chemical_data.xlsx     #   化工批次数据
 │   ├── test_reliability_data.xlsx  #   可靠性数据

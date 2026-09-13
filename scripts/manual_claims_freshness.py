@@ -84,6 +84,17 @@ ANCHOR_PATTERNS = {
     ("inverse_solve", "LOO R²"): r"LOO R²",
 }
 
+# 逐列绑定捕获（审查 2026-09-13 G-1）：token+容差匹配对"同锚点行内近值"无区分力
+# ——inverse 两系数相差 1.29e-4 < 5e-4 容差，单项篡改/互换可被邻值掩盖（注入实测
+# 门禁 exit 0）。捕获组 1 为该 CLAIM 绑定的展示值，须与快照严格一致（显示精度
+# 6 位小数，容差 5e-6）。
+VALUE_CAPTURE_PATTERNS = {
+    ("inverse_solve", "方程截距"): r"不良率\s*=\s*(-?\d+(?:\.\d+)?)",
+    ("inverse_solve", "熔体温度系数"): r"(-?\d+(?:\.\d+)?)·熔体温度",
+    ("inverse_solve", "模具温度系数"): r"(-?\d+(?:\.\d+)?)·模具温度",
+}
+_VALUE_CAPTURE_TOL = 5e-6
+
 
 def locate_section(text: str, sec: str) -> str | None:
     """提取手册章节正文（标题行起、下一同级标题止）；找不到返回 None。"""
@@ -123,6 +134,20 @@ def _value_matches(tokens: list[float], value: float) -> bool:
     return any(abs(t - value) <= tol for t in tokens)
 
 
+def _value_captured_matches(lines: list[str], pattern: str, value: float) -> bool:
+    """按变量名绑定捕获展示值并与快照严格比对（G-1）。"""
+    for line in lines:
+        m = re.search(pattern, line)
+        if m is None:
+            continue
+        try:
+            captured = float(m.group(1))
+        except (TypeError, ValueError):
+            return False
+        return abs(captured - value) <= _VALUE_CAPTURE_TOL
+    return False
+
+
 def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
     """校验 CLAIM 快照值仍存在于手册对应章节，返回问题列表（空 = 全部新鲜）。
 
@@ -133,7 +158,8 @@ def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
 
     匹配口径：登记了行锚点（ANCHOR_PATTERNS）的 CLAIM 逐行校验——
     快照值必须命中**某一条锚点行**的 token（行内匹配，跨行不合并）；
-    未登记锚点的 CLAIM 回退全章节 token 存在性检查。
+    登记了逐列捕获（VALUE_CAPTURE_PATTERNS）的 CLAIM 按变量名绑定捕获值严格
+    比对（防同线近值掩盖）；未登记锚点的 CLAIM 回退全章节 token 存在性检查。
     """
     problems: list[str] = []
     normalized = _normalize(manual_text)
@@ -170,11 +196,15 @@ def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
             line_token_groups = None
         if isinstance(literal, (int, float)) and not isinstance(literal, bool):
             value = float(literal)
-            hit = (
-                any(_value_matches(group, value) for group in line_token_groups)
-                if line_token_groups is not None
-                else _value_matches(_section_tokens(scope_text), value)
-            )
+            capture_pat = VALUE_CAPTURE_PATTERNS.get((analysis, value_name))
+            if capture_pat is not None and line_token_groups is not None:
+                hit = _value_captured_matches(anchor_lines, capture_pat, value)
+            else:
+                hit = (
+                    any(_value_matches(group, value) for group in line_token_groups)
+                    if line_token_groups is not None
+                    else _value_matches(_section_tokens(scope_text), value)
+                )
             if not hit:
                 problems.append(
                     f"§{sec} 缺少 CLAIM「{value_name}」快照值 {literal}"

@@ -158,3 +158,49 @@ def test_verify_manual_claims_integrates_freshness():
     assert "check_manual_freshness" in src, (
         "verify_manual_claims.py 必须集成手册新鲜度校验（F-D1 修复，不得移除）"
     )
+
+
+# ── G-1 回归：inverse_solve 同锚点近值系数必须逐列绑定 ──────────────
+
+
+_INVERSE_MANUAL = (
+    "### 6.12 工艺参数反解 (`inverse_solve`)\n\n"
+    "| 类型 | 对象 | 表达式 |\n"
+    "| 前向方程 | 不良率 | `不良率 = 6.334 - 0.008057·熔体温度 - 0.007928·模具温度` |\n"
+    "| 反解公式 | 不良率 → 模具温度 | "
+    "`模具温度 = (目标不良率 − (6.334 - 0.008057·熔体温度)) / (-0.007928)` |\n\n"
+    "所选线性模型 LOO R²=-0.002（温度与不良率近乎无关）。\n"
+)
+
+_INVERSE_CLAIMS = [
+    ("inverse_solve", "方程截距", 6.334),
+    ("inverse_solve", "熔体温度系数", -0.008057),
+    ("inverse_solve", "模具温度系数", -0.007928),
+    ("inverse_solve", "LOO R²", -0.002),
+]
+
+
+def test_inverse_near_coefficients_baseline_passes():
+    """G-1 前置：未篡改的真实取值结构 → 零问题。"""
+    assert freshness.check_manual_freshness(_INVERSE_MANUAL, _INVERSE_CLAIMS) == []
+
+
+def test_inverse_near_coefficient_single_tamper_detected():
+    """G-1 核心负例：两系数相差 1.29e-4（< 旧 token 容差 5e-4），单项篡改时
+    邻系数不得掩盖（旧实现注入实测 exit 0）。"""
+    tampered = _INVERSE_MANUAL.replace("6.334 - 0.008057·熔体温度", "6.334 - 0.018057·熔体温度")
+    problems = freshness.check_manual_freshness(tampered, _INVERSE_CLAIMS)
+    assert len(problems) == 1, f"应恰好检出熔体温度系数 1 条: {problems}"
+    assert "熔体温度系数" in problems[0]
+
+
+def test_inverse_near_coefficient_swap_detected():
+    """G-1 负例：互换两个近值系数（无序 token 匹配无法区分）→ 两条都须检出。"""
+    swapped = _INVERSE_MANUAL.replace(
+        "6.334 - 0.008057·熔体温度 - 0.007928·模具温度",
+        "6.334 - 0.007928·熔体温度 - 0.008057·模具温度",
+    )
+    problems = freshness.check_manual_freshness(swapped, _INVERSE_CLAIMS)
+    assert len(problems) == 2, f"互换应检出两条: {problems}"
+    assert any("熔体温度系数" in p for p in problems)
+    assert any("模具温度系数" in p for p in problems)

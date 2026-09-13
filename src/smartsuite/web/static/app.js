@@ -469,7 +469,7 @@ function inverseCheckedCols(k) {
 function buildRequestEditor() {
   return `<div class="param-item">
     <label class="param-label">反演请求行</label>
-    <div class="param-hint">每行填入来料/固定条件与各输出目标值；可调参数由反解计算，固定列留空按历史中位数。</div>
+    <div class="param-hint">每行填入来料/固定条件与各输出目标值（目标可填「目标·输出列」，也可填勾选的「目标列」）；可调参数由反解计算，固定列留空按历史中位数。</div>
     <div id="request-editor"></div>
     <button type="button" class="btn-sm" onclick="addRequestRow()">+ 添加请求行</button>
   </div>`;
@@ -485,7 +485,7 @@ function requestRowData() {
   });
 }
 
-function requestCardHtml(index, values, incoming, fixed, outputs) {
+function requestCardHtml(index, values, incoming, fixed, outputs, targets = []) {
   const field = (label, col) => `<div class="request-field">
       <label title="${escHtml(col)}">${escHtml(label)}</label>
       <input type="number" step="any" data-col="${escHtml(col)}" value="${escHtml(String(values[col] ?? ''))}">
@@ -496,6 +496,7 @@ function requestCardHtml(index, values, incoming, fixed, outputs) {
     ${incoming.map(col => field(col, col)).join('')}
     ${fixed.map(col => field('固定·' + col, col)).join('')}
     ${outputs.map(col => field('目标·' + col, col)).join('')}
+    ${targets.map(col => field('目标列·' + col, col)).join('')}
   </div>`;
 }
 
@@ -506,13 +507,14 @@ function rebuildRequestTable() {
   const incoming = inverseCheckedCols('incoming_cols');
   const fixed = inverseCheckedCols('fixed_cols');
   const outputs = inverseCheckedCols('output_cols');
+  const targets = inverseCheckedCols('target_cols');
   if (!incoming.length || !outputs.length) {
     editor.innerHTML = '<div class="param-hint">请先勾选「来料列」与「输出列」，再填写请求行。</div>';
     return;
   }
   const rows = saved.length ? saved : [{}];
   editor.innerHTML = rows.map((values, i) =>
-    requestCardHtml(i, values, incoming, fixed, outputs)).join('');
+    requestCardHtml(i, values, incoming, fixed, outputs, targets)).join('');
 }
 
 function addRequestRow() {
@@ -521,9 +523,11 @@ function addRequestRow() {
   const incoming = inverseCheckedCols('incoming_cols');
   const fixed = inverseCheckedCols('fixed_cols');
   const outputs = inverseCheckedCols('output_cols');
+  const targets = inverseCheckedCols('target_cols');
   if (!incoming.length || !outputs.length) return;
   const index = editor.querySelectorAll('.request-card').length;
-  editor.insertAdjacentHTML('beforeend', requestCardHtml(index, {}, incoming, fixed, outputs));
+  editor.insertAdjacentHTML(
+    'beforeend', requestCardHtml(index, {}, incoming, fixed, outputs, targets));
   renumberRequestRows();
 }
 
