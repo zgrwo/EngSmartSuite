@@ -198,6 +198,36 @@ side: {
 
 **修复模板**：AV 查表按操作员数取固定映射（2→1.41、3→1.91、4→2.24、5→2.48）或 K2=5.15/d2\*，不传 `n_obs`；补 `10 零件 × 2 操作员 × 2 重复` 用例钉住回归。
 
+### 陷阱 9：绝对 `EPSILON` 判决/展示——量纲一缩放结论就翻转
+
+**现象**（2026-09-16 全量审查 B-1..B-5/D-1/D-2，同一数组仅乘 1e-9~1e-12 复现）：
+doe_analysis `t=0/p=1/显著=否`、Grubbs 静默 0 异常、Hedges g=0.0、trend/spc_xbar/spc_nonparametric 误报「常量列」、
+MAPE/DW/CV% 退化、Web/HTML 微尺度列整列显示 `0.0000`；宏观量级同数据全部正常。
+
+**根因**：把**带数据量纲**的量（`se`/`sigma`/`sp`/`tv`/`total_var`/极差/残差）与绝对常量 `EPSILON=1e-10` 比较做
+判决或拒绝；展示层用固定 `round(4)`/`toFixed(4)` 二次舍入，抵消引擎 `round_for_display`。
+
+**规则（防零除 ≠ 判决）**：
+1. **防零除/常量守卫**只认**精确零或非有限**：`x == 0`、`not np.isfinite(x)`、`data.nunique() <= 1`；
+2. **判决**用无量纲比值（t=β/se、z、DW、CV）或相对判据 `1e-12 * max(|x|max)`，禁止 `x > EPSILON` 绝对比较；
+   不可估计时返回 `NaN` + 「无法判定」/中文消息，**不得伪造 0.0/1.0**；
+3. **展示**统一走 `round_for_display`（`_utils.py`）口径；Web/HTML/前端需与引擎一致（`api.py:_serialize_table`、`fmtCellNum`、`reporter._fmt_html_cell`）。
+
+**检查方法**：量纲对抗——同一数组乘 `1e-9`/`1e-12`，数值应同比缩放、结论不变；
+回归防线 `tests/test_review_2026_09_16_release_prep.py`（31 项，含 DOE ppb、Grubbs、Hedges g、展示层、哨兵）；
+全库扫描 `grep -n "EPSILON" src/smartsuite/engine/*.py` 逐处核对「防零除还是判决」。
+
+**修复模板**：
+```python
+# ❌ 绝对判决 → 微尺度静默错
+se = resid_std / np.sqrt(Sxx) if Sxx > EPSILON else 1.0
+t_val = float(beta[1] / se) if se > EPSILON else 0.0
+
+# ✅ 精确零防除 + 相对/无量纲判决 + 不可估计显式标注
+se = resid_std / np.sqrt(Sxx) if Sxx > 0 else float("nan")
+t_val = float(beta[1] / se) if np.isfinite(se) and se > 0 else float("nan")
+```
+
 ---
 
 ## 🟢 最佳实践模板
@@ -356,6 +386,7 @@ result_b = results_b[0]
 | 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 11 步清单 |
 | `sum(axis=None)` FutureWarning | pandas 弃用 | 改为 `.sum().sum()` 链式调用 |
 | Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
+| 微尺度(ppb/pico)数据结论翻转 / Web 整列 0.0000 | 绝对 `EPSILON` 判决或展示层固定舍入 | 见陷阱 9：守卫改精确零、判决相对化、展示走 `round_for_display` |
 
 ---
 

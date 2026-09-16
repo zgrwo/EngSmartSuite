@@ -2,6 +2,7 @@
 
 import io
 import logging
+import math
 import os
 import warnings
 
@@ -28,6 +29,24 @@ def _validate_output_path(output_path: str) -> str:
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     return abs_path
+
+
+def _fmt_html_cell(x) -> str:
+    """HTML 表格数值格式：常规量级保留 4 位小数，微尺度改用 4 位有效数字科学计数。
+
+    审查 2026-09-16 B-5：原 `float_format` 固定 `.4f` 把微尺度列（<5e-5）全部渲染为
+    0.0000，抵消引擎 round_for_display → 与 Web/CLI 一致改为尺度感知（≥1e6 维持原 .2e）。
+    """
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return str(x)
+    if not math.isfinite(x):
+        return f"{x}"
+    ax = abs(x)
+    if ax >= 1e6:
+        return f"{x:.2e}"
+    if ax >= 0.5e-4 or ax == 0:
+        return f"{x:.4f}"
+    return f"{x:.4g}"
 
 
 def to_excel(result: AnalysisResult, workbook, sheet_name: str = "分析结果") -> str:
@@ -249,13 +268,7 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
                     classes="table",
                     border=0,
                     escape=True,
-                    float_format=lambda x: (
-                        f"{x:.4f}"
-                        if isinstance(x, (int, float)) and abs(x) < 1e6
-                        else f"{x:.2e}"
-                        if isinstance(x, (int, float))
-                        else str(x)
-                    ),
+                    float_format=_fmt_html_cell,
                 )
             )
             if len(df) > 50:

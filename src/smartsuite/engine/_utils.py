@@ -8,8 +8,6 @@ import logging
 
 import numpy as np
 
-from smartsuite.engine._constants import EPSILON
-
 logger = logging.getLogger(__name__)
 
 
@@ -82,8 +80,13 @@ def durbin_watson(residuals):
             f"请确保回归模型有足够的观测数据。"
         )
     diff = np.diff(residuals)
-    dw = np.sum(diff**2) / (np.sum(residuals**2) + EPSILON)
-    return float(dw)
+    # 审查 2026-09-16 D-2：原分母 `Σe² + EPSILON` 把微尺度残差（~1e-13）的 DW 压到 ~0
+    # → 假"正自相关"；DW 为量纲无关比值，仅残差全零（完美拟合）无定义 → 中性值 2.0
+    denom = float(np.sum(np.square(residuals)))
+    if denom == 0:
+        return 2.0
+    dw = float(np.sum(np.square(diff)) / denom)
+    return dw
 
 
 def round_for_display(values, decimals: int = 4):

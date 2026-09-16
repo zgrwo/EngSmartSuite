@@ -49,6 +49,7 @@ from smartsuite.engine import (
     vif_analysis,
     xbar_r_chart,
 )
+from smartsuite.engine._utils import round_for_display  # noqa: F401 — re-export for web layer
 
 logger = logging.getLogger(__name__)
 

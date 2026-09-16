@@ -932,7 +932,14 @@ def _cohens_d(x, y, warn_list: list[str] | None = None):
     s1, s2 = np.std(x, ddof=1), np.std(y, ddof=1)
     # 合并标准差
     sp = np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / (n1 + n2 - 2))
-    if sp < EPSILON:
+    # 审查 2026-09-16 B-3：sp 带数据量纲，原 `sp < EPSILON`（绝对 1e-10）把微尺度
+    # 真实效应静默归 0；仅当两组均零方差（sp 精确为 0）或非有限时才无法估计，
+    # 返回 0 的同时给出警告（不静默）
+    if not np.isfinite(sp) or sp == 0:
+        if warn_list is not None:
+            warn_list.append(
+                "⚠ 效应量计算: 两组数据均无变异（合并标准差为 0），Hedges g 无法估计，已返回 0"
+            )
         return 0.0
     d = (np.mean(x) - np.mean(y)) / sp
     # Hedges' g 小样本校正因子
@@ -1395,7 +1402,8 @@ def _ht_correlation(req: AnalysisRequest) -> AnalysisResult:
         )
     x = sub[x_col].values
     y = sub[req.target_col].values
-    if np.std(x, ddof=1) < EPSILON or np.std(y, ddof=1) < EPSILON:
+    # 审查 2026-09-16 D-2：原绝对 EPSILON 把微尺度变量误判常量列；改精确零判据
+    if np.std(x, ddof=1) == 0 or np.std(y, ddof=1) == 0:
         return AnalysisResult(
             task="hypothesis_test",
             status="error",
@@ -1515,7 +1523,10 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
         stat, p = sp_stats.ttest_1samp(data, popmean)
         test_name = f"单样本 t 检验 (H0: mu={popmean})"
-        d = (float(data.mean()) - popmean) / (float(data.std(ddof=1)) + EPSILON)
+        # 审查 2026-09-16 D-2：原分母 `std+EPSILON` 稀释微尺度 d（~1000×）；
+        # d 为量纲无关比值，std 精确为 0 时不可估计 → NaN（标签走 N/A）
+        _std_1s = float(data.std(ddof=1))
+        d = (float(data.mean()) - popmean) / _std_1s if _std_1s > 0 else float("nan")
         effect_size = float(d)
         effect_name = "Cohen's d (单样本)"
         effect_label = _effect_size_label(abs(d), "cohens_d")
@@ -1615,7 +1626,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = f"配对 t 检验 ({col1} vs {col2})"
         diff = sub[col1].values - sub[col2].values
         # 配对 Cohen's d: mean(diff) / sd(diff)
-        d_val = float(np.mean(diff) / (np.std(diff, ddof=1) + EPSILON))
+        # 审查 2026-09-16 D-2：同单样本——去掉 +EPSILON 绝对稀释，精确零/非有限除外
+        _sd_diff = float(np.std(diff, ddof=1))
+        d_val = float(np.mean(diff)) / _sd_diff if _sd_diff > 0 else float("nan")
         effect_size = d_val
         effect_name = "Cohen's d (配对)"
         effect_label = _effect_size_label(abs(d_val), "cohens_d")
@@ -3566,7 +3579,8 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
     # 各项方差 + 总分方差
     item_vars = sub.var(ddof=1).values
     total_var = float(sub.sum(axis=1).var(ddof=1))
-    if total_var < EPSILON:
+    # 审查 2026-09-16 D-2：方差带量纲，原 `< EPSILON` 误判微尺度量表为全零 → 精确零判据
+    if total_var == 0:
         return AnalysisResult(
             task="cronbach_alpha", status="error", messages=["总分方差为零，无法计算 α"]
         )
@@ -3593,13 +3607,13 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
         kd = k - 1
         item_vars_drop = sub_drop.var(ddof=1).values
         total_var_drop = float(sub_drop.sum(axis=1).var(ddof=1))
-        if total_var_drop > EPSILON and kd > 1:
+        if total_var_drop > 0 and kd > 1:
             a_drop = (kd / (kd - 1)) * (1 - np.sum(item_vars_drop) / total_var_drop)
         else:
             a_drop = None
         # 项总相关：零方差列会导致 .corr() 返回 NaN，格式化时需防护
         item_total_corr = sub[col].corr(sub.drop(columns=[col]).sum(axis=1))
-        if pd.isna(item_total_corr) or item_vars[i] < EPSILON:
+        if pd.isna(item_total_corr) or item_vars[i] == 0:
             corr_str = "N/A (零方差)"
         else:
             corr_str = f"{float(item_total_corr):.3f}"
@@ -3694,12 +3708,17 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
         "P95": float(data.quantile(0.95)),
         "P99": float(data.quantile(0.99)),
         "IQR": float(data.quantile(0.75) - data.quantile(0.25)),
-        "CV(%)": round(float(data.std(ddof=1) / (abs(data.mean()) + EPSILON) * 100), 2),
+        "CV(%)": (
+            round(float(data.std(ddof=1) / abs(data.mean()) * 100), 2)
+            if float(data.mean()) != 0
+            else float("nan")
+        ),  # 审查 2026-09-16 D-2：原 +EPSILON 使均值≈0 时 CV 爆表；均值精确 0 → 无定义 NaN
     }
 
     # 正态性
     sw_p = float(sp_stats.shapiro(data)[1]) if n <= 5000 else None
-    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p else "N/A"
+    # 审查 2026-09-16 C-2：原 `if sw_p` 把合法的 p=0.0 与"未计算(None)"混同 → is not None
+    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"
 
     # 分布拟合
     fits = {}
@@ -3799,6 +3818,10 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
 
     # 最佳拟合
     best_fit = max(fits, key=lambda k: fits[k]["KS p"]) if fits else "None"
+    _cv_disp = desc["CV(%)"]
+    _cv_txt = (
+        f"{_cv_disp:.1f}" if isinstance(_cv_disp, (int, float)) and np.isfinite(_cv_disp) else "N/A"
+    )
 
     return AnalysisResult(
         task="distribution_summary",
@@ -3809,7 +3832,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig],
         summary=(
             f"{req.target_col}: μ={desc['均值']:.3f}, M={desc['中位数']:.3f}, "
-            f"σ={desc['标准差']:.3f}, CV={desc['CV(%)']:.1f}%。"
+            f"σ={desc['标准差']:.3f}, CV={_cv_txt}%。"
             f"最佳拟合: {best_fit} (KS p={fits[best_fit]['KS p']:.3f})"
         ),
         metadata={"descriptive": desc, "fits": fits, "best_fit": best_fit},

@@ -22,7 +22,12 @@ from smartsuite.services.data_io import (
     preprocess_for_task,
     validate_data,
 )
-from smartsuite.services.orchestrator import NO_TARGET_TASKS, RAW_CAT_TASKS, orchestrate
+from smartsuite.services.orchestrator import (
+    NO_TARGET_TASKS,
+    RAW_CAT_TASKS,
+    orchestrate,
+    round_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,23 +90,25 @@ def _serialize_table(tbl: pd.DataFrame) -> dict:
     json.dumps 输出为 Infinity，破坏浏览器 JSON.parse）。NaN 最终填充为 ""。
     审查 2026-09-01 N-1：datetime64 列此前走 else col 原样传递，values.tolist()
     产出 Timestamp → json.dumps TypeError；现转换为字符串（NaT → NaN → ""）。
+    审查 2026-09-16 B-5：固定 `round(4)` 把微尺度列（<5e-5，如 ~1e-10）整列归零，
+    抵消引擎 round_for_display（O-1 修复）→ 逐列改用同一尺度感知口径（round_for_display
+    经 services.orchestrator 桥接，web 不直接 import engine）。
     """
-    data = (
-        tbl.apply(
-            lambda col: (
-                col.replace([np.inf, -np.inf], np.nan).round(4)
-                if pd.api.types.is_numeric_dtype(col)
-                and not pd.api.types.is_datetime64_any_dtype(col)
-                else (
-                    col.dt.strftime("%Y-%m-%d %H:%M:%S")
-                    if pd.api.types.is_datetime64_any_dtype(col)
-                    else col
-                )
+
+    def _display_column(col: pd.Series) -> pd.Series:
+        if pd.api.types.is_datetime64_any_dtype(col):
+            return col.dt.strftime("%Y-%m-%d %H:%M:%S")
+        # bool 是 numeric 的子类，保留原字面量（旧行为 True/False，不转 0/1）
+        if pd.api.types.is_bool_dtype(col):
+            return col
+        if pd.api.types.is_numeric_dtype(col):
+            clean = col.replace([np.inf, -np.inf], np.nan).astype(float)
+            return pd.Series(
+                round_for_display(clean.to_numpy(), 4), index=clean.index, name=col.name
             )
-        )
-        .fillna("")
-        .values.tolist()
-    )
+        return col
+
+    data = tbl.apply(_display_column).fillna("").values.tolist()
     return {
         "columns": [str(c) for c in tbl.columns],
         "index": [str(i) for i in tbl.index],

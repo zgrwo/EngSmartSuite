@@ -52,10 +52,16 @@ def _natural_sort_key(v):
 
 
 def _we_rules_xbar(values, cl, sigma):
-    """Western Electric 规则检测 X-bar 图。返回违规子组索引字典。"""
+    """Western Electric 规则检测 X-bar 图。返回违规子组索引字典。
+
+    审查 2026-09-16 D-2：原 `sigma = max(sigma, EPSILON)` 把微尺度 σ 抬高到 1e-10
+    → 超出 ±3σ 的点被静默漏检（σ 带数据量纲）；改为直接使用 σ，仅对非正/非有限
+    的退化 σ（如某组子组均值全同）返回空违规，避免 Rule 8 的 `>= 1σ` 全量误报。
+    """
     violations: dict[str, list[int]] = {}
+    if not np.isfinite(sigma) or sigma <= 0:
+        return violations
     vals = np.asarray(values)
-    sigma = max(sigma, EPSILON)
     n = len(vals)
 
     # Rule 1: 单点超出 ±3σ
@@ -479,8 +485,10 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         )
     # 常量列：σ=0 → 控制图无意义（审查 #2.8）
     # Round-2 #A2l：绝对阈值 1e-12 误报微尺度数据 → 相对阈值
-    _scale = abs(xbar_bar) if abs(xbar_bar) > 1e-12 else 1.0
-    if sigma_xbar <= 1e-12 * _scale:
+    # 审查 2026-09-16 B-4：原 `_scale=1.0` 兜底使阈值退回绝对值 → pico 级真实波动
+    # 误报常量；改为相对数据自身幅值（|x|max），全零列才判常量
+    _abs_scale = float(np.max(np.abs(agg["xbar"].values)))
+    if _abs_scale == 0 or sigma_xbar <= 1e-12 * _abs_scale:
         return AnalysisResult(
             task="spc_xbar",
             status="error",
@@ -1513,7 +1521,9 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         else:
             mu = float(gdata.mean())
             sigma = float(gdata.std(ddof=1))
-        if sigma < EPSILON:
+        # 审查 2026-09-16 D-1：原 `sigma < EPSILON` 把微尺度分组误判零方差跳过；
+        # 仅当 σ 精确为 0/非有限/非正（用户给定）时才跳过
+        if not np.isfinite(sigma) or sigma <= 0:
             skipped_zero_var.append(str(gname))
             continue
 
@@ -1776,7 +1786,8 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         else:
             mu = float(gdata.mean())
             sigma = float(gdata.std(ddof=1))
-        if sigma < EPSILON:
+        # 审查 2026-09-16 D-1：同 CUSUM——微尺度分组不再误判零方差跳过
+        if not np.isfinite(sigma) or sigma <= 0:
             skipped_zero_var.append(str(gname))
             continue
 
@@ -1968,9 +1979,9 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
 
     # 审查 2026-08-19 #2.5：常量列 → 所有 KS p 为 nan → 假"过程稳定 ✓ CL=nan"
     # 审查 2026-09-05 B1：绝对阈值误判微尺度数据 → 相对阈值（同 xbar_r_chart #A2l）
-    _mean_abs = abs(float(np.mean(values)))
-    _scale = _mean_abs if _mean_abs > 1e-12 else 1.0
-    if float(np.std(values, ddof=1)) <= 1e-12 * _scale:
+    # 审查 2026-09-16 B-4：去掉 `_scale=1.0` 兜底（pico 级真实波动不再误报常量）
+    _abs_scale = float(np.max(np.abs(values)))
+    if _abs_scale == 0 or float(np.std(values, ddof=1)) <= 1e-12 * _abs_scale:
         return AnalysisResult(
             task="spc_nonparametric",
             status="error",

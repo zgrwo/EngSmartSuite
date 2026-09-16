@@ -317,7 +317,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
 
     # Total Variation
     tv = np.sqrt(grr**2 + pv**2)
-    if tv < EPSILON:
+    # 审查 2026-09-16 D-1：原 `tv < EPSILON`（绝对 1e-10）把微尺度测量数据误判
+    # 零变异拒绝；只有总变异精确为 0（所有读数全同）才无法评估
+    if tv == 0:
         return AnalysisResult(
             task="gage_rr",
             status="error",
@@ -487,7 +489,8 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
         )
     mu = float(data.mean())
     sigma = float(data.std(ddof=1))
-    if sigma < EPSILON:
+    # 审查 2026-09-16 D-1：原 `< EPSILON` 拒绝微尺度数据；改精确零判据
+    if sigma == 0:
         return AnalysisResult(
             task="tolerance_interval",
             status="error",

@@ -14,7 +14,6 @@ from smartsuite.engine._constants import (
     DW_POSITIVE_AUTOCORR,
     DW_SAFE_LOWER,
     DW_SAFE_UPPER,
-    EPSILON,
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
@@ -88,9 +87,10 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
     # 审查 2026-09-05 B1：绝对阈值 1e-12 误判微尺度数据（std~1e-13，如单位换算后的
     # 纳米/微应变数据）→ 相对阈值，复用 spc_xbar 同族修法（spc_charts.py #A2l）
-    _mean_abs = abs(float(np.mean(data.values)))
-    _scale = _mean_abs if _mean_abs > 1e-12 else 1.0
-    if float(np.std(data.values, ddof=1)) <= 1e-12 * _scale:
+    # 审查 2026-09-16 B-4：去掉 `_scale=1.0` 兜底（pico 级真实波动不再误报常量），
+    # 阈值相对数据自身幅值 |x|max
+    _abs_scale = float(np.max(np.abs(data.values)))
+    if _abs_scale == 0 or float(np.std(data.values, ddof=1)) <= 1e-12 * _abs_scale:
         return AnalysisResult(
             task="trend_forecast",
             status="error",
@@ -125,7 +125,9 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
         # ── 精度指标 ──
         # MAPE (处理零值)
-        mape_mask = np.abs(y) > EPSILON
+        # 审查 2026-09-16 D-2：原 |y|>EPSILON 绝对掩码会把微尺度序列（~1e-11）
+        # 整体排除 → MAPE 恒 N/A；改精确零判据（MAPE 为比值，量纲无关）
+        mape_mask = np.abs(y) > 0
         mape = (
             float(np.mean(np.abs(residuals[mape_mask] / y[mape_mask])) * 100)
             if mape_mask.sum() > 0
@@ -599,7 +601,9 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     )
 
     # ── 方法 2: Z-score ──
-    z_scores = np.abs((data - data.mean()) / (data.std(ddof=1) + EPSILON))
+    # 审查 2026-09-16 D-1：原分母 `std+EPSILON` 在微尺度下把 z 整体压低 ~1000×
+    # → 静默漏检；此处 std=0 已在 IQR==0 分支提前返回，直接相除（z 量纲无关）
+    z_scores = np.abs((data - data.mean()) / data.std(ddof=1))
     z_mask = z_scores > ZSCORE_OUTLIER_THRESHOLD
 
     # ── 方法 3: Isolation Forest ──
@@ -894,10 +898,11 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     if method == "grubbs":
         # Grubbs 检验：每次检测最大偏差，迭代最多 5 个异常点
         # 类型安全转换（审查 2026-08-19 #1.4：CLI/YAML 字符串参数会 TypeError）
+        # 审查 2026-09-16 C-1：int(inf) 抛 OverflowError 且不在捕获元组内 → 补齐
         try:
             alpha_g = float(req.params.get("alpha", 0.05))
             max_outliers = int(req.params.get("max_outliers", 5))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
@@ -915,13 +920,22 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=[f"max_outliers 必须 ≥ 1，当前: {max_outliers}"],
             )
+        # 审查 2026-09-16 B-2：原 `sigma < EPSILON`（绝对 1e-10）在首次迭代对微尺度
+        # 数据直接 break → 静默返回 0 异常。常量列改为显式中文错误；迭代中 sigma 归零
+        # （剔除后剩余值全同）才 break（此时已返回已检出异常，语义正确）。
+        if data.nunique(dropna=True) <= 1:
+            return AnalysisResult(
+                task="anomaly_detect",
+                status="error",
+                messages=["目标列为常量列（标准差为 0），无法进行 Grubbs 检验"],
+            )
         vals = data.values.copy()
         mask = np.zeros(len(data), dtype=bool)
         keep_idx = np.arange(len(data))
         for _ in range(max_outliers):
             mu = np.mean(vals)
             sigma = np.std(vals, ddof=1)
-            if sigma < EPSILON:
+            if not np.isfinite(sigma) or sigma <= 0:
                 break
             g_scores = np.abs(vals - mu) / sigma
             max_idx = np.argmax(g_scores)
@@ -952,11 +966,13 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR
         )
     else:
-        if data_std < EPSILON:
+        # 审查 2026-09-16 D-1：原 `data_std < EPSILON`（绝对 1e-10）显式拒绝微尺度
+        # 数据；改精确零判据——只有真常量列才无法做 z 分数（z 本身量纲无关）
+        if data.nunique(dropna=True) <= 1:
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
-                messages=["数据标准差接近零，无法进行 Z-score 异常检测"],
+                messages=["目标列为常量列（标准差为 0），无法进行 Z-score 异常检测"],
             )
         z = np.abs((data - data.mean()) / data_std)
         mask = z > ZSCORE_OUTLIER_THRESHOLD

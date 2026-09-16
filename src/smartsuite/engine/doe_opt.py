@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
-from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR, EPSILON
+from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     durbin_watson,
@@ -36,9 +36,13 @@ def _detect_positive_label(unique_values: list) -> object:
 
 
 def _std_beta(model, X):
-    """计算标准化回归系数 (Beta 权重)，用于比较不同量纲变量的重要性。"""
-    y_std = np.std(model.model.endog)
-    if y_std < EPSILON:
+    """计算标准化回归系数 (Beta 权重)，用于比较不同量纲变量的重要性。
+
+    审查 2026-09-16 C-3：y_std/x_std 带数据量纲，绝对 EPSILON 会把微尺度数据
+    整表归零 → 改精确零/非有限判据（β·σx/σy 为量纲无关比值，可正常计算）。
+    """
+    y_std = float(np.std(model.model.endog))
+    if not np.isfinite(y_std) or y_std == 0:
         return [0.0] * len(X.columns)
     beta = []
     for i, col in enumerate(X.columns):
@@ -46,8 +50,8 @@ def _std_beta(model, X):
             beta.append(0.0)
         else:
             param_val = model.params[col]
-            x_std = np.std(X[col])
-            if np.isnan(param_val) or x_std < EPSILON:
+            x_std = float(np.std(X[col]))
+            if not np.isfinite(param_val) or x_std == 0:
                 beta.append(0.0)
             else:
                 beta.append(float(param_val * x_std / y_std))
@@ -775,13 +779,19 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
 
 
 def _desirability(vals, direction):
-    """计算期望值（0-1 min-max 归一化，multi_objective 聚合口径见其 docstring）。"""
+    """计算期望值（0-1 min-max 归一化，multi_objective 聚合口径见其 docstring）。
+
+    审查 2026-09-16 C-3：极差带数据量纲，原 `vmax-vmin+EPSILON` 会把微尺度目标
+    压到 ~0.001 甚至全 0 → 改精确零判据；无变异目标保持全 0（不影响加权排序）。
+    """
     vmin, vmax = vals.min(), vals.max()
-    rng = vmax - vmin + EPSILON
+    span = float(vmax - vmin)
+    if not np.isfinite(span) or span == 0:
+        return np.zeros_like(np.asarray(vals, dtype=float))
     if direction == "maximize":
-        return (vals - vmin) / rng
+        return (vals - vmin) / span
     elif direction == "minimize":
-        return (vmax - vals) / rng
+        return (vmax - vals) / span
     else:
         raise ValueError(f"不支持的优化方向「{direction}」，请使用 'maximize' 或 'minimize'")
 
@@ -1043,7 +1053,12 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
 
 
 def _lenth_pse(effects):
-    """Lenth 伪标准误 — 用于无重复 DOE 的效应显著性判断。"""
+    """Lenth 伪标准误 — 用于无重复 DOE 的效应显著性判断。
+
+    审查 2026-09-16 C-3：效应值带数据量纲，原 `max(pse, EPSILON)=1e-10` 绝对下限
+    会把微尺度 PSE/SME 抬高到与效应同量级 → 失真。改为返回原始值；
+    全零效应返回 0（调用方 `me > 0` 守卫不画 SME 参考线）。
+    """
     abs_effects = np.sort(np.abs(effects))
     # 取中位数的一半作为初始 s0
     median_abs = np.median(abs_effects)
@@ -1051,9 +1066,9 @@ def _lenth_pse(effects):
     # 剔除 > 2.5*s0 的效应后重新计算 PSE
     trimmed = abs_effects[abs_effects < 2.5 * s0]
     if len(trimmed) == 0:
-        return max(s0, EPSILON)
+        return float(s0)
     pse = 1.5 * np.median(trimmed)
-    return max(pse, EPSILON)
+    return float(pse)
 
 
 # DOE 效应量阈值（η² 类逐步效应量, Richardson 2011）
@@ -1120,7 +1135,13 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
                     ],
                 )
             # 多水平/连续因子：标准化后作为线性效应
-            coded = (col_vals - col_vals.mean()) / (col_vals.std(ddof=1) + EPSILON)
+            # 审查 2026-09-16 C-3：std 带数据量纲，绝对 EPSILON 会稀释微尺度因子
+            _std = float(col_vals.std(ddof=1))
+            coded = (
+                (col_vals - col_vals.mean()) / _std
+                if _std > 0
+                else pd.Series(0.0, index=col_vals.index)
+            )
         coded_map[col] = coded
 
         X = np.column_stack([np.ones(len(coded)), coded])
@@ -1130,13 +1151,19 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             # 连续因子: 效应 = 2*β (对应 ±1σ 的变化，约覆盖 68% 数据)
             # 注: 两种效应量的物理含义不同（全范围 vs 2σ），Pareto 图中并排展示时需注意解读差异
             effect = float(2 * beta[1])
-            # t 检验
+            # t 检验（审查 2026-09-16 B-1：se 带数据量纲，原 `se > EPSILON` 绝对判据
+            # 会把微/ppb 尺度数据的 t 置 0、p 置 1、显著静默漏判 → 改精确零判据；
+            # t=β/se 本身量纲无关，仅 se 精确为 0（完美拟合）时不可计算 → NaN+无法判定）
             resid_std = float(np.std(y - X @ beta, ddof=2)) if len(y) > 2 else 1.0
-            Sxx = np.sum((coded - np.mean(coded)) ** 2)
-            se = resid_std / np.sqrt(Sxx) if Sxx > EPSILON else 1.0
-            t_val = float(beta[1] / se) if se > EPSILON else 0.0
+            Sxx = float(np.sum((coded - np.mean(coded)) ** 2))
+            se = resid_std / np.sqrt(Sxx) if Sxx > 0 else float("nan")
+            t_val = float(beta[1] / se) if np.isfinite(se) and se > 0 else float("nan")
             dof = len(y) - 2
-            p_val = float(2 * sp_stats.t.sf(abs(t_val), dof)) if dof > 0 else 1.0
+            p_val = (
+                float(2 * sp_stats.t.sf(abs(t_val), dof))
+                if dof > 0 and np.isfinite(t_val)
+                else float("nan")
+            )
         except (ValueError, np.linalg.LinAlgError, TypeError) as e:
             logger.warning("DOE 效应估计失败 (因子: %s): %s", col, e)
             # 标记为计算失败而非静默赋零，避免伪造正常结果
@@ -1153,9 +1180,9 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             )
             continue
 
-        effect_ratio = (
-            abs(effect) / (abs(grand_mean) + EPSILON) if abs(grand_mean) > EPSILON else 0.0
-        )
+        # 审查 2026-09-16 B-1：效应占比分母原为 abs(grand_mean)+EPSILON 并附加
+        # 绝对门槛，微尺度整体均值会扭曲/清零占比 → 改精确零判据（量纲同比，占比无量纲）
+        effect_ratio = abs(effect) / abs(grand_mean) if grand_mean != 0 else 0.0
         alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         # Round-2 P3：alpha 越界（如 2.0）→ 全因子"显著"
         if not 0 < alpha < 1:
@@ -1167,11 +1194,13 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         effects.append(
             {
                 "因子": col,
-                "主效应": round(effect, 4),
+                "主效应": round_for_display(effect),
                 "效应占比": round(effect_ratio, 4),
                 "t值": round(t_val, 3),
                 "p值": round(p_val, 4),
-                "显著": "是" if p_val < alpha else "否",
+                "显著": (
+                    "无法判定" if not np.isfinite(p_val) else ("是" if p_val < alpha else "否")
+                ),
                 "效应量": threshold_label(
                     effect_ratio, _DOE_EFFECT_THRESHOLDS, ("可忽略", "小", "中", "大")
                 ),
@@ -1193,11 +1222,17 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
                     beta_i, _, _, _ = np.linalg.lstsq(X_i, y, rcond=None)
                     effect_i = float(2 * beta_i[1])
                     resid_std_i = float(np.std(y - X_i @ beta_i, ddof=2)) if len(y) > 2 else 1.0
-                    Sxx_i = np.sum((inter - np.mean(inter)) ** 2)
-                    se_i = resid_std_i / np.sqrt(Sxx_i) if Sxx_i > EPSILON else 1.0
-                    t_i = float(beta_i[1] / se_i) if se_i > EPSILON else 0.0
+                    Sxx_i = float(np.sum((inter - np.mean(inter)) ** 2))
+                    se_i = resid_std_i / np.sqrt(Sxx_i) if Sxx_i > 0 else float("nan")
+                    t_i = (
+                        float(beta_i[1] / se_i) if np.isfinite(se_i) and se_i > 0 else float("nan")
+                    )
                     dof_i = len(y) - 2
-                    p_i = float(2 * sp_stats.t.sf(abs(t_i), dof_i)) if dof_i > 0 else 1.0
+                    p_i = (
+                        float(2 * sp_stats.t.sf(abs(t_i), dof_i))
+                        if dof_i > 0 and np.isfinite(t_i)
+                        else float("nan")
+                    )
                 except (ValueError, np.linalg.LinAlgError, TypeError) as e:
                     logger.warning("DOE 交互效应估计失败 (%s): %s", inter_name, e)
                     effects.append(
@@ -1212,19 +1247,17 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
                         }
                     )
                     continue
-                ratio_i = (
-                    abs(effect_i) / (abs(grand_mean) + EPSILON)
-                    if abs(grand_mean) > EPSILON
-                    else 0.0
-                )
+                ratio_i = abs(effect_i) / abs(grand_mean) if grand_mean != 0 else 0.0
                 effects.append(
                     {
                         "因子": inter_name,
-                        "主效应": round(effect_i, 4),
+                        "主效应": round_for_display(effect_i),
                         "效应占比": round(ratio_i, 4),
                         "t值": round(t_i, 3),
                         "p值": round(p_i, 4),
-                        "显著": "是" if p_i < alpha else "否",
+                        "显著": (
+                            "无法判定" if not np.isfinite(p_i) else ("是" if p_i < alpha else "否")
+                        ),
                         "效应量": threshold_label(
                             ratio_i, _DOE_EFFECT_THRESHOLDS, ("可忽略", "小", "中", "大")
                         ),
@@ -1268,7 +1301,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             linestyle="--",
             linewidth=1,
             alpha=0.6,
-            label=f"Lenth ME={me:.3f} (α={alpha})",
+            label=f"Lenth ME={round_for_display(me):g} (α={alpha})",
         )
         ax.axvline(-me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6)
     # 标注效应值
@@ -1278,7 +1311,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax.text(
             v,
             i,
-            f" {v:+.3f}",
+            f" {round_for_display(v):+g}",
             va="center",
             ha=ha,
             fontsize=8,
@@ -1286,7 +1319,9 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     ax.set_xlabel("主效应", fontsize=10)
     ax.set_title(
-        f"DOE主效应 — {req.target_col} | 均值={grand_mean:.3f}, σ={grand_std:.3f}", fontsize=11
+        f"DOE主效应 — {req.target_col} | 均值={round_for_display(grand_mean):g}, "
+        f"σ={round_for_display(grand_std):g}",
+        fontsize=11,
     )
     if me > 0:
         ax.legend(fontsize=8)
@@ -1297,7 +1332,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     fail_count = len(failed_effects)
     top_effect_label = str(valid_effects["效应量"].iloc[0]) if len(valid_effects) > 0 else "N/A"
     summary_parts = [
-        f"最强主效应: {top_name} (效应={top_val:.4f}, {top_effect_label})",
+        f"最强主效应: {top_name} (效应={round_for_display(top_val):g}, {top_effect_label})",
         f"显著因子: {sig_count}/{len(valid_effects)}",
     ]
     if fail_count > 0:
