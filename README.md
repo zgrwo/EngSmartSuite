@@ -1,5 +1,8 @@
 # EngSmartSuite (SmartSuite)
 
+> **语言与目标市场**：本项目面向国内制造业工艺工程师，文档与界面均为简体中文，暂不提供英文版。
+> 在线文档：<https://zgrwo.github.io/EngSmartSuite/>
+
 > 工艺数据分析工具箱：Python 引擎 + Flask Web UI + CLI，覆盖正态性检验、过程能力分析、可靠性工程、实验设计（DoE）等。
 
 ---
@@ -22,6 +25,13 @@ git clone https://github.com/zgrwo/EngSmartSuite
 cd EngSmartSuite
 pip install -e ".[dev]"
 ```
+
+### 方式三：从 GitHub Release 安装（离线可用）
+
+1. 打开 [Releases](https://github.com/zgrwo/EngSmartSuite/releases) 下载最新版 wheel（`smartsuite-x.y.z-py3-none-any.whl`）；
+2. `pip install smartsuite-x.y.z-py3-none-any.whl`。
+
+> 暂未发布到 PyPI；稳定数个版本后再评估（见 ROADMAP 决策门）。
 
 ### 验证安装
 
@@ -183,6 +193,7 @@ python run_server.py
 
 | 文档 | 角色 | 内容 |
 |------|------|------|
+| [在线文档站](https://zgrwo.github.io/EngSmartSuite/) | 全部文档 | Web 版手册，支持搜索与暗色主题 |
 | [API 参考](docs/specification/api-reference.md) | 数字唯一信源 | 分析方法签名与参数说明（方法总数唯一锚点） |
 | [用户手册](docs/user-manual/index.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
 | [context.md](docs/governance/context.md) | 术语表 | 所有领域术语唯一定义 |
