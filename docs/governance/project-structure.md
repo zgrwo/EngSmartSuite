@@ -94,7 +94,7 @@ EngSmartSuite/
 │   │   ├── test_root_cause.py
 │   │   ├── test_doe_opt.py
 │   │   ├── test_doe_design.py
-│   │   ├── test_doe_pydoe2_benchmark.py  #   DOE 基准对照（无 pydoe2 时自动跳过）
+│   │   ├── test_doe_pydoe3_benchmark.py #   DOE 基准对照（无 pyDOE3 时自动跳过）
 │   │   ├── test_spc_monitor.py
 │   │   ├── test_utils.py
 │   │   ├── test_correctness.py     #   数值正确性 — 全量覆盖
