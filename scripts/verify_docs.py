@@ -85,7 +85,9 @@ def collect_doc_files(root: Path) -> list[str]:
     readme = root / "scripts" / "README.md"
     if readme.exists():
         docs.append("scripts/README.md")
-    return [d for d in docs if not d.startswith("docs/superpowers/")]
+    # 豁免：docs/superpowers 为会话产物（gitignore）；docs/governance/plans 为
+    # 前瞻性执行计划——引用尚未创建的目标文件属正常，不参与链接/反引号存在性检查
+    return [d for d in docs if not d.startswith(("docs/superpowers/", "docs/governance/plans/"))]
 
 
 # ── 目录树解析（project-structure.md 即契约）──────────────────

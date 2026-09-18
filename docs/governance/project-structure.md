@@ -135,6 +135,8 @@ EngSmartSuite/
 │   │   ├── context.md              #   术语表
 │   │   ├── documentation.md        #   文档职责
 │   │   ├── falsy-pitfalls.md       #   Falsy 陷阱清单
+│   │   ├── plans/                  #   长期执行计划（入库，2026-09-18 起）
+│   │   │   └── 2026-09-18-external-capability-completion-plan.md  # 外功补齐执行计划
 │   │   ├── project-structure.md    #   本文件（目录树契约）
 │   │   ├── sentinel-contract.md    #   哨兵契约 L1-L5 与 NaN/Inf 守卫
 │   │   └── tooling-pitfalls.md     #   工具链陷阱清单
