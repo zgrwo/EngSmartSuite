@@ -31,7 +31,7 @@ pip install -e ".[dev]"
 1. 打开 [Releases](https://github.com/zgrwo/EngSmartSuite/releases) 下载最新版 wheel（`smartsuite-x.y.z-py3-none-any.whl`）；
 2. `pip install smartsuite-x.y.z-py3-none-any.whl`。
 
-> 暂未发布到 PyPI；稳定数个版本后再评估（见 ROADMAP 决策门）。
+> 暂未发布到 PyPI；稳定数个版本后再评估（见 [ROADMAP](ROADMAP.md) 决策门）。
 
 ### 验证安装
 
@@ -162,6 +162,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 ## 贡献
 
 请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解贡献流程（fork → PR → review）。
+适合第一次贡献的任务见 [ROADMAP](ROADMAP.md) 的 good first issue 候选。
 
 ---
 
@@ -199,6 +200,7 @@ python run_server.py
 | [context.md](docs/governance/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](docs/governance/project-structure.md) | 结构地图 | 文件职责与层级关系 |
 | [AGENTS.md](AGENTS.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
+| [ROADMAP.md](ROADMAP.md) | 公开路线图 | 方向、决策门与 good first issue 候选 |
 
 ---
 

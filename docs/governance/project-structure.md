@@ -259,6 +259,7 @@ EngSmartSuite/
 ├── pyproject.toml                  # 包配置 + ruff 规则
 ├── AGENTS.md                       # 项目宪法 / AI 行为准则
 ├── README.md                       # 用户入口
+├── ROADMAP.md                      # 公开路线图（决策门 + good first issue 候选）
 ├── CONTRIBUTING.md                 # 贡献指南
 ├── CODE_OF_CONDUCT.md              # 贡献者行为准则
 ├── CHANGELOG.md                    # 变更记录

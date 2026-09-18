@@ -2,6 +2,8 @@
 
 感谢你对 SmartSuite（工艺数据分析工具箱）的关注！
 
+初次贡献可从 [ROADMAP](ROADMAP.md#适合新贡献者的任务good-first-issue-候选) 的 good first issue 候选开始。
+
 ## 开发环境
 
 ```bash
