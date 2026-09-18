@@ -43,6 +43,9 @@ report = [
     "reportlab>=4.0",
     "openpyxl>=3.0",
 ]
+docs = [
+    "mkdocs-material>=9.5",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

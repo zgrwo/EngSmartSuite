@@ -129,6 +129,7 @@ EngSmartSuite/
 │       └── test_verify_frontend_params.py # 2026-09-06 E4/G4 前后端键集自测
 │
 ├── docs/                           # 项目文档（规范文档 + ADR + 手册）
+│   ├── index.md                    #   文档站首页（mkdocs-material）
 │   ├── README.md                   #   文档分类导航
 │   ├── governance/                 #   治理与基础
 │   │   ├── ai-review-prompt.md     #   AI 深度审查 Prompt 模板
@@ -244,6 +245,7 @@ EngSmartSuite/
 ├── run_server.py                   # Web UI 启动入口
 ├── setup_offline.bat               # 离线安装脚本（Windows）
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
+├── mkdocs.yml                      # 文档站配置（mkdocs-material）
 ├── pyproject.toml                  # 包配置 + ruff 规则
 ├── AGENTS.md                       # 项目宪法 / AI 行为准则
 ├── README.md                       # 用户入口

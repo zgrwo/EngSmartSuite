@@ -97,6 +97,7 @@ EngSmartSuite/
 ├── run_server.py                   # Web UI 启动入口
 ├── setup_offline.bat               # 离线安装脚本（Windows）
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
+├── mkdocs.yml                        # 文档站配置（mkdocs-material）
 ├── pyproject.toml                    # 包配置 + ruff 规则
 ├── AGENTS.md                         # 本文件
 ├── README.md                         # 用户向功能指南

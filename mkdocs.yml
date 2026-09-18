@@ -1,0 +1,49 @@
+site_name: EngSmartSuite 用户文档
+site_description: 工艺数据分析工具箱 — Web UI / CLI / Python API
+site_url: https://zgrwo.github.io/EngSmartSuite/
+repo_url: https://github.com/zgrwo/EngSmartSuite
+repo_name: zgrwo/EngSmartSuite
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      toggle:
+        icon: material/weather-night
+        name: 切换到暗色
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到亮色
+
+docs_dir: docs
+
+# 不发布：AI 会话/计划、ADR 草稿、内部执行计划、内部审查 Prompt、docs 目录自身的 README
+exclude_docs: |
+  superpowers/
+  adr/
+  governance/plans/
+  governance/ai-review-prompt.md
+  README.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - 首页: index.md
+  - 用户手册: user-manual/user-manual.md
+  - API 参考: specification/api-reference.md
+  - 术语表: governance/context.md
