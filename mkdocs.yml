@@ -28,12 +28,13 @@ theme:
 
 docs_dir: docs
 
-# 不发布：AI 会话/计划、ADR 草稿、内部执行计划、内部审查 Prompt、docs 目录自身的 README
+# 不发布：AI 会话/计划、ADR 草稿、内部执行计划、内部审查 Prompt/清单、docs 目录自身的 README
 exclude_docs: |
   superpowers/
   adr/
   governance/plans/
   governance/ai-review-prompt.md
+  governance/review-checklist.md
   README.md
 
 markdown_extensions:

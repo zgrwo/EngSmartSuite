@@ -1,6 +1,7 @@
 # AI 深度审查 Prompt（EngSmartSuite 变更审查模板）
 
 > 本文档是**一份可直接投喂给任意 AI 审查代理的 Prompt 模板**，用于对本项目的任何变更（PR / 提交 / 发版前全量）做一次"先想后写、实证优先、杜绝假阳性"的深度审查。
+> 人类审查者请优先使用 [review-checklist.md](review-checklist.md)（可执行清单）；本 Prompt 面向 AI 深度审查。
 > 配套治理规则见 [documentation.md](documentation.md)；审查产出报告一律归档 `logs/reports/`，**不入库**。
 
 ---
