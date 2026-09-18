@@ -56,5 +56,6 @@ nav:
       - 8 高级分析: user-manual/08-advanced.md
       - 9 结果验证: user-manual/09-result-verification.md
       - 10 排错 FAQ: user-manual/10-faq.md
+  - 示例集: gallery.md
   - API 参考: specification/api-reference.md
   - 术语表: governance/context.md

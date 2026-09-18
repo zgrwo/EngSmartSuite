@@ -35,4 +35,4 @@
 2. 为 `benchmarks/` 增加 `process_capability` 与 `correlation` 两个基准任务
 3. 手册某方法章节补充"常见参数误用"小节（每章 ≤30 行，附实际输出）
 4. 为 `templates/` 增加模板参数自动校验脚本的测试用例
-5. 补 docs/gallery.md 中缺失方法的示例图与一句话解读
+5. 补 `docs/gallery.md` 中缺失方法的示例图与一句话解读

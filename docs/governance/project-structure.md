@@ -131,6 +131,7 @@ EngSmartSuite/
 ├── docs/                           # 项目文档（规范文档 + ADR + 手册）
 │   ├── index.md                    #   文档站首页（mkdocs-material）
 │   ├── README.md                   #   文档分类导航
+│   ├── gallery.md                  #   示例集（代表方法图 + CLI 命令）
 │   ├── governance/                 #   治理与基础
 │   │   ├── ai-review-prompt.md     #   AI 深度审查 Prompt 模板
 │   │   ├── context.md              #   术语表
