@@ -25,6 +25,8 @@ Mini/
 │   └── governance/
 │       └── project-structure.md
 ├── skills/
+├── scripts/
+├── AGENTS.md
 └── README.md
 ```
 """
@@ -36,6 +38,8 @@ Mini/
 ├── tests/
 ├── docs/
 ├── skills/
+├── scripts/
+├── AGENTS.md
 └── README.md
 ```
 """
@@ -201,6 +205,14 @@ def test_subdir_undeclared_strict(tmp_path):
     problems = verify_docs.check_subdir_undeclared(root, strict=True)
     assert any("docs/extra.md" in p for p in problems)
     assert verify_docs.check_subdir_undeclared(root, strict=False) == []
+
+
+def test_undeclared_excludes_build_artifacts(tmp_path):
+    """回归：site/（mkdocs）与 dist/（uv build）是 .gitignore 忽略的构建产物，豁免登记。"""
+    root = build_repo(tmp_path)
+    (root / "site").mkdir()
+    (root / "dist").mkdir()
+    assert verify_docs.check_undeclared(root, strict=True) == []
 
 
 # ── 向量 6b：git tag 版本漂移（审查 2026-09-05 E1）────────────
