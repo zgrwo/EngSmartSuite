@@ -50,8 +50,10 @@ EXCLUDED_DIRS = {
     ".superpowers",  # Superpowers 会话产物（.gitignore 已忽略）
     ".venv",
     "build",
+    "dist",  # 构建产物（.gitignore 已忽略）
     "logs",
     "packages",  # 离线安装缓存（.gitignore 忽略）
+    "site",  # mkdocs 文档站构建产物（.gitignore 已忽略）
     "__pycache__",
 }
 
