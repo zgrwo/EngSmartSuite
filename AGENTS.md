@@ -99,6 +99,7 @@ EngSmartSuite/
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
 ├── mkdocs.yml                        # 文档站配置（mkdocs-material）
 ├── pyproject.toml                    # 包配置 + ruff 规则
+├── uv.lock                           # 可复现依赖锁（uv）
 ├── AGENTS.md                         # 本文件
 ├── README.md                         # 用户向功能指南
 ├── ROADMAP.md                        # 公开路线图（决策门 + good first issue 候选）

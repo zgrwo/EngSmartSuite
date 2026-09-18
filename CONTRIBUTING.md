@@ -17,10 +17,22 @@
 
 ## 开发环境
 
+### 路径 A：uv（推荐，可复现）
+
 ```bash
 git clone https://github.com/zgrwo/EngSmartSuite
 cd EngSmartSuite
-pip install -e ".[dev,report]"
+uv sync --frozen --all-extras   # 安装全部依赖（含测试/报告/Web/文档）
+uv run pytest tests/ -q         # 全部命令通过 uv run 执行
+```
+
+### 路径 B：pip（离线/无 uv 环境）
+
+```bash
+git clone https://github.com/zgrwo/EngSmartSuite
+cd EngSmartSuite
+pip install -e ".[dev,report,web]"
+pytest tests/ -q
 ```
 
 ## 新增分析方法流程（11 步注册链）

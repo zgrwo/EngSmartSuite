@@ -6,8 +6,10 @@ on:
       - "src/smartsuite/**"
       - "scripts/**"
       - "tests/**"
+      - "benchmarks/**"
       - "docs/user-manual/**"
       - "docs/specification/api-reference.md"
+      - "uv.lock"
   workflow_dispatch:
 
 # 最小权限：只读仓库内容；pull-requests: read 供 dependency-review-action 读取 PR 元数据
@@ -33,84 +35,88 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-          cache: pip
-      - name: Install
-        run: pip install -e ".[dev]"
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
       - name: Run test quality guard
         # WARN 基线 29（审查 #P1-7）：新增弱断言/恒真断言即 FAIL
-        run: python scripts/test_quality_guard.py --max-warn 29
+        run: uv run python scripts/test_quality_guard.py --max-warn 29
 
   docs-consistency:
     name: 文档一致性（断链/目录树/裸异常/版本漂移）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"  # 最低支持版本兜底（矩阵覆盖见 ci.yml full）
-          cache: pip
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
       - name: Run docs verification
-        run: python scripts/verify_docs.py --strict
+        run: uv run python scripts/verify_docs.py --strict
 
   manual-parity:
     name: 手册数值一致性
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-          cache: pip
-      - name: Install
-        # 2026-08-21 CI 修复：verify_cross_consistency 读 tests/test_data.xlsx，
-        # 需要 openpyxl（report extras）；此前 [dev] 缺依赖 → pd.read_excel ImportError
-        run: pip install -e ".[dev,report]"
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件）
+        # --all-extras 含 report（openpyxl）：verify_cross_consistency 读 tests/test_data.xlsx
+        # （2026-08-21 CI 修复历史：dev 缺依赖 → pd.read_excel ImportError）
+        run: uv sync --frozen --all-extras
       - name: Verify manual parity
-        run: python scripts/verify_cross_consistency.py
+        run: uv run python scripts/verify_cross_consistency.py
 
   falsy-audit:
     name: Falsy 模式审计
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-          cache: pip
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
       - name: Run falsy audit
-        run: python scripts/falsy_audit.py
+        run: uv run python scripts/falsy_audit.py
 
   architecture-check:
     name: 架构约束检查
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-          cache: pip
-      - name: Install
-        # Round-2：verify_consistency 内嵌全量 pytest，含 Web 层测试（flask）
-        run: pip install -e ".[dev,web,report]"
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件）
+        # verify_consistency 内嵌全量 pytest，含 Web 层测试（flask）
+        run: uv sync --frozen --all-extras
       - name: Verify architecture
-        run: python scripts/verify_consistency.py
+        run: uv run python scripts/verify_consistency.py
 
   ruff-check:
     name: Ruff Format Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-          cache: pip
-      - name: Install ruff
-        # 审查 2026-09-11 R-8：与 pyproject.toml dev extra 统一（0.16.5，
-        # 此前 dependabot 仅 bump pyproject，quality.yml 停留在 0.16.3）
-        run: pip install ruff==0.16.5
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件）
+        # 审查 2026-09-11 R-8：ruff 版本以 pyproject.toml dev extra 为准（0.16.5），
+        # 现由 uv.lock 锁定，消除"quality.yml 手工钉版本"的漂移面
+        run: uv sync --frozen --all-extras
       - name: Ruff format check
         # 审查 2026-09-01 G-8：format 检查范围补 tests/（此前不含，本地与 CI 不一致）
-        run: ruff format --check src/smartsuite/ scripts/ tests/
+        run: uv run ruff format --check src/smartsuite/ scripts/ tests/ benchmarks/
