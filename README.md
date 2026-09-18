@@ -161,8 +161,10 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 ## 贡献
 
-请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解贡献流程（fork → PR → review）。
-适合第一次贡献的任务见 [ROADMAP](ROADMAP.md) 的 good first issue 候选。
+- 新手入口：[CONTRIBUTING 的第一个 PR 路径](CONTRIBUTING.md#第一个-pr约-15-分钟)；任务从 [ROADMAP](ROADMAP.md) 的候选清单挑选
+- 审查标准：[人类审查清单](docs/governance/review-checklist.md)
+- **维护模式**：目前为单一维护者（业余时间）。Issue 通常在 72 小时内答复；PR 审查集中在周末。
+  若你希望成为长期贡献者，请从 ROADMAP 任务开始，累计 3 个合并 PR 后可申请 triage 权限。
 
 ---
 
