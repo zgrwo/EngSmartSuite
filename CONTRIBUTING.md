@@ -4,6 +4,17 @@
 
 初次贡献可从 [ROADMAP](ROADMAP.md#适合新贡献者的任务good-first-issue-候选) 的 good first issue 候选开始。
 
+## 第一个 PR（约 15 分钟）
+
+1. `python scripts/doctor.py` — 环境诊断（Python/git/依赖逐项检查，失败会给修复指引）
+2. `uv sync --frozen --all-extras` — 安装依赖（无 uv 时见下方路径 B）
+3. `python scripts/verify_all.py --quick` — 快速门禁（语法编译 + 全量测试；跳过文档检查）
+4. 从 [ROADMAP](ROADMAP.md#适合新贡献者的任务good-first-issue-候选) 挑一条任务，按下方「提交前必检」开工
+5. 提交前：`uv run pytest tests/ -q -x` + `uv run ruff check src/smartsuite/ scripts/ tests/ benchmarks/`
+6. 按 [Conventional Commits](https://www.conventionalcommits.org/) 提交，开 PR 时使用模板
+
+> 卡住了？在 Issue 里 `@zgrwo`，或直接开 Discussion。
+
 ## 开发环境
 
 ```bash
@@ -40,10 +51,23 @@ pip install -e ".[dev,report]"
 ## 提交前必检
 
 ```bash
-ruff check src/smartsuite/ scripts/  # 零错误
-pytest tests/ -x -q              # 全绿
-python scripts/verify_consistency.py  # 一致性校验
+# uv（推荐）
+uv run ruff check src/smartsuite/ scripts/ tests/ benchmarks/        # 零错误
+uv run ruff format --check src/smartsuite/ scripts/ tests/ benchmarks/
+uv run pytest tests/ -x -q                                          # 全绿
+
+# pip 等价（无 uv 环境）
+ruff check src/smartsuite/ scripts/ tests/ benchmarks/
+ruff format --check src/smartsuite/ scripts/ tests/ benchmarks/
+pytest tests/ -x -q
 ```
+
+## 测试
+
+- 全量：`uv run pytest tests/ -q`（≈8 分钟）
+- 仅引擎：`uv run pytest tests/test_engine -q`
+- 仅服务/Web：`uv run pytest tests/test_services -q`
+- 性能基准：`uv run pytest benchmarks/ --benchmark-only -q`（非门禁）
 
 ## PR 规范
 
