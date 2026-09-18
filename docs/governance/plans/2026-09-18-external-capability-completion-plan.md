@@ -154,10 +154,11 @@ theme:
 
 docs_dir: docs
 
-# 不发布：AI 会话/计划、ADR 草稿、docs 目录自身的 README
+# 不发布：AI 会话/计划、ADR 草稿、内部执行计划、docs 目录自身的 README
 exclude_docs: |
   superpowers/
   adr/
+  governance/plans/
   README.md
 
 markdown_extensions:
