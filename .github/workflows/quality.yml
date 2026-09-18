@@ -120,3 +120,18 @@ jobs:
       - name: Ruff format check
         # 审查 2026-09-01 G-8：format 检查范围补 tests/（此前不含，本地与 CI 不一致）
         run: uv run ruff format --check src/smartsuite/ scripts/ tests/ benchmarks/
+
+  type-check:
+    name: Mypy Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
+      - name: Type check (core + services)
+        run: uv run mypy

@@ -2,6 +2,8 @@
 
 import logging
 import time
+from typing import Any
+
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
 from smartsuite.engine import GROUP_COLORS  # noqa: F401 — re-export for web layer
@@ -98,7 +100,7 @@ TASK_REGISTRY = {
     "scatter_plot": scatter_plot,
 }
 
-DEFAULT_PARAMS = {
+DEFAULT_PARAMS: dict[str, dict[str, Any]] = {
     # 要因分析
     "correlation": {"method": "pearson", "control_vars": []},
     "anova": {"alpha": 0.05, "interactions": 0},
