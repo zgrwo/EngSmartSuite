@@ -2,7 +2,7 @@
 
 背景：verify_manual_claims.py 的 rpt() 期望值是**编写时誊写的快照**，
 两道既有门禁（verify_manual_claims / verify_cross_consistency）都不解析
-user-manual.md——审查注入 2a 实证：手册值 −0.050→−0.099 双门禁 PASS。
+user-manual/（按章拆页）——审查注入 2a 实证：手册值 −0.050→−0.099 双门禁 PASS。
 本模块校验「CLAIM 快照值仍存在于手册对应章节」，闭合 手册↔快照↔引擎 链。
 """
 
@@ -140,10 +140,19 @@ def test_spaced_operator_minus_negative_claim():
     assert len(problems) == 1 and "模具温度系数" in problems[0]
 
 
+def _read_manual_text() -> str:
+    """合并 docs/user-manual/[0-9]*.md 章节文件（与 verify_manual_claims 同口径）。"""
+    parts = [
+        p.read_text(encoding="utf-8")
+        for p in sorted((ROOT / "docs" / "user-manual").glob("[0-9]*.md"))
+    ]
+    assert parts, "未找到 docs/user-manual/[0-9]*.md 章节文件"
+    return "\n".join(parts)
+
+
 def test_real_manual_sections_locatable():
     """真实手册结构守卫：SECTION_BY_ANALYSIS 中的每个章节标题都能定位。"""
-    manual_path = ROOT / "docs" / "user-manual" / "user-manual.md"
-    text = manual_path.read_text(encoding="utf-8")
+    text = _read_manual_text()
     missing = [
         sec
         for sec in freshness.SECTION_BY_ANALYSIS.values()

@@ -1,9 +1,9 @@
 """手册 CLAIM 新鲜度校验 — 闭合「手册 ↔ 快照 ↔ 引擎」链（审查 2026-09-06 F-D1）。
 
-背景：verify_manual_claims.py 的 rpt() 期望值是编写时从 user-manual.md 誊写的
-**快照**，既有两道门禁（verify_manual_claims / verify_cross_consistency）均不
-解析 user-manual.md——审查注入 2a 实证：手册值 −0.050→−0.099 双门禁 PASS。
-本模块从 user-manual.md 解析各章节的数值 token，要求每条数值 CLAIM 仍能在
+背景：verify_manual_claims.py 的 rpt() 期望值是编写时从 user-manual/（按章拆页）誊写的
+**快照**，既有两道门禁（verify_manual_claims / verify_cross_consistency）均不解析
+user-manual/（按章拆页）——审查注入 2a 实证：手册值 −0.050→−0.099 双门禁 PASS。
+本模块从 user-manual/（按章拆页）解析各章节的数值 token，要求每条数值 CLAIM 仍能在
 对应章节中找到（Unicode 减号/千分位归一化），缺失即报告问题。
 
 用法（由 verify_manual_claims.py 集成调用）：
@@ -13,7 +13,7 @@
 
 import re
 
-# 分析方法 → 手册章节号（与 user-manual.md 的 ### 标题对应）
+# 分析方法 → 手册章节号（与 user-manual/（按章拆页）的 ### 标题对应）
 SECTION_BY_ANALYSIS = {
     "correlation": "4.1",
     "anova": "4.2",
@@ -152,7 +152,7 @@ def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
     """校验 CLAIM 快照值仍存在于手册对应章节，返回问题列表（空 = 全部新鲜）。
 
     Args:
-        manual_text: user-manual.md 全文
+        manual_text: user-manual/（按章拆页）全文
         claims: (analysis, value_name, manual_literal) 列表；
                 manual_literal 为数值或含数值的字符串（如 VIF 区间 "~1.002-1.004"）
 
@@ -175,7 +175,7 @@ def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
         if section is None:
             problems.append(
                 f"§{sec} 缺少 CLAIM「{value_name}」——手册章节不存在或结构变化"
-                f"（快照值 {literal}），请核对 docs/user-manual/user-manual.md"
+                f"（快照值 {literal}），请核对 docs/user-manual/（按章拆页）"
             )
             continue
         # 行锚定：取锚点行；未登记锚点 → 全章节
@@ -185,7 +185,7 @@ def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
             if not anchor_lines:
                 problems.append(
                     f"§{sec} CLAIM「{value_name}」的锚点行未找到（pattern={anchor_pat}）"
-                    f"——手册表格结构可能已变化，请核对 docs/user-manual/user-manual.md"
+                    f"——手册表格结构可能已变化，请核对 docs/user-manual/（按章拆页）"
                 )
                 continue
             scope_text = "\n".join(anchor_lines)
@@ -208,7 +208,7 @@ def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
             if not hit:
                 problems.append(
                     f"§{sec} 缺少 CLAIM「{value_name}」快照值 {literal}"
-                    f"——手册数值可能已被编辑，请核对 docs/user-manual/user-manual.md"
+                    f"——手册数值可能已被编辑，请核对 docs/user-manual/（按章拆页）"
                 )
         elif isinstance(literal, str):
             parts = _UNSIGNED_TOKEN_RE.findall(literal)

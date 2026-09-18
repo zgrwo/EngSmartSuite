@@ -38,7 +38,7 @@ python run_server.py
 
 ## 模块速览
 
-> 完整签名、参数说明见 **[API 参考](docs/specification/api-reference.md)**；每个函数的详细示例见 **[用户手册](docs/user-manual/user-manual.md)**。
+> 完整签名、参数说明见 **[API 参考](docs/specification/api-reference.md)**；每个函数的详细示例见 **[用户手册](docs/user-manual/index.md)**。
 
 | 模块 | 做什么 |
 |------|------|
@@ -184,7 +184,7 @@ python run_server.py
 | 文档 | 角色 | 内容 |
 |------|------|------|
 | [API 参考](docs/specification/api-reference.md) | 数字唯一信源 | 分析方法签名与参数说明（方法总数唯一锚点） |
-| [用户手册](docs/user-manual/user-manual.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
+| [用户手册](docs/user-manual/index.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
 | [context.md](docs/governance/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](docs/governance/project-structure.md) | 结构地图 | 文件职责与层级关系 |
 | [AGENTS.md](AGENTS.md) | 项目宪法 | 架构分层、红线规则、开发流程 |

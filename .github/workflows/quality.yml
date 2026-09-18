@@ -6,7 +6,7 @@ on:
       - "src/smartsuite/**"
       - "scripts/**"
       - "tests/**"
-      - "docs/user-manual/user-manual.md"
+      - "docs/user-manual/**"
       - "docs/specification/api-reference.md"
   workflow_dispatch:
 

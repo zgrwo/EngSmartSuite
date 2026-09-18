@@ -22,7 +22,7 @@ pip install -e ".[dev,report]"
 □ 7. templates/ — 创建 YAML 模板
 □ 8. tests/ — 至少覆盖 correctness + invariants 两层
 □ 9. docs/specification/api-reference.md — 更新 API 参考
-□ 10. docs/user-manual/user-manual.md — 更新用户手册（五段式）
+□ 10. docs/user-manual/ — 更新用户手册（五段式；方法章节位于 04–08）
 □ 11. skills/analysis-decision-tree.md — 更新决策树（如引入新场景）
 ```
 

@@ -70,7 +70,7 @@ core/   (contracts.py：AnalysisRequest / AnalysisResult；exceptions.py)   ← 
 ```
 engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → DEFAULT_PARAMS
 → TASK_LABELS + TASK_GROUPS → web/static/app.js TASK_PARAMS → templates/ YAML
-→ 测试（correctness+invariants）→ api-reference.md → user-manual.md（五段式）→ 决策树
+→ 测试（correctness+invariants）→ api-reference.md → user-manual/（五段式）→ 决策树
 ```
 
 **前端列约束三集合**（`web/static/app.js` 的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 常量——行号易漂移，按常量名定位；引擎函数每次改动后必核对，陷阱 2）：
@@ -107,7 +107,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | 红线 | 要求 |
 | :--- | :--- |
 | 注册完整性 | 新增分析函数必须 11 步注册链全走（见 3.3） |
-| 文档同步 | api-reference 签名唯一信源；user-manual 参数选择→示例图片→数值结果→解读→补充五段式（承诺内存要求：**手册数值与引擎实测一致**，不得"声称未兑现"） |
+| 文档同步 | api-reference 签名唯一信源；user-manual/（五段式：参数选择→示例图片→数值结果→解读→补充）（承诺内存要求：**手册数值与引擎实测一致**，不得"声称未兑现"） |
 | 版本一致性 | `pyproject.toml version` == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 引用行，2026-09-06 F1）== `.release-please-manifest.json` == 最新 `v*` tag（verify_docs 版本向量强制） |
 | 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.x）；CI 矩阵 3.10–3.13 × 3 OS |
 
@@ -173,7 +173,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 - 变更**引擎函数**的调用者：orchestrator 注册？其他引擎函数？`engine/__init__.py` 导出？前端 `_noTargetNeeded/_yOnlyTasks/_xOptionalTasks` 是否有该任务？templates/ 是否有对应 YAML？
 - **数据处理链**：`preprocess_data` / `safe_float` / `_utils.py` 的改动对所有引擎函数的连锁影响（全库共享 → 先跑全量引擎测试）。
 - **测试覆盖面**：codegraph 标 `⚠️ no covering tests found` 的符号 = 高风险点，核对是否落入四层防线的哪一层。
-- **文档契约**：是否触碰 api-reference / user-manual / project-structure 目录树（verify_docs 强制）/ 术语表 context.md。
+- **文档契约**：是否触碰 api-reference / user-manual/（五段式）/ project-structure 目录树（verify_docs 强制）/ 术语表 context.md。
 - 新增/移动文件是否触发 `verify_docs.py --strict` 的未声明/未登记检查与断链检查。
 
 ### 4.4 流程触发链核对（CI / PR / Q&S）
@@ -243,7 +243,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 - F1 数字基准：签名总数以 [api-reference.md](../specification/api-reference.md) 为唯一信源；42 任务文字在任何文档中不得硬编码成别的数（**审查者当轮重测数量，模板中的 42 为 2026-09-10 快照**）。
 - F2 注册链：新增/修改分析函数必须走 11 步同步（见 3.3），前端三集合与引擎实际使用一致。
-- F3 手册准确性：user-manual 的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
+- F3 手册准确性：user-manual/（五段式）的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
 - F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义；**`skills/*.md` 陷阱清单与源码同步**（历史：smartsuite-dev.md `_yOnlyTasks` 缺 `doe_design` 而 app.js 已含，2026-09-05 F-drift）。
 - F5 版本链：pyproject version == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 行，2026-09-06 F1）== manifest == **远端** latest tag（本地 tag 与 `origin/*` 引用会过期，发版前全量按「4.2 附注」核远端）。
 

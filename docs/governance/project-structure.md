@@ -144,8 +144,18 @@ EngSmartSuite/
 │   ├── specification/              #   技术规格
 │   │   ├── api-reference.md        #   函数签名查阅（唯一信源，总数锚点）
 │   │   └── specification.md        #   项目规格文档
-│   ├── user-manual/                #   用户手册
-│   │   ├── user-manual.md          #   全方法操作指南
+│   ├── user-manual/                #   用户手册（2026-09-18 起按章拆页）
+│   │   ├── index.md                #   手册首页 + 分章目录
+│   │   ├── 01-quickstart.md        #   1 快速入门
+│   │   ├── 02-ui-overview.md       #   2 界面概览
+│   │   ├── 03-data-import.md       #   3 导入数据与列定义
+│   │   ├── 04-root-cause.md        #   4 要因筛选
+│   │   ├── 05-reliability.md       #   5 信度诊断
+│   │   ├── 06-modeling.md          #   6 建模优化
+│   │   ├── 07-spc.md               #   7 过程监控
+│   │   ├── 08-advanced.md          #   8 高级分析
+│   │   ├── 09-result-verification.md # 9 结果验证
+│   │   ├── 10-faq.md               #   10 排错 FAQ
 │   │   └── images/                 #   示例图片
 │   └── adr/                        #   架构决策记录
 │       ├── adr-template.md         #   ADR 模板

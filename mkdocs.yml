@@ -44,6 +44,17 @@ markdown_extensions:
 
 nav:
   - 首页: index.md
-  - 用户手册: user-manual/user-manual.md
+  - 用户手册:
+      - 指南首页: user-manual/index.md
+      - 1 快速入门: user-manual/01-quickstart.md
+      - 2 界面概览: user-manual/02-ui-overview.md
+      - 3 导入数据与列定义: user-manual/03-data-import.md
+      - 4 要因筛选: user-manual/04-root-cause.md
+      - 5 信度诊断: user-manual/05-reliability.md
+      - 6 建模优化: user-manual/06-modeling.md
+      - 7 过程监控: user-manual/07-spc.md
+      - 8 高级分析: user-manual/08-advanced.md
+      - 9 结果验证: user-manual/09-result-verification.md
+      - 10 排错 FAQ: user-manual/10-faq.md
   - API 参考: specification/api-reference.md
   - 术语表: governance/context.md

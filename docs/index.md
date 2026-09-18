@@ -25,6 +25,6 @@ result = orchestrate(AnalysisRequest(task="correlation", data=df, target_col="�
 
 ## 关键入口
 
-- [用户手册](user-manual/user-manual.md) — 每个方法的参数、示例图、数值与解读
+- [用户手册](user-manual/index.md) — 每个方法的参数、示例图、数值与解读
 - [API 参考](specification/api-reference.md) — 42 个分析函数签名与参数字典
 - [GitHub 仓库](https://github.com/zgrwo/EngSmartSuite) — 源码、Issue、Release

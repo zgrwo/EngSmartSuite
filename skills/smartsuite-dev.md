@@ -16,7 +16,7 @@ description: SmartSuite 项目开发技能 — 工艺数据分析工具箱的代
 - `smartsuite/web/` — Web UI 层（app.js / api.py / app.py）
 - `smartsuite/services/` — 桥接层（orchestrator / data_io）
 - `smartsuite/engine/_palette.py` — 可视化配色
-- `docs/user-manual/user-manual.md` — 用户手册
+- `docs/user-manual/` — 用户手册（按章拆页，index.md + 01–10）
 - `tests/` — 测试文件
 
 ## 架构速查
@@ -298,7 +298,7 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
 □ 8. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
 □ 9. docs/specification/api-reference.md   — 更新 API 参考
 □ 10. skills/analysis-decision-tree.md — 更新决策树（如引入新分析场景）
-□ 11. docs/user-manual/user-manual.md    — 更新用户手册（如面向用户的新方法）
+□ 11. docs/user-manual/    — 更新用户手册（如面向用户的新方法）
 ```
 
 ### 模板 3：box_chart / SPC 函数新增 USL/LSL/UCL/CL 参数
@@ -422,7 +422,7 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 领域术语 | `docs/governance/context.md` | 中文术语定义 |
 | 决策知识 | `skills/analysis-decision-tree.md` | 分析方法决策树 + 工作流 |
 | API 参考 | `docs/specification/api-reference.md` | 全量函数签名（总数锚点） |
-| 用户手册 | `docs/user-manual/user-manual.md` | 操作说明 + 五段式示例 |
+| 用户手册 | `docs/user-manual/index.md` | 操作说明 + 五段式示例 |
 | 架构决策 | `docs/adr/0001-*.md` / `docs/adr/0002-*.md` | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel |
 | 防错契约 | `docs/governance/sentinel-contract.md` | L1-L5 哨兵 + NaN/Inf 守卫清单（新增/修改引擎函数必查） |
 | 配色方案 | `smartsuite/engine/_palette.py` | PALETTE 字典完整定义 |
