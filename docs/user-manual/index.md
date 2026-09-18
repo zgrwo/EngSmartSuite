@@ -11,7 +11,7 @@
 3. [导入数据与列定义](03-data-import.md)
 4. [要因筛选（8 个方法）](04-root-cause.md)
 5. [信度诊断（5 个方法）](05-reliability.md)
-6. [建模优化（11 个方法）](06-modeling.md)
+6. [建模优化（12 个方法）](06-modeling.md)
 7. [过程监控（12 个方法）](07-spc.md)
 8. [高级分析（5 个方法）](08-advanced.md)
 9. [结果验证](09-result-verification.md)

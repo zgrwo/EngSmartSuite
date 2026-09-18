@@ -26,10 +26,12 @@ cd EngSmartSuite
 pip install -e ".[dev]"
 ```
 
-### 方式三：从 GitHub Release 安装（离线可用）
+### 方式三：从 GitHub Release 安装（wheel 安装仍需联网拉取依赖）
 
 1. 打开 [Releases](https://github.com/zgrwo/EngSmartSuite/releases) 下载最新版 wheel（`smartsuite-x.y.z-py3-none-any.whl`）；
 2. `pip install smartsuite-x.y.z-py3-none-any.whl`。
+
+> wheel 仅含本项目代码，Python 依赖仍需从依赖索引下载；完全离线请先预下载依赖（参考项目内 `setup_offline` 脚本的做法）。
 
 > 暂未发布到 PyPI；稳定数个版本后再评估（见 [ROADMAP](ROADMAP.md) 决策门）。
 
@@ -39,8 +41,8 @@ pip install -e ".[dev]"
 # 命令行验证（列出全部支持的分析方法）
 python -m smartsuite.cli list
 
-# 或启动 Web UI
-python run_server.py
+# 或启动 Web UI（源码检出可改用 python run_server.py）
+python -m smartsuite.web.app
 # → 浏览器打开 http://localhost:5050
 ```
 
