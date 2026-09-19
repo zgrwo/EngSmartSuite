@@ -37,6 +37,7 @@ from sklearn.tree import DecisionTreeRegressor, plot_tree
 from statsmodels.formula.api import ols
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.tools.sm_exceptions import SingularMatrixWarning
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
@@ -2731,7 +2732,10 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     try:
         X = sm.add_constant(df)
-        vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+        # 秩亏由本函数后续条件数告警（poorly conditioned）统一表达，此处静默 statsmodels 英文告警
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SingularMatrixWarning)
+            vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
         vif_full = pd.DataFrame({"变量": X.columns, "VIF": vif_vals})
         # 排除无意义的 const 列
         vif_data = vif_full[vif_full["变量"] != "const"].copy()
