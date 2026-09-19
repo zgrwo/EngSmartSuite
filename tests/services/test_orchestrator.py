@@ -3,7 +3,7 @@
 覆盖范围：
 - 任务路由（已知/未知任务）
 - DEFAULT_PARAMS 注入与参数合并
-- 空字符串 → None 规范化
+- 空字符串规范化（'' → 该参数默认值；默认值为 None 时即 '' → None）
 - 目标列存在性检查
 - 异常捕获与翻译
 - NO_TARGET_TASKS 行为
@@ -13,7 +13,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.services.orchestrator import (
     DEFAULT_PARAMS,
     NO_DATA_TASKS,
@@ -147,6 +147,70 @@ def test_empty_string_to_none_normalization(sample_doe_data):
             abs(float(row["LCL"]) - 37.7855) < 0.01,
         )
     ), f"控制限数值漂移: {row.to_dict()}"
+
+
+# ── 空字符串归一：非 None 默认值（审查 2026-09-19 E11）──
+#
+# 旧逻辑仅对「默认值为 None」的参数做 '' → None；默认值非 None 的枚举参数
+# 收到 JS 清空后的 '' 会直达引擎并报错（'不支持的检验类型: '）。
+# 新语义：'' 一律视为「未提供」→ 回退该参数的默认值；未知键保持原样。
+
+
+def test_empty_string_enum_param_falls_back_to_default():
+    """枚举参数 test_type='' 应回退默认 'ttest'（复现：此前报「不支持的检验类型: 」）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"test_type": ""})
+    result = orchestrate(req)
+    assert result.status == "ok", f"空枚举参数应回退默认值: {result.messages}"
+    assert result.metadata["test_type"] == DEFAULT_PARAMS["power_analysis"]["test_type"]
+    assert result.metadata["required_n"] == 64, "应与空 params 的结果一致"
+
+
+def test_empty_string_mode_falls_back_to_default():
+    """枚举参数 mode='' 应回退默认 'required_n'（复现：此前报「未知模式: 」）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"mode": ""})
+    result = orchestrate(req)
+    assert result.status == "ok", f"空枚举参数应回退默认值: {result.messages}"
+    assert result.metadata["mode"] == "required_n"
+
+
+def test_empty_string_numeric_param_falls_back_to_default():
+    """数值参数 alpha='' 应回退默认 0.05（而非静默取其它值）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"alpha": ""})
+    result = orchestrate(req)
+    assert result.status == "ok", f"空数值参数应回退默认值: {result.messages}"
+    assert result.metadata["alpha"] == DEFAULT_PARAMS["power_analysis"]["alpha"]
+
+
+def test_explicit_param_still_overrides_default():
+    """归一化不得吞掉显式传入的非空值（防把有效参数也换成默认）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"test_type": "anova"})
+    result = orchestrate(req)
+    assert result.status == "ok", result.messages
+    assert result.metadata["test_type"] == "anova", "显式参数必须生效"
+    assert result.metadata["required_n"] == 14
+
+
+def test_unknown_param_key_passes_through_unchanged(monkeypatch):
+    """未知键 '' 不归一到默认值（不吞用户输入），原样传给引擎。"""
+    from smartsuite.services import orchestrator as orch
+
+    received: dict = {}
+
+    def _spy(req):
+        received.update(req.params)
+        return AnalysisResult(task=req.task, status="ok", summary="spy")
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _spy)
+    req = AnalysisRequest(
+        task="correlation",
+        data=pd.DataFrame({"a": [1.0, 2.0, 3.0]}),
+        target_col="a",
+        params={"foo": "", "method": "spearman"},
+    )
+    result = orchestrate(req)
+    assert result.status == "ok", result.messages
+    assert received["foo"] == "", "未知键应原样透传"
+    assert received["method"] == "spearman", "默认值仍应注入"
 
 
 # ── 目标列检查测试 ──

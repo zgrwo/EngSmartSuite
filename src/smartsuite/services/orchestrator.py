@@ -207,6 +207,23 @@ DEFAULT_PARAMS: dict[str, dict[str, Any]] = {
 }
 
 
+def _normalize_empty_params(params: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    """把表单/JS 清空后的空字符串归一为「未提供」：'' → 该参数的默认值。
+
+    审查 2026-09-19 E11：旧实现仅当 `defaults.get(k) is None` 时把 '' 转为 None：
+
+    - 默认值非 None 的枚举参数（如 power_analysis 的 test_type='ttest'、mode='required_n'）
+      收到 '' 会直达引擎并报「不支持的检验类型: 」/「未知模式: 」；
+    - 未知键因 `defaults.get(k) is None` 恒真而被静默改成 None（吞用户输入）。
+
+    新语义：
+      - `k in defaults` → 用默认值替换（含默认值为 None 的情形，即 '' → None）；
+      - 否则（未知键）→ 原样保留。
+    显式传入的非空值不受影响。
+    """
+    return {k: (defaults[k] if v == "" and k in defaults else v) for k, v in params.items()}
+
+
 def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     """路由分析请求到对应引擎函数，注入默认参数。
 
@@ -254,10 +271,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         )
 
     defaults = DEFAULT_PARAMS.get(req.task, {})
-    merged = {**defaults, **req.params}
-    # 规范化: JS 端空字符串 '' → Python None (修复 Web/CLI 参数桥接)
-    # 仅对默认值为 None 的参数做此转换，保留 explicit '' 的语义
-    merged = {k: (None if v == "" and defaults.get(k) is None else v) for k, v in merged.items()}
+    merged = _normalize_empty_params({**defaults, **req.params}, defaults)
     req = req.model_copy(update={"params": merged})
 
     try:
