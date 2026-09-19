@@ -3,6 +3,17 @@ let columnData = [];
 let selectedY = new Set(), selectedX = new Set(), selectedCat = new Set();
 let csrfToken = '';
 const escHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+
+// 页内提示（替代原生 alert；3.2s 自动消失，无 DOM 时回退 alert）
+let _toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  if (!el) { alert(msg); return; }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
 // 审查 2026-09-16 B-5：表格数值展示——固定 toFixed(4) 会把微尺度值（<5e-5）整列显示为
 // 0.0000（抵消引擎 round_for_display）；微尺度改用 4 位有效数字科学计数，常规量级行为不变
 function fmtCellNum(v) {
@@ -52,7 +63,7 @@ document.getElementById('file-input').addEventListener('change', async e => {
   document.getElementById('shape').textContent = '上传中...';
   // 审查 2026-08-19 M3：前端预检 50MB，避免 413 HTML 响应导致"网络错误"误报
   if (f.size > 50 * 1024 * 1024) {
-    alert('文件超过 50MB 限制，请减少数据量后重试');
+    showToast('文件超过 50MB 限制，请减少数据量后重试');
     document.getElementById('filename').textContent = '未选择文件';
     document.getElementById('shape').textContent = '';
     e.target.value = '';
@@ -64,7 +75,7 @@ document.getElementById('file-input').addEventListener('change', async e => {
     let d = {};
     try { d = await r.json(); } catch(err) { /* 非 JSON 响应（如 413 HTML） */ }
     if (!r.ok) {
-      alert('上传失败: ' + (d.error || (r.status === 413 ? '文件超过 50MB 限制' : '未知错误')));
+      showToast('上传失败: ' + (d.error || (r.status === 413 ? '文件超过 50MB 限制' : '未知错误')));
       document.getElementById('filename').textContent = '未选择文件';
       document.getElementById('shape').textContent = '';
       return;
@@ -77,7 +88,7 @@ document.getElementById('file-input').addEventListener('change', async e => {
       showParams(_pendingTask);
     }
   } catch(err) {
-    alert('上传失败: 网络错误或服务器不可达');
+    showToast('上传失败: 网络错误或服务器不可达');
     document.getElementById('filename').textContent = '未选择文件';
     document.getElementById('shape').textContent = '';
   }
@@ -358,6 +369,7 @@ const PARAM_LABELS = {
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
   current_n: '当前样本量 n (achieved 模式)', n_groups: '组数 k (anova)', p0: '基准比例 (proportion)', p1: '目标比例 (proportion)',
   fit: '拟合类型', show_ci: '显示置信带', threshold: '分类阈值',
+  'threshold@vif': 'VIF 阈值',
   factors: '因子定义', replicates: '重复次数', randomize: '随机化',
   seed: '随机种子', center_points: '中心点重复数', n_runs: '运行数',
   'method@doe_design': '设计方法', 'alpha@doe_design': 'CCD 轴向距离 α',
@@ -395,8 +407,8 @@ const INVERSE_PREFIXES = {
 // ── DOE 因子编辑器（每个因子单独一行：因子名 + 水平）──
 function factorRowHtml(name = '', levels = '') {
   return `<div class="factor-row">
-    <input class="factor-name" placeholder="因子名（如 料温）" value="${escHtml(name)}">
-    <input class="factor-levels" placeholder="水平（逗号分隔，如 180,200,220）" value="${escHtml(levels)}">
+    <input class="factor-name" placeholder="因子名" value="${escHtml(name)}">
+    <input class="factor-levels" placeholder="水平(逗号分隔)" value="${escHtml(levels)}">
     <button type="button" onclick="removeFactorRow(this)" class="btn-sm" title="删除">✕</button>
   </div>`;
 }
@@ -579,7 +591,8 @@ function buildParamInput(k, v, task) {
   if (task === 'inverse_solve' && INVERSE_ROLE_KEYS.includes(k)) return buildColumnChecks(k, task);
   // 支持 task.key 格式的覆盖查找（如 power_analysis.mode vs box_chart.mode）
   const meta = PARAM_META[k + '@' + task] || PARAM_META[k];
-  const label = PARAM_LABELS[k + '@' + task] || PARAM_LABELS[k] || k;
+  // 标签优先级：任务覆盖 > 通用标签 > PARAM_META.label（如 random_state）> 键名
+  const label = PARAM_LABELS[k + '@' + task] || PARAM_LABELS[k] || meta?.label || k;
   const hint = PARAM_HINTS[k];
   const id = `param_${k}`;
 
@@ -587,7 +600,7 @@ function buildParamInput(k, v, task) {
     const opts = meta.options.map(([val, text]) =>
       `<option value="${val}" ${String(v) === val ? 'selected' : ''}>${text}</option>`
     ).join('');
-    return `<div class="param-item">
+    return `<div class="param-item" id="param-item_${k}">
       <label class="param-label" for="${id}">${label}</label>
       <select id="${id}" class="param-select">${opts}</select>
     </div>`;
@@ -597,7 +610,7 @@ function buildParamInput(k, v, task) {
     const opts = columnData.map(c =>
       `<option value="${escHtml(c.name)}" ${String(v) === c.name ? 'selected' : ''}>${escHtml(c.name)}</option>`
     ).join('');
-    return `<div class="param-item">
+    return `<div class="param-item" id="param-item_${k}">
       <label class="param-label" for="${id}">${label}</label>
       <select id="${id}" class="param-select"><option value="">— 自动 —</option>${opts}</select>
     </div>`;
@@ -607,7 +620,7 @@ function buildParamInput(k, v, task) {
   let inputType = 'text';
   let step = '';
   if (typeof v === 'number') { inputType = 'number'; step = v < 1 ? '0.01' : '1'; }
-  return `<div class="param-item">
+  return `<div class="param-item" id="param-item_${k}">
     <label class="param-label" for="${id}">${label}</label>
     ${hint ? `<div class="param-hint">${hint}</div>` : ''}
     <input type="${inputType}" id="${id}" value="${v}" step="${step}"
@@ -623,6 +636,16 @@ function showParams(task) {
   panel.style.display = 'block';
   body.innerHTML = Object.entries(cfg).map(([k, v]) => buildParamInput(k, v, task)).join('')
     + `<button onclick="executeAnalysis()" class="btn-run">▶ 运行分析</button>`;
+  if (task === 'doe_design') {
+    // CCD 轴向距离 α 仅中心复合设计使用（引擎只在 ccd 分支读取），按设计方法联动显隐
+    const methodEl = document.getElementById('param_method');
+    const alphaItem = document.getElementById('param-item_alpha');
+    const syncAlpha = () => {
+      if (alphaItem) alphaItem.style.display = (methodEl && methodEl.value === 'ccd') ? '' : 'none';
+    };
+    if (methodEl) methodEl.addEventListener('change', syncAlpha);
+    syncAlpha();
+  }
   if (task === 'inverse_solve') {
     // 列角色勾选变化 → 重建请求行编辑器（保留已填数值）
     INVERSE_ROLE_KEYS.forEach(k => {
@@ -708,7 +731,7 @@ async function runAnalysis(task) {
     'inverse_solve',
   ]);
   if (!_noTargetNeeded.has(task) && !selectedY.size) {
-    alert('请至少选择一个 Y 列'); return;
+    showToast('请至少选择一个 Y 列'); return;
   }
   // 仅需 Y 列即可运行的任务（无需选择 X 列）
   const _yOnlyTasks = new Set([
@@ -725,7 +748,7 @@ async function runAnalysis(task) {
     'spc_xbar', 'spc_attribute', 'normality_check', 'anomaly_detect',
   ]);
   if (!_yOnlyTasks.has(task) && !_xOptionalTasks.has(task) && !selectedX.size) {
-    alert('请至少选择一个 X 列'); return;
+    showToast('请至少选择一个 X 列'); return;
   }
   // 有参数配置 → 第一步: 显示参数面板, 等待用户编辑后点"运行"
   if (TASK_PARAMS[task]) {
