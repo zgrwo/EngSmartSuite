@@ -13,6 +13,25 @@ from smartsuite.services.orchestrator import orchestrate
 
 logger = logging.getLogger(__name__)
 
+# Excel 单元格字符上限：openpyxl 对超长字符串在保存时**静默**截到 32767
+# （实测无异常、无告警），因此必须在写入前显式截断并留下可见标记。
+# 审查 2026-09-19 E13：原实现 str(val)[:100] 会把「判定依据」等长文本
+# 静默砍成 100 字符，审计工作簿丢失关键证据且用户在表内看不到任何提示。
+_EXCEL_CELL_MAX = 32767
+_TRUNCATION_SUFFIX = "…（已截断）"
+
+# 每张表写入工作簿的最大数据行数（预览上限）；超出时在表名处显式标注，
+# 避免长表被静默丢弃（原 table.head(100) 无任何提示）。
+_AUDIT_PREVIEW_ROWS = 100
+
+
+def _excel_cell_text(val: object) -> str:
+    """非数值单元格文本：原样保留，仅在超过 Excel 单元格上限时截断并显式标注。"""
+    text = str(val)
+    if len(text) <= _EXCEL_CELL_MAX:
+        return text
+    return text[: _EXCEL_CELL_MAX - len(_TRUNCATION_SUFFIX)] + _TRUNCATION_SUFFIX
+
 
 def _close_figures(result):
     """关闭 AnalysisResult 中的所有 matplotlib Figure，防止内存泄漏。"""
@@ -495,7 +514,11 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
 
             # Tables
             for name, table in r.tables.items():
-                ws.cell(row=row, column=1, value=name).font = openpyxl.styles.Font(bold=True)
+                # 审查 2026-09-19 E13：行截断必须显式可见（原 head(100) 静默丢行）
+                title = str(name)
+                if len(table) > _AUDIT_PREVIEW_ROWS:
+                    title += f"（预览前 {_AUDIT_PREVIEW_ROWS} 行，共 {len(table)} 行）"
+                ws.cell(row=row, column=1, value=title).font = openpyxl.styles.Font(bold=True)
                 row += 1
                 # Headers
                 for ci, col in enumerate(table.columns):
@@ -507,7 +530,7 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
                     )
                 row += 1
                 # Data
-                for _, data_row in table.head(100).iterrows():
+                for _, data_row in table.head(_AUDIT_PREVIEW_ROWS).iterrows():
                     for ci, val in enumerate(data_row):
                         if val is None:
                             ws.cell(row=row, column=ci + 1, value="")
@@ -518,7 +541,7 @@ def export_workbook(df, target_col, feature_cols, output_path, tasks=None):
                             else:
                                 ws.cell(row=row, column=ci + 1, value=val)
                         else:
-                            ws.cell(row=row, column=ci + 1, value=str(val)[:100])
+                            ws.cell(row=row, column=ci + 1, value=_excel_cell_text(val))
                     row += 1
                 row += 2
 
