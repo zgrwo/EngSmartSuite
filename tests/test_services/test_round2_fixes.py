@@ -409,6 +409,10 @@ def root_handlers_backup():
     saved_level = root.level
     root.handlers.clear()
     yield root
+    # error 门禁：setup_logging 打开的文件 handler 清空前必须关闭，否则 ResourceWarning
+    for h in root.handlers:
+        if getattr(h, "_smartsuite_managed", False):
+            h.close()
     root.handlers.clear()
     root.handlers.extend(saved_handlers)
     root.setLevel(saved_level)

@@ -75,7 +75,11 @@ def _silence_logging(monkeypatch):
 
     import smartsuite as pkg
 
-    logging.getLogger().handlers.clear()
+    root = logging.getLogger()
+    for h in root.handlers:
+        if getattr(h, "_smartsuite_managed", False):
+            h.close()  # error 门禁：清空前必须关闭文件 handler，否则 ResourceWarning
+    root.handlers.clear()
     monkeypatch.setattr(pkg, "setup_logging", lambda: None)
 
 

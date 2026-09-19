@@ -616,6 +616,7 @@ def test_export_workbook_canned_table_with_none_and_nan(tmp_path, monkeypatch):
     assert 1.5 in values and "ok" in values, f"数值与文本应原样写入: {values}"
     assert "NaN" in values, "NaN 应写作字符串「NaN」防 openpyxl 崩溃"
     assert values[3] in ("", None), "None 应写空串（openpyxl 回读为 None）"
+    wb.close()
 
 
 def test_export_workbook_task_crash_continues(tmp_path, monkeypatch):
@@ -637,3 +638,4 @@ def test_export_workbook_task_crash_continues(tmp_path, monkeypatch):
     wb = openpyxl.load_workbook(out)
     assert wb.sheetnames == ["导出状态"], "全部任务失败应只剩状态 Sheet"
     assert "所有分析任务均失败" in wb["导出状态"]["A1"].value
+    wb.close()

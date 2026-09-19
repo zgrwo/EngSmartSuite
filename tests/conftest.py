@@ -7,6 +7,21 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import werkzeug.test as _werkzeug_test
+
+# error 门禁（2026-09-19）：werkzeug TestClient 对 >500KB 的 multipart 上传会创建
+# NamedTemporaryFile 且请求结束后不主动关闭（上游行为），ResourceWarning 会在任意
+# 后续测试的 GC 时刻爆出并误伤无关测试。测试数据本就在内存中，强制走内存编码。
+_stream_encode_multipart = _werkzeug_test.stream_encode_multipart
+
+
+def _stream_encode_multipart_in_memory(values, *args, **kwargs):
+    kwargs.setdefault("use_tempfile", False)
+    return _stream_encode_multipart(values, *args, **kwargs)
+
+
+_werkzeug_test.stream_encode_multipart = _stream_encode_multipart_in_memory
+
 
 @pytest.fixture
 def sample_doe_data() -> pd.DataFrame:
