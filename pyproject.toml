@@ -79,6 +79,9 @@ include = ["smartsuite*"]
 [tool.mypy]
 # numpy 2.5 的存根含 PEP 695 语法（mypy 目标 <3.12 无法解析）；3.10 运行时下限由 ci.yml 矩阵兜底
 python_version = "3.12"
+# 平台固定 win32：winreg 分支声明于 Windows 专用存根，Linux CI 上按本机平台检查会误报
+# attr-defined（本机 Windows mypy 与 CI 同口径）；Linux 运行时走 try/except ImportError 分支
+platform = "win32"
 files = [
     "src/smartsuite/__init__.py",
     "src/smartsuite/core",
@@ -102,6 +105,9 @@ markers = [
 filterwarnings = [
     "error",
     "ignore:Glyph .* missing from font:UserWarning",
+    # tight_layout 在 Linux CI（缺 CJK 字体、标签更宽）无法容纳装饰时退化为默认边距，
+    # 图仍可渲染；该警告随字体环境变化，非代码缺陷
+    "ignore:Tight layout not applied:UserWarning",
 ]
 
 [tool.ruff]
