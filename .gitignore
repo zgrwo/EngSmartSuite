@@ -8,6 +8,7 @@ __pycache__/
 .ruff_cache/
 .benchmarks/
 .mypy_cache/
+.hypothesis/
 
 # 构建
 dist/

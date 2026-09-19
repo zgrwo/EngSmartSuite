@@ -126,6 +126,7 @@ EngSmartSuite/
 │   │   ├── test_correctness.py     #   数值正确性 — 全量覆盖
 │   │   ├── test_edge_cases.py      #   边界情况
 │   │   ├── test_invariants.py      #   数学不变量
+│   │   ├── test_property_invariants.py # 属性测试（hypothesis：量纲/不变量/退化）
 │   │   ├── test_fuzz.py            #   模糊测试
 │   │   ├── test_med_fixes.py       #   审查 MED 问题修复回归
 │   │   ├── test_inverse.py         #   工艺参数反解（角色/建模/求解/可达/端到端）
@@ -334,5 +335,5 @@ smartsuite/core/      ← ① 数据契约层：仅 pandas+pydantic（AnalysisRe
 ```
 __pycache__/  *.egg-info/  .venv/  .eggs/
 dist/  build/  .codegraph/  .claude/
-tests/demo_output/  *.pyc
+.hypothesis/  tests/demo_output/  *.pyc
 ```

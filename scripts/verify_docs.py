@@ -45,6 +45,7 @@ EXCLUDED_DIRS = {
     ".git",
     ".claude",
     ".codegraph",
+    ".hypothesis",  # hypothesis 示例数据库（.gitignore 已忽略）
     ".opencode-goal",  # opencode goal 会话产物（.gitignore 已忽略）
     ".pytest_cache",
     ".qoder",
