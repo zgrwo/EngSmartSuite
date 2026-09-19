@@ -1,7 +1,7 @@
 /* SmartSuite Web UI — jamovi-inspired design */
 :root {
   --bg: #f5f5f5; --panel: #fff; --border: #e0e0e0;
-  --text: #333; --muted: #888; --accent: #3f51b5;
+  --text: #333; --muted: #6b6b6b; --accent: #3f51b5;
   --header-bg: #2c3e50; --header-text: #fff;
   --ok: #2e7d32; --err: #c62828; --warn: #e65100;
 }
@@ -16,7 +16,7 @@ header .logo { font-size: 18px; font-weight: 700; letter-spacing: 1px; }
 header .subtitle { font-size: 12px; opacity: 0.7; }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 #btn-upload { background: #4caf50; color: #fff; border: none; padding: 6px 14px;
-  border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit; }
+  border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit; white-space: nowrap; }
 #btn-upload:hover { background: #43a047; }
 .filename { font-size: 12px; opacity: 0.8; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shape { font-size: 11px; opacity: 0.6; }
@@ -52,7 +52,7 @@ header .subtitle { font-size: 12px; opacity: 0.7; }
 .wf-title { font-size: 12px; font-weight: 700; color: #555; margin-bottom: 2px; }
 .wf-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
 .btn-analysis { padding: 5px 12px; border: 1px solid #ccc; border-radius: 4px;
-  background: #fff; cursor: pointer; font-size: 12px; font-family: inherit; }
+  background: #fff; cursor: pointer; font-size: 12px; font-family: inherit; white-space: nowrap; }
 .btn-analysis:hover { background: #e8eaf6; border-color: var(--accent); }
 
 /* Results */
@@ -97,7 +97,7 @@ table tr:hover td { background: #f0f4ff; }
 .param-body { padding: 8px 10px; }
 .param-item { margin-bottom: 10px; }
 .param-label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 4px; }
-.param-hint { font-size: 11px; color: #999; margin-bottom: 3px; }
+.param-hint { font-size: 11px; color: #6b6b6b; margin-bottom: 3px; }
 .param-input {
   width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
   font-size: 13px; font-family: inherit; background: #fff;
@@ -142,6 +142,8 @@ table tr:hover td { background: #f0f4ff; }
 .btn-run {
   margin-top: 10px; width: 100%; padding: 8px; background: #2171b5; color: #fff;
   border: none; border-radius: 4px; font-size: 14px; font-family: inherit; cursor: pointer;
+  /* 长参数表单（inverse_solve 等）滚动时按钮常驻面板底部 */
+  position: sticky; bottom: 0; z-index: 2; box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
 }
 .btn-run:hover { background: #1a5a9a; }
 
@@ -160,3 +162,29 @@ table tr:hover td { background: #f0f4ff; }
 .btn-sm { font-size: 11px; padding: 2px 10px; border-radius: 4px; border: 1px solid var(--accent);
   background: var(--accent); color: #fff; cursor: pointer; }
 .btn-sm:hover { opacity: 0.85; }
+
+/* Toast：替代原生 alert 的页内提示 */
+.toast { position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
+  z-index: 100; max-width: min(90vw, 480px);
+  background: var(--err); color: #fff; padding: 8px 16px; border-radius: 4px;
+  font-size: 13px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
+.toast.show { opacity: 1; visibility: visible; }
+
+/* ── 窄屏（≤900px）：三栏改纵向堆叠，整页可滚动 ── */
+@media (max-width: 900px) {
+  .main { flex-direction: column; overflow-y: auto; }
+  #left-panel { width: 100%; max-height: 45vh; flex-shrink: 0;
+    border-right: none; border-bottom: 1px solid var(--border); }
+  #center-panel { flex: none; overflow: visible; }
+  .workflow { border-bottom: none; }
+  .results { flex: none; overflow: visible; }
+}
+
+/* ── 手机（≤600px）：头部精简，上传按钮与任务按钮不折字 ── */
+@media (max-width: 600px) {
+  header { flex-wrap: wrap; gap: 6px; row-gap: 4px; padding: 6px 10px; }
+  header .subtitle { display: none; }
+  .filename { max-width: 120px; }
+  .results { padding: 8px; }
+}
