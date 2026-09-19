@@ -326,7 +326,7 @@ def test_regression_std_beta_micro_scale():
 
 
 def test_desirability_micro_range_scale_invariant():
-    from smartsuite.engine.doe_opt import _desirability
+    from smartsuite.engine.doe_opt.optimization import _desirability
 
     base = np.array([1.0, 2.0, 3.0])
     macro = _desirability(base, "maximize")
@@ -539,7 +539,7 @@ def test_trend_forecast_mape_micro_scale_computed():
 
 
 def test_we_rules_micro_sigma_detects_violation():
-    from smartsuite.engine.spc_charts import _we_rules_xbar
+    from smartsuite.engine.spc_charts.we_rules import _we_rules_xbar
 
     cl, sigma = 5e-13, 1e-13
     vals = np.full(20, cl)
@@ -550,7 +550,7 @@ def test_we_rules_micro_sigma_detects_violation():
 
 def test_we_rules_zero_sigma_no_false_violations():
     """退化 σ=0（组内子组均值全同）→ 不得让 `abs(x-cl) >= 1σ` 的全量误报（Rule 8）。"""
-    from smartsuite.engine.spc_charts import _we_rules_xbar
+    from smartsuite.engine.spc_charts.we_rules import _we_rules_xbar
 
     assert _we_rules_xbar(np.full(20, 5.0), 5.0, 0.0) == {}
     assert _we_rules_xbar(np.full(20, 5.0), 5.0, float("nan")) == {}

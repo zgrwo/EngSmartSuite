@@ -239,7 +239,7 @@ def test_doe_design_n_runs_none_uses_default():
 def test_breusch_pagan_micro_scale_heteroscedastic_not_na():
     import statsmodels.api as sm
 
-    from smartsuite.engine.doe_opt import _breusch_pagan
+    from smartsuite.engine.doe_opt.regression import _breusch_pagan
 
     rng = np.random.default_rng(3)
     n = 60

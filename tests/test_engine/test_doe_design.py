@@ -6,7 +6,7 @@ import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine import _doe_arrays as da
-from smartsuite.engine.doe_opt import (
+from smartsuite.engine.doe_opt.doe import (
     _gen_box_behnken,
     _gen_ccd,
     _gen_fractional,

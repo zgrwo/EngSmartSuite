@@ -22,7 +22,7 @@ import pytest
 pytest.importorskip("pyDOE3")
 from pyDOE3 import bbdesign, ccdesign, ff2n, fullfact
 
-from smartsuite.engine.doe_opt import (
+from smartsuite.engine.doe_opt.doe import (
     _gen_box_behnken,
     _gen_ccd,
     _gen_fractional,

@@ -1008,7 +1008,7 @@ def test_group_filter_contract_all_tasks():
 
 def test_spc_xbar_int64_x_axis_ordered():
     """Round-2 #A5：np.int64 X 列（Excel/CSV 默认类型）必须按数值序而非字典序。"""
-    from smartsuite.engine.spc_charts import _natural_sort_key
+    from smartsuite.engine.spc_charts._shared import _natural_sort_key
     from smartsuite.engine.spc_monitor import xbar_r_chart
 
     np.random.seed(3)
@@ -1554,7 +1554,7 @@ def test_ewma_partial_mu_sigma_rejected():
 
 def test_weco_rules_7_and_8_detected():
     """Round-2 #A2r：交替升降（规则7）与连续8点在±1σ外（规则8）应被检出。"""
-    from smartsuite.engine.spc_charts import _we_rules_xbar
+    from smartsuite.engine.spc_charts.we_rules import _we_rules_xbar
 
     # 规则7：交替升降
     alt = [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
