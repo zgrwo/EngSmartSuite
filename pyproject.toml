@@ -67,6 +67,7 @@ all = [
 
 [project.scripts]
 smartsuite = "smartsuite.cli:main"
+smartsuite-web = "smartsuite.web.app:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]

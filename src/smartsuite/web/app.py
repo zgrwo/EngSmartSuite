@@ -397,18 +397,34 @@ def main(host="127.0.0.1", port=5050, debug=False):
     app.run(host=host, port=port, debug=debug)
 
 
-if __name__ == "__main__":
+def cli(argv: list[str] | None = None) -> int:
+    """控制台入口（`smartsuite-web` / `python -m smartsuite.web.app`）。
+
+    审查 2026-09-19 E14a：此前仅在 `__main__` 守卫内解析参数，导致 console
+    script 若指向 `main()` 则无法传参（总是默认 host/port）。现抽为可复用
+    入口，供 console script、模块执行与 run_server.py 三方共用。
+
+    参数:
+        argv: 参数列表；`None` 表示读 `sys.argv`（便于测试注入）。
+    """
     import argparse
 
-    _parser = argparse.ArgumentParser(description="SmartSuite Web UI")
-    _parser.add_argument("--host", default=None, help="监听地址 (默认: 127.0.0.1)")
-    _parser.add_argument("--port", type=int, default=None, help="监听端口 (默认: 5050)")
-    _parser.add_argument("--debug", action="store_true", help="启用 Flask debug 模式")
-    _args = _parser.parse_args()
+    parser = argparse.ArgumentParser(description="SmartSuite Web UI")
+    parser.add_argument("--host", default=None, help="监听地址 (默认: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=None, help="监听端口 (默认: 5050)")
+    parser.add_argument("--debug", action="store_true", help="启用 Flask debug 模式")
+    args = parser.parse_args(argv)
     main(
-        host=_args.host or "127.0.0.1",
-        port=_args.port
-        if _args.port is not None
+        host=args.host or "127.0.0.1",
+        port=args.port
+        if args.port is not None
         else 5050,  # --port 0 是 Flask 合法值（随机端口），勿用 or 吞掉
-        debug=bool(_args.debug or os.environ.get("SMARTSUITE_DEBUG", "0") == "1"),
+        debug=bool(args.debug or os.environ.get("SMARTSUITE_DEBUG", "0") == "1"),
     )
+    return 0
+
+
+if __name__ == "__main__":
+    # 不 sys.exit：runpy 入口（python app.py）须正常返回，退出码由 cli() 返回值
+    # 经 console script 包装层承担（smartsuite-web = smartsuite.web.app:cli）
+    cli()

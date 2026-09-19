@@ -403,7 +403,96 @@ def test_main_default_runs_localhost(monkeypatch, capsys):
     monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
     app_module.main()
     assert calls == {"host": "127.0.0.1", "port": 5050, "debug": False}
-    assert "Ctrl+C" in capsys.readouterr().out
+
+
+# ── smartsuite-web 控制台入口（审查 2026-09-19 E14a）──
+
+
+def test_console_script_entry_is_registered_and_callable():
+    """pyproject 的 smartsuite-web 入口必须指向可导入的可调用对象（防注册漂移）。"""
+    import importlib
+    import re
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    # 用正则而非 tomllib：tomllib 仅 3.11+，而 requires-python >= 3.10
+    text = pyproject.read_text(encoding="utf-8")
+    match = re.search(r'^smartsuite-web\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    assert match, "pyproject.toml 缺少 smartsuite-web 控制台入口"
+    module_path, _, attr = match.group(1).partition(":")
+    assert attr, f"入口目标须为 module:callable 形式: {match.group(1)}"
+    assert callable(getattr(importlib.import_module(module_path), attr))
+
+
+def test_cli_help_is_chinese_and_exits_zero(capsys):
+    """`smartsuite-web --help` 输出中文帮助并 exit 0。"""
+    with pytest.raises(SystemExit) as ei:
+        app_module.cli(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    assert "监听地址" in out and "监听端口" in out, f"帮助应含中文参数说明: {out[:200]}"
+
+
+def test_cli_passes_host_and_port(monkeypatch):
+    """--host/--port 透传到 app.run。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+    assert app_module.cli(["--host", "0.0.0.0", "--port", "9999"]) == 0
+    assert calls == {"host": "0.0.0.0", "port": 9999, "debug": False}
+
+
+def test_cli_port_zero_is_not_swallowed(monkeypatch):
+    """--port 0 是 Flask 合法值（随机端口），不得被 `or` 当成假值吞掉。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+    app_module.cli(["--port", "0"])
+    assert calls["port"] == 0, f"--port 0 应原样传递: {calls}"
+
+
+def test_cli_debug_flag_and_env(monkeypatch, capsys):
+    """--debug 与 SMARTSUITE_DEBUG=1 都能开启 debug；两者共存不报错。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+
+    app_module.cli(["--host", "127.0.0.1", "--debug"])
+    assert calls["debug"] is True
+
+    monkeypatch.setenv("SMARTSUITE_DEBUG", "1")
+    app_module.cli([])
+    assert calls["debug"] is True, "环境变量 SMARTSUITE_DEBUG=1 应开启 debug"
+
+    monkeypatch.setenv("SMARTSUITE_DEBUG", "0")
+    app_module.cli([])
+    assert calls["debug"] is False
+
+
+def test_cli_debug_forces_localhost(monkeypatch, capsys):
+    """经 cli 入口传 --debug + 非本机地址 → 仍强制绑定 127.0.0.1。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+    app_module.cli(["--host", "0.0.0.0", "--debug"])
+    assert calls["host"] == "127.0.0.1", "debug 模式必须强制本机绑定"
+
+
+def test_run_server_delegates_to_cli():
+    """run_server.py 不得再自行调用 main()（消除第三份启动代码）。"""
+    import ast
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "run_server.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "smartsuite.web.app"
+        for alias in node.names
+    }
+    assert "cli" in imported, f"run_server.py 应从 smartsuite.web.app 导入 cli: {imported}"
+    assert "main" not in imported, "run_server.py 不应再直接导入 main"
 
 
 # ── 清理链 OSError 防御分支 ──

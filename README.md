@@ -41,8 +41,10 @@ pip install -e ".[dev]"
 # 命令行验证（列出全部支持的分析方法）
 python -m smartsuite.cli list
 
-# 或启动 Web UI（源码检出可改用 python run_server.py）
+# 或启动 Web UI（三选一，等价）
 python -m smartsuite.web.app
+smartsuite-web                  # 安装后提供的控制台命令，支持 --host/--port/--debug
+python run_server.py            # 源码检出：读环境变量并自动打开浏览器
 # → 浏览器打开 http://localhost:5050
 ```
 

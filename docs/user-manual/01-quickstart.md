@@ -4,7 +4,10 @@
 
 ```bash
 cd EngSmartSuite
-python run_server.py
+python run_server.py       # 源码检出：自动打开浏览器
+
+# 或使用安装好的控制台命令（等价，支持 --host / --port / --debug）
+smartsuite-web
 ```
 
 浏览器打开 `http://127.0.0.1:5050`。
