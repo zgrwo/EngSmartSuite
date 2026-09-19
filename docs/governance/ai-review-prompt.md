@@ -183,7 +183,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 | 流程 | 触发 | 审查要点 |
 | :--- | :--- | :--- |
-| [ci.yml `quick`](../../.github/workflows/ci.yml) | push main / PR / dispatch | Conventional Commits（PR，逐 commit 校验）、模块导入（engine 导出数 + TASK_REGISTRY 数）、ruff lint+format、引擎/服务/脚本/集成 pytest、`verify_consistency --skip-pytest`（任务冒烟，数量当轮实测——2026-09-05 为 41）、`verify_manual_claims`（PR 即拦手册数值漂移）。核对：**失败是否真由变更引起**；路径过滤（`docs/**`、`skills/**` 等）是否漏掉了实际上会影响结果的文件。 |
+| [ci.yml `quick`](../../.github/workflows/ci.yml) | push main / PR / dispatch | Conventional Commits（PR，逐 commit 校验）、模块导入（engine 导出数 + TASK_REGISTRY 数）、ruff lint+format、引擎/服务/guards/脚本/集成 pytest、`verify_consistency --skip-pytest`（任务冒烟，数量当轮实测——2026-09-05 为 41）、`verify_manual_claims`（PR 即拦手册数值漂移）。核对：**失败是否真由变更引起**；路径过滤（`docs/**`、`skills/**` 等）是否漏掉了实际上会影响结果的文件。 |
 | [ci.yml `e2e`](../../.github/workflows/ci.yml) | Push/PR | 服务器 30 次探测（失败即红），`tests/integration/test_web_e2e.py` 全部方法；Linux 需 CJK 字体。 |
 | [ci.yml `full`](../../.github/workflows/ci.yml) | main push / dispatch | 矩阵 3 OS × Python 3.10/3.11/3.12/3.13（部分排除），`pytest tests/ -q` + `verify_consistency`（完整嵌套 pytest）。核对 Windows junction `--basetemp` 处理。 |
 | [ci.yml `quality`](../../.github/workflows/ci.yml) | main push / dispatch | 覆盖率 fail-under=70、vulture（过滤 Pydantic `cls` 误报）、pip-audit。 |
