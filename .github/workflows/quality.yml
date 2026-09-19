@@ -90,7 +90,7 @@ jobs:
         run: uv run python scripts/falsy_audit.py
 
   architecture-check:
-    name: 架构约束检查
+    name: 架构约束检查 + 覆盖率门禁
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -101,8 +101,11 @@ jobs:
       - name: 安装依赖（冻结锁文件）
         # verify_consistency 内嵌全量 pytest，含 Web 层测试（flask）
         run: uv sync --frozen --all-extras
-      - name: Verify architecture
-        run: uv run python scripts/verify_consistency.py
+      - name: Verify architecture (非 pytest 部分)
+        run: uv run python scripts/verify_consistency.py --skip-pytest
+      - name: 覆盖率门禁（PR 防回退）
+        # fail-under=85：2026-09-19 基线 89%；全量 pytest 由本步骤承担（原内嵌于 verify_consistency）
+        run: uv run pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-fail-under=85
 
   ruff-check:
     name: Ruff Format Check

@@ -106,6 +106,7 @@ EngSmartSuite/
 │   ├── test_integration_reliability.py # 可靠性场景
 │   ├── test_integration_warranty.py#   保修场景
 │   ├── test_master_integration.py  #   全方法集成
+│   ├── test_packaging.py           #   打包契约（PEP 561 py.typed 分发）
 │   ├── test_review_2026_09_fixes.py#   2026-09-01 审查修复回归（跨层）
 │   ├── test_review_2026_09_05_release_prep.py # 2026-09-05 发版前审查修复回归
 │   ├── test_review_2026_09_06_release_prep.py # 2026-09-06 发版前审查修复回归（B3 微尺度 ACF）

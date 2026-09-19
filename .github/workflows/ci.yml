@@ -255,8 +255,8 @@ jobs:
         run: uv sync --frozen --all-extras
 
       - name: 测试覆盖率
-        # fail-under=70：当前基线 ~75%，留余量防跨平台波动；低于 70 即红（防测试退化）
-        run: uv run pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html --cov-fail-under=70
+        # fail-under=85：2026-09-19 基线 89%（engine/__init__ 平台分支 pragma 后达 100%），留余量防跨平台波动
+        run: uv run pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html --cov-fail-under=85
 
       - name: 死代码检测 (vulture)
         # Pydantic classmethod validator 的 cls 参数为误报，过滤之
