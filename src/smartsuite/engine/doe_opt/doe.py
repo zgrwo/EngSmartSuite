@@ -2,6 +2,7 @@
 
 import logging
 import math
+import numbers
 from itertools import combinations, product
 
 import numpy as np
@@ -394,7 +395,11 @@ def _pb_generator(n_runs: int) -> list[int]:
 
 
 def _is_num(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    """数值标量判定（审查 2026-09-19 E12）：numbers.Real 覆盖 int/float/numpy 全系；
+    numpy 2.x 起 np.int64/np.float32 不再是 int/float 子类，旧判据会误判为非数值。
+    bool 必须排除（bool ⊂ numbers.Real），否则 True 会被当作数值 1。
+    """
+    return isinstance(v, numbers.Real) and not isinstance(v, bool)
 
 
 def _as_bool(v, default=True) -> bool:

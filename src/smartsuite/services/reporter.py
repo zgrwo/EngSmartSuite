@@ -3,6 +3,7 @@
 import io
 import logging
 import math
+import numbers
 import os
 import warnings
 
@@ -36,9 +37,18 @@ def _fmt_html_cell(x) -> str:
 
     审查 2026-09-16 B-5：原 `float_format` 固定 `.4f` 把微尺度列（<5e-5）全部渲染为
     0.0000，抵消引擎 round_for_display → 与 Web/CLI 一致改为尺度感知（≥1e6 维持原 .2e）。
+
+    审查 2026-09-19 E12：判据改用 `numbers.Real` —— `df.to_html(float_format=…)`
+    实测把 numpy 标量（如 np.float32）直接传入，而 numpy 2.x 起 np.float32 不再是
+    float 子类，旧判据会落入 `str(x)` 分支，把 float32 列渲染成 0.12345679（Web/CLI
+    显示 0.1235）→ HTML 报告与其余入口不一致。bool 仍须显式排除（bool ⊂ numbers.Real）。
     """
-    if isinstance(x, bool) or not isinstance(x, (int, float)):
+    if isinstance(x, bool) or not isinstance(x, numbers.Real):
         return str(x)
+    # numpy 标量先归一为 Python float：否则 float16 与 1e6 比较会 cast 溢出
+    # （RuntimeWarning:“overflow encountered in cast”；本项目 filterwarnings=error
+    # 把警告当失败，等同真实缺陷）。归一后下面均只涉及 Python float 运算。
+    x = float(x)
     if not math.isfinite(x):
         return f"{x}"
     ax = abs(x)

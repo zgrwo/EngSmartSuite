@@ -1,6 +1,7 @@
 """网格搜索与多目标优化。"""
 
 import logging
+import numbers
 
 import numpy as np
 import pandas as pd
@@ -27,7 +28,9 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     for _col, _r in ranges.items():
         if not isinstance(_r, (tuple, list)) or len(_r) != 2:
             _invalid_ranges.append(f"「{_col}」应为 (下限, 上限) 格式")
-        elif not all(isinstance(v, (int, float)) for v in _r):
+        elif not all(isinstance(v, numbers.Real) and not isinstance(v, bool) for v in _r):
+            # numbers.Real（审查 2026-09-19 E12）：numpy 数值上下限不得被误拒；
+            # bool 排除，否则 (True, False) 会被当作合法区间
             _invalid_ranges.append(f"「{_col}」的上下限必须为数值")
         elif _r[0] >= _r[1]:
             _invalid_ranges.append(f"「{_col}」下限 ({_r[0]}) 必须小于上限 ({_r[1]})")
