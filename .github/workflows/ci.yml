@@ -213,13 +213,10 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
         exclude:
-          # 减少组合数：3.12/3.13 仅在 ubuntu 上测（最新 Python 稳定性哨兵）
-          - os: windows-latest
-            python-version: "3.12"
+          # 3.12/3.13 仅排除 macOS（runner 成本高、无平台特有分支）；
+          # Windows 为主部署平台，3.12/3.13 补回验证（2026-09-19 决定）
           - os: macos-latest
             python-version: "3.12"
-          - os: windows-latest
-            python-version: "3.13"
           - os: macos-latest
             python-version: "3.13"
     steps:
@@ -269,9 +266,11 @@ jobs:
       - name: 死代码检测 (vulture)
         # Pydantic classmethod validator 的 cls 参数为误报，过滤之
         # vulture 不在 extras 中，用 uv run --with 临时叠加（不写入锁文件）
+        # 仅采信 vulture 输出格式行（path:line:），隔离 uv 安装噪声
+        # （2026-09-19 CI 实测：uv 进度输出混入 filtered → 假死代码）
         run: |
           output=$(uv run --with vulture vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" 2>&1) || true
-          filtered=$(echo "$output" | grep -v "unused variable 'cls'" || true)
+          filtered=$(printf '%s\n' "$output" | grep -E '^[^ :]+:[0-9]+:' | grep -v "unused variable 'cls'" || true)
           if [ -n "$filtered" ]; then
             echo "$filtered"
             exit 1

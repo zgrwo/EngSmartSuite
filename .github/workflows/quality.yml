@@ -91,7 +91,7 @@ jobs:
         run: uv run python scripts/falsy_audit.py
 
   py310-engine:
-    name: Python 3.10 引擎回归（锁文件分叉路径）
+    name: Python 3.10 分叉回归（引擎 + 服务）
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -102,8 +102,10 @@ jobs:
           enable-cache: true
       - name: 安装依赖（冻结锁文件；3.10 解析为 pandas 2.x / numpy 2.2 分叉）
         run: uv sync --frozen --all-extras
-      - name: 引擎测试（3.10 依赖分叉路径）
-        run: uv run pytest tests/engine -q --tb=short
+      - name: 引擎 + 服务测试（3.10 依赖分叉路径）
+        # tests/services 覆盖 Web 序列化/差分（pandas 2.3 downcast 告警族），
+        # 2026-09-19 full 矩阵 3.10 曾因该族 5 处失败到达 main —— PR 阶段补齐
+        run: uv run pytest tests/engine tests/services -q --tb=short
 
   architecture-check:
     name: 架构约束检查 + 覆盖率门禁

@@ -86,7 +86,9 @@ def _normalize_nan(df: pd.DataFrame) -> pd.DataFrame:
         )
         if is_stringy:
             empty_set = {"", "nan", "NaN", "None", "null", "NA"}
-            df[col] = df[col].replace(empty_set, np.nan)
+            # pandas 2.3 的 object.replace 触发 Downcasting FutureWarning；
+            # mask 等价语义且不做 dtype 推断（full 矩阵 3.10 修复）
+            df[col] = df[col].mask(df[col].isin(empty_set))
             with contextlib.suppress(ValueError, TypeError):
                 df[col] = pd.to_numeric(df[col])
         if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_datetime64_any_dtype(

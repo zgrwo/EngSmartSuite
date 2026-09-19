@@ -108,7 +108,10 @@ def _serialize_table(tbl: pd.DataFrame) -> dict:
             )
         return col
 
-    data = tbl.apply(_display_column).fillna("").values.tolist()
+    displayed = tbl.apply(_display_column)
+    # 审查 2026-09-19（full 矩阵 3.10）：pandas 2.3 对 object dtype fillna 触发
+    # Downcasting FutureWarning（3.0 行为变更）；where 掩码语义等价且不做隐式降级
+    data = displayed.where(displayed.notna(), "").values.tolist()
     return {
         "columns": [str(c) for c in tbl.columns],
         "index": [str(i) for i in tbl.index],
