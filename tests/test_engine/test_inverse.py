@@ -592,6 +592,44 @@ def test_time_adjustable_true_includes_variable_time():
     assert abs(rec.iloc[0]["VariableU1"] - 5.0) < 0.5
 
 
+def test_inverse_solve_rate_model_end_to_end_time_adjustable():
+    """B-2 回归（2026-09-19 审查）：rate 前向模型端到端 + 可调时间。
+
+    覆盖 `_solve_one` 中 `assert time_col is not None` 的收敛路径——此前仅有
+    `_fit_rate_forward` 单元测试，端到端 rate 反解无回归防线。
+    """
+    hist = _rate_history()
+    req = pd.DataFrame(
+        {"IncomingZ1": [1.1], "VariableU1": [None], "FixedTime": [None], "OutputZ1": [0.86]}
+    )
+    df = pd.concat([hist, req], ignore_index=True)
+    result = inverse_parameter_solve(
+        AnalysisRequest(
+            task="inverse_solve",
+            data=df,
+            target_col="",
+            feature_cols=[],
+            params={
+                "model": "rate",
+                "time_col": "FixedTime",
+                "time_adjustable": "true",
+                "time_min": 30,
+                "time_max": 120,
+            },
+        )
+    )
+    assert result.status == "ok", result.messages
+    assert result.metadata["time_adjustable"] is True
+    rec = result.tables["recommendations"]
+    assert len(rec) == 1, rec
+    assert 30.0 <= float(rec.iloc[0]["FixedTime"]) <= 120.0
+    pred_row = result.tables["predictions"].iloc[0]
+    assert np.isfinite(float(pred_row["预测OutputZ1"])), "rate 反解应产出有限预测值"
+    assert abs(float(pred_row["预测OutputZ1"]) - 0.86) < 0.05, (
+        f"预测应接近目标 0.86，实测 {pred_row['预测OutputZ1']}"
+    )
+
+
 def test_inverse_solve_all_requests_fail_summary():
     hist = _variable_time_history()
     req = pd.DataFrame(

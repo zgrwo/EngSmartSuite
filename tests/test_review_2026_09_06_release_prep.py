@@ -5,7 +5,7 @@ B3：detection.py `_acf_values` 分母保护 `denom <= 1e-12` 为量纲绑定绝
 [1, 0.45, 0.211] 被静默吞为 [1, 0, 0]（trend_forecast 的 DW/Ljung-Box 随之误判）。
 修复：改为相对判据 `denom <= 1e-12 * max(Σx², 1e-300)`（与 exploratory.py ssx 同族）。
 
-R4-1：doe_opt.py lasso_regression 以绝对阈值 `abs(coef) > 1e-6` 标注「选中」，
+R4-1：doe_opt（2026-09-19 起为子包）lasso_regression 以绝对阈值 `abs(coef) > 1e-6` 标注「选中」，
 系数带 y 量纲（模型拟合于 X_scaled、y 未标准化），微尺度目标列（y~1e-10）
 系数 ~1e-9 整表误标「否」，输出「选中 0/2 变量, R²=0.99」的自相矛盾结论。
 修复：改为相对判据 `abs(coef) > 1e-6 * max(abs(coefs))`（与 B1/B3 同族）。

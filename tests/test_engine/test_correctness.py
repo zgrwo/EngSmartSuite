@@ -108,8 +108,11 @@ def test_process_capability_known_cpk():
     result = process_capability_analysis(req)
     assert result.status == "ok"
     cpk = result.metadata["cpk"]
-    # 理论 Cpk = min(14-10, 10-6) / (3*1) = 4/3 ≈ 1.33
-    assert 1.2 < cpk < 1.5, f"Expected Cpk≈1.33, got {cpk:.3f}"
+    cp = result.metadata["cp"]
+    # 理论 Cpk = Cp = min(14-10, 10-6) / (3*1) = 4/3 ≈ 1.3333
+    # 容差 ±0.02（2026-09-19 审查 D-2：原 1.2~1.5 区间可放过 0.01 级引擎漂移）
+    assert cpk == pytest.approx(4 / 3, abs=0.02), f"Expected Cpk≈4/3, got {cpk:.4f}"
+    assert cp == pytest.approx(4 / 3, abs=0.02), f"Expected Cp≈4/3, got {cp:.4f}"
 
 
 def test_anova_known_group_diff():
@@ -1879,7 +1882,7 @@ def test_xbar_all_n1_groups_sigma_ddof1():
     """X-bar (分组 + 全 n=1)：σ 回退路径必须用 ddof=1（审查 #P1-1）。
 
     分组且每组 1 点时 MR 池化为空，σ 由子组均值的样本标准差估计；
-    此前分组分支用 ddof=1 而非分组分支用 ddof=0（spc_charts.py 468 vs 479），
+    此前分组分支用 ddof=1 而非分组分支用 ddof=0（原 spc_charts.py 两处分组/非分组实现），
     现统一 ddof=1。手工交叉验证：std([1,5,9], ddof=1) = 4。
     """
     from smartsuite.engine.spc_monitor import xbar_r_chart

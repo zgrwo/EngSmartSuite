@@ -6,6 +6,10 @@
 - 退化与 falsy：空/单行/常量/全 NaN 返回 error 不抛异常；n_runs=0 不得回退默认值。
 
 常规确定性防线见 test_invariants.py / test_edge_cases.py；本文件仅补充随机搜索。
+
+已知边界（2026-09-19 审查 E-2）：生成器保证非退化幅值下限，纯绝对兜底模式
+（`scale = X if X > 1e-12 else 1.0`）不在本文件触发；该模式由
+test_review_2026_09_16_release_prep.py 的 pico 用例（xbar/nonparametric/trend）钉住。
 """
 
 import numpy as np
@@ -26,6 +30,7 @@ from smartsuite.engine.doe_opt import doe_design
 SETTINGS = settings(
     max_examples=25,
     deadline=None,
+    derandomize=True,  # 固定种子：失败样本可跨机/跨 run 稳定复现（探索广度换确定性）
     suppress_health_check=[HealthCheck.too_slow],
 )
 

@@ -30,7 +30,7 @@ def test_engine_module_maps_to_test_engine_dir():
         "run",
         ["tests/test_engine"],
     )
-    assert map_source_to_tests("src/smartsuite/engine/root_cause.py") == (
+    assert map_source_to_tests("src/smartsuite/engine/root_cause/anova.py") == (
         "run",
         ["tests/test_engine"],
     )

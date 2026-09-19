@@ -273,7 +273,7 @@ def test_doe_design_fractional_non_two_level():
 
 # ── CCD α 正确性（审查发现的两个严重 bug 回归测试）──
 def test_doe_design_fractional_invalid_runs():
-    """审查 2026-08-29 #R8：fractional_factorial 非 2 的幂 n_runs 分支（doe_opt.py:1990）此前缺测。"""
+    """审查 2026-08-29 #R8：fractional_factorial 非 2 的幂 n_runs 分支（doe_opt 历史缺测点）此前缺测。"""
     factors = [{"name": f"X{i}", "levels": [0, 1]} for i in range(3)]
     r = doe_design(_req("fractional_factorial", factors, n_runs=12))  # 12 不是 2 的幂
     assert r.status == "error"

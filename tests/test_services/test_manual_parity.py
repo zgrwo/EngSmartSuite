@@ -8,11 +8,9 @@
 原则: 同一份数据 + 同一组参数 → 同一个数字
 """
 
-import warnings
-from pathlib import Path
-
 import pandas as pd
 import pytest
+from pathlib import Path
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import preprocess_data
@@ -23,9 +21,8 @@ from smartsuite.services.orchestrator import (
     orchestrate,
 )
 
-# 抑制 scipy/statsmodels 的已知警告
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
+# 注：原模块级 warnings.filterwarnings 已移除（2026-09-19 G-3）——
+# pytest 逐测试重设 filter，import 期 ignore 不生效（实测探针），属死代码。
 
 # ── 加载测试数据 ──
 _DATA_PATH = Path(__file__).parent.parent / "test_data.xlsx"

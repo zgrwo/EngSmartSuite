@@ -102,6 +102,69 @@ def test_doe_analysis_ppb_scale_matches_normal_scale():
     assert "显著因子: 1/1" in micro.summary
 
 
+def test_doe_analysis_micro_factor_coding_and_effect_ratio():
+    """B-1 同族：因子列本身微尺度（DOE z-score 编码 std+EPSILON 稀释 + 效应占比分母）。
+
+    旧缺陷两处：编码用 `std + EPSILON`（因子 ~1e-11 时编码被压缩 ~5 倍）；
+    `abs(grand_mean) > EPSILON` 把微尺度占比整体置 0。
+    """
+
+    def run(scale):
+        df = _doe_df(scale)
+        df["x"] = df["x"] * scale  # 因子与响应同比缩放，关系不变
+        return orchestrate(
+            AnalysisRequest(
+                task="doe_analysis",
+                data=df,
+                target_col="y",
+                feature_cols=["x"],
+                params={},
+            )
+        )
+
+    macro, micro = run(1.0), run(1e-11)
+    row_m = macro.tables["effect_estimates"].iloc[0]
+    row_u = micro.tables["effect_estimates"].iloc[0]
+    assert row_u["显著"] == "是", f"微尺度因子应显著: {row_u.to_dict()}"
+    assert row_u["t值"] == pytest.approx(row_m["t值"], rel=1e-3)
+    assert row_u["主效应"] == pytest.approx(row_m["主效应"] * 1e-11, rel=1e-3)
+    assert float(row_u["效应占比"]) == pytest.approx(float(row_m["效应占比"]), rel=1e-3)
+    assert float(row_u["效应占比"]) > 0.0, "微尺度占比不得被绝对 EPSILON 归零"
+
+
+def test_doe_analysis_lenth_pse_micro_scale_not_floored():
+    """C-3 同族：`_lenth_pse` 绝对下限 `max(pse, EPSILON)`（3 因子无重复 DOE）。
+
+    微尺度效应 ~1e-12 时旧代码把 PSE/SME 抬到 1e-10（约 50 倍失真）。
+    """
+    rng = np.random.default_rng(41)
+    n = 40
+    x1, x2, x3 = (rng.uniform(0, 1, n) for _ in range(3))
+
+    def run(y_scale):
+        y = y_scale * (2 + 0.6 * x1 - 0.4 * x2 + 0.15 * x3 + 0.02 * rng.standard_normal(n))
+        df = pd.DataFrame({"x1": x1, "x2": x2, "x3": x3, "y": y})
+        return orchestrate(
+            AnalysisRequest(
+                task="doe_analysis",
+                data=df,
+                target_col="y",
+                feature_cols=["x1", "x2", "x3"],
+                params={},
+            )
+        )
+
+    macro, micro = run(1e-2), run(1e-11)
+    assert micro.status == "ok", micro.messages
+    pse_m = float(macro.metadata["lenth_pse"])
+    pse_u = float(micro.metadata["lenth_pse"])
+    me_m = float(macro.metadata["lenth_me"])
+    me_u = float(micro.metadata["lenth_me"])
+    assert pse_m > 0 and pse_u > 0
+    assert pse_u == pytest.approx(pse_m * 1e-9, rel=1e-6), "PSE 被绝对下限抬高"
+    assert me_u == pytest.approx(me_m * 1e-9, rel=1e-6), "SME 被绝对下限抬高"
+
+
 def test_doe_analysis_perfect_fit_not_fabricated_zero_t():
     """完全共线（残差≈0）→ 不得伪造 t=0/p=1/不显著（旧缺陷）。
 
@@ -265,10 +328,29 @@ def test_to_html_micro_values_not_zeroed(tmp_path):
     assert "9.827e-11" in text, "HTML 报告不得把微尺度值吞成 0.0000"
 
 
-def test_app_js_has_scale_aware_number_formatter():
+def test_app_js_fmt_cell_num_execution():
+    """E-3：不止 grep 字符串——用 node 实际执行 fmtCellNum 验证量级自适应分支。"""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node 不可用（GitHub runner 自带；本地未安装时跳过）")
     js = _APP_JS.read_text(encoding="utf-8")
-    assert "fmtCellNum" in js
-    assert "toExponential" in js
+    start = js.index("function fmtCellNum")
+    end = js.index("\n}", start) + 2
+    script = (
+        js[start:end] + "\nconsole.log(JSON.stringify([fmtCellNum(9.827e-11), fmtCellNum(0.123456),"
+        " fmtCellNum(0), fmtCellNum('N/A')]));"
+    )
+    out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    vals = json.loads(out.stdout)
+    assert vals[0] == "9.827e-11", f"微尺度应走指数分支: {vals[0]}"
+    assert vals[1] == "0.1235", f"常规数值应 4 位小数: {vals[1]}"
+    assert vals[2] == "0.0000", f"零值显示: {vals[2]}"
+    assert vals[3] == "N/A", f"非数值应原样返回: {vals[3]}"
 
 
 # ── C-1: max_outliers=inf ──────────────────────────────────────────────────
@@ -317,10 +399,15 @@ def test_regression_std_beta_micro_scale():
 
     macro = run(1.0, 1e10)
     micro_y = run(1.0, 1.0)
+    micro_y_lo = run(1.0, 0.1)  # y_std≈1.4e-11 < 旧阈值 1e-10 → 直接命中 y_std 分支
     micro_x = run(1e-11, 1e10)
     base = float(macro.tables["coefficients"].set_index("变量").loc["x", "标准化系数(β)"])
     assert abs(base) > 0.1, "前置：宏观标准化系数应有非零值"
-    for label, r in (("y 微尺度", micro_y), ("x 微尺度", micro_x)):
+    for label, r in (
+        ("y 微尺度", micro_y),
+        ("y 微尺度(跨阈值)", micro_y_lo),
+        ("x 微尺度", micro_x),
+    ):
         beta = float(r.tables["coefficients"].set_index("变量").loc["x", "标准化系数(β)"])
         assert beta == pytest.approx(base, rel=1e-6), f"{label} β 偏离"
 
