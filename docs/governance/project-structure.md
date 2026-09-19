@@ -174,9 +174,6 @@ EngSmartSuite/
 │   │   ├── context.md              #   术语表
 │   │   ├── documentation.md        #   文档职责
 │   │   ├── falsy-pitfalls.md       #   Falsy 陷阱清单
-│   │   ├── plans/                  #   长期执行计划（入库，2026-09-18 起）
-│   │   │   ├── 2026-09-18-external-capability-completion-plan.md  # 外功补齐执行计划
-│   │   │   └── 2026-09-19-internal-quality-plan.md  # 内功补齐（告警/类型/拆分）执行计划
 │   │   ├── project-structure.md    #   本文件（目录树契约）
 │   │   ├── review-checklist.md     #   人类 PR 审查清单（可执行，20 项）
 │   │   ├── sentinel-contract.md    #   哨兵契约 L1-L5 与 NaN/Inf 守卫
