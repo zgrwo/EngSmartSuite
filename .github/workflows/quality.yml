@@ -133,5 +133,5 @@ jobs:
           enable-cache: true
       - name: 安装依赖（冻结锁文件）
         run: uv sync --frozen --all-extras
-      - name: Type check (core + services)
+      - name: Type check (src/smartsuite)
         run: uv run mypy

@@ -58,8 +58,13 @@ def _parse_sheet(sheet) -> int | str | None:
 def main():
     # Windows 控制台默认 GBK 无法输出 ⚠/中文 emoji 等字符 → 重配为标准 UTF-8（替换不可编码字符）
     with contextlib.suppress(AttributeError, ValueError):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        # reconfigure 是 TextIOWrapper 专属 API；被替换的非标准流没有此方法（getattr 兜底）
+        _reconfig_out = getattr(sys.stdout, "reconfigure", None)
+        _reconfig_err = getattr(sys.stderr, "reconfigure", None)
+        if _reconfig_out is not None:
+            _reconfig_out(encoding="utf-8", errors="replace")
+        if _reconfig_err is not None:
+            _reconfig_err(encoding="utf-8", errors="replace")
 
     from smartsuite import setup_logging
 
