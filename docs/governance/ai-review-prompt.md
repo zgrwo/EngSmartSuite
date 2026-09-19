@@ -61,7 +61,7 @@ core/   (contracts.py：AnalysisRequest / AnalysisResult；exceptions.py)   ← 
 - `AnalysisResult` 必须含 `summary`（中文工艺语言）、`tables`（dict[str, DataFrame]）、`figures`（list[Figure]）。
 - 违例红线：`engine/` 任何 flask/xlwings 导入、`web/` 任何 `import smartsuite.engine`、裸 `except:` / `except Exception` 不记录日志、错误消息泄露 Python traceback。
 
-### 3.3 数据契约与任务注册（11 步注册链）
+### 3.3 数据契约与任务注册（8 步注册链）
 
 **AnalysisRequest**：`task / data: pd.DataFrame / target_col / feature_cols: list[str] / params: dict[str, Any]`（Pydantic v2）。
 **AnalysisResult**：`task / tables / figures / summary / metadata / status("ok"|"error") / messages`。
@@ -69,10 +69,15 @@ core/   (contracts.py：AnalysisRequest / AnalysisResult；exceptions.py)   ← 
 新增分析函数必须走完整注册链，审查时逐环节核对（见 [documentation.md](documentation.md) "同步更新链"）：
 
 ```
-engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → DEFAULT_PARAMS
-→ TASK_LABELS + TASK_GROUPS → web/static/app.js TASK_PARAMS → templates/ YAML
-→ 测试（correctness+invariants）→ api-reference.md → user-manual/（五段式）→ 决策树
+engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_SPECS 追加一条 TaskSpec
+→ web/static/app.js TASK_PARAMS → templates/ YAML → 测试（correctness+invariants）
+→ api-reference.md → user-manual/（五段式）+ 决策树
 ```
+
+**注册只有 1 处**（审查 2026-09-19 B1）：`services/task_spec.py` 的 `TASK_SPECS`；
+`orchestrator.py` 的 `TASK_REGISTRY` / `DEFAULT_PARAMS` / `TASK_LABELS` / `TASK_GROUPS` /
+`RAW_CAT_TASKS` / `NO_TARGET_TASKS` / `NO_DATA_TASKS` 共 7 个名字全部由 `derive()` 派生。
+审查时若发现 `orchestrator.py` 里出现任务字面量集合，即为回退。
 
 **前端列约束三集合**（`web/static/app.js` 的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 常量——行号易漂移，按常量名定位；引擎函数每次改动后必核对，陷阱 2）：
 - `_noTargetNeeded`：完全无需 Y 列（vif/cohens_kappa/cronbach_alpha/power_analysis/multi_objective/doe_design…）
@@ -108,7 +113,7 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 
 | 红线 | 要求 |
 | :--- | :--- |
-| 注册完整性 | 新增分析函数必须 11 步注册链全走（见 3.3） |
+| 注册完整性 | 新增分析函数必须 8 步注册链全走（见 3.3） |
 | 文档同步 | api-reference 签名唯一信源；user-manual/（五段式：参数选择→示例图片→数值结果→解读→补充）（承诺内存要求：**手册数值与引擎实测一致**，不得"声称未兑现"） |
 | 版本一致性 | `pyproject.toml version` == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 引用行，2026-09-06 F1）== `.release-please-manifest.json` == 最新 `v*` tag（verify_docs 版本向量强制） |
 | 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.5，经 uv.lock 锁定）；CI 矩阵 3.10–3.13 × 3 OS |
@@ -246,7 +251,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 ### 维度 F：文档一致性（Docs）
 
 - F1 数字基准：签名总数以 [api-reference.md](../specification/api-reference.md) 为唯一信源；42 任务文字在任何文档中不得硬编码成别的数（**审查者当轮重测数量，模板中的 42 为 2026-09-19 快照**）。
-- F2 注册链：新增/修改分析函数必须走 11 步同步（见 3.3），前端三集合与引擎实际使用一致。
+- F2 注册链：新增/修改分析函数必须走 8 步同步（见 3.3），注册集中在 `task_spec.py`，前端三集合与引擎实际使用一致。
 - F3 手册准确性：user-manual/（五段式）的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
 - F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义；**`skills/*.md` 陷阱清单与源码同步**（历史：smartsuite-dev.md `_yOnlyTasks` 缺 `doe_design` 而 app.js 已含，2026-09-05 F-drift）。
 - F5 版本链：pyproject version == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 行，2026-09-06 F1）== manifest == **远端** latest tag（本地 tag 与 `origin/*` 引用会过期，发版前全量按「4.2 附注」核远端）。
@@ -347,7 +352,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 ```
 
 分级定级参考（与 [AGENTS.md](../../AGENTS.md) 历史 P0 对齐）：
-- P0：静默错误数值结果（如相关系数、Cpk、Kaplan-Meier 算错却不报错）；验证体系假绿（改错引擎侧仍全绿）；falsy 陷阱引入 0/False 误分支导致静默错结果；11 步注册链断裂导致 Web UI 功能缺失。
+- P0：静默错误数值结果（如相关系数、Cpk、Kaplan-Meier 算错却不报错）；验证体系假绿（改错引擎侧仍全绿）；falsy 陷阱引入 0/False 误分支导致静默错结果；8 步注册链断裂（尤其 `TASK_SPECS` 漏登记）导致 Web UI 功能缺失。
 - P1：n·p 组合爆炸无界、守卫缺一路（修 NaN 不修 Inf）、手册数值与实际漂移、测试期望自产、差分测试宣称失真。
 - P2：绝对阈值残留、参数共享语义错配、弱断言、三集合未同步、文档硬编码 42 以外的数字。
 - P3：归档/文档化建议、门禁增强、重构友好性。

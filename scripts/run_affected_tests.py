@@ -191,7 +191,7 @@ def map_source_to_tests(rel_path: str) -> tuple[str, list[str]]:
     if p.startswith("templates/"):
         if p.endswith(".yaml"):
             return "run", ["tests/services", "tests/integration/test_workflows.py"]
-        # new_analysis.py 脚手架 / README.md：无直接测试（11 步注册链由一致性门禁覆盖）→ SKIP
+        # new_analysis.py 脚手架 / README.md：无直接测试（8 步注册链由一致性门禁覆盖）→ SKIP
         if p.endswith((".py", ".md")):
             return "skip", []
         return "fail", []

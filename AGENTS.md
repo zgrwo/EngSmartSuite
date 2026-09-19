@@ -37,7 +37,7 @@
 
 | 而不是 | 而是 |
 |--------|------|
-| "添加分析方法" | "新方法通过 11 步注册 + 4 层测试防线。去验证。" |
+| "添加分析方法" | "新方法通过 8 步注册 + 4 层测试防线。去验证。" |
 | "修复 Bug" | "复现测试 FAILS → 修复后 PASSES + 无回归。去验证。" |
 
 ## 技能加载
@@ -123,7 +123,7 @@ EngSmartSuite/
 
 - engine/ 零业务框架依赖（纯 Python + numpy/scipy/pandas + matplotlib/sklearn/statsmodels 统计栈；禁止 xlwings/flask）
 - web/ 通过 orchestrator 间接调用 engine/
-- 新增分析函数必须走 11 步注册清单
+- 新增分析函数必须走 8 步注册清单（注册只有 1 处：`services/task_spec.py` 的 `TASK_SPECS`）
 
 ### 2. 防错原则
 

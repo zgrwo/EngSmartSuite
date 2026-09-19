@@ -95,7 +95,8 @@ smartsuite/
 │   └── exploratory.py  # 探索性分析
 │
 ├── services/      # ② 应用服务层：唯一桥接层
-│   ├── orchestrator.py # TASK_REGISTRY + DEFAULT_PARAMS
+│   ├── task_spec.py    # TASK_SPECS（任务注册唯一事实源）
+│   ├── orchestrator.py # 编排 + 7 组注册结构（派生自 task_spec）
 │   ├── data_io.py      # 数据读写 + 预处理（支持 Excel/CSV）
 │   ├── reporter.py     # 多格式输出
 │   └── audit.py        # 综合审计

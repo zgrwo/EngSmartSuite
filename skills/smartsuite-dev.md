@@ -288,21 +288,24 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
     )
 ```
 
-### 模板 2：新增分析方法的 11 步注册链
+### 模板 2：新增分析方法的 8 步注册链
 
 ```
 □ 1. engine/xxx.py           — 实现 AnalysisRequest → AnalysisResult
 □ 2. engine/__init__.py      — 导出函数名
-□ 3. orchestrator.py         — TASK_REGISTRY 注册
-□ 4. orchestrator.py         — DEFAULT_PARAMS 添加默认值
-□ 5. orchestrator.py         — TASK_LABELS + TASK_GROUPS 添加条目
-□ 6. app.js                  — TASK_PARAMS 添加参数默认值
-□ 7. templates/              — 创建 YAML 模板
-□ 8. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
-□ 9. docs/specification/api-reference.md   — 更新 API 参考
-□ 10. skills/analysis-decision-tree.md — 更新决策树（如引入新分析场景）
-□ 11. docs/user-manual/    — 更新用户手册（如面向用户的新方法）
+□ 3. services/task_spec.py   — 在 TASK_SPECS 追加一条 TaskSpec（**唯一注册点**）
+                               key/func_path/label/group/default_params/raw_cat/no_target/no_data
+                               → TASK_REGISTRY / DEFAULT_PARAMS / TASK_LABELS / TASK_GROUPS /
+                                 RAW_CAT_TASKS / NO_TARGET_TASKS / NO_DATA_TASKS 自动派生
+□ 4. app.js                  — TASK_PARAMS 添加参数默认值
+□ 5. templates/              — 创建 YAML 模板
+□ 6. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
+□ 7. docs/specification/api-reference.md   — 更新 API 参考
+□ 8. docs/user-manual/ + skills/analysis-decision-tree.md — 手册与决策树（如引入新场景）
 ```
+
+> 审查 2026-09-19 B1：第 3 步曾需同步改 `orchestrator.py` 的 7 组集合（含 3 处
+> append/add 补丁）；现这些名字全部由 `derive()` 派生，**新增任务只改这一处**。
 
 ### 模板 3：box_chart / SPC 函数新增 USL/LSL/UCL/CL 参数
 
@@ -395,7 +398,7 @@ result_b = results_b[0]
 | Python 修改不生效 | Flask 未重启 | 重启 `python src/smartsuite/web/app.py` |
 | `ruff` N806 报错 | 函数内常量用了大写名 | 改名 `_lowercase` 或提升到模块级 |
 | 测试失败但代码正确 | 检查是否是 statsmodels/pandas 版本差异 | 查看 CI 日志中的版本号 |
-| 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 11 步清单 |
+| 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 8 步清单（第 3 步 `task_spec.py` 最易漏） |
 | `sum(axis=None)` FutureWarning | pandas 弃用 | 改为 `.sum().sum()` 链式调用 |
 | Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
 | 微尺度(ppb/pico)数据结论翻转 / Web 整列 0.0000 | 绝对 `EPSILON` 判决或展示层固定舍入 | 见陷阱 9：守卫改精确零、判决相对化、展示走 `round_for_display` |

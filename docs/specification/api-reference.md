@@ -373,11 +373,25 @@ class AnalysisResult:
 ### orchestrate(req: AnalysisRequest) -> AnalysisResult
 路由分析请求到对应引擎函数，注入默认参数，统一异常处理。
 
-### TASK_REGISTRY: dict[str, Callable]
-全部 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
+### TaskSpec / TASK_SPECS（任务注册唯一事实源）
+`services/task_spec.py` 的 `TASK_SPECS: tuple[TaskSpec, ...]` 是任务元数据的**唯一来源**。
+`TaskSpec(key, func_path, label, group, default_params={}, raw_cat=False, no_target=False, no_data=False)`；
+`func_path` 为 `"模块:函数名"` 字符串，首次访问时按需 import（不在此展开引擎依赖）。
+
+### derive(specs) -> DerivedRegistry
+由 `TASK_SPECS` 派生全部注册结构：`registry`（LazyTaskRegistry）、`labels`、`groups`、
+`default_params`、`raw_cat`、`no_target`、`no_data`。重复 key 直接 `ValueError`。
+审查 2026-09-19 B1 之前，这 7 个结构需手工同步（且含 3 处 `append`/`add` 补丁）。
+
+### TASK_REGISTRY: MutableMapping[str, Callable]
+全部 task key → 引擎函数的注册表，由 `task_spec.derive()` 派生。支持
+按下标取函数后调用（如 `TASK_REGISTRY[task]` 再 `(req)`）/ `keys()` / `values()` / `items()` / `in` / `len()` /
+`set(...)` / `sorted(...)` 与 `monkeypatch.setitem` 覆盖（覆盖仅改解析缓存，可逆）。
+Task key 按业务场景分为 5 组（定义在 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
 
 ### DEFAULT_PARAMS: dict[str, dict]
-各 task key 的默认参数。编排器会自动合并用户参数到默认参数之上。
+各 task key 的默认参数（源自 `TaskSpec.default_params`）。编排器会自动合并用户参数到默认参数之上；
+空字符串参数视为“未提供”而回退到默认值（见 `_normalize_empty_params`）。
 
 ---
 

@@ -21,7 +21,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 - engine/ 零外部框架依赖（纯 Python + numpy/scipy/pandas）
 - 引擎函数签名统一：`(AnalysisRequest) -> AnalysisResult`
-- 新增分析函数必须走 11 步注册清单
+- 新增分析函数必须走 8 步注册清单（注册集中 `services/task_spec.py`）
 
 ---
 
