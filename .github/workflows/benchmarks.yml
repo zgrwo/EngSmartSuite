@@ -43,8 +43,11 @@ jobs:
         run: uv run pytest benchmarks/ --benchmark-only -q --benchmark-max-time=1.0 --benchmark-json=benchmark.json
 
       - name: 上传基准构件
+        # 审查 2026-09-19 G-1：基准失败/超时也上传已生成的 JSON，保留排障现场
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: benchmark-${{ github.sha }}
           path: benchmark.json
+          if-no-files-found: warn
           retention-days: 90

@@ -1,7 +1,7 @@
 # EngSmartSuite (SmartSuite)
 
 > **语言与目标市场**：本项目面向国内制造业工艺工程师，文档与界面均为简体中文，暂不提供英文版。
-> 在线文档：<https://zgrwo.github.io/EngSmartSuite/>
+> 在线文档：<https://zgrwo.github.io/EngSmartSuite/>（首次 Pages 部署后可用，进度见 [ROADMAP](ROADMAP.md)）
 
 > 工艺数据分析工具箱：Python 引擎 + Flask Web UI + CLI，覆盖正态性检验、过程能力分析、可靠性工程、实验设计（DoE）等。
 
@@ -165,7 +165,7 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 - 新手入口：[CONTRIBUTING 的第一个 PR 路径](CONTRIBUTING.md#第一个-pr约-15-分钟)；任务从 [ROADMAP](ROADMAP.md) 的候选清单挑选
 - 审查标准：[人类审查清单](docs/governance/review-checklist.md)
-- **维护模式**：目前为单一维护者（业余时间）。Issue 通常在 72 小时内答复；PR 审查集中在周末。
+- **项目运营**：目前为单一维护者（业余时间）。Issue 通常在 72 小时内答复；PR 审查集中在周末。
   若你希望成为长期贡献者，请从 ROADMAP 任务开始，累计 3 个合并 PR 后可申请 triage 权限。
 
 ---
@@ -186,7 +186,7 @@ pip install -e ".[dev]"
 pytest tests/ -x -q
 
 # 代码检查
-ruff check src/smartsuite/ scripts/
+ruff check src/smartsuite/ scripts/ tests/
 
 # 启动 Web UI
 python run_server.py

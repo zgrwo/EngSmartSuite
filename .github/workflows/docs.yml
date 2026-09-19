@@ -7,6 +7,14 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -15,9 +23,10 @@ permissions:
   pages: write
   id-token: write
 
+# 审查 2026-09-19 G-1：Pages 部署不取消进行中的部署（GitHub 官方 starter 惯例）
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -40,6 +49,8 @@ jobs:
 
   deploy:
     needs: build
+    # 审查 2026-09-19 G-1：PR 仅做构建校验，部署仍限 main push / 手动触发
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

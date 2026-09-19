@@ -2,6 +2,7 @@ graft templates
 include docs/README.md
 graft docs/adr
 graft docs/governance
+prune docs/governance/plans
 graft docs/specification
 graft docs/user-manual
 include *.md

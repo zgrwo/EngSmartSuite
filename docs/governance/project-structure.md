@@ -130,6 +130,7 @@ EngSmartSuite/
 │   │   ├── test_fuzz.py            #   模糊测试
 │   │   ├── test_med_fixes.py       #   审查 MED 问题修复回归
 │   │   ├── test_inverse.py         #   工艺参数反解（角色/建模/求解/可达/端到端）
+│   │   ├── test_engine_bootstrap.py #  引擎包根初始化（MATPLOTLIB_FONT_PATH 分支）
 │   │   └── test_new_functions.py   #   新函数验证
 │   ├── test_services/              #   服务层单元测试
 │   │   ├── __init__.py
@@ -326,7 +327,7 @@ smartsuite/core/      ← ① 数据契约层：仅 pandas+pydantic（AnalysisRe
 | 模式 | 说明 | 示例 |
 |------|------|------|
 | `{domain}.py` | 按分析领域划分引擎模块 | capability.py, detection.py |
-| `{domain}/` | 巨石分析领域拆分为子包（`__init__` re-export 公开 API） | root_cause/, doe_opt/, spc_charts/ |
+| `{domain}/` | 巨石分析领域拆分为子包（`__init__` re-export 公开 API；私有名下不保证兼容，2026-09-19） | root_cause/, doe_opt/, spc_charts/ |
 | `_{name}.py` | 内部工具（下划线前缀） | _palette.py, _constants.py |
 | `test_{name}.py` | 测试文件 | test_correctness.py |
 

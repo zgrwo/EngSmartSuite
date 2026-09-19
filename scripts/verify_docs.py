@@ -465,8 +465,14 @@ def check_undeclared(root: Path, strict: bool) -> list[str]:
     if not declared:
         problems.append("[配置错误] 无法从 project-structure.md 解析顶层条目（目录树格式异常？）")
         return problems
-    for p in root.iterdir():
-        if p.name in declared or p.name in EXCLUDED_DIRS:
+    candidates = [
+        p for p in root.iterdir() if p.name not in declared and p.name not in EXCLUDED_DIRS
+    ]
+    # 审查 2026-09-19 F-2：.gitignore 忽略的本地产物（benchmark.json / htmlcov/ 等）豁免登记；
+    # 非 git 环境（迷你仓库/CI checkout 前）返回空集 → 行为与既有严格模式一致
+    ignored = _git_ignored_files(root, candidates)
+    for p in candidates:
+        if p.name in ignored:
             continue
         if p.is_file():
             problems.append(f"[未声明文件] {p.name}（请同步 project-structure.md 目录树）")

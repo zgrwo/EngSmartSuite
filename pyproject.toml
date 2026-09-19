@@ -8,7 +8,7 @@ version = "1.3.1"
 description = "SmartSuite — 工艺数据分析工具箱 (Flask Web UI + CLI + Python API)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "SmartSuite Team"}
 ]
@@ -16,7 +16,6 @@ keywords = ["flask", "web", "cli", "analysis", "manufacturing", "doe", "spc", "a
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Manufacturing",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -81,6 +80,7 @@ include = ["smartsuite*"]
 # numpy 2.5 的存根含 PEP 695 语法（mypy 目标 <3.12 无法解析）；3.10 运行时下限由 ci.yml 矩阵兜底
 python_version = "3.12"
 files = [
+    "src/smartsuite/__init__.py",
     "src/smartsuite/core",
     "src/smartsuite/services",
     "src/smartsuite/engine",

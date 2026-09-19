@@ -223,6 +223,26 @@ def test_undeclared_excludes_tool_caches(tmp_path):
     assert verify_docs.check_undeclared(root, strict=True) == []
 
 
+def test_undeclared_exempts_gitignored_local_artifacts(tmp_path, monkeypatch):
+    """回归（2026-09-19 F-2）：benchmark.json / htmlcov/ 等 .gitignore 忽略的本地产物豁免登记。
+
+    _git_ignored_files 在非 git 的迷你仓库返回空集，此处 monkeypatch 模拟 git 命中。
+    """
+    root = build_repo(tmp_path)
+    (root / "benchmark.json").write_text("{}", encoding="utf-8")
+    (root / "htmlcov").mkdir()
+    monkeypatch.setattr(verify_docs, "_git_ignored_files", lambda r, paths: {p.name for p in paths})
+    assert verify_docs.check_undeclared(root, strict=True) == []
+
+
+def test_undeclared_gitignored_does_not_mask_tracked_like_files(tmp_path):
+    """反向守卫：非忽略文件仍必须登记（_git_ignored_files 空集路径）。"""
+    root = build_repo(tmp_path)
+    (root / "benchmark.json").write_text("{}", encoding="utf-8")
+    problems = verify_docs.check_undeclared(root, strict=True)
+    assert any("benchmark.json" in p for p in problems)
+
+
 # ── 向量 6b：git tag 版本漂移（审查 2026-09-05 E1）────────────
 
 

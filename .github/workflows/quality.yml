@@ -17,9 +17,10 @@ permissions:
   contents: read
   pull-requests: read
 
-# 版本策略（审查 #P1-8）：quality gate 固定 3.12 加速 PR 反馈，
-# 全版本矩阵（3.10–3.13）由 ci.yml full job 覆盖；docs-consistency 用 3.10
-# 兜底最低支持版本。
+# 版本策略（审查 #P1-8）：quality gate 固定 3.12 加速 PR 反馈；
+# 全版本矩阵（3.10–3.13）由 ci.yml full job（仅 main）覆盖。
+# 审查 2026-09-19 D-1：uv.lock 在 3.10 与 3.11+ 解析为两套依赖（pandas 2.x vs 3.0），
+# 新增 py310-engine job 在 PR 阶段验证 3.10 分叉路径，避免只在 main 才暴露。
 jobs:
   dependency-review:
     name: PR 依赖变更审查
@@ -88,6 +89,21 @@ jobs:
         run: uv sync --frozen --all-extras
       - name: Run falsy audit
         run: uv run python scripts/falsy_audit.py
+
+  py310-engine:
+    name: Python 3.10 引擎回归（锁文件分叉路径）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.10"
+          enable-cache: true
+      - name: 安装依赖（冻结锁文件；3.10 解析为 pandas 2.x / numpy 2.2 分叉）
+        run: uv sync --frozen --all-extras
+      - name: 引擎测试（3.10 依赖分叉路径）
+        run: uv run pytest tests/test_engine -q --tb=short
 
   architecture-check:
     name: 架构约束检查 + 覆盖率门禁

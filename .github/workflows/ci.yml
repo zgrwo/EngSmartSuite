@@ -188,8 +188,13 @@ jobs:
             kill $SERVER_PID 2>/dev/null || true
             exit 1
           fi
-          uv run python -m pytest tests/test_web_e2e.py -q --tb=short
-          RC=$?
+          # 审查 2026-09-19 G-1：默认 shell 为 `bash -e`，裸 `RC=$?` 不可达；
+          # 用 if/else 捕获退出码，确保服务器进程总被清理且退出码正确传播
+          if uv run python -m pytest tests/test_web_e2e.py -q --tb=short; then
+            RC=0
+          else
+            RC=$?
+          fi
           kill $SERVER_PID 2>/dev/null || true
           exit $RC
 
@@ -255,7 +260,7 @@ jobs:
         run: uv sync --frozen --all-extras
 
       - name: 测试覆盖率
-        # fail-under=85：2026-09-19 基线 89%（engine/__init__ 平台分支 pragma 后达 100%），留余量防跨平台波动
+        # fail-under=85：2026-09-19 实测 89.67%（本 job 单平台基线；full 矩阵不带 cov，无跨平台比较）
         run: uv run pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html --cov-fail-under=85
 
       - name: 死代码检测 (vulture)
