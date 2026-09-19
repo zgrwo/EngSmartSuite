@@ -1,4 +1,5 @@
 import logging
+import warnings
 from itertools import combinations, product
 
 import numpy as np
@@ -6,6 +7,7 @@ import pandas as pd
 import statsmodels.api as sm
 from matplotlib.figure import Figure
 from scipy import stats as sp_stats
+from statsmodels.tools.sm_exceptions import SingularMatrixWarning
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
@@ -66,7 +68,10 @@ def _breusch_pagan(model, X):
     n = len(residuals)
     # 回归残差平方对自变量
     try:
-        aux_model = sm.OLS(resid_sq, X).fit()
+        # 秩亏（常量残差/共线 X）告警由下方相对判据统一处理，此处仅静默 statsmodels 英文告警
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SingularMatrixWarning)
+            aux_model = sm.OLS(resid_sq, X).fit()
         ess = np.sum((aux_model.fittedvalues - resid_sq_mean) ** 2)
         rss = np.sum((resid_sq - aux_model.fittedvalues) ** 2)
         # 审查 2026-08-19：#完美拟合时 ess=rss=0 → LM=0/0=NaN，返回 None 由调用方显示 N/A
@@ -132,7 +137,10 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
     try:
         X = sm.add_constant(df[cols])
         y = df[req.target_col]
-        model = sm.OLS(y, X).fit()
+        # 共线设计矩阵的秩亏告警：退化处理走下方 R²/系数守卫，静默第三方英文告警
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SingularMatrixWarning)
+            model = sm.OLS(y, X).fit()
         # 审查 2026-08-19 #1.4：输出守卫——R² 非有限时替换为哨兵 N/A
         if not np.isfinite(model.rsquared):
             return AnalysisResult(

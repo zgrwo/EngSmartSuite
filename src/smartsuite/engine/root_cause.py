@@ -1,4 +1,5 @@
 import logging
+import warnings
 from math import sqrt
 
 import numpy as np
@@ -348,12 +349,15 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                         # LOWESS 平滑趋势线
                         if len(sub) >= 20:
                             try:
-                                smoothed = lowess(
-                                    sub[cv2].values,
-                                    sub[cv1].values,
-                                    frac=0.3,
-                                    return_sorted=True,
-                                )
+                                # 常量/近常量序列的平滑除零告警：结果由后续哨兵判定
+                                with warnings.catch_warnings():
+                                    warnings.simplefilter("ignore", RuntimeWarning)
+                                    smoothed = lowess(
+                                        sub[cv2].values,
+                                        sub[cv1].values,
+                                        frac=0.3,
+                                        return_sorted=True,
+                                    )
                                 ax.plot(
                                     smoothed[:, 0],
                                     smoothed[:, 1],
