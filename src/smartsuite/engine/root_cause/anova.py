@@ -278,7 +278,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     group_data = [groups[groups[group_col] == g][req.target_col].values for g in group_names]
     bp = ax_box.boxplot(
         group_data,
-        tick_labels=[f"{g}\n(n={len(d)})" for g, d in zip(group_names, group_data)],
+        tick_labels=[f"{g}\n(n={len(d)})" for g, d in zip(group_names, group_data, strict=True)],
         patch_artist=True,
         widths=0.5,
     )

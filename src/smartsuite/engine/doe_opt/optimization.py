@@ -302,7 +302,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
 
     scores = np.zeros(len(req.data))
     valid_rows = valid_mask  # 布尔索引
-    for obj, w in zip(objectives, weights):
+    for obj, w in zip(objectives, weights, strict=True):
         col = obj["col"]
         vals = req.data.loc[valid_rows, col].values
         if len(vals) < 2:

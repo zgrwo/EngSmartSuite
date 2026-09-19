@@ -144,7 +144,7 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="variance_test", status="error", messages=["至少需要 2 个分组"])
 
     group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
-    valid_groups = [(str(g), d) for g, d in zip(groups, group_data) if len(d) >= 2]
+    valid_groups = [(str(g), d) for g, d in zip(groups, group_data, strict=True) if len(d) >= 2]
 
     if len(valid_groups) < 2:
         return AnalysisResult(task="variance_test", status="error", messages=["有效分组不足"])

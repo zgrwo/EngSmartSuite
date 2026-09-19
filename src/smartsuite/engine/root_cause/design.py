@@ -55,7 +55,7 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
     current_n = req.params.get("current_n")
 
     # 参数 float() 防护 (CLI/YAML 传入字符串时安全转换)
-    for name, val, default in [
+    for name, val, _default in [
         ("effect_size", effect_size, 0.5),
         ("alpha", alpha, 0.05),
         ("target_power", target_power, 0.80),

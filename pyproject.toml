@@ -116,18 +116,11 @@ ignore = ["E501", "N806"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/smartsuite/engine/__init__.py" = ["E402", "I001", "SIM112"]  # matplotlib config + core deps check must precede imports
-"src/smartsuite/engine/doe_opt/doe.py" = ["B007"]  # 迁移遗留：未用循环变量
-"src/smartsuite/engine/doe_opt/optimization.py" = ["B905"]  # 迁移遗留：zip strict
-"src/smartsuite/engine/doe_opt/regression.py" = ["N803", "B007", "B905"]  # 迁移遗留：X 参数名 + 未用循环变量 + zip strict
-"src/smartsuite/engine/root_cause/anova.py" = ["B905"]  # 迁移遗留：zip strict（收敛属后续任务）
-"src/smartsuite/engine/root_cause/correlation.py" = ["B007"]  # 迁移遗留：未用循环变量
-"src/smartsuite/engine/root_cause/design.py" = ["B007"]  # 迁移遗留：未用循环变量
-"src/smartsuite/engine/root_cause/distribution.py" = ["SIM108"]  # 迁移遗留：if-else 可三元
-"src/smartsuite/engine/root_cause/hypothesis.py" = ["B007", "B905"]  # 迁移遗留：未用循环变量 + zip strict
-"src/smartsuite/engine/root_cause/inference.py" = ["B905"]  # 迁移遗留：zip strict
+"src/smartsuite/engine/doe_opt/regression.py" = ["N803"]  # X 参数名（统计符号约定，非笔误）
+"src/smartsuite/engine/root_cause/distribution.py" = ["SIM108"]  # 三元风格（历史风格，保留豁免）
 "src/smartsuite/engine/spc_monitor.py" = ["N806", "B007", "B905"]  # math vars + zip strict
-"src/smartsuite/engine/spc_charts/attribute.py" = ["B007", "SIM108"]  # 迁移遗留：未用循环变量 + 三元风格
-"src/smartsuite/engine/spc_charts/xbar_r.py" = ["B007", "SIM108"]  # 迁移遗留：未用循环变量 + 三元风格
+"src/smartsuite/engine/spc_charts/attribute.py" = ["SIM108"]  # 三元风格（历史风格，保留豁免）
+"src/smartsuite/engine/spc_charts/xbar_r.py" = ["SIM108"]  # 三元风格（历史风格，保留豁免）
 "src/smartsuite/engine/detection.py" = ["SIM300"]  # yoda condition
 "src/smartsuite/engine/exploratory.py" = ["SIM105"]  # try-except-pass style
 "src/smartsuite/cli.py" = ["E402"]  # matplotlib.use before imports

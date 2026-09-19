@@ -481,10 +481,11 @@ def _gen_taguchi(factors):
         else:
             raise ValueError(f"二水平因子数({n2})过多，无正交表可匹配")
     elif n2 == 0:
-        for name, runs, c3 in (("L9", 9, 4), ("L27", 27, 13)):
+        for oa_name, runs, c3 in (("L9", 9, 4), ("L27", 27, 13)):
             if n3 <= c3:
                 three_cols = three_level_oa(runs)
                 two_cols = None
+                name = oa_name
                 spec = f"3^{c3}"
                 break
         else:

@@ -407,11 +407,11 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # 按分组绘制系列线
     all_xbar_violated: set[int] = set()
-    for rule_name, idxs in xbar_violations.items():
+    for _rule_name, idxs in xbar_violations.items():
         for idx in idxs:
             all_xbar_violated.add(idx)
 
-    for gi, gname in enumerate(group_names):
+    for _gi, gname in enumerate(group_names):
         gdata = agg[agg["group_val"] == gname].sort_values("_idx")
         if len(gdata) == 0:
             continue
@@ -569,7 +569,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 )
 
         # 系列线
-        for gi, gname in enumerate(group_names):
+        for _gi, gname in enumerate(group_names):
             gdata = agg[agg["group_val"] == gname].sort_values("_idx")
             g_multi = gdata[gdata["multi"]]
             if len(g_multi) == 0:

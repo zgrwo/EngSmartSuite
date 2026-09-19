@@ -127,8 +127,8 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 相关性 + 显著性标记矩阵 ──
     annotated = pd.DataFrame(index=cols, columns=cols, dtype=str)
-    for i, c1 in enumerate(cols):
-        for j, c2 in enumerate(cols):
+    for i, _c1 in enumerate(cols):
+        for j, _c2 in enumerate(cols):
             r = corr.iloc[i, j]
             p = pmat.iloc[i, j]
             stars = _significance_stars(p)  # _significance_stars 内部处理 NaN/None

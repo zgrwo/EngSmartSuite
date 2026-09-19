@@ -242,7 +242,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     for gi, gname in enumerate(group_names):
         group_colors[gname] = cm.tab10(gi % 10)
 
-    for gi, gname in enumerate(group_names):
+    for _gi, gname in enumerate(group_names):
         gdata = agg[agg["group_val"] == gname].sort_values("_idx")
         if len(gdata) == 0:
             continue

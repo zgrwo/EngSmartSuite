@@ -919,7 +919,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             _, tie_counts = np.unique(ranks, return_counts=True)
             rank_sums = {}
             start = 0
-            for g, gd in zip(groups, group_data):
+            for g, gd in zip(groups, group_data, strict=True):
                 rank_sums[g] = np.sum(ranks[start : start + len(gd)])
                 start += len(gd)
 
@@ -1049,7 +1049,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             ],
             edgecolor="white",
         )
-        for i, (cat, cnt) in enumerate(zip(categories, counts)):
+        for i, (_cat, cnt) in enumerate(zip(categories, counts, strict=True)):
             ax.text(i, cnt + max(counts) * 0.02, str(cnt), ha="center", fontsize=9)
         ax.set_ylabel("频数", fontsize=10)
         ax.set_title(f"{test_name} (p={p:.4f}, OR={or_val:.2f})", fontsize=10)
@@ -1451,7 +1451,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         patch_artist=True,
         widths=0.5,
     )
-    for patch, color in zip(bp["boxes"], [PALETTE["data"]["secondary"], PALETTE["target"]["fill"]]):
+    for patch, color in zip(
+        bp["boxes"], [PALETTE["data"]["secondary"], PALETTE["target"]["fill"]], strict=True
+    ):
         patch.set_facecolor(color)
     # 叠加散点
     for i, gdata in enumerate([g1, g2], 1):

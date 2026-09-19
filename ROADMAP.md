@@ -8,7 +8,7 @@
 - v1.3.0：42 个分析方法，1040 项测试，覆盖率 89%，4 层测试防线 + 文档数值对账门禁。
 - 类型检查：mypy 全覆盖 `src/smartsuite`（core/services/engine/web/cli），CI 软门禁。
 - 测试告警：`filterwarnings = ["error", ...]` 白名单制，全量 0 告警。
-- 已知短板：覆盖率洼地 `engine/__init__.py`、子包迁移遗留 lint 豁免收敛、社区回路。
+- 已知短板：社区回路（单一维护者）、英文/国际化未启动。
 
 ## 2026 Q4
 
@@ -19,11 +19,12 @@
 - [x] 测试告警清零（error 白名单制，2026-09-19）
 - [x] 巨石模块 `root_cause.py` 拆分为子包（3,999 行 → 10 文件，公开 API 不变，2026-09-19）
 - [x] 巨石模块 `spc_charts.py` / `doe_opt.py` 同模式拆分为子包（2,220/2,471 行 → 8/6 文件，公开 API 不变，2026-09-19）
+- [x] 子包 lint 豁免收敛：B905（`zip(strict=True)`）/B007 清零，仅保留 N803（统计符号 `X`）与 SIM108（风格）并注明理由（2026-09-19）
+- [x] 覆盖率洼地 `engine/__init__.py` 补齐（平台分支 pragma 化后 100%，2026-09-19）
+- [x] 覆盖率门禁 70 → 85，并在 PR quality.yml 增设覆盖率门禁（2026-09-19）
 
 ## 2027 H1
 
-- [x] 覆盖率洼地 `engine/__init__.py` 补齐（平台分支 pragma 化后 100%，2026-09-19）
-- [x] 覆盖率门禁 70 → 85，并在 PR quality.yml 增设覆盖率门禁（2026-09-19）
 - [ ] 第 2 位维护者路径：至少 2 名外部贡献者、3 个合并 PR 后开放 triage 权限
 
 ## 决策门（满足条件才启动，启动前写 ADR）
@@ -36,8 +37,7 @@
 
 ## 适合新贡献者的任务（good first issue 候选）
 
-1. 收敛 `root_cause/`、`doe_opt/`、`spc_charts/` 子包的迁移遗留 lint 豁免（N803/B007/B905/SIM108 变量重命名，逐文件摘除 per-file-ignores）
-2. 为 `benchmarks/` 增加 `process_capability` 与 `correlation` 两个基准任务
-3. 手册某方法章节补充"常见参数误用"小节（每章 ≤30 行，附实际输出）
-4. 为 `templates/` 增加模板参数自动校验脚本的测试用例
-5. 补 `docs/gallery.md` 中缺失方法的示例图与一句话解读
+1. 为 `benchmarks/` 增加 `process_capability` 与 `correlation` 两个基准任务
+2. 手册某方法章节补充"常见参数误用"小节（每章 ≤30 行，附实际输出）
+3. 为 `templates/` 增加模板参数自动校验脚本的测试用例
+4. 补 `docs/gallery.md` 中缺失方法的示例图与一句话解读

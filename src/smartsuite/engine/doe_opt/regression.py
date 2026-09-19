@@ -34,7 +34,7 @@ def _std_beta(model, X):
     if not np.isfinite(y_std) or y_std == 0:
         return [0.0] * len(X.columns)
     beta = []
-    for i, col in enumerate(X.columns):
+    for col in X.columns:
         if col == "const":
             beta.append(0.0)
         else:
@@ -346,7 +346,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
                 "aic": float(model.aic),
                 "bic": float(model.bic),
                 "significant_vars": sig_vars["变量"].tolist(),
-                "std_betas": {col: beta for col, beta in zip(X.columns, std_betas)},
+                "std_betas": {col: beta for col, beta in zip(X.columns, std_betas, strict=True)},
             },
             messages=warn_msgs,
         )
@@ -543,7 +543,7 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
                 "Huber系数": [huber.intercept_] + list(huber.coef_),
                 "OLS系数": list(ols_model.params),
                 "差异": [huber.intercept_ - ols_model.params[0]]
-                + [h - o for h, o in zip(huber.coef_, ols_model.params[1:])],
+                + [h - o for h, o in zip(huber.coef_, ols_model.params[1:], strict=True)],
             }
         )
 
