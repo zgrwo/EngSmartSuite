@@ -9,10 +9,10 @@ pip install -e ".[all]"                     # 或从 GitHub Release 安装 wheel
 python run_server.py                        # 打开 Web UI（默认 http://127.0.0.1:5050）
 ```
 
-CLI 最小示例（模板 + 内置演示数据 `tests/test_data.xlsx`）：
+CLI 最小示例（模板 + 内置演示数据 `tests/data/injection_process.xlsx`）：
 
 ```bash
-smartsuite run templates/example_correlation.yaml --input tests/test_data.xlsx --outdir out/
+smartsuite run templates/example_correlation.yaml --input tests/data/injection_process.xlsx --outdir out/
 ```
 
 Python API：
@@ -22,7 +22,7 @@ import pandas as pd
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import orchestrate
 
-df = pd.read_excel("tests/test_data.xlsx")
+df = pd.read_excel("tests/data/injection_process.xlsx")
 result = orchestrate(
     AnalysisRequest(
         task="correlation",

@@ -116,16 +116,19 @@ jobs:
 
       - name: 引擎层核心测试
         # 第二轮 #8：--basetemp 固定独立临时目录（Windows junction 防护，见 verify_consistency.py #5.2）
-        run: uv run pytest tests/test_engine/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-engine
+        run: uv run pytest tests/engine/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-engine
 
       - name: 服务层测试
-        run: uv run pytest tests/test_services/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-services
+        run: uv run pytest tests/services/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-services
+
+      - name: 回归防线测试（guards：微尺度/规格限/跨层）
+        run: uv run pytest tests/guards/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-guards
 
       - name: 治理脚本测试
         run: uv run pytest tests/scripts/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-scripts
 
       - name: 集成测试
-        run: uv run pytest tests/test_integration.py tests/test_master_integration.py -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-integration
+        run: uv run pytest tests/integration/test_integration.py tests/integration/test_task_registry_smoke.py -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-integration
 
       # 审查 2026-08-19 #5.3：全量一致性门禁此前只在 main push 的 full job 跑，
       # 引擎崩溃（如 scatter_plot 重复列）可在 PR 阶段静默合入；纳入 PR 门禁
@@ -190,7 +193,7 @@ jobs:
           fi
           # 审查 2026-09-19 G-1：默认 shell 为 `bash -e`，裸 `RC=$?` 不可达；
           # 用 if/else 捕获退出码，确保服务器进程总被清理且退出码正确传播
-          if uv run python -m pytest tests/test_web_e2e.py -q --tb=short; then
+          if uv run python -m pytest tests/integration/test_web_e2e.py -q --tb=short; then
             RC=0
           else
             RC=$?

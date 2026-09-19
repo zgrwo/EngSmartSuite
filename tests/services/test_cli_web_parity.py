@@ -1,11 +1,12 @@
-"""CLI (orchestrate) vs Web (run_analysis) numerical parity — all 42 methods.
+"""Web API (run_analysis) 与引擎直调路径数值差分 — 全 42 方法（真实数据）。
 
-由原 tests/_diff_cli_web.py 模块级脚本改造（审查 2026-08-19 #3.3）：
-- 原文件名不匹配 pytest python_files=["test_*.py"] 收集规则，且无 test_* 函数，
-  40 方法 CLI/Web 差分从未执行，属死代码
-- 现为参数化 pytest 测试：41 个任务逐一对比 status/summary/tables/metadata
-- 顺带修复原脚本两处参数格式 bug：
-  grid_search 的 ranges 传字符串（引擎需 dict）、multi_objective 的 objectives 传字符串
+每任务对比 status / summary（全字符串）/ metadata 标量数值 / 表格值（经
+_serialize_table 对称规范化），并含变异注入自测（metadata 漂移 / summary 尾部）。
+
+来源：2026-08-19 #3.3 由 _diff_cli_web.py 死脚本改造（原无 test_* 函数、不被收集）；
+2026-09-19 5S：与 test_differential.py 合并——合成数据版全任务差分被本文件严格覆盖
+（真实数据 + 表格值 + 元数据数值），其独有预处理/注册表用例已迁至
+test_data_io.py 与 test_orchestrator.py。
 """
 
 import contextlib
@@ -34,10 +35,12 @@ from smartsuite.web.api import _serialize_table, run_analysis
 def parity_df():
     # 审查 2026-09-01 T-5：数据路径基于 __file__ 解析，不再依赖进程 cwd
     path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_data.xlsx"
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data",
+        "injection_process.xlsx",
     )
     if not pd.io.common.file_exists(path):
-        pytest.skip("缺少 tests/test_data.xlsx，跳过 CLI/Web 差分测试")
+        pytest.skip("缺少 tests/data/injection_process.xlsx，跳过 CLI/Web 差分测试")
     return pd.read_excel(path)
 
 
@@ -120,7 +123,6 @@ def tables_equal(t_a, t_b):
 def _meta_scalars_equal(meta_a, meta_b, rtol=1e-3, atol=1e-6):
     """比较两路径 metadata 中共有的标量数值键（Round-2 批次D #1）。
 
-    复用 tests/test_services/test_differential.py 的浮点比较思路：
     仅键集合一致仍可能数值漂移（如 Web JSON 序列化精度），对 float 值做
     rtol/atol 双容差比较；nan 视为相等（两侧皆 nan 时跳过）。
     返回 (ok, detail)。

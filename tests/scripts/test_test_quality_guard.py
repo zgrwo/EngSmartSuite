@@ -355,7 +355,7 @@ def test_max_warn_exceeded_fails(tmp_path, capsys):
     root = tmp_path / "repo"
     _write(
         root,
-        "tests/test_demo.py",
+        "tests/engine/test_demo.py",
         "def test_ok_only():\n    r = compute()\n    assert r.status == 'ok'\n",
     )
     rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests"), "--max-warn", "0"])
@@ -368,11 +368,71 @@ def test_max_warn_within_limit_passes(tmp_path, capsys):
     root = tmp_path / "repo"
     _write(
         root,
-        "tests/test_demo.py",
+        "tests/engine/test_demo.py",
         "def test_ok_only():\n    r = compute()\n    assert r.status == 'ok'\n",
     )
     rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests"), "--max-warn", "1"])
     assert rc == 0
+
+
+# ── 测试布局/文件名约定（5S 素养，2026-09-19）────────────────
+
+
+def test_root_level_test_file_flagged(tmp_path):
+    """tests/ 根直接放 test_*.py → FAIL（须归入范围子目录）。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/test_loose.py", "def test_x():\n    assert True\n")
+    problems = guard.check_test_layout(tests)
+    assert any("散放" in p and "test_loose.py" in p for p in problems)
+
+
+def test_subdir_test_file_passes(tmp_path):
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/engine/test_ok.py", "def test_x():\n    assert True\n")
+    assert guard.check_test_layout(tests) == []
+
+
+def test_data_file_outside_data_dir_flagged(tmp_path):
+    """测试数据散放在子目录（非 tests/data/）→ FAIL。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/engine/test_ok.py", "def test_x():\n    assert True\n")
+    _write(root, "tests/engine/fixture.xlsx", "binary")
+    problems = guard.check_test_layout(tests)
+    assert any("未置于 tests/data/" in p for p in problems)
+
+
+def test_data_dir_xlsx_passes(tmp_path):
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/engine/test_ok.py", "def test_x():\n    assert True\n")
+    _write(root, "tests/data/fixture.xlsx", "binary")
+    assert guard.check_test_layout(tests) == []
+
+
+def test_review_or_date_named_test_file_flagged(tmp_path):
+    """review/日期/轮次式文件名 → FAIL（修复回归须表述被测行为）。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(
+        root,
+        "tests/guards/test_review_2026_09_16_release_prep.py",
+        "def test_x():\n    assert True\n",
+    )
+    _write(root, "tests/services/test_round2_fixes.py", "def test_y():\n    assert 1 == 1\n")
+    problems = guard.check_test_layout(tests)
+    assert sum("review/日期/轮次式命名" in p for p in problems) == 2
+
+
+def test_main_flags_root_level_test_file(tmp_path, capsys):
+    root = tmp_path / "repo"
+    _write(root, "tests/test_loose.py", "def test_x():\n    assert True\n")
+    rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests")])
+    out = capsys.readouterr().out
+    assert rc == 1, f"布局违规应 FAIL: {out[-200:]}"
+    assert "散放在 tests/ 根" in out
 
 
 # ── 类方法宽松口径的已知漏检（钉死取舍，fix round 2）──────────

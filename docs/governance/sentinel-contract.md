@@ -50,7 +50,7 @@
 - [ ] **防零除 ≠ 判决**：常量/零守卫只认精确零或非有限（`x == 0` / `not np.isfinite(x)`）；
   带量纲量的阈值判决必须相对化（如 `1e-12 * max(|x|)`），禁止 `x > EPSILON` 绝对常量；
   不可估计返回 `NaN` + 消息，不得伪造 0/1；展示走 `round_for_display`（见陷阱 9，
-  回归防线 `tests/test_review_2026_09_16_release_prep.py`）
+  回归防线 `tests/guards/test_micro_scale_guards.py`）
 
 ### 输出守卫（结果验证）
 
@@ -86,7 +86,7 @@ python scripts/falsy_audit.py
 python scripts/verify_manual_claims.py
 
 # 边界模糊测试防线（空数据/单行/全NaN/常量列/共线/n>5000）
-pytest tests/test_engine/test_edge_cases.py -q
+pytest tests/engine/test_edge_cases.py -q
 ```
 
 ## 维护规则

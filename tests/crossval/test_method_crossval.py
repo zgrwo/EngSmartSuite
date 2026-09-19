@@ -4,7 +4,7 @@
 但实际不含任何 R 参考数值——现如实标注为 手工公式/已知性质 交叉验证。
 后续录入真实 R 输出数值后，可改回"R 参考对比"并逐项比对。
 
-运行方式：pytest tests/crossval_r/ -v
+运行方式：pytest tests/crossval/ -v
 """
 
 import numpy as np

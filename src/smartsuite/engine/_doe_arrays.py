@@ -73,7 +73,7 @@ def three_level_oa(n_runs: int) -> np.ndarray:
 
 # L18 = OA(18, 2^1·3^7)。标准田口混合水平表。
 # 列 0 为二水平(0/1)，列 1-7 为三水平(0/1/2)。
-# 正交性由 tests/test_engine/test_doe_design.py 的 test_l18_* 校验。
+# 正交性由 tests/engine/test_doe_design.py 的 test_l18_* 校验。
 L18 = np.array(
     [
         [0, 0, 0, 0, 0, 0, 0, 0],

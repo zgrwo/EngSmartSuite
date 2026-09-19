@@ -15,9 +15,9 @@ from smartsuite.services.orchestrator import orchestrate
 @pytest.fixture(scope="module")
 def chemical_df():
     """加载化工批次数据集。"""
-    path = os.path.join(os.path.dirname(__file__), "test_chemical_data.xlsx")
+    path = os.path.join(os.path.dirname(__file__), "..", "data", "chemical_batch.xlsx")
     if not os.path.exists(path):
-        pytest.skip("test_chemical_data.xlsx not found")
+        pytest.skip("tests/data/chemical_batch.xlsx not found")
     return pd.read_excel(path)
 
 

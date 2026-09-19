@@ -12,6 +12,7 @@ from smartsuite.services.data_io import (
     auto_generate_subgroup_col,
     infer_group_col,
     infer_hypothesis_group_col,
+    preprocess_data,
     preprocess_for_task,
     prepare_spc_subgroup_col,
 )
@@ -80,10 +81,40 @@ def test_preprocess_for_task_removes_inf():
     assert np.isinf(out2["a"]).sum() == 0, "RAW_CAT 路径也不应残留 Inf"
 
 
+def test_preprocess_data_idempotent():
+    """预处理幂等：对已预处理数据再次调用不改变列集、不产生新插补。"""
+    np.random.seed(42)
+    df = pd.DataFrame(
+        {
+            "x1": np.random.normal(0, 1, 50),
+            "x2": np.random.normal(5, 2, 50),
+            "y": np.random.normal(10, 1, 50),
+        }
+    )
+    df1, cols1, _, _, _ = preprocess_data(df, ["x1", "x2"])
+    _, cols2, _, log2, _ = preprocess_data(df1, cols1)
+    assert cols1 == cols2, f"预处理不幂等: {cols1} ≠ {cols2}"
+    assert sum(log2.values()) == 0, f"二次预处理产生新插补: {log2}"
+
+
+def test_preprocess_data_fills_missing_values():
+    """特征列 NaN 应被中位数填充，输出不得残留 NaN。"""
+    np.random.seed(42)
+    df = pd.DataFrame(
+        {
+            "num_col": pd.Series([1.0, 2.0, None, 4.0, 5.0]),
+            "y": np.random.normal(0, 1, 5),
+        }
+    )
+    df2, cols, _, _, _ = preprocess_data(df, ["num_col"])
+    assert "num_col" in cols or any(c.startswith("num_col") for c in cols)
+    assert df2[cols[0]].isna().sum() == 0, (
+        f"预处理后仍有 {df2[cols[0]].isna().sum()} 个 NaN，原始 NaN 未被填充"
+    )
+
+
 def test_preprocess_data_cat_map_roundtrip():
     """Round-2 P3：cat_map 回填 known_cat_map 不得产生全 NaN 参照列。"""
-    from smartsuite.services.data_io import preprocess_data
-
     df = pd.DataFrame({"city": ["A", "B", "C", "A", "B"] * 2, "y": [1.0] * 10})
     enc1, cols1, cat_map, _, _ = preprocess_data(df, ["city"], categorical_cols={"city"})
     enc2, cols2, _, _, _ = preprocess_data(
@@ -148,10 +179,6 @@ def test_validate_data_tiny_sample_warning():
 
 def test_preprocess_data_high_cardinality_warns():
     """类别列 >50 唯一值 → 记录 One-Hot 膨胀警告（data_io.py:92-100）。"""
-    import pandas as pd
-
-    from smartsuite.services.data_io import preprocess_data
-
     df = pd.DataFrame({"批次": [f"B{i}" for i in range(60)], "y": range(60)})
     df_enc, feats, cat_map, _, _ = preprocess_data(df, ["批次", "y"], {"批次"})
     assert len([c for c in feats if c.startswith("批次_")]) >= 50
@@ -162,10 +189,6 @@ def test_preprocess_data_known_cat_map_alignment():
 
     运行时调用方均不传 known_cat_map（仅历史对齐能力），此处直测对齐行为。
     """
-    import pandas as pd
-
-    from smartsuite.services.data_io import preprocess_data
-
     df = pd.DataFrame({"产线": ["A", "B", "A", "B"], "y": [1, 2, 3, 4]})
     df_enc, feats, cat_map, _, unknown = preprocess_data(
         df, ["产线"], {"产线"}, known_cat_map={"产线": ["A", "B", "C"]}

@@ -1,4 +1,4 @@
-"""MED 修复回归测试 — 三个已知 MED 问题的红-绿验证。
+"""假设检验 / DOE / 过程能力 回归测试 — 方法分发、交互效应、Box-Cox 规格限。
 
 对应问题（2026-08-29 全量数值验证）:
 - MED-1: hypothesis_test 白名单含 cohens_d/correlation 但静默落入独立双样本 t 检验

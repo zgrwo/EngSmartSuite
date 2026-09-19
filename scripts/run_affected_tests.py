@@ -7,17 +7,17 @@ run_affected_tests.py — 影响范围测试路由（git-diff → 受影响测�
   定位变更的源文件，按映射表路由到对应测试，只运行受影响的部分。
 
 映射约定（套件专属，见 map_source_to_tests）：
-  - src/smartsuite/engine/*.py      → tests/test_engine/
-  - src/smartsuite/services/*.py    → tests/test_services/
-  - src/smartsuite/core/*.py        → tests/test_services/
-  - src/smartsuite/web/*.py         → E2E + 集成测试（web 变更影响面最大）
-  - src/smartsuite/cli.py           → 集成 + 差分测试
+  - src/smartsuite/engine/*.py      → tests/engine/ + tests/guards/（跨层回归防线）
+  - src/smartsuite/services/*.py    → tests/services/ + tests/guards/
+  - src/smartsuite/core/*.py        → tests/services/ + tests/guards/
+  - src/smartsuite/web/*.py         → E2E + 集成测试 + tests/guards/（web 变更影响面最大）
+  - src/smartsuite/cli.py           → 集成 + 服务层测试
   - scripts/*.py / *.sh             → tests/scripts/ 下 stem 子串匹配；
                                       无匹配时 *.md/*.sh/*.yaml 等文档/配置类 → SKIP
   - templates/*.yaml                → 服务层 + 工作流测试；
                                       new_analysis.py/README.md 脚手架 → SKIP
   - tests/**                        → 直接运行变更的测试文件
-  - 文档/配置变更（*.md / .github/）→ SKIP（无测试）
+  - 文档/配置变更（*.md / .github/ / MANIFEST.in / uv.lock / LICENSE 等）→ SKIP（无测试）
   - 无匹配 → FAIL（提示"可能缺测"，不静默跳过，防门禁说谎）
 
 用法：
@@ -41,26 +41,32 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # 映射表：src 子目录前缀 → 目标测试（目录或文件，相对 ROOT）
 _SRC_TEST_MAP: list[tuple[str, tuple[str, ...]]] = [
-    ("src/smartsuite/engine/", ("tests/test_engine",)),
-    ("src/smartsuite/services/", ("tests/test_services",)),
-    ("src/smartsuite/core/", ("tests/test_services",)),
+    # 回归防线 guards/ 钉住引擎/服务/web 的历史修复——层变更必须带跑
+    ("src/smartsuite/engine/", ("tests/engine", "tests/guards")),
+    ("src/smartsuite/services/", ("tests/services", "tests/guards")),
+    ("src/smartsuite/core/", ("tests/services", "tests/guards")),
     (
         "src/smartsuite/web/",
         (
-            "tests/test_web_e2e.py",
-            "tests/test_integration.py",
-            "tests/test_integration_chemical.py",
-            "tests/test_integration_reliability.py",
-            "tests/test_integration_warranty.py",
+            "tests/integration/test_web_e2e.py",
+            "tests/integration/test_integration.py",
+            "tests/integration/test_integration_chemical.py",
+            "tests/integration/test_integration_reliability.py",
+            "tests/integration/test_integration_warranty.py",
+            "tests/guards",
         ),
     ),
     (
         "src/smartsuite/cli.py",
-        ("tests/test_integration.py", "tests/test_master_integration.py", "tests/test_services"),
+        (
+            "tests/integration/test_integration.py",
+            "tests/integration/test_task_registry_smoke.py",
+            "tests/services",
+        ),
     ),
     (
         "templates/",
-        ("tests/test_services", "tests/test_workflows.py"),
+        ("tests/services", "tests/integration/test_workflows.py"),
     ),
 ]
 
@@ -73,7 +79,26 @@ _SKIP_PREFIXES = (
     ".qoder/",
     "logs/",
 )
-_SKIP_SUFFIXES = (".md", ".yml", ".yaml", ".json", ".toml", ".cfg", ".ini", ".bat", ".sh")
+_SKIP_SUFFIXES = (
+    ".md",
+    ".yml",
+    ".yaml",
+    ".json",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".bat",
+    ".sh",
+    ".in",  # MANIFEST.in 等打包配置（审查 2026-09-19：无测试但有变更即 FAIL 的门禁盲区）
+    ".lock",  # uv.lock（依赖锁：变更由 CI --frozen 校验，无 pytest 对应）
+)
+# 根级配置/元数据裸名（无后缀，无对应测试）
+_SKIP_BARE_NAMES = {
+    "LICENSE",
+    ".gitignore",
+    ".gitattributes",
+    ".editorconfig",
+}
 
 # 既有治理脚本豁免（早于本工具，已由 CI 直接执行覆盖，见 ci.yml/quality.yml）：
 #   新增脚本不在此列——必须配 tests/scripts/ 测试（缺测即失败，防门禁说谎）
@@ -165,7 +190,7 @@ def map_source_to_tests(rel_path: str) -> tuple[str, list[str]]:
         return "fail", []
     if p.startswith("templates/"):
         if p.endswith(".yaml"):
-            return "run", ["tests/test_services", "tests/test_workflows.py"]
+            return "run", ["tests/services", "tests/integration/test_workflows.py"]
         # new_analysis.py 脚手架 / README.md：无直接测试（11 步注册链由一致性门禁覆盖）→ SKIP
         if p.endswith((".py", ".md")):
             return "skip", []
@@ -175,7 +200,11 @@ def map_source_to_tests(rel_path: str) -> tuple[str, list[str]]:
             if p == prefix.rstrip("/") or p.startswith(prefix):
                 return "run", list(targets)
         return "fail", []
-    if p.startswith(_SKIP_PREFIXES) or p.endswith(_SKIP_SUFFIXES):
+    if (
+        p.startswith(_SKIP_PREFIXES)
+        or p.endswith(_SKIP_SUFFIXES)
+        or Path(p).name in _SKIP_BARE_NAMES
+    ):
         return "skip", []
     # 未知路径
     return "fail", []

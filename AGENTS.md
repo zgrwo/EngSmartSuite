@@ -88,7 +88,7 @@ EngSmartSuite/
 ├── docs/                             # 项目文档（governance / specification / user-manual / adr）
 ├── logs/                             # 审查报告/运行产物（本地保留，不入库）
 ├── src/                              # 主包（core / engine / services / web）
-├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
+├── tests/                            # 测试（engine/services/integration/guards/crossval/scripts + data/）
 ├── benchmarks/                       # 性能基准（pytest-benchmark，非测试防线）
 ├── skills/                           # Skill 定义（领域 5 + 过程 6）
 ├── templates/                        # YAML 分析模板 (45 个: 42 任务 + 2 方法变体 + 1 工作流指南)

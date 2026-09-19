@@ -94,33 +94,23 @@ EngSmartSuite/
 │               ├── app.js          #   前端逻辑：列标记、参数面板、结果渲染
 │               └── style.css       #   前端样式
 │
-├── tests/                          # 测试
+├── tests/                          # 测试（2026-09-19 5S：范围分目录，目录名不带 test_ 前缀）
 │   ├── __init__.py
 │   ├── conftest.py                 #   共享 fixtures
-│   ├── test_data.xlsx              #   通用测试数据
-│   ├── test_chemical_data.xlsx     #   化工批次数据
-│   ├── test_reliability_data.xlsx  #   可靠性数据
-│   ├── test_warranty_data.xlsx     #   保修数据
-│   ├── test_integration.py         #   通用集成测试
-│   ├── test_integration_chemical.py#   化工场景
-│   ├── test_integration_reliability.py # 可靠性场景
-│   ├── test_integration_warranty.py#   保修场景
-│   ├── test_master_integration.py  #   全方法集成
-│   ├── test_packaging.py           #   打包契约（PEP 561 py.typed 分发）
-│   ├── test_review_2026_09_fixes.py#   2026-09-01 审查修复回归（跨层）
-│   ├── test_review_2026_09_05_release_prep.py # 2026-09-05 发版前审查修复回归
-│   ├── test_review_2026_09_06_release_prep.py # 2026-09-06 发版前审查修复回归（B3 微尺度 ACF）
-│   ├── test_review_2026_09_16_release_prep.py # 2026-09-16 全量审查修复回归（微尺度绝对阈值族/展示层/哨兵）
-│   ├── test_web_e2e.py             #   Web UI E2E
-│   ├── test_workflows.py           #   工作流串联测试
-│   ├── crossval_r/                 #   关键方法交叉验证（手工公式/已知性质；已不再声称 R 参考）
-│   │   └── test_r_reference.py
-│   ├── test_engine/                #   引擎层单元测试
+│   ├── data/                       #   测试数据集（命名 {domain}.xlsx，不带 test_ 前缀）
+│   │   ├── injection_process.xlsx  #   注塑工艺 1000行×44列（原 test_data.xlsx）
+│   │   ├── chemical_batch.xlsx     #   化工批次数据
+│   │   ├── reliability.xlsx        #   可靠性数据
+│   │   └── warranty.xlsx           #   保修数据
+│   ├── engine/                     #   引擎层单元测试（原 test_engine/）
 │   │   ├── __init__.py
 │   │   ├── test_root_cause.py
 │   │   ├── test_doe_opt.py
 │   │   ├── test_doe_design.py
-│   │   ├── test_doe_pydoe3_benchmark.py #   DOE 基准对照（无 pyDOE3 时自动跳过）
+│   │   ├── test_doe_pydoe3_parity.py #   DOE vs pyDOE3 交叉验证（无 pyDOE3 时自动跳过）
+│   │   ├── test_doe_opt_package_parity.py # DOE/优化子包拆分组装对照
+│   │   ├── test_root_cause_package_parity.py # 要因分析子包拆分组装对照
+│   │   ├── test_spc_charts_package_parity.py # SPC 图表子包拆分组装对照
 │   │   ├── test_spc_monitor.py
 │   │   ├── test_utils.py
 │   │   ├── test_correctness.py     #   数值正确性 — 全量覆盖
@@ -128,24 +118,40 @@ EngSmartSuite/
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_property_invariants.py # 属性测试（hypothesis：量纲/不变量/退化）
 │   │   ├── test_fuzz.py            #   模糊测试
-│   │   ├── test_med_fixes.py       #   审查 MED 问题修复回归
+│   │   ├── test_hypothesis_doe_capability.py # 假设检验/DOE/过程能力 回归
 │   │   ├── test_inverse.py         #   工艺参数反解（角色/建模/求解/可达/端到端）
 │   │   ├── test_engine_bootstrap.py #  引擎包根初始化（MATPLOTLIB_FONT_PATH 分支）
-│   │   └── test_new_functions.py   #   新函数验证
-│   ├── test_services/              #   服务层单元测试
+│   │   ├── test_engine_input_guards.py # 引擎输入防护（审查修复钉死）
+│   │   └── test_spc_hypothesis_basics.py # SPC/假设检验基础覆盖
+│   ├── services/                   #   服务层单元测试（原 test_services/）
 │   │   ├── __init__.py
 │   │   ├── test_orchestrator.py
 │   │   ├── test_data_io.py
 │   │   ├── test_audit.py
 │   │   ├── test_reporter.py
-│   │   ├── test_differential.py    #   CLI vs Web 路径一致性
-│   │   ├── test_diff_cli_web.py    #   CLI/Web 差分一致性
-│   │   ├── test_round2_fixes.py    #   审查回归修复验证
+│   │   ├── test_cli_web_parity.py  #   引擎直调 vs Web API 差分（全 42 任务真实数据）
+│   │   ├── test_service_guards.py  #   服务层防护（CLI/API/审计/报告/日志）
 │   │   ├── test_upload_limits.py   #   Web 上传限制校验
 │   │   ├── test_manual_parity.py   #   Web/CLI/Python/手册 四路一致性
 │   │   ├── test_web_app_routes.py  #   Web 路由直测（app.py 分支/安全/清理）
 │   │   ├── test_web_api.py         #   Web API 内部机制（序列化/合并矩阵/兜底）
 │   │   └── test_cli_paths.py       #   CLI 分支补测（模板/输入/校验/输出）
+│   ├── integration/                #   跨层集成 / E2E（服务+引擎+Web 端到端）
+│   │   ├── test_integration.py
+│   │   ├── test_integration_chemical.py
+│   │   ├── test_integration_reliability.py
+│   │   ├── test_integration_warranty.py
+│   │   ├── test_task_registry_smoke.py # 任务注册冒烟（全任务可调用 + 计数/标签/分组）
+│   │   ├── test_web_e2e.py         #   Web UI E2E（需运行中的服务器）
+│   │   ├── test_workflows.py       #   工作流串联测试
+│   │   └── test_packaging.py       #   打包契约（PEP 561 py.typed 分发）
+│   ├── guards/                     #   跨层回归防线（审查修复钉死；engine/services/web 变更必跑）
+│   │   ├── test_micro_scale_guards.py     # 微尺度绝对阈值同族/展示层/哨兵
+│   │   ├── test_acf_lasso_guards.py       # ACF 与 Lasso 微尺度相对判据
+│   │   ├── test_capability_spc_guards.py  # 能力/SPC/DOE 防护（规格限哨兵/相对判据/分组校验）
+│   │   └── test_cross_layer_guards.py     # 跨层防护（序列化/预处理/Web API 校验）
+│   ├── crossval/                   #   关键方法交叉验证（手工公式/已知性质）
+│   │   └── test_method_crossval.py
 │   └── scripts/                    #   治理脚本测试
 │       ├── test_retry.py
 │       ├── test_run_affected_tests.py
@@ -329,7 +335,9 @@ smartsuite/core/      ← ① 数据契约层：仅 pandas+pydantic（AnalysisRe
 | `{domain}.py` | 按分析领域划分引擎模块 | capability.py, detection.py |
 | `{domain}/` | 巨石分析领域拆分为子包（`__init__` re-export 公开 API；私有名下不保证兼容，2026-09-19） | root_cause/, doe_opt/, spc_charts/ |
 | `_{name}.py` | 内部工具（下划线前缀） | _palette.py, _constants.py |
-| `test_{name}.py` | 测试文件 | test_correctness.py |
+| `{scope}/` | 测试按范围分目录，目录名不带 `test_` 前缀 | tests/engine/, tests/services/, tests/integration/, tests/guards/, tests/crossval/, tests/scripts/ |
+| `data/{domain}.xlsx` | 测试数据集（不带 `test_` 前缀，统一置于 tests/data/） | tests/data/injection_process.xlsx |
+| `test_{name}.py` | 测试文件（须置于对应范围子目录，禁 review/日期/轮次式命名；由 test_quality_guard 守卫） | tests/engine/test_correctness.py |
 
 ## 不入库
 

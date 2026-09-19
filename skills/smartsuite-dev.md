@@ -194,7 +194,7 @@ side: {
 
 **方向直觉陷阱（2026-09-04 → 2026-09-05 否证）**：真实 d2\* 表**随 m 递增**（m=2→1.128，m=12→3.266；行 g 随 g 递减趋近渐近线），代码方向其实是正确的。2026-09-04 轮"表倒置/AV 低估 25–400%（Critical）"是**误报**——复算时用了 `d2(g)/√m` 的错误归一化（把"个体读数 σ"当成量具 σ），构造出虚假的"真实值"。**任何"D2\* 应递减/表错了"的结论，先按下述检查方法独立交叉后再动手，否则会把正确的表改错。**
 
-**检查方法**：`pytest tests/test_engine/test_edge_cases.py -k gage_rr`——`test_gage_rr_av_matches_anova`（14aa345）用 statsmodels ANOVA 做独立交叉；自查 `av/anova ≈ 1.0`（仅 2 操作员小样本允许 1.08~1.09 级）。**禁止**用"直觉公式"自造 d2\* 期望值当基准。
+**检查方法**：`pytest tests/engine/test_edge_cases.py -k gage_rr`——`test_gage_rr_av_matches_anova`（14aa345）用 statsmodels ANOVA 做独立交叉；自查 `av/anova ≈ 1.0`（仅 2 操作员小样本允许 1.08~1.09 级）。**禁止**用"直觉公式"自造 d2\* 期望值当基准。
 
 **修复模板**：AV 查表按操作员数取固定映射（2→1.41、3→1.91、4→2.24、5→2.48）或 K2=5.15/d2\*，不传 `n_obs`；补 `10 零件 × 2 操作员 × 2 重复` 用例钉住回归。
 
@@ -214,7 +214,7 @@ MAPE/DW/CV% 退化、Web/HTML 微尺度列整列显示 `0.0000`；宏观量级�
 3. **展示**统一走 `round_for_display`（`_utils.py`）口径；Web/HTML/前端需与引擎一致（`api.py:_serialize_table`、`fmtCellNum`、`reporter._fmt_html_cell`）。
 
 **检查方法**：量纲对抗——同一数组乘 `1e-9`/`1e-12`，数值应同比缩放、结论不变；
-回归防线 `tests/test_review_2026_09_16_release_prep.py`（31 项，含 DOE ppb、Grubbs、Hedges g、展示层、哨兵）；
+回归防线 `tests/guards/test_micro_scale_guards.py`（34 项，含 DOE ppb、Grubbs、Hedges g、展示层、哨兵）；
 全库扫描 `grep -n "EPSILON" src/smartsuite/engine/*.py` 逐处核对「防零除还是判决」。
 
 **修复模板**：
@@ -397,7 +397,10 @@ result_b = results_b[0]
 pytest tests/ -x -q
 
 # 仅运行引擎测试
-pytest tests/test_engine/ -x -q
+pytest tests/engine/ -x -q
+
+# 仅运行跨层回归防线
+pytest tests/guards/ -x -q
 
 # 代码检查
 ruff check src/smartsuite/ scripts/

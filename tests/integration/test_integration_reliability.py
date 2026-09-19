@@ -12,9 +12,9 @@ from smartsuite.services.orchestrator import orchestrate
 
 @pytest.fixture(scope="module")
 def rel_df():
-    path = os.path.join(os.path.dirname(__file__), "test_reliability_data.xlsx")
+    path = os.path.join(os.path.dirname(__file__), "..", "data", "reliability.xlsx")
     if not os.path.exists(path):
-        pytest.skip("test_reliability_data.xlsx not found")
+        pytest.skip("tests/data/reliability.xlsx not found")
     return pd.read_excel(path)
 
 

@@ -13,9 +13,9 @@ from smartsuite.services.orchestrator import orchestrate
 
 @pytest.fixture(scope="module")
 def war_df():
-    path = os.path.join(os.path.dirname(__file__), "test_warranty_data.xlsx")
+    path = os.path.join(os.path.dirname(__file__), "..", "data", "warranty.xlsx")
     if not os.path.exists(path):
-        pytest.skip("test_warranty_data.xlsx not found")
+        pytest.skip("tests/data/warranty.xlsx not found")
     return pd.read_excel(path)
 
 

@@ -8,7 +8,7 @@ import re
 from importlib.resources import files
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_py_typed_marker_present():

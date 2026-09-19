@@ -1,4 +1,4 @@
-"""Round-2 审查修复批次B — 回归测试（TDD：先红后绿）。
+"""服务层防护回归测试 — CLI/API/审计/报告/日志 的输入校验与降级。
 
 覆盖:
 - cli.py: _parse_sheet / 缺 task / 空 YAML / 缺列模板 中文错误
@@ -58,7 +58,7 @@ def test_cli_missing_task_key(monkeypatch, tmp_path, capsys):
     tmpl.write_text("target_col: 不良率\nfeature_cols: [熔体温度]\n", encoding="utf-8")
     code, out, err = _run_cli(
         monkeypatch,
-        ["smartsuite", "run", str(tmpl), "--input", "tests/test_data.xlsx"],
+        ["smartsuite", "run", str(tmpl), "--input", "tests/data/injection_process.xlsx"],
         capsys,
     )
     assert code == 1, f"应 exit 1，实际 {code}"
@@ -71,7 +71,7 @@ def test_cli_empty_yaml(monkeypatch, tmp_path, capsys):
     tmpl.write_text("", encoding="utf-8")
     code, out, err = _run_cli(
         monkeypatch,
-        ["smartsuite", "run", str(tmpl), "--input", "tests/test_data.xlsx"],
+        ["smartsuite", "run", str(tmpl), "--input", "tests/data/injection_process.xlsx"],
         capsys,
     )
     assert code == 1, f"应 exit 1，实际 {code}"
@@ -87,7 +87,7 @@ def test_cli_missing_column_template(monkeypatch, tmp_path, capsys):
     )
     code, out, err = _run_cli(
         monkeypatch,
-        ["smartsuite", "run", str(tmpl), "--input", "tests/test_data.xlsx"],
+        ["smartsuite", "run", str(tmpl), "--input", "tests/data/injection_process.xlsx"],
         capsys,
     )
     assert code == 1, f"应 exit 1，实际 {code}"
@@ -103,7 +103,15 @@ def test_cli_sheet_zero_index(monkeypatch, tmp_path, capsys):
     )
     code, out, err = _run_cli(
         monkeypatch,
-        ["smartsuite", "run", str(tmpl), "--input", "tests/test_data.xlsx", "--sheet", "0"],
+        [
+            "smartsuite",
+            "run",
+            str(tmpl),
+            "--input",
+            "tests/data/injection_process.xlsx",
+            "--sheet",
+            "0",
+        ],
         capsys,
     )
     assert code is None, f"正常执行不应 exit，实际 exit {code}: {out} {err}"

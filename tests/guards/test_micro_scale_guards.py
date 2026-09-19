@@ -1,4 +1,4 @@
-"""review-2026-09-16 修复回归测试 — 微尺度绝对阈值同族 + 展示层 + 哨兵补齐。
+"""微尺度防护回归测试 — 绝对阈值同族 + 展示层 + 哨兵补齐。
 
 对应审查报告 logs/reports/review-2026-09-16-full-modules.md 的问题清单：
   B-1 (P0) doe_analysis 绝对 EPSILON 误判标准误 → t 置 0 / p 置 1
@@ -42,9 +42,7 @@ from smartsuite.engine._utils import durbin_watson
 from smartsuite.services.orchestrator import orchestrate
 from smartsuite.web.api import _serialize_table
 
-_APP_JS = (
-    Path(__file__).resolve().parent.parent / "src" / "smartsuite" / "web" / "static" / "app.js"
-)
+_APP_JS = Path(__file__).resolve().parents[2] / "src" / "smartsuite" / "web" / "static" / "app.js"
 
 
 def _doe_df(scale: float, seed: int = 23, n: int = 60) -> pd.DataFrame:

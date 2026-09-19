@@ -2,7 +2,7 @@
 
 Requires a running server: `python src/smartsuite/web/app.py`
 When the server is not running, the module is skipped at collection time.
-Run manually: pytest tests/test_web_e2e.py -v
+Run manually: pytest tests/integration/test_web_e2e.py -v
 """
 
 import http.cookiejar
@@ -135,7 +135,10 @@ def web_session():
     csrf_token = json.loads(csrf_resp.read())["token"]
 
     with open(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_data.xlsx"), "rb"
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "data", "injection_process.xlsx"
+        ),
+        "rb",
     ) as f:
         data = f.read()
     boundary = uuid.uuid4().hex

@@ -77,8 +77,9 @@ pytest tests/ -x -q
 ## 测试
 
 - 全量：`uv run pytest tests/ -q`（≈8 分钟）
-- 仅引擎：`uv run pytest tests/test_engine -q`
-- 仅服务/Web：`uv run pytest tests/test_services -q`
+- 仅引擎：`uv run pytest tests/engine -q`
+- 仅服务/Web：`uv run pytest tests/services -q`
+- 仅回归防线：`uv run pytest tests/guards -q`
 - 性能基准：`uv run pytest benchmarks/ --benchmark-only -q`（非门禁）
 
 ## PR 规范

@@ -70,7 +70,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: 安装依赖（冻结锁文件）
-        # --all-extras 含 report（openpyxl）：verify_cross_consistency 读 tests/test_data.xlsx
+        # --all-extras 含 report（openpyxl）：verify_cross_consistency 读 tests/data/injection_process.xlsx
         # （2026-08-21 CI 修复历史：dev 缺依赖 → pd.read_excel ImportError）
         run: uv sync --frozen --all-extras
       - name: Verify manual parity
@@ -103,7 +103,7 @@ jobs:
       - name: 安装依赖（冻结锁文件；3.10 解析为 pandas 2.x / numpy 2.2 分叉）
         run: uv sync --frozen --all-extras
       - name: 引擎测试（3.10 依赖分叉路径）
-        run: uv run pytest tests/test_engine -q --tb=short
+        run: uv run pytest tests/engine -q --tb=short
 
   architecture-check:
     name: 架构约束检查 + 覆盖率门禁

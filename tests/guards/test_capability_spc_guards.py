@@ -1,4 +1,4 @@
-"""review-2026-09-05 发版前审查修复回归测试。
+"""能力 / SPC / DOE 防护回归测试 — 规格限哨兵、相对判据、分组与参数校验。
 
 对应 logs/reports/review-2026-09-05-release-prep.md 问题项：
 C1(规格限 isfinite), B1(常量列相对阈值), B2(d2* 取 ∞ 列), C2(无效 group_col),

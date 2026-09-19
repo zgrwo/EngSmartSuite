@@ -1,4 +1,4 @@
-"""新引擎函数的测试覆盖。"""
+"""SPC 与假设检验基础覆盖 — CUSUM/EWMA/变点/属性图 + 配对/单样本 t + 缺失模式。"""
 
 import numpy as np
 import pandas as pd

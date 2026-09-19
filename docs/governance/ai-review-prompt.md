@@ -94,10 +94,10 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 ### 3.5 验证体系（4 层测试防线 + 治理门禁）
 
 ```
-① 数值正确性   tests/test_engine/test_correctness.py + test_doe_design.py   已知答案 + 手工公式/独立库交叉
-② 数学不变量   tests/test_engine/test_invariants.py   p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减
-③ 边界模糊     tests/test_engine/test_edge_cases.py   空数据/单行/全NaN/常量列/共线/n>5000
-④ 差分测试     tests/test_services/test_differential.py + test_diff_cli_web.py  CLI vs Web 数值一致
+① 数值正确性   tests/engine/test_correctness.py + test_doe_design.py   已知答案 + 手工公式/独立库交叉
+② 数学不变量   tests/engine/test_invariants.py   p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减
+③ 边界模糊     tests/engine/test_edge_cases.py   空数据/单行/全NaN/常量列/共线/n>5000
+④ 差分测试     tests/services/test_cli_web_parity.py  引擎直调 vs Web API 数值一致（42 任务）
 ```
 
 - 数据流转含 `services/data_io.preprocess_data`（**返回多个值的元组解包——历史的 4+ 解包错误**，改动必须核对全部调用方）。
@@ -150,8 +150,8 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 | :--- | :--- |
 | 任何变更 | `git status`（确认无未声明改动/残留）+ `git diff --stat`（变更面） |
 | 源代码 | `ruff check src/smartsuite/ scripts/ tests/` + `ruff format --check src/smartsuite/ scripts/ tests/` + 聚焦 pytest（`run_affected_tests.py` 增量判定） |
-| 引擎/数值 | 追加四层防线：`pytest tests/test_engine/test_correctness.py tests/test_engine/test_invariants.py tests/test_engine/test_edge_cases.py -q` + `python scripts/verify_consistency.py --skip-pytest`（42 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
-| 服务/桥接 | `preprocess_data` 改动必查全部解包调用方 + `pytest tests/test_services/ -q` |
+| 引擎/数值 | 追加四层防线：`pytest tests/engine/test_correctness.py tests/engine/test_invariants.py tests/engine/test_edge_cases.py -q` + `pytest tests/guards/ -q`（微尺度/规格限回归）+ `python scripts/verify_consistency.py --skip-pytest`（42 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
+| 服务/桥接 | `preprocess_data` 改动必查全部解包调用方 + `pytest tests/services/ -q` |
 | 前端/参数面板 | 四点一致性（app.js TASK_PARAMS / PARAM_META / PARAM_LABELS / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_frontend_params.py`（键集静态比对）+ `python scripts/verify_cross_consistency.py`（运行时） |
 | 脚本/门禁 | `pytest tests/scripts/ -q`（治理脚本自测）+ 负向注入验证（见 6.4） |
 | 文档/发版 | `python scripts/verify_docs.py --strict` + `python scripts/falsy_audit.py` + 版本链核对（pyproject/CHANGELOG/manifest） + **远端拓扑核验（发版前全量）**：`git ls-remote origin refs/heads/main 'refs/tags/v*'` + 仓库外临时克隆判祖先（见「4.2 附注」） |
@@ -184,7 +184,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | 流程 | 触发 | 审查要点 |
 | :--- | :--- | :--- |
 | [ci.yml `quick`](../../.github/workflows/ci.yml) | push main / PR / dispatch | Conventional Commits（PR，逐 commit 校验）、模块导入（engine 导出数 + TASK_REGISTRY 数）、ruff lint+format、引擎/服务/脚本/集成 pytest、`verify_consistency --skip-pytest`（任务冒烟，数量当轮实测——2026-09-05 为 41）、`verify_manual_claims`（PR 即拦手册数值漂移）。核对：**失败是否真由变更引起**；路径过滤（`docs/**`、`skills/**` 等）是否漏掉了实际上会影响结果的文件。 |
-| [ci.yml `e2e`](../../.github/workflows/ci.yml) | Push/PR | 服务器 30 次探测（失败即红），`tests/test_web_e2e.py` 全部方法；Linux 需 CJK 字体。 |
+| [ci.yml `e2e`](../../.github/workflows/ci.yml) | Push/PR | 服务器 30 次探测（失败即红），`tests/integration/test_web_e2e.py` 全部方法；Linux 需 CJK 字体。 |
 | [ci.yml `full`](../../.github/workflows/ci.yml) | main push / dispatch | 矩阵 3 OS × Python 3.10/3.11/3.12/3.13（部分排除），`pytest tests/ -q` + `verify_consistency`（完整嵌套 pytest）。核对 Windows junction `--basetemp` 处理。 |
 | [ci.yml `quality`](../../.github/workflows/ci.yml) | main push / dispatch | 覆盖率 fail-under=70、vulture（过滤 Pydantic `cls` 误报）、pip-audit。 |
 | [ci.yml `consistency`](../../.github/workflows/ci.yml) | 任意分支 | 5 路注册断言（REGISTRY=PARAMS=LABELS=GROUPS）+ `engine` 全部导出 + `verify_frontend_params`（静态键集比对，2026-09-06 E4/G4 起）+ `verify_cross_consistency`（运行时，`set -o pipefail`）。 |
@@ -237,7 +237,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 - E1 **自校验零容忍**（专项见 6.1）：期望值不得来自被测实现本身；`verify_manual_claims` 手册 CLAIM 值必须与引擎输出独立交叉（与 scipy 级独立参考对账）。
 - E2 **通道分离**：`verify_consistency` 的 status=ok 冒烟 ≠ 数值正确（它只证明不崩溃）；四层防线的"数值正确"必须由已知答案/独立重算支撑。
 - E3 **差分测试口径**：CLI vs Web 共享同一引擎——差分只能拦截"封装路径引入的不一致"，**不能**拦截引擎本身的错；引擎对的锚点是 correctness/tests + manual 交叉。
-- E4 **断言质量**：期望硬编码（禁 `assert 实现自产`）；禁零信息断言（NotNonEmpty 类）；**测试命名/标注与断言内容相符**（历史：`test_r_reference.py` 名为"R 参考"实际只断言 status+pv>grr、无 R 数值比对，2026-09-05 1.5 附注）；复现测试必须进正式测试文件，临时审查测试（`_AUDIT_`）完成即转正或删除。
+- E4 **断言质量**：期望硬编码（禁 `assert 实现自产`）；禁零信息断言（NotNonEmpty 类）；**测试命名/标注与断言内容相符**（历史：`tests/crossval/test_method_crossval.py` 原名 `test_r_reference.py`，曾名为"R 参考"实际只断言 status+pv>grr、无 R 数值比对，2026-09-05 1.5 附注；2026-09-19 更名以名副其实）；复现测试必须进正式测试文件，临时审查测试（`_AUDIT_`）完成即转正或删除。
 - E5 **测试稳定性**：随机/计时/时序/全局状态依赖、matplotlib 后端（Agg）、CI 环境差异（junction 路径）导致间歇失败先查环境再归因代码。
 
 ### 维度 F：文档一致性（Docs）

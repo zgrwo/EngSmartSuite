@@ -204,6 +204,12 @@ def test_all_tasks_have_default_params():
         assert task in DEFAULT_PARAMS, f"{task} 缺少 DEFAULT_PARAMS 条目"
 
 
+def test_default_params_keys_are_registered():
+    """验证 DEFAULT_PARAMS 的键都是已注册任务（反向一致性，防幽灵条目）。"""
+    for task in DEFAULT_PARAMS:
+        assert task in TASK_REGISTRY, f"DEFAULT_PARAMS 中的 '{task}' 不在 TASK_REGISTRY 中"
+
+
 def test_task_registry_count():
     """验证注册任务数量符合预期（42 个分析方法）。"""
     assert len(TASK_REGISTRY) == 42, f"期望 42 个任务，实际 {len(TASK_REGISTRY)}"

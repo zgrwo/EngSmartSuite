@@ -9,7 +9,7 @@
 
 已知边界（2026-09-19 审查 E-2）：生成器保证非退化幅值下限，纯绝对兜底模式
 （`scale = X if X > 1e-12 else 1.0`）不在本文件触发；该模式由
-test_review_2026_09_16_release_prep.py 的 pico 用例（xbar/nonparametric/trend）钉住。
+test_micro_scale_guards.py 的 pico 用例（xbar/nonparametric/trend）钉住。
 """
 
 import numpy as np

@@ -37,7 +37,7 @@ def p(*args, **kwargs):
 # ────────────────────────────────────────────────────────
 # Load data & define column indices
 # ────────────────────────────────────────────────────────
-df_raw = pd.read_excel(os.path.join(PROJECT_ROOT, "tests", "test_data.xlsx"))
+df_raw = pd.read_excel(os.path.join(PROJECT_ROOT, "tests", "data", "injection_process.xlsx"))
 COLS = df_raw.columns  # by-index access
 # Verified via data patterns:
 IDX_MELT_TEMP = 24  # values ~200

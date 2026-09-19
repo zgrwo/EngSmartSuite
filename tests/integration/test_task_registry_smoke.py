@@ -1,4 +1,4 @@
-"""主集成测试 — 验证所有 TASK_REGISTRY 函数可被调用并返回合理结果。"""
+"""任务注册冒烟测试 — TASK_REGISTRY 全任务可调用 + 计数/标签/分组一致性。"""
 
 import os
 
@@ -138,7 +138,7 @@ def test_all_tasks_registered_count():
     """
     import re as _re
 
-    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     with open(
         os.path.join(_root, "docs", "specification", "api-reference.md"), encoding="utf-8"
     ) as _fh:

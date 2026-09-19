@@ -18,7 +18,7 @@
 
 ### 9.2 验证结果对照表
 
-以 `tests/test_data.xlsx` 为输入，验证日期: 2026-07-08。
+以 `tests/data/injection_process.xlsx` 为输入，验证日期: 2026-07-08。
 
 | 分析方法 | Web UI status | Python status | summary 一致 | 耗时 |
 |---------|--------------|--------------|-------------|------|
@@ -45,7 +45,7 @@
 
 ```bash
 # 运行完整 E2E 验证
-python tests/test_web_e2e.py
+python tests/integration/test_web_e2e.py
 
 # 输出:
 # === Upload ===

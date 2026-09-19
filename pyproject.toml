@@ -51,7 +51,7 @@ dev = [
     "pytest-cov>=4.0",
     "ruff==0.16.5",
     "setuptools>=83.0",
-    # DOE 设计 benchmark 基准库（可选，未安装时 test_doe_pydoe3_benchmark.py 自动跳过）
+    # DOE 设计交叉验证基准库（可选，未安装时 tests/engine/test_doe_pydoe3_parity.py 自动跳过）
     "pyDOE3>=1.0",
     "mypy>=1.11",
     "pytest-benchmark>=4.0",

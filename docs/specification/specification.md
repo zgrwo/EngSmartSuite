@@ -122,7 +122,7 @@ smartsuite/
 | ① 数值正确性 | test_correctness.py + test_doe_design.py | 已知答案 + 手工公式交叉验证 | 全量 (100%) |
 | ② 数学不变量 | test_invariants.py | p∈[0,1]、Cpk≤Cp、R²≥0 | 关键函数 |
 | ③ 边界模糊 | test_fuzz.py | 空数据/单行/全NaN/常量列 | 全部 |
-| ④ 差分测试 | test_differential.py | CLI vs Web 数值一致 | 全部 |
+| ④ 差分测试 | test_cli_web_parity.py | 引擎直调 vs Web API 数值一致 | 全部 (42 任务) |
 
 ### 4.2 已知限制
 

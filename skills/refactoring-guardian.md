@@ -17,8 +17,8 @@ argument-hint: "[phase: 0|1|2|3|4] [action: start|end]"
 | 代码检查 | `ruff check src/smartsuite/ scripts/` |
 | 快速测试 | `pytest tests/ -x -q` |
 | 全量测试 | `pytest tests/ -v` |
-| 数值正确性 | `pytest tests/test_correctness.py -v` |
-| 差分测试 | `pytest tests/test_differential.py -v` |
+| 数值正确性 | `pytest tests/engine/test_correctness.py -v` |
+| 差分测试 | `pytest tests/services/test_cli_web_parity.py -v` |
 
 ---
 

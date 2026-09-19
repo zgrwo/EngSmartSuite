@@ -1,6 +1,6 @@
 """Web UI ≡ CLI ≡ Python ≡ 用户手册 四路一致性验证。
 
-使用 tests/test_data.xlsx (1000行×44列 注塑工艺数据)，
+使用 tests/data/injection_process.xlsx (1000行×44列 注塑工艺数据)，
 逐条对照 docs/user-manual/（按章拆页）中记录的预期数值，
 验证所有 4 条路径（Python 直接调用 / CLI 模拟 / Web API / 手册文档）
 产生完全一致的数值结果。
@@ -25,7 +25,7 @@ from smartsuite.services.orchestrator import (
 # pytest 逐测试重设 filter，import 期 ignore 不生效（实测探针），属死代码。
 
 # ── 加载测试数据 ──
-_DATA_PATH = Path(__file__).parent.parent / "test_data.xlsx"
+_DATA_PATH = Path(__file__).parent.parent / "data" / "injection_process.xlsx"
 
 
 @pytest.fixture(scope="module")
@@ -480,7 +480,7 @@ def test_manual_6_1_regression(raw_df):
 def test_manual_spc_xbar(raw_df):
     """手册过程监控: X-bar/R 控制图 — 应正常生成控制限。
 
-    注: test_data.xlsx 中"车间"列每个组有~333个观测，
+    注: injection_process.xlsx 中"车间"列每个组有~333个观测，
     X-bar/R 要求 n=2-25。此处用"班次"列替代（3个水平），
     每个班次随机取前 5 个样本构造合理子组。
     """

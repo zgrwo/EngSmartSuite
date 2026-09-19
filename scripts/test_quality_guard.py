@@ -3,11 +3,13 @@
 test_quality_guard.py — 测试质量守卫（弱断言/缺测/命名）
 
 背景（来源：VibeCodingTemplate test-quality-guard.py）：
-  lint 与覆盖率只保证"测试存在"，不保证"测试有效"。本脚本检测三类测试质量问题：
+  lint 与覆盖率只保证"测试存在"，不保证"测试有效"。本脚本检测四类测试质量问题：
     1. 弱断言：`assert x is not None` / `assert len(x) > 0` 等作为**唯一**断言的测试方法
        （验证了"不是空"，但没有验证具体值，任何非空结果都能通过——形同虚设）
     2. 缺测：src/ 下公共函数无对应测试引用（源码改动了测试没跟上）
     3. 命名：测试方法名非描述性（test_1 / test_caseN 等无意义名）
+    4. 布局：测试文件须归入范围子目录（5S，禁 tests/ 根散放）；测试数据统一 tests/data/；
+       文件名禁 review/日期/轮次式命名（test_review_2026_*.py 类）
 
 用法：
   python scripts/test_quality_guard.py            # 基础检查（默认 src=src, tests=tests）
@@ -53,6 +55,16 @@ _STRONG_ASSERT_RE = re.compile(
 # 无意义测试名：test_<纯数字/序号/caseN>
 _BAD_NAME_RE = re.compile(r"test_(?:\d+|case\d+|test\d+|a|b|c|foo|bar|dummy)$")
 
+# 测试布局约定（2026-09-19 5S）：
+#   - 测试代码按范围归入 tests/ 子目录（engine/services/integration/guards/crossval/scripts，
+#     等价于 src 分层 + 防线 + 治理脚本），tests/ 根不得直接放 test_*.py
+#   - 测试数据（xlsx/csv）统一 tests/data/，根与其它子目录不得散放
+#   - 文件名禁 review/日期/轮次式命名（test_review_2026_*.py / test_round2_fixes.py 类）
+_TEST_DATA_DIR = "data"
+_TEST_DATA_SUFFIXES = (".xlsx", ".xls", ".csv")
+_BAD_TEST_FILE_RE = re.compile(r"(review|_fixes|round\d)", re.IGNORECASE)
+_DATE_IN_TEST_FILE_RE = re.compile(r"20\d{2}[-_]?\d{2}")
+
 # 审查 2026-08-19 #3.5 + 第二轮 #4：状态断言分级——
 #   - 弱状态断言：assert x.status == "ok"（仅成功状态，不验证具体值）
 #   - 强状态断言：assert x.status == "error"/"warning"（error 路径测试是有效断言，不判弱）
@@ -75,7 +87,7 @@ SELF_TEST_FILES = {"test_test_quality_guard.py"}
 #   - to_excel：导出 API 由 reporter 提供，需已打开 workbook 实例，单测收益低
 #     （read_excel_range 已于 2026-08 移除——V1 add-in 遗留死代码，无调用方）
 #   - upload / analyze / list_tasks / column_info / require_csrf / csrf_token：
-#     Flask 视图/辅助函数，经 tests/test_web_e2e.py HTTP 层端到端覆盖，
+#     Flask 视图/辅助函数，经 tests/integration/test_web_e2e.py HTTP 层端到端覆盖，
 #     直接函数级测试需 request context，收益低
 EXEMPT_FUNCS = {
     "to_excel",
@@ -85,7 +97,7 @@ EXEMPT_FUNCS = {
     "column_info",
     "require_csrf",
     "csrf_token",
-    "index",  # Flask 首页视图：经 tests/test_web_e2e.py HTTP 层覆盖（审查 #R2 收紧模块关联后暴露）
+    "index",  # Flask 首页视图：经 tests/integration/test_web_e2e.py HTTP 层覆盖（审查 #R2 收紧模块关联后暴露）
     # pydantic field_validator：由框架反射调用，无直接测试引用（审查 #P1-8 修复后
     # 类公共方法也纳入缺测检查，validator 属框架回调而非业务公共函数）
     "task_not_empty",
@@ -271,6 +283,39 @@ def check_naming(tests_dir: Path) -> list[str]:
     return problems
 
 
+def check_test_layout(tests_dir: Path) -> list[str]:
+    """测试布局/文件名约定（5S 素养，FAIL）：
+
+    1) tests/ 根不得直接放 test_*.py——须归入范围子目录；
+    2) 测试数据（xlsx/xls/csv）必须位于 tests/data/；
+    3) 测试文件名禁 review/日期/轮次式命名（修复回归应表述被测行为）。
+    """
+    problems: list[str] = []
+    if not tests_dir.is_dir():
+        return problems
+    for p in sorted(tests_dir.iterdir()):
+        if p.is_file() and p.name.startswith("test_") and p.suffix == ".py":
+            problems.append(
+                f"[FAIL] tests/{p.name} 散放在 tests/ 根——请归入范围子目录"
+                "（engine/services/integration/guards/crossval/scripts）"
+            )
+    for p in sorted(tests_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in _TEST_DATA_SUFFIXES and p.parent != tests_dir / _TEST_DATA_DIR:
+            problems.append(f"[FAIL] {_rel(p)} 未置于 tests/data/——测试数据须统一存放")
+        if (
+            p.name.startswith("test_")
+            and p.suffix == ".py"
+            and (_BAD_TEST_FILE_RE.search(p.stem) or _DATE_IN_TEST_FILE_RE.search(p.stem))
+        ):
+            problems.append(
+                f"[FAIL] {_rel(p)} 文件名含 review/日期/轮次式命名——"
+                "请改为表述被测行为的名称（如 test_service_guards.py）"
+            )
+    return problems
+
+
 def _is_property(node) -> bool:
     """是否为 property/cached_property 装饰的方法。
 
@@ -437,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
     problems += check_weak_asserts(tests_dir)
     problems += check_status_only_asserts(tests_dir)
     problems += check_naming(tests_dir)
+    problems += check_test_layout(tests_dir)
     problems += check_missing_tests(src_dir, tests_dir)
 
     if not problems:
