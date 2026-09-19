@@ -137,6 +137,9 @@ if usl is not None:
 
 **影响范围**：xbar_r_chart, process_capability_analysis, logistic_regression（threshold 参数）。
 
+> 注：SPC/箱线图参考线参数（usl/lsl/ucl/lcl/cl/target）自 2026-09-19 D-1 起改为
+> **显式中文报错**（`float` 后加 `np.isfinite` 拒绝，capability 范式），不再静默置 None；见模板 3。
+
 ### 陷阱 5：orchestrator 异常消息误翻译
 
 **现象**：引擎 `KeyError` → 用户看到"数据中缺少必要的列"（完全误导）。
@@ -307,7 +310,7 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
 
 **引擎端**：
 ```python
-# 提取参数并安全转换
+# 提取参数并安全转换（审查 2026-09-19 D-1：inf/nan 必须显式拒绝，见陷阱 9/capability 范式）
 def _draw_ref_lines(ax):
     for val, color, style, label in _ref_lines:
         ax.axhline(val, color=color, linestyle=style, linewidth=1.0, alpha=0.8, label=label)
@@ -325,9 +328,18 @@ for key, color, style in [
     val = req.params.get(key)
     if val is not None:
         try:
-            _ref_lines.append((float(val), color, style, key.upper()))
+            val_f = float(val)
         except (ValueError, TypeError):
-            pass
+            return AnalysisResult(
+                task="box_chart", status="error",
+                messages=[f"{key.upper()} 值无效: {val}，请输入数值"],
+            )
+        if not np.isfinite(val_f):
+            return AnalysisResult(
+                task="box_chart", status="error",
+                messages=[f"{key.upper()} 必须为有限数值，当前: {val!r}"],
+            )
+        _ref_lines.append((val_f, color, style, key.upper()))
 ```
 
 **前端 TASK_PARAMS**：
