@@ -10,9 +10,10 @@ verify_all.py — 全量验证入口（一个命令完成全部治理验证）
 步骤清单（适配套件治理脚本）：
   1. 构建（compileall src/ 语法检查）
   2. 测试（pytest tests/）
-  3. 文档一致性（verify_docs.py --strict：断链/目录树/裸异常/版本漂移）
-  4. Falsy 审计（falsy_audit.py）
-  5. 测试质量守卫（test_quality_guard.py：弱断言/缺测/命名）
+  3. 类型检查（mypy，与 quality.yml type-check 作业同口径）
+  4. 文档一致性（verify_docs.py --strict：断链/目录树/裸异常/版本漂移）
+  5. Falsy 审计（falsy_audit.py）
+  6. 测试质量守卫（test_quality_guard.py：弱断言/缺测/命名）
 
 注：verify_consistency.py（含 pytest 子进程，重）不纳入本入口（由 CI full job
 与 consistency job 覆盖）；verify_manual_claims.py 已接入 CI quick job
@@ -80,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if not args.quick:
         steps += [
+            ("类型检查（mypy）", [PYTHON, "-m", "mypy"]),
             ("文档一致性", [PYTHON, "scripts/verify_docs.py", "--strict"]),
             ("Falsy 审计", [PYTHON, "scripts/falsy_audit.py"]),
             ("测试质量守卫", [PYTHON, "scripts/test_quality_guard.py"]),
