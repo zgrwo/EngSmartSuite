@@ -14,6 +14,7 @@ from smartsuite.engine._constants import (
     CPK_MINIMUM,
 )
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import shapiro_p
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ def _normality_warning(data):
     n = len(data)
     if n < 3 or n > 5000:
         return None
-    _, sw_p = sp_stats.shapiro(data)
+    sw_p = shapiro_p(data)
     if sw_p < 0.01:
         return (
             f"⚠ 正态性检验 (Shapiro-Wilk) p={sw_p:.4f}<0.01，"

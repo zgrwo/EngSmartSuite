@@ -12,6 +12,7 @@ from statsmodels.formula.api import ols
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import safe_float as _safe_float
+from smartsuite.engine._utils import shapiro_p
 from smartsuite.engine.root_cause._shared import _effect_interpretation
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 残差正态性检验
     residuals = model.resid
     if len(residuals) >= 3 and len(residuals) <= 5000:
-        _, sw_p = sp_stats.shapiro(residuals)
+        sw_p = shapiro_p(residuals)
         if sw_p < 0.05:
             warn_msgs.append(
                 f"⚠ 残差正态性检验 (Shapiro-Wilk) p={sw_p:.4f}<0.05，"

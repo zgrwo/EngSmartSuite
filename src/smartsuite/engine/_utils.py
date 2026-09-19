@@ -7,8 +7,28 @@
 import logging
 
 import numpy as np
+from scipy import stats as sp_stats
 
 logger = logging.getLogger(__name__)
+
+
+def shapiro_p(data) -> float:
+    """Shapiro-Wilk p 值 — 退化输入显式短路，保证跨 scipy 版本确定性。
+
+    scipy 版本行为不一致：<1.18 对零极差数据发 UserWarning 并返回 p=1.0，
+    >=1.18 静默返回 NaN（warnings-as-errors 环境下前者会中断分析）。
+    统一语义：无方差数据 W=1 → p=1.0（正态性检验不拒绝）。
+
+    Args:
+        data: 一维数值序列（n >= 3，调用方保证）
+
+    Returns:
+        p 值（有限 float；NaN 归一为 1.0）
+    """
+    if float(np.max(data)) == float(np.min(data)):
+        return 1.0
+    p = float(sp_stats.shapiro(data)[1])
+    return 1.0 if np.isnan(p) else p
 
 
 def safe_float(value, default: float) -> float:

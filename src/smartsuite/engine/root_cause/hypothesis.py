@@ -14,6 +14,7 @@ from smartsuite.engine._constants import (
 )
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import safe_float as _safe_float
+from smartsuite.engine._utils import shapiro_p
 from smartsuite.engine.root_cause._shared import (
     _correlation_ci,
     _effect_interpretation,
@@ -1391,8 +1392,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     if test_type == "auto":
         normal = True
         if len(g1) >= 3 and len(g2) >= 3 and len(g1) <= 5000 and len(g2) <= 5000:
-            _, sw1 = sp_stats.shapiro(g1)
-            _, sw2 = sp_stats.shapiro(g2)
+            sw1 = shapiro_p(g1)
+            sw2 = shapiro_p(g2)
             normal = min(sw1, sw2) >= 0.05
             norm_already_checked = True
         if normal:
@@ -1402,8 +1403,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             norm_warn.append(f"自动选择 Mann-Whitney U (正态性p={min(sw1, sw2):.4f}<0.05)")
 
     if not norm_already_checked and len(g1) >= 3 and len(g2) >= 3 and test_type != "mannwhitney":
-        _, sw1 = sp_stats.shapiro(g1) if len(g1) <= 5000 else (None, 1.0)
-        _, sw2 = sp_stats.shapiro(g2) if len(g2) <= 5000 else (None, 1.0)
+        sw1 = shapiro_p(g1) if len(g1) <= 5000 else 1.0
+        sw2 = shapiro_p(g2) if len(g2) <= 5000 else 1.0
         if min(sw1, sw2) < 0.05:
             norm_warn.append(f"正态性检验 p={min(sw1, sw2):.4f}<0.05，建议使用 Mann-Whitney U 检验")
 
