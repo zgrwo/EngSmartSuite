@@ -116,7 +116,12 @@ ignore = ["E501", "N806"]
 [tool.ruff.lint.per-file-ignores]
 "src/smartsuite/engine/__init__.py" = ["E402", "I001", "SIM112"]  # matplotlib config + core deps check must precede imports
 "src/smartsuite/engine/doe_opt.py" = ["E402", "I001", "N803", "N806", "B007", "B905"]  # sp_stats alias + math vars + zip strict + sorted imports
-"src/smartsuite/engine/root_cause.py" = ["E402", "I001", "N803", "N806", "B007", "B905", "SIM108"]  # sp_stats alias + math vars + zip strict + logger mid-imports
+"src/smartsuite/engine/root_cause/anova.py" = ["B905"]  # 迁移遗留：zip strict（收敛属后续任务）
+"src/smartsuite/engine/root_cause/correlation.py" = ["B007"]  # 迁移遗留：未用循环变量
+"src/smartsuite/engine/root_cause/design.py" = ["B007"]  # 迁移遗留：未用循环变量
+"src/smartsuite/engine/root_cause/distribution.py" = ["SIM108"]  # 迁移遗留：if-else 可三元
+"src/smartsuite/engine/root_cause/hypothesis.py" = ["B007", "B905"]  # 迁移遗留：未用循环变量 + zip strict
+"src/smartsuite/engine/root_cause/inference.py" = ["B905"]  # 迁移遗留：zip strict
 "src/smartsuite/engine/spc_monitor.py" = ["N806", "B007", "B905"]  # math vars + zip strict
 "src/smartsuite/engine/spc_charts.py" = ["B007", "SIM108"]  # unused loop vars + ternary style
 "src/smartsuite/engine/detection.py" = ["SIM300"]  # yoda condition

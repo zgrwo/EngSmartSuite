@@ -291,8 +291,10 @@ def test_grubbs_max_outliers_inf_chinese_error():
 # ── C-2: sw_p 精确 0.0 ─────────────────────────────────────────────────────
 def test_sw_p_exact_zero_not_shown_as_na(monkeypatch):
     import smartsuite.engine.root_cause as rc
+    from smartsuite.engine.root_cause import distribution as rc_distribution
 
-    monkeypatch.setattr(rc.sp_stats, "shapiro", lambda data: (0.9, 0.0))
+    # 2026-09-19 拆分：sp_stats 绑定在 distribution 子模块（patch scipy.stats.shapiro 本身）
+    monkeypatch.setattr(rc_distribution.sp_stats, "shapiro", lambda data: (0.9, 0.0))
     df = pd.DataFrame({"y": [1.0, 2.0, 3.0, 4.0, 5.0]})
     r = rc.distribution_summary(
         AnalysisRequest(task="distribution_summary", data=df, target_col="y", feature_cols=[])
