@@ -1308,6 +1308,38 @@ def test_power_analysis_effect_size_monotonic():
     assert 20 <= n_big <= 35, f"effect_size=0.8 时每组约需 26 个样本, 实际={n_big}"
 
 
+def test_power_analysis_proportion_matches_independent_reference():
+    """比例模式 required_n 必须与独立公式逐点一致（审查 2026-09-19 C-1）。
+
+    旧缺陷：分母 `d**2 + EPSILON`（EPSILON=1e-10）在 1e-9<d<1e-4 时静默低估——
+    d=1e-5 仅真值的 50%，d=1e-6 仅 1%。独立参考 = 正态分位手算公式（scipy）。
+    """
+    import math
+
+    from smartsuite.engine.root_cause import power_analysis
+
+    def reference(p0: float, p1: float, alpha: float = 0.05, power: float = 0.8) -> int:
+        za = abs(sp_stats.norm.ppf(alpha / 2))
+        zb = abs(sp_stats.norm.ppf(1 - power))
+        d = abs(p1 - p0)
+        return math.ceil((za + zb) ** 2 * (p0 * (1 - p0) + p1 * (1 - p1)) / d**2)
+
+    for d in (1e-2, 1e-3, 1e-5, 1e-6):
+        p0, p1 = 0.5, 0.5 + d
+        r = power_analysis(
+            AnalysisRequest(
+                task="power_analysis",
+                data=pd.DataFrame(),
+                params={"mode": "required_n", "test_type": "proportion", "p0": p0, "p1": p1},
+            )
+        )
+        assert r.status == "ok", r.messages
+        expected = reference(p0, p1)
+        assert r.metadata["required_n"] == expected, (
+            f"d={d:g}: required_n={r.metadata['required_n']} 独立参考={expected}"
+        )
+
+
 # ── 异常共识检测 ──
 
 

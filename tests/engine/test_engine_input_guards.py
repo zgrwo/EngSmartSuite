@@ -368,3 +368,51 @@ def test_survival_empty_group_col_not_silently_substituted():
     )
     assert r.status == "error", "空串 group_col 不应被静默替换为 feature_cols[1]"
     assert any("分组列" in m for m in r.messages)
+
+
+# ── 10. SPC/箱线图参考线参数非有限值拒绝（审查 2026-09-19 D-1）──
+def test_spc_xbar_reference_lines_reject_non_finite():
+    """usl/lsl/target='inf'/'nan'/'-inf' 不得静默接受（capability C1 同族）。"""
+    from smartsuite.engine.spc_charts import xbar_r_chart
+
+    rng = np.random.RandomState(6)
+    df = pd.DataFrame({"y": rng.normal(10, 1, 60)})
+    for bad in ("inf", "nan", "-inf"):
+        r = xbar_r_chart(_req("spc_xbar", df, target="y", params={"usl": bad, "lsl": 0}))
+        assert r.status == "error", f"usl={bad!r} 应报错，实际 status={r.status}"
+        assert any("有限" in m for m in r.messages), r.messages
+    r = xbar_r_chart(_req("spc_xbar", df, target="y", params={"target": "nan"}))
+    assert r.status == "error" and any("有限" in m for m in r.messages)
+
+
+def test_box_chart_reference_lines_reject_non_finite():
+    """usl/lsl/ucl/lcl/cl/target 的 inf/nan 不得静默忽略。"""
+    from smartsuite.engine.exploratory import box_chart
+
+    rng = np.random.RandomState(6)
+    df = pd.DataFrame({"y": rng.normal(10, 1, 40), "g": ["A", "B"] * 20})
+    for key in ("usl", "lsl", "ucl", "lcl", "cl", "target"):
+        r = box_chart(_req("box_chart", df, target="y", features=["g"], params={key: "nan"}))
+        assert r.status == "error", f"{key}='nan' 应报错，实际 status={r.status}"
+        assert any("有限" in m for m in r.messages), r.messages
+
+
+# ── 11. doe_design 全因子组合数上限不得被整数回绕绕过（审查 2026-09-19 D-2）──
+def test_doe_design_full_factorial_combinatorial_limit_clear_error():
+    """55 因子×1000 水平：旧 np.prod int64 回绕为 0 → 绕过检查 → MemoryError。
+
+    修复后应在分配前以含「上限」的中文错误拒绝（math.prod 任意精度）。
+    """
+    from smartsuite.engine.doe_opt import doe_design
+
+    factors = [{"name": f"f{i}", "levels": list(range(1000))} for i in range(55)]
+    r = doe_design(
+        _req(
+            "doe_design",
+            pd.DataFrame(),
+            target="",
+            params={"method": "full_factorial", "factors": factors},
+        )
+    )
+    assert r.status == "error", "组合数超限应显式拒绝"
+    assert any("上限" in m for m in r.messages), r.messages
