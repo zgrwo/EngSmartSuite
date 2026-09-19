@@ -1,0 +1,50 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "benchmarks/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/benchmarks.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1" # 每周一 03:00 UTC 基线
+
+# 最小权限：基准只读仓库内容
+permissions:
+  contents: read
+
+# 自动取消同一 ref 的旧运行，节省 runner 资源
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    # 风险预案：n=1e5 档位超时（计划 §风险表）——必要时降 1e4 上限并登记
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
+
+      - name: 运行基准
+        # --benchmark-max-time=1.0：限制单基准时长，防 n=1e5 档位失控
+        run: uv run pytest benchmarks/ --benchmark-only -q --benchmark-max-time=1.0 --benchmark-json=benchmark.json
+
+      - name: 上传基准构件
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-${{ github.sha }}
+          path: benchmark.json
+          retention-days: 90

@@ -89,6 +89,7 @@ EngSmartSuite/
 ├── logs/                             # 审查报告/运行产物（本地保留，不入库）
 ├── src/                              # 主包（core / engine / services / web）
 ├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
+├── benchmarks/                       # 性能基准（pytest-benchmark，非测试防线）
 ├── skills/                           # Skill 定义（领域 5 + 过程 6）
 ├── templates/                        # YAML 分析模板 (45 个: 42 任务 + 2 方法变体 + 1 工作流指南)
 ├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）

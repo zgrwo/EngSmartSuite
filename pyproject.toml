@@ -54,6 +54,7 @@ dev = [
     # DOE 设计 benchmark 基准库（可选，未安装时 test_doe_pydoe3_benchmark.py 自动跳过）
     "pyDOE3>=1.0",
     "mypy>=1.11",
+    "pytest-benchmark>=4.0",
 ]
 all = [
     "flask>=3.0",
@@ -86,6 +87,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "benchmark: 性能基准（benchmarks/ 专用，不进入 tests/ 防线）",
+]
 filterwarnings = [
     "ignore:Glyph .* missing from font:UserWarning",
 ]

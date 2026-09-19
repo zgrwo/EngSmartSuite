@@ -128,6 +128,9 @@ EngSmartSuite/
 │       ├── test_manual_claims_freshness.py # 2026-09-06 F-D1 手册新鲜度校验自测
 │       └── test_verify_frontend_params.py # 2026-09-06 E4/G4 前后端键集自测
 │
+├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）
+│   └── test_benchmarks.py          #   3 任务 × 3 规模端到端基准（非 tests/ 防线）
+│
 ├── docs/                           # 项目文档（规范文档 + ADR + 手册）
 │   ├── index.md                    #   文档站首页（mkdocs-material）
 │   ├── README.md                   #   文档分类导航
