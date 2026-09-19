@@ -24,7 +24,7 @@ def _get_windows_font_dir() -> str:
     if sysroot and os.path.isdir(f"{sysroot}/Fonts"):
         return sysroot
     # 注册表查询（支持非标安装路径，如 D:\Windows）
-    try:
+    try:  # pragma: no cover — 平台分支：Windows+SystemRoot 生效或 Linux winreg ImportError，单平台运行不可双覆盖
         import winreg as _wr
 
         with _wr.OpenKey(
@@ -33,9 +33,9 @@ def _get_windows_font_dir() -> str:
             sysroot = _wr.QueryValueEx(key, "SystemRoot")[0]
         if os.path.isdir(f"{sysroot}/Fonts"):
             return sysroot
-    except (OSError, RuntimeError, ImportError):
+    except (OSError, RuntimeError, ImportError):  # pragma: no cover — 与上方 try 同因（平台互斥）
         pass
-    return "C:/Windows"  # 最终回退
+    return "C:/Windows"  # 最终回退  # pragma: no cover — 与上方 try 同因（平台互斥）
 
 
 _WINDOWS_SYSROOT = _get_windows_font_dir()
@@ -70,17 +70,18 @@ _env_font = os.environ.get("MATPLOTLIB_FONT_PATH")
 # 环境变量字体（跨平台通用）
 if _env_font and os.path.exists(_env_font):
     try:
-        _font_prop = _fm.fontManager.addfont(_env_font)
+        _fm.fontManager.addfont(_env_font)  # matplotlib API 无返回值（注册即生效）
+        # 审查 2026-09-19 C-1：族名取 FontProperties.get_name()（如 DejaVuSans.ttf →
+        # "DejaVu Sans"），文件名 stem 与注册族名常不一致会导致 findfont 静默回退默认字体
+        try:
+            _env_family = _fm.FontProperties(fname=_env_font).get_name()
+        except Exception:
+            _env_family = os.path.splitext(os.path.basename(_env_font))[0]
         # 仅当用户未自定义 font.family 时才覆盖（保护用户配置）
         if "font.family" not in matplotlib.rcParams or matplotlib.rcParams["font.family"] == [
             "sans-serif"
         ]:
-            if hasattr(_font_prop, "family_name") and _font_prop.family_name:
-                matplotlib.rcParams["font.family"] = _font_prop.family_name
-            else:
-                matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[
-                    0
-                ]
+            matplotlib.rcParams["font.family"] = _env_family
         _font_loaded = True
     except Exception as e:
         _logger.debug("环境变量字体 %s 加载失败: %s", _env_font, e)
@@ -98,11 +99,11 @@ if not _font_loaded:
                     matplotlib.rcParams["font.family"] = family
                 _font_loaded = True
                 break
-            except Exception as e:
+            except Exception as e:  # pragma: no cover — 防御分支：addfont 失败（字体损坏/权限）
                 _logger.debug("平台字体 %s (%s) 加载失败: %s", font_path, family, e)
                 continue
 
-if not _font_loaded:
+if not _font_loaded:  # pragma: no cover — 无系统字体环境才进入（findfont 回退链）
     # 回退: 尝试使用 matplotlib 字体查找机制（保护用户已有配置）
     _fallback_fonts = [
         "SimHei",
@@ -131,7 +132,7 @@ if not _font_loaded:
                 break
         except (OSError, RuntimeError, ValueError):
             pass
-if not _font_loaded:
+if not _font_loaded:  # pragma: no cover — 完全无中文字体环境才触发（告警分支）
     _logger.warning(
         "未检测到中文字体，图表中文可能无法正常显示。"
         "Windows: 安装微软雅黑; Mac: 使用 PingFang SC; "
@@ -176,7 +177,7 @@ try:
         robust_regression,
         roc_analysis,
     )
-except ImportError as e:
+except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
     raise ImportError(
         f"SmartSuite 引擎初始化失败 (doe_opt): {e}\n"
         "请确保已安装所有核心依赖：pip install smartsuite"
@@ -198,7 +199,7 @@ try:
         variance_test,
         vif_analysis,
     )
-except ImportError as e:
+except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
     raise ImportError(
         f"SmartSuite 引擎初始化失败 (root_cause): {e}\n"
         "请确保已安装所有核心依赖：pip install smartsuite"
@@ -224,7 +225,7 @@ try:
         trend_forecast,
         xbar_r_chart,
     )
-except ImportError as e:
+except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
     raise ImportError(
         f"SmartSuite 引擎初始化失败 (spc_monitor): {e}\n"
         "请确保已安装所有核心依赖：pip install smartsuite"
@@ -232,7 +233,7 @@ except ImportError as e:
 
 try:
     from smartsuite.engine.inverse import inverse_parameter_solve
-except ImportError as e:
+except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
     raise ImportError(
         f"SmartSuite 引擎初始化失败 (inverse): {e}\n"
         "请确保已安装所有核心依赖：pip install smartsuite"

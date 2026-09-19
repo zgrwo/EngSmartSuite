@@ -3,6 +3,13 @@ let columnData = [];
 let selectedY = new Set(), selectedX = new Set(), selectedCat = new Set();
 let csrfToken = '';
 const escHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+// 审查 2026-09-16 B-5：表格数值展示——固定 toFixed(4) 会把微尺度值（<5e-5）整列显示为
+// 0.0000（抵消引擎 round_for_display）；微尺度改用 4 位有效数字科学计数，常规量级行为不变
+function fmtCellNum(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return String(v);
+  if (v === 0) return '0.0000';
+  return Math.abs(v) < 5e-5 ? v.toExponential(3) : v.toFixed(4);
+}
 
 // CSRF token 获取
 async function getCsrfToken(force) {
@@ -885,7 +892,7 @@ function renderResults(results) {
       const hdr = tbl.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
       const rows = tbl.data.map((row, i) =>
         `<tr><td>${escHtml(String(tbl.index[i]||''))}</td>${row.map(v =>
-          `<td>${typeof v==='number'?v.toFixed(4):escHtml(String(v))}</td>`).join('')}</tr>`
+          `<td>${typeof v==='number'?fmtCellNum(v):escHtml(String(v))}</td>`).join('')}</tr>`
       ).join('');
       tHtml += `<div class="table-wrap"><h4>${escHtml(String(tn))} (${String(tbl.shape[0])}×${String(tbl.shape[1])})</h4>
         <table><thead><tr><th></th>${hdr}</tr></thead><tbody>${rows}</tbody></table></div>`;

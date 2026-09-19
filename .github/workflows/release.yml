@@ -61,7 +61,7 @@ jobs:
       - name: 构建 wheel 与 sdist
         if: steps.release.outputs.release_created == 'true'
         run: |
-          pip install build
+          pip install "build==1.6.1"  # 审查 2026-09-19 F-1：锁定构建前端（原先未固定版本）
           python -m build
 
       - name: 上传构件到 GitHub Release
@@ -90,7 +90,7 @@ jobs:
 
       - name: 构建 wheel 与 sdist
         run: |
-          pip install build
+          pip install "build==1.6.1"  # 审查 2026-09-19 F-1：锁定构建前端
           python -m build
 
       - name: 上传构件到 GitHub Release

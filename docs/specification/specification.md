@@ -86,9 +86,9 @@ smartsuite/
 │   └── exceptions.py   # 分层异常体系（3 层）
 │
 ├── engine/        # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
-│   ├── root_cause.py   # 要因分析
-│   ├── doe_opt.py      # DOE/优化
-│   ├── spc_charts.py   # SPC 控制图
+│   ├── root_cause/     # 要因分析（子包）
+│   ├── doe_opt/        # DOE/优化（子包）
+│   ├── spc_charts/     # SPC 控制图（子包）
 │   ├── capability.py   # 过程能力
 │   ├── detection.py    # 异常检测
 │   ├── reliability.py  # 可靠性/MSA
@@ -122,7 +122,7 @@ smartsuite/
 | ① 数值正确性 | test_correctness.py + test_doe_design.py | 已知答案 + 手工公式交叉验证 | 全量 (100%) |
 | ② 数学不变量 | test_invariants.py | p∈[0,1]、Cpk≤Cp、R²≥0 | 关键函数 |
 | ③ 边界模糊 | test_fuzz.py | 空数据/单行/全NaN/常量列 | 全部 |
-| ④ 差分测试 | test_differential.py | CLI vs Web 数值一致 | 全部 |
+| ④ 差分测试 | test_cli_web_parity.py | 引擎直调 vs Web API 数值一致 | 全部 (42 任务) |
 
 ### 4.2 已知限制
 

@@ -1,4 +1,4 @@
-"""Cross-check key numerical values from docs/user-manual/user-manual.md against actual source code output.
+"""Cross-check key numerical values from docs/user-manual/（按章拆页） against actual source code output.
 
 Robust version: uses positional column access and detection to avoid encoding issues.
 """
@@ -26,7 +26,7 @@ buf = io.StringIO()
 # 审查 2026-09-01 G-1：失败计数 → 脚本退出码（此前 DIFF 仅记录文本，永远 exit 0）
 fail_count = 0
 # 审查 2026-09-06 F-D1：rpt() 数值 CLAIM 登记簿 → 结尾对手册新鲜度校验
-# （快照值必须仍存在于 user-manual.md 对应章节，防手册内容漂移无门禁）
+# （快照值必须仍存在于 user-manual/（按章拆页）对应章节，防手册内容漂移无门禁）
 CLAIM_LOG: list[tuple] = []
 
 
@@ -37,7 +37,7 @@ def p(*args, **kwargs):
 # ────────────────────────────────────────────────────────
 # Load data & define column indices
 # ────────────────────────────────────────────────────────
-df_raw = pd.read_excel(os.path.join(PROJECT_ROOT, "tests", "test_data.xlsx"))
+df_raw = pd.read_excel(os.path.join(PROJECT_ROOT, "tests", "data", "injection_process.xlsx"))
 COLS = df_raw.columns  # by-index access
 # Verified via data patterns:
 IDX_MELT_TEMP = 24  # values ~200
@@ -619,14 +619,29 @@ p("=" * 100)
 p("VERIFICATION COMPLETE")
 p("=" * 100)
 
-# ── 手册新鲜度校验（审查 2026-09-06 F-D1）：CLAIM 快照 ↔ user-manual.md ──
+# ── 手册新鲜度校验（审查 2026-09-06 F-D1）：CLAIM 快照 ↔ user-manual/（按章拆页） ──
 from manual_claims_freshness import check_manual_freshness  # noqa: E402
 
 p()
-p("--- 手册新鲜度校验（CLAIM 快照 ↔ user-manual.md）---")
-_manual_path = os.path.join(PROJECT_ROOT, "docs", "user-manual", "user-manual.md")
-with open(_manual_path, encoding="utf-8") as _f:
-    _manual_text = _f.read()
+p("--- 手册新鲜度校验（CLAIM 快照 ↔ user-manual/（按章拆页））---")
+# 手册自 2026-09-18 起按章拆页：合并目录下全部编号章节（NN-*.md），
+# 保持与 §4.1/§7.5 等章节锚定的解析口径不变（index.md 不含 ### 章节号，不参与）
+import glob as _glob  # noqa: E402
+
+
+def _read_manual_text() -> str:
+    _manual_dir = os.path.join(PROJECT_ROOT, "docs", "user-manual")
+    _parts: list[str] = []
+    for _p in sorted(_glob.glob(os.path.join(_manual_dir, "[0-9]*.md"))):
+        with open(_p, encoding="utf-8") as _f:
+            _parts.append(_f.read())
+    return "\n".join(_parts)
+
+
+_manual_text = _read_manual_text()
+if not _manual_text:
+    print("[FAIL] 未找到 docs/user-manual/[0-9]*.md 章节文件")
+    sys.exit(1)
 _problems = check_manual_freshness(_manual_text, CLAIM_LOG)
 for _prob in _problems:
     p(f"  [DIFF] {_prob}")

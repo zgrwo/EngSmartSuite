@@ -19,6 +19,8 @@ on:
       - "SECURITY.md"
       - "CODE_OF_CONDUCT.md"
       - "pyproject.toml"
+      - "uv.lock"
+      - "benchmarks/**"
       - ".pre-commit-config.yaml"
       - ".release-please-manifest.json"
       # 根级启动/安装脚本（第二轮 #9）：改动这些也必须触发 CI
@@ -45,6 +47,8 @@ on:
       - "SECURITY.md"
       - "CODE_OF_CONDUCT.md"
       - "pyproject.toml"
+      - "uv.lock"
+      - "benchmarks/**"
       - ".pre-commit-config.yaml"
       - ".release-please-manifest.json"
       # 根级启动/安装脚本（第二轮 #9）：改动这些也必须触发 CI
@@ -75,15 +79,14 @@ jobs:
           # 提交规范检查需要 PR 基线与完整提交历史
           fetch-depth: 0
 
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           python-version: "3.11"
-          cache: pip
+          enable-cache: true
 
-      - name: 安装依赖
-        # Round-2：test_services 现含 Web 层测试（api_client fixture import
-        # smartsuite.web.app → 需要 flask），quick job 必须装 web extras
-        run: pip install -e ".[dev,report,web]"
+      - name: 安装依赖（冻结锁文件）
+        # --all-extras 含 dev/report/web/docs（统一安装模板，避免逐 job 漂移）
+        run: uv sync --frozen --all-extras
 
       # --- 提交规范：PR 内全部 commit 必须符合 Conventional Commits（与 release-please 闭环）---
       - name: 提交规范检查（Conventional Commits）
@@ -103,33 +106,36 @@ jobs:
           echo "✅ 全部 $count 个提交符合规范"
 
       - name: 模块导入验证
-        run: python -c "from smartsuite.engine import __all__ as eng; from smartsuite.services.orchestrator import TASK_REGISTRY; print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
+        run: uv run python -c "from smartsuite.engine import __all__ as eng; from smartsuite.services.orchestrator import TASK_REGISTRY; print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
 
       - name: Ruff Lint
-        run: ruff check src/smartsuite/ scripts/ tests/
+        run: uv run ruff check src/smartsuite/ scripts/ tests/ benchmarks/
 
       - name: Ruff Format
-        run: ruff format --check src/smartsuite/ scripts/ tests/
+        run: uv run ruff format --check src/smartsuite/ scripts/ tests/ benchmarks/
 
       - name: 引擎层核心测试
         # 第二轮 #8：--basetemp 固定独立临时目录（Windows junction 防护，见 verify_consistency.py #5.2）
-        run: pytest tests/test_engine/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-engine
+        run: uv run pytest tests/engine/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-engine
 
       - name: 服务层测试
-        run: pytest tests/test_services/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-services
+        run: uv run pytest tests/services/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-services
+
+      - name: 回归防线测试（guards：微尺度/规格限/跨层）
+        run: uv run pytest tests/guards/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-guards
 
       - name: 治理脚本测试
-        run: pytest tests/scripts/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-scripts
+        run: uv run pytest tests/scripts/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-scripts
 
       - name: 集成测试
-        run: pytest tests/test_integration.py tests/test_master_integration.py -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-integration
+        run: uv run pytest tests/integration/test_integration.py tests/integration/test_task_registry_smoke.py -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-integration
 
       # 审查 2026-08-19 #5.3：全量一致性门禁此前只在 main push 的 full job 跑，
       # 引擎崩溃（如 scatter_plot 重复列）可在 PR 阶段静默合入；纳入 PR 门禁
       # 第二轮 #8：--skip-pytest 跳过脚本内嵌套的全量 pytest（上方已逐层跑过），
       # 只保留 42 任务 status=ok 冒烟判定，避免重复跑完整套件
       - name: 全量一致性校验（42 任务 status=ok 冒烟门禁）
-        run: python scripts/verify_consistency.py --skip-pytest
+        run: uv run python scripts/verify_consistency.py --skip-pytest
 
       # 审查 2026-09-01 G-1 后续：verify_manual_claims 此前只修了
       # "永远 exit 0"，但无任何 job 调用——门禁仍 inert（verify_all.py:17 的
@@ -137,7 +143,7 @@ jobs:
       # PR 即拦手册数值漂移（原计划 full job 仅 main push 才跑，且为矩阵
       # 多版本环境，数值易跨版本抖动）；本 job 固定 ubuntu-3.11 + 全 extras。
       - name: 手册数值声明 ↔ 引擎输出交叉校验
-        run: python scripts/verify_manual_claims.py
+        run: uv run python scripts/verify_manual_claims.py
 
   # ── Web E2E（审查 2026-08-19 #3.6：test_web_e2e 需运行中服务器，
   #     CI 此前从不启动服务器 → 40 个 Web 路径测试永远跳过）──
@@ -148,20 +154,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           python-version: "3.11"
-          cache: pip
+          enable-cache: true
 
-      - name: 安装依赖（含 web extras）
-        run: pip install -e ".[dev,report,web]"
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
 
       - name: Linux CJK 字体
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
 
       - name: 启动服务器并运行 Web E2E（全部方法）
         run: |
-          python run_server.py > /tmp/smartsuite-server.log 2>&1 &
+          uv run python run_server.py > /tmp/smartsuite-server.log 2>&1 &
           SERVER_PID=$!
           READY=0
           for i in $(seq 1 30); do
@@ -185,8 +191,13 @@ jobs:
             kill $SERVER_PID 2>/dev/null || true
             exit 1
           fi
-          python -m pytest tests/test_web_e2e.py -q --tb=short
-          RC=$?
+          # 审查 2026-09-19 G-1：默认 shell 为 `bash -e`，裸 `RC=$?` 不可达；
+          # 用 if/else 捕获退出码，确保服务器进程总被清理且退出码正确传播
+          if uv run python -m pytest tests/integration/test_web_e2e.py -q --tb=short; then
+            RC=0
+          else
+            RC=$?
+          fi
           kill $SERVER_PID 2>/dev/null || true
           exit $RC
 
@@ -214,14 +225,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+          enable-cache: true
 
-      - name: 安装依赖
-        # Round-2：全量测试含 Web 层（flask）
-        run: pip install -e ".[dev,report,web]"
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
 
       - name: Linux CJK 字体 (matplotlib 图表中文渲染)
         if: runner.os == 'Linux'
@@ -229,11 +239,11 @@ jobs:
 
       - name: 全量测试
         # 第二轮 #8：--basetemp 固定独立临时目录（Windows junction 防护）
-        run: pytest tests/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-full
+        run: uv run pytest tests/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-full
 
       - name: 一致性校验
         # 第二轮 #8：full job 保留完整嵌套 pytest（矩阵上再跑一次全量）
-        run: python scripts/verify_consistency.py
+        run: uv run python scripts/verify_consistency.py
 
   # ── 代码质量分析（仅 main push 或手动触发）──
   quality:
@@ -244,22 +254,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           python-version: "3.11"
-          cache: pip
+          enable-cache: true
 
-      - name: 安装依赖
-        run: pip install -e ".[dev,report,web]" pytest-cov vulture pip-audit
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
 
       - name: 测试覆盖率
-        # fail-under=70：当前基线 ~75%，留余量防跨平台波动；低于 70 即红（防测试退化）
-        run: pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html --cov-fail-under=70
+        # fail-under=85：2026-09-19 实测 89.67%（本 job 单平台基线；full 矩阵不带 cov，无跨平台比较）
+        run: uv run pytest tests/ -q --tb=short --cov=smartsuite --cov-report=term-missing:skip-covered --cov-report=html --cov-fail-under=85
 
       - name: 死代码检测 (vulture)
         # Pydantic classmethod validator 的 cls 参数为误报，过滤之
+        # vulture 不在 extras 中，用 uv run --with 临时叠加（不写入锁文件）
         run: |
-          output=$(vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" 2>&1) || true
+          output=$(uv run --with vulture vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" 2>&1) || true
           filtered=$(echo "$output" | grep -v "unused variable 'cls'" || true)
           if [ -n "$filtered" ]; then
             echo "$filtered"
@@ -268,7 +279,7 @@ jobs:
           echo "Vulture: 无死代码（已过滤 Pydantic cls 误报）"
 
       - name: 依赖安全审计
-        run: pip-audit
+        run: uv run --with pip-audit pip-audit
 
       - name: 上传覆盖率报告
         uses: actions/upload-artifact@v7
@@ -284,19 +295,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           python-version: "3.11"
-          cache: pip
+          enable-cache: true
 
-      - name: 安装依赖
-        # 2026-09-05 CI 修复（同族漏改）：verify_cross_consistency 读 tests/test_data.xlsx
-        # 需要 openpyxl（report extras）；quality.yml manual-parity 2026-08-21 已修，此处漏装
-        run: pip install -e ".[dev,report]"
+      - name: 安装依赖（冻结锁文件）
+        run: uv sync --frozen --all-extras
 
       - name: TASK_REGISTRY ↔ DEFAULT_PARAMS ↔ TASK_LABELS 一致性
         run: |
-          python << 'EOF'
+          uv run python << 'EOF'
           from smartsuite.services.orchestrator import TASK_REGISTRY, DEFAULT_PARAMS, TASK_LABELS, TASK_GROUPS
           reg = set(TASK_REGISTRY.keys())
           params = set(DEFAULT_PARAMS.keys())
@@ -310,7 +319,7 @@ jobs:
 
       - name: TASK_REGISTRY 引擎函数全部导出
         run: |
-          python << 'EOF'
+          uv run python << 'EOF'
           from smartsuite.engine import __all__ as engine_exports
           from smartsuite.services.orchestrator import TASK_REGISTRY
           reg_funcs = {fn.__name__ for fn in TASK_REGISTRY.values()}
@@ -322,7 +331,7 @@ jobs:
       - name: 前后端参数键集一致性（静态解析 app.js TASK_PARAMS vs DEFAULT_PARAMS）
         # 审查 2026-09-06 E4/G4：此前"前后端参数默认值一致性"步骤实跑 verify_cross_consistency
         # （运行时交叉验证，不含 app.js 解析），前端键漂移无任何自动化拦截。
-        run: python scripts/verify_frontend_params.py
+        run: uv run python scripts/verify_frontend_params.py
 
       - name: 全量交叉验证（Web ↔ CLI ↔ 手册 CLAIM）
-        run: set -o pipefail && python scripts/verify_cross_consistency.py 2>&1 | tail -5
+        run: set -o pipefail && uv run python scripts/verify_cross_consistency.py 2>&1 | tail -5

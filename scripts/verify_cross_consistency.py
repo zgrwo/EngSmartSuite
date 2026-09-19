@@ -25,10 +25,10 @@ from smartsuite.services.data_io import preprocess_data
 from smartsuite.services.orchestrator import RAW_CAT_TASKS, TASK_REGISTRY, orchestrate
 
 # ── 加载测试数据 ──
-df_raw = pd.read_excel("tests/test_data.xlsx")
+df_raw = pd.read_excel("tests/data/injection_process.xlsx")
 print(f"数据: {df_raw.shape[0]}行 × {df_raw.shape[1]}列")
 
-# ── 用户手册记录值 (基于 tests/test_data.xlsx, seed=42) ──
+# ── 用户手册记录值 (基于 tests/data/injection_process.xlsx, seed=42) ──
 MANUAL_EXPECTATIONS = {
     "correlation": {
         "最强因子": "注射压力",

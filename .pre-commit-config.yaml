@@ -33,6 +33,7 @@ repos:
       - id: check-case-conflict        # 大小写冲突（跨平台文件名）
       - id: check-added-large-files    # 大文件检测（防止误提交二进制）
         args: ['--maxkb=500']
+        exclude: '^uv\.lock$'          # uv 锁文件（~720KB 文本）是交付契约，豁免阈值
 
   # --- Markdown / YAML / JSON 通用格式化（prettier）---
   - repo: https://github.com/pre-commit/mirrors-prettier

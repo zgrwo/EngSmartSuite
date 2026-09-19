@@ -399,7 +399,7 @@ check("Response surface produces figures", len(rs.figures) >= 1)
 # ============================================================
 section("6. Test Data Regression Validation")
 # ============================================================
-test_path = os.path.join(ROOT, "tests", "test_data.xlsx")
+test_path = os.path.join(ROOT, "tests", "data", "injection_process.xlsx")
 if os.path.exists(test_path):
     df = pd.read_excel(test_path)
     nc = [

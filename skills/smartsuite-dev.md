@@ -16,7 +16,7 @@ description: SmartSuite 项目开发技能 — 工艺数据分析工具箱的代
 - `smartsuite/web/` — Web UI 层（app.js / api.py / app.py）
 - `smartsuite/services/` — 桥接层（orchestrator / data_io）
 - `smartsuite/engine/_palette.py` — 可视化配色
-- `docs/user-manual/user-manual.md` — 用户手册
+- `docs/user-manual/` — 用户手册（按章拆页，index.md + 01–10）
 - `tests/` — 测试文件
 
 ## 架构速查
@@ -137,6 +137,9 @@ if usl is not None:
 
 **影响范围**：xbar_r_chart, process_capability_analysis, logistic_regression（threshold 参数）。
 
+> 注：SPC/箱线图参考线参数（usl/lsl/ucl/lcl/cl/target）自 2026-09-19 D-1 起改为
+> **显式中文报错**（`float` 后加 `np.isfinite` 拒绝，capability 范式），不再静默置 None；见模板 3。
+
 ### 陷阱 5：orchestrator 异常消息误翻译
 
 **现象**：引擎 `KeyError` → 用户看到"数据中缺少必要的列"（完全误导）。
@@ -194,9 +197,39 @@ side: {
 
 **方向直觉陷阱（2026-09-04 → 2026-09-05 否证）**：真实 d2\* 表**随 m 递增**（m=2→1.128，m=12→3.266；行 g 随 g 递减趋近渐近线），代码方向其实是正确的。2026-09-04 轮"表倒置/AV 低估 25–400%（Critical）"是**误报**——复算时用了 `d2(g)/√m` 的错误归一化（把"个体读数 σ"当成量具 σ），构造出虚假的"真实值"。**任何"D2\* 应递减/表错了"的结论，先按下述检查方法独立交叉后再动手，否则会把正确的表改错。**
 
-**检查方法**：`pytest tests/test_engine/test_edge_cases.py -k gage_rr`——`test_gage_rr_av_matches_anova`（14aa345）用 statsmodels ANOVA 做独立交叉；自查 `av/anova ≈ 1.0`（仅 2 操作员小样本允许 1.08~1.09 级）。**禁止**用"直觉公式"自造 d2\* 期望值当基准。
+**检查方法**：`pytest tests/engine/test_edge_cases.py -k gage_rr`——`test_gage_rr_av_matches_anova`（14aa345）用 statsmodels ANOVA 做独立交叉；自查 `av/anova ≈ 1.0`（仅 2 操作员小样本允许 1.08~1.09 级）。**禁止**用"直觉公式"自造 d2\* 期望值当基准。
 
 **修复模板**：AV 查表按操作员数取固定映射（2→1.41、3→1.91、4→2.24、5→2.48）或 K2=5.15/d2\*，不传 `n_obs`；补 `10 零件 × 2 操作员 × 2 重复` 用例钉住回归。
+
+### 陷阱 9：绝对 `EPSILON` 判决/展示——量纲一缩放结论就翻转
+
+**现象**（2026-09-16 全量审查 B-1..B-5/D-1/D-2，同一数组仅乘 1e-9~1e-12 复现）：
+doe_analysis `t=0/p=1/显著=否`、Grubbs 静默 0 异常、Hedges g=0.0、trend/spc_xbar/spc_nonparametric 误报「常量列」、
+MAPE/DW/CV% 退化、Web/HTML 微尺度列整列显示 `0.0000`；宏观量级同数据全部正常。
+
+**根因**：把**带数据量纲**的量（`se`/`sigma`/`sp`/`tv`/`total_var`/极差/残差）与绝对常量 `EPSILON=1e-10` 比较做
+判决或拒绝；展示层用固定 `round(4)`/`toFixed(4)` 二次舍入，抵消引擎 `round_for_display`。
+
+**规则（防零除 ≠ 判决）**：
+1. **防零除/常量守卫**只认**精确零或非有限**：`x == 0`、`not np.isfinite(x)`、`data.nunique() <= 1`；
+2. **判决**用无量纲比值（t=β/se、z、DW、CV）或相对判据 `1e-12 * max(|x|max)`，禁止 `x > EPSILON` 绝对比较；
+   不可估计时返回 `NaN` + 「无法判定」/中文消息，**不得伪造 0.0/1.0**；
+3. **展示**统一走 `round_for_display`（`_utils.py`）口径；Web/HTML/前端需与引擎一致（`api.py:_serialize_table`、`fmtCellNum`、`reporter._fmt_html_cell`）。
+
+**检查方法**：量纲对抗——同一数组乘 `1e-9`/`1e-12`，数值应同比缩放、结论不变；
+回归防线 `tests/guards/test_micro_scale_guards.py`（34 项，含 DOE ppb、Grubbs、Hedges g、展示层、哨兵）；
+全库扫描 `grep -n "EPSILON" src/smartsuite/engine/*.py` 逐处核对「防零除还是判决」。
+
+**修复模板**：
+```python
+# ❌ 绝对判决 → 微尺度静默错
+se = resid_std / np.sqrt(Sxx) if Sxx > EPSILON else 1.0
+t_val = float(beta[1] / se) if se > EPSILON else 0.0
+
+# ✅ 精确零防除 + 相对/无量纲判决 + 不可估计显式标注
+se = resid_std / np.sqrt(Sxx) if Sxx > 0 else float("nan")
+t_val = float(beta[1] / se) if np.isfinite(se) and se > 0 else float("nan")
+```
 
 ---
 
@@ -268,7 +301,7 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
 □ 8. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
 □ 9. docs/specification/api-reference.md   — 更新 API 参考
 □ 10. skills/analysis-decision-tree.md — 更新决策树（如引入新分析场景）
-□ 11. docs/user-manual/user-manual.md    — 更新用户手册（如面向用户的新方法）
+□ 11. docs/user-manual/    — 更新用户手册（如面向用户的新方法）
 ```
 
 ### 模板 3：box_chart / SPC 函数新增 USL/LSL/UCL/CL 参数
@@ -277,7 +310,7 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
 
 **引擎端**：
 ```python
-# 提取参数并安全转换
+# 提取参数并安全转换（审查 2026-09-19 D-1：inf/nan 必须显式拒绝，见陷阱 9/capability 范式）
 def _draw_ref_lines(ax):
     for val, color, style, label in _ref_lines:
         ax.axhline(val, color=color, linestyle=style, linewidth=1.0, alpha=0.8, label=label)
@@ -295,9 +328,18 @@ for key, color, style in [
     val = req.params.get(key)
     if val is not None:
         try:
-            _ref_lines.append((float(val), color, style, key.upper()))
+            val_f = float(val)
         except (ValueError, TypeError):
-            pass
+            return AnalysisResult(
+                task="box_chart", status="error",
+                messages=[f"{key.upper()} 值无效: {val}，请输入数值"],
+            )
+        if not np.isfinite(val_f):
+            return AnalysisResult(
+                task="box_chart", status="error",
+                messages=[f"{key.upper()} 必须为有限数值，当前: {val!r}"],
+            )
+        _ref_lines.append((val_f, color, style, key.upper()))
 ```
 
 **前端 TASK_PARAMS**：
@@ -356,6 +398,7 @@ result_b = results_b[0]
 | 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 11 步清单 |
 | `sum(axis=None)` FutureWarning | pandas 弃用 | 改为 `.sum().sum()` 链式调用 |
 | Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
+| 微尺度(ppb/pico)数据结论翻转 / Web 整列 0.0000 | 绝对 `EPSILON` 判决或展示层固定舍入 | 见陷阱 9：守卫改精确零、判决相对化、展示走 `round_for_display` |
 
 ---
 
@@ -366,7 +409,10 @@ result_b = results_b[0]
 pytest tests/ -x -q
 
 # 仅运行引擎测试
-pytest tests/test_engine/ -x -q
+pytest tests/engine/ -x -q
+
+# 仅运行跨层回归防线
+pytest tests/guards/ -x -q
 
 # 代码检查
 ruff check src/smartsuite/ scripts/
@@ -391,7 +437,7 @@ python -c "from smartsuite.services.orchestrator import TASK_REGISTRY; print(len
 | 领域术语 | `docs/governance/context.md` | 中文术语定义 |
 | 决策知识 | `skills/analysis-decision-tree.md` | 分析方法决策树 + 工作流 |
 | API 参考 | `docs/specification/api-reference.md` | 全量函数签名（总数锚点） |
-| 用户手册 | `docs/user-manual/user-manual.md` | 操作说明 + 五段式示例 |
+| 用户手册 | `docs/user-manual/index.md` | 操作说明 + 五段式示例 |
 | 架构决策 | `docs/adr/0001-*.md` / `docs/adr/0002-*.md` | ADR-001 三层架构 / ADR-002 Web UI 替代 Excel |
 | 防错契约 | `docs/governance/sentinel-contract.md` | L1-L5 哨兵 + NaN/Inf 守卫清单（新增/修改引擎函数必查） |
 | 配色方案 | `smartsuite/engine/_palette.py` | PALETTE 字典完整定义 |

@@ -1,19 +1,23 @@
-"""图片自动生成脚本 — 从 Python 运行生成用户手册中的方法图片。
+"""图片自动生成脚本 — 重建用户手册中的方法示例图片。
 
 用法：
-    python scripts/generate_images.py [--output-dir docs/user-manual/images]
+    uv run python scripts/generate_images.py [--output-dir docs/user-manual/images]
+    uv run python scripts/generate_images.py --only decision_tree,grid_search
 
-产出：
-    docs/user-manual/images/{method_name}_1.png — 每个分析方法的示例输出图
-    （命名对齐手册约定：{method}_1.png 为第 1 张示例图）
+数据源：tests/data/injection_process.xlsx（与手册「数值结果」章节同源），
+每个方法的 Y/X/参数配置与手册「参数选择及说明」表格一致。
 
-验收标准：全部方法图片全覆盖
+产出（命名对齐手册引用：{method}_1.png 为第 1 张示例图）：
+    docs/user-manual/images/{method}_1.png
+    决策树额外输出 {method}_2.png（特征重要性 + 树结构）
+
+验收标准：手册引用的全部方法图片全覆盖，且与手册配置一致。
 """
 
+import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 # 审查 2026-09-01（验证补充）：Windows 控制台默认 GBK 无法打印 emoji 状态标记，
@@ -25,60 +29,41 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from smartsuite.core.contracts import AnalysisRequest  # noqa: E402
-from smartsuite.services.orchestrator import TASK_REGISTRY, orchestrate  # noqa: E402
+from smartsuite.services.data_io import preprocess_data  # noqa: E402
+from smartsuite.services.orchestrator import orchestrate  # noqa: E402
 
+DATA_PATH = ROOT / "tests" / "data" / "injection_process.xlsx"
 
-def _make_sample_data() -> pd.DataFrame:
-    """生成通用示例数据。"""
-    np.random.seed(42)
-    n = 60
-    return pd.DataFrame(
-        {
-            "y": np.random.normal(100, 10, n),
-            "x1": np.random.normal(50, 5, n),
-            "x2": np.random.normal(30, 3, n),
-            "x3": np.random.normal(20, 2, n),
-            "group": np.random.choice(["A", "B", "C"], n),
-            "time": np.arange(1, n + 1, dtype=float),
-            "defects": np.random.poisson(3, n),
-            "binary": np.random.choice([0, 1], n),
-        }
-    )
-
-
-# 每个方法的参数配置
+# 手册「参数选择及说明」表格逐节对齐的配置
+# preprocess_numeric=True：先走 Web 同款数值预处理（相关性分析章节口径）
 METHOD_CONFIGS: dict[str, dict] = {
-    "correlation": {"target": "y", "features": ["x1", "x2", "x3"], "params": {"method": "pearson"}},
-    "anova": {"target": "y", "features": ["group"], "params": {}},
+    "correlation": {
+        "target": "不良率",
+        "features": ["熔体温度", "模具温度", "注射压力", "冷却时间"],
+        "params": {"method": "pearson"},
+        "preprocess_numeric": True,
+    },
+    "anova": {"target": "不良率", "features": ["原料类型"], "params": {}},
     "hypothesis_test": {
-        "target": "y",
-        "features": ["分组"],
-        "params": {"test": "ttest_ind", "group_col": "分组"},
+        "target": "不良率",
+        "features": ["保养日"],
+        "params": {"test": "ttest_ind", "group_col": "保养日"},
     },
-    "decision_tree": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
-    "vif": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
-    "regression": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
-    "contingency": {"target": "group", "features": ["binary"], "params": {}},
-    "process_capability": {"target": "y", "features": [], "params": {"usl": 130, "lsl": 70}},
-    "spc_xbar": {"target": "y", "features": [], "params": {"subgroup_size": 5}},
-    "spc_attribute": {"target": "defects", "features": [], "params": {"chart_type": "c"}},
-    "spc_cusum": {"target": "y", "features": [], "params": {}},
-    "spc_ewma": {"target": "y", "features": [], "params": {}},
-    "spc_nonparametric": {"target": "y", "features": [], "params": {}},
-    "trend_forecast": {"target": "y", "features": ["time"], "params": {}},
-    "anomaly_detect": {"target": "y", "features": ["x1", "x2"], "params": {}},
-    "change_point": {"target": "y", "features": [], "params": {}},
-    "outlier_consensus": {"target": "y", "features": ["x1", "x2"], "params": {}},
-    "bootstrap_ci": {"target": "y", "features": [], "params": {"n_bootstrap": 1000}},
-    "box_chart": {"target": "y", "features": ["group"], "params": {}},
-    "scatter_plot": {"target": "y", "features": ["x1"], "params": {"fit": "linear"}},
-    "gage_rr": {
-        "target": "measurement",
-        "features": ["part", "operator"],
-        "params": {},
+    "decision_tree": {
+        "target": "不良率",
+        "features": ["熔体温度", "模具温度", "注射压力", "冷却时间"],
+        "params": {"max_depth": 5},
+        "max_figures": 2,
     },
-    "normality_check": {"target": "y", "features": [], "params": {}},
-    "distribution_summary": {"target": "y", "features": [], "params": {}},
+    "vif": {
+        "target": "",
+        "features": ["熔体温度", "模具温度", "注射压力", "冷却时间"],
+        "params": {"threshold": 5},
+    },
+    "contingency": {"target": "原料类型", "features": ["保养日"], "params": {}},
+    "proportion_ci": {"target": "首件合格", "features": [], "params": {}},
+    "distribution_summary": {"target": "不良率", "features": [], "params": {}},
+    "normality_check": {"target": "不良率", "features": ["熔体温度"], "params": {}},
     "power_analysis": {
         "target": "",
         "features": [],
@@ -90,130 +75,132 @@ METHOD_CONFIGS: dict[str, dict] = {
             "test_type": "ttest",
         },
     },
-    "doe_design": {
-        "target": "",
-        "features": [],
-        "params": {
-            "method": "taguchi",
-            "factors": [
-                {"name": "A", "levels": [10, 20, 30]},
-                {"name": "B", "levels": [10, 20, 30]},
-                {"name": "C", "levels": [10, 20, 30]},
-            ],
-            "randomize": "false",
-        },
-    },
-    "median_ci": {"target": "y", "features": [], "params": {}},
-    "proportion_ci": {"target": "binary", "features": [], "params": {}},
-    "variance_test": {"target": "y", "features": ["group"], "params": {"group_col": "group"}},
-    "survival_analysis": {
-        "target": "time",
-        "features": ["binary"],
+    "regression": {
+        "target": "不良率",
+        "features": ["熔体温度", "注射压力", "冷却时间"],
         "params": {},
     },
-    "tolerance_interval": {"target": "y", "features": [], "params": {}},
-    "cohens_kappa": {"target": "y", "features": ["rater1", "rater2"], "params": {}},
-    "cronbach_alpha": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
-    # 第二轮 #12：补齐 9 个缺失方法配置（此前走默认参数，示例图与手册声明不符）
-    "roc_analysis": {"target": "binary", "features": ["x1", "x2"], "params": {}},
-    "logistic_regression": {"target": "binary", "features": ["x1", "x2", "x3"], "params": {}},
-    "lasso_regression": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
+    "response_surface": {
+        "target": "不良率",
+        "features": ["熔体温度", "模具温度"],
+        "params": {"direction": "minimize"},
+    },
     "grid_search": {
-        "target": "y",
-        "features": ["x1"],
-        "params": {"ranges": {"x1": [40, 60]}, "n_points": 5},
+        "target": "不良率",
+        "features": ["熔体温度"],
+        "params": {"ranges": {"熔体温度": [180, 220]}, "n_points": 10, "direction": "minimize"},
     },
     "multi_objective": {
-        "target": "y",
-        "features": ["x1", "x2"],
-        "params": {"objectives": [{"col": "y", "direction": "maximize"}]},
+        "target": "不良率",
+        "features": ["熔体温度", "模具温度"],
+        "params": {
+            "objectives": [
+                {"col": "不良率", "direction": "minimize"},
+                {"col": "拉伸强度", "direction": "maximize"},
+            ]
+        },
     },
+    "doe_analysis": {
+        "target": "不良率",
+        "features": ["熔体温度", "模具温度", "注射压力"],
+        "params": {},
+    },
+    "roc_analysis": {"target": "首件合格", "features": ["熔体温度"], "params": {}},
+    "logistic_regression": {
+        "target": "保养日",
+        "features": ["熔体温度", "模具温度"],
+        "params": {},
+    },
+    "lasso_regression": {
+        "target": "不良率",
+        "features": ["熔体温度", "模具温度", "注射压力"],
+        "params": {},
+    },
+    "robust_regression": {"target": "不良率", "features": ["熔体温度"], "params": {}},
     "inverse_solve": {
         "target": "",
         "features": [],
         "params": {
-            "incoming_cols": "IncomingA",
-            "variable_cols": "VariableU1",
-            "output_cols": "OutputY1",
-            "model": "auto",
+            "incoming_cols": "熔体温度",
+            "variable_cols": "模具温度",
+            "output_cols": "不良率",
+            "model": "linear",
         },
     },
-    "doe_analysis": {"target": "y", "features": ["x1", "x2", "x3"], "params": {}},
-    "response_surface": {"target": "y", "features": ["x1", "x2"], "params": {}},
-    "robust_regression": {"target": "y", "features": ["x1", "x2"], "params": {}},
-    "quantile_regression": {"target": "y", "features": ["x1"], "params": {"quantile": 0.5}},
+    "scatter_plot": {
+        "target": "不良率",
+        "features": ["熔体温度"],
+        "params": {"fit": "linear"},
+    },
+    "spc_attribute": {"target": "不良率", "features": [], "params": {"chart_type": "c"}},
+    "spc_cusum": {"target": "不良率", "features": [], "params": {}},
+    "spc_ewma": {"target": "不良率", "features": [], "params": {}},
+    "spc_nonparametric": {"target": "不良率", "features": [], "params": {}},
+    "process_capability": {
+        "target": "不良率",
+        "features": [],
+        "params": {"usl": 10, "lsl": 1},
+    },
+    "trend_forecast": {"target": "不良率", "features": [], "params": {"forecast_steps": 5}},
+    "anomaly_detect": {"target": "不良率", "features": [], "params": {"method": "iqr"}},
+    "change_point": {"target": "不良率", "features": [], "params": {}},
+    "outlier_consensus": {"target": "不良率", "features": ["熔体温度"], "params": {}},
+    "box_chart": {"target": "不良率", "features": ["原料类型"], "params": {}},
+    "bootstrap_ci": {
+        "target": "不良率",
+        "features": [],
+        "params": {"statistic": "mean", "n_bootstrap": 200},
+    },
+    "median_ci": {"target": "不良率", "features": [], "params": {}},
+    "gage_rr": {
+        "target": "不良率",
+        "features": ["模具编号", "检验员"],
+        "params": {"part_col": "模具编号", "operator_col": "检验员"},
+    },
+    "tolerance_interval": {"target": "不良率", "features": [], "params": {}},
+    "survival_analysis": {"target": "不良率", "features": ["保养日"], "params": {}},
 }
 
 
-def _make_method_data(method_name: str, base: pd.DataFrame) -> pd.DataFrame:
-    """方法专用示例数据：仅对需要特殊结构的任务返回定制 df（其余复用 base）。"""
-    rng = np.random.default_rng(42)
-    n = 60
-    if method_name == "gage_rr":
-        rows = []
-        for part in range(1, 6):
-            for op in ("甲", "乙"):
-                for _ in range(3):
-                    rows.append(
-                        {
-                            "part": part,
-                            "operator": op,
-                            "measurement": 50.0 + part * 2 + float(rng.normal(0, 0.4)),
-                        }
-                    )
-        return pd.DataFrame(rows)
-    if method_name == "cohens_kappa":
-        true = rng.integers(0, 2, n)
-        r1 = true
-        r2 = np.where(rng.random(n) < 0.85, true, 1 - true)
-        return pd.DataFrame({"rater1": r1, "rater2": r2})
-    if method_name == "hypothesis_test":
-        out = base.copy()
-        out["分组"] = np.where(base["group"] == "A", "组1", "组2")
-        return out
-    if method_name == "inverse_solve":
-        # 历史行 + 一行请求（可调参数留空，输出目标给定）
-        inc = rng.normal(100, 5, n)
-        u = rng.uniform(10, 30, n)
-        y = 50.0 + 0.5 * inc + 1.2 * u
-        hist = pd.DataFrame({"IncomingA": inc, "VariableU1": u, "OutputY1": y})
-        request = pd.DataFrame({"IncomingA": [105.0], "VariableU1": [None], "OutputY1": [130.0]})
-        return pd.concat([hist, request], ignore_index=True)
-    return base
-
-
-def generate_images(output_dir: Path) -> int:
+def generate_images(output_dir: Path, only: set[str] | None = None) -> int:
     """为每个方法生成示例图片。返回失败方法数。"""
     output_dir.mkdir(parents=True, exist_ok=True)
-    df = _make_sample_data()
+    base = pd.read_excel(DATA_PATH)
 
     success = 0
     failed = []
 
-    for method_name in sorted(TASK_REGISTRY.keys()):
-        config = METHOD_CONFIGS.get(method_name)
-        if config is None:
-            # 未配置的方法使用默认参数
-            config = {"target": "y", "features": ["x1", "x2"], "params": {}}
+    for method_name in sorted(METHOD_CONFIGS):
+        if only and method_name not in only:
+            continue
+        config = METHOD_CONFIGS[method_name]
+        features = list(config["features"])
+        data = base
 
         try:
+            if config.get("preprocess_numeric"):
+                data, features, _, _, _ = preprocess_data(base.copy(), features, set())
             req = AnalysisRequest(
                 task=method_name,
-                data=_make_method_data(method_name, df).copy(),
+                data=data.copy(),
                 target_col=config["target"],
-                feature_cols=config["features"],
+                feature_cols=features,
                 params=config["params"],
             )
             result = orchestrate(req)
 
             if result.status == "ok" and result.figures:
-                fig = result.figures[0]
-                # 命名对齐仓库约定 {method}_1.png（第二轮 #12）
-                out_path = output_dir / f"{method_name}_1.png"
-                fig.savefig(out_path, dpi=100, bbox_inches="tight")
+                max_figures = int(config.get("max_figures", 1))
+                for i, fig in enumerate(result.figures[:max_figures]):
+                    fig.savefig(
+                        output_dir / f"{method_name}_{i + 1}.png",
+                        dpi=150,
+                        bbox_inches="tight",
+                    )
                 success += 1
                 print(f"  ✅ {method_name}")
             elif result.status == "ok":
+                failed.append((method_name, "无图片输出"))
                 print(f"  ⚠️ {method_name}: 无图片输出")
             else:
                 failed.append((method_name, result.messages[0] if result.messages else "unknown"))
@@ -224,21 +211,21 @@ def generate_images(output_dir: Path) -> int:
             failed.append((method_name, str(e)))
             print(f"  ❌ {method_name}: {str(e)[:50]}")
 
+    total = len(only) if only else len(METHOD_CONFIGS)
     print("\n═══ 图片生成完成 ═══")
-    print(f"成功: {success}/{len(TASK_REGISTRY)}")
+    print(f"成功: {success}/{total}")
     if failed:
         print(f"失败: {len(failed)}")
         for name, err in failed:
             print(f"  - {name}: {err[:80]}")
-    # 审查 2026-09-01 G-6：失败数返回给 main → 退出码（此前仅打印，验收无约束）
     return len(failed)
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(description="生成方法示例图片")
     parser.add_argument("--output-dir", default=str(ROOT / "docs" / "user-manual" / "images"))
+    parser.add_argument("--only", default="", help="仅生成指定方法（逗号分隔）")
     args = parser.parse_args()
-    failed = generate_images(Path(args.output_dir))
+    only_set = {m.strip() for m in args.only.split(",") if m.strip()} or None
+    failed = generate_images(Path(args.output_dir), only_set)
     sys.exit(1 if failed else 0)

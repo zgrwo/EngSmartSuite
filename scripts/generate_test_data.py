@@ -228,7 +228,7 @@ df.loc[mask, "设备报警"] = np.nan
 
 # ============ SAVE ============
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-path = os.path.join(project_root, "tests", "test_data.xlsx")
+path = os.path.join(project_root, "tests", "data", "injection_process.xlsx")
 os.makedirs(os.path.dirname(path), exist_ok=True)
 df.to_excel(path, index=False, engine="openpyxl")
 size_kb = os.path.getsize(path) / 1024

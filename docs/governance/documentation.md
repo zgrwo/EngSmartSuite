@@ -9,7 +9,7 @@
 | `AGENTS.md` | AI 助手 | "项目怎么组织？红线在哪？" | 架构/红线/流程变更 |
 | `context.md` | AI + 新人 | "术语什么意思？" | 新概念引入 |
 | `../specification/api-reference.md` | 开发者/AI | "函数签名是什么？"（**签名唯一信源**） | 任何 Public 接口变更 |
-| `../user-manual/user-manual.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
+| `../user-manual/index.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
 | `project-structure.md` | 开发者/AI | "代码在哪？"（**结构唯一信源**） | 文件新增/删除/移动 |
 | `ai-review-prompt.md` | AI 审查代理 | "变更怎么审查？"（审查模板，产出归档 logs/reports/） | 治理契约/陷阱速查变更 |
 | `skills/*.md` | AI 编码 | "Python 有什么陷阱？" | 发现新陷阱 |
@@ -19,7 +19,7 @@
 | ❌ 禁止 | 原因 |
 |---------|------|
 | 在多处重复定义同一信息 | 更新时必然遗漏 |
-| 在代码注释中写使用教程 | 教程属于 user-manual.md |
+| 在代码注释中写使用教程 | 教程属于 user-manual/ |
 | 在 api-reference 中写实现细节 | 只写签名和行为契约 |
 
 ## 同步更新链（EngSmartSuite 特定：11 步注册）
@@ -35,7 +35,7 @@
   → ⑦ templates/ 创建 YAML 模板
   → ⑧ 测试：test_correctness + test_invariants
   → ⑨ specification/api-reference.md 更新
-  → ⑩ user-manual/user-manual.md 更新（五段式）
+  → ⑩ user-manual/ 更新（五段式）
   → ⑪ skill.md 决策树更新（如引入新场景）
 ```
 

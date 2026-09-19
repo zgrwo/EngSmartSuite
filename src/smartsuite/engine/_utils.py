@@ -7,10 +7,28 @@
 import logging
 
 import numpy as np
-
-from smartsuite.engine._constants import EPSILON
+from scipy import stats as sp_stats
 
 logger = logging.getLogger(__name__)
+
+
+def shapiro_p(data) -> float:
+    """Shapiro-Wilk p 值 — 退化输入显式短路，保证跨 scipy 版本确定性。
+
+    scipy 版本行为不一致：<1.18 对零极差数据发 UserWarning 并返回 p=1.0，
+    >=1.18 静默返回 NaN（warnings-as-errors 环境下前者会中断分析）。
+    统一语义：无方差数据 W=1 → p=1.0（正态性检验不拒绝）。
+
+    Args:
+        data: 一维数值序列（n >= 3，调用方保证）
+
+    Returns:
+        p 值（有限 float；NaN 归一为 1.0）
+    """
+    if float(np.max(data)) == float(np.min(data)):
+        return 1.0
+    p = float(sp_stats.shapiro(data)[1])
+    return 1.0 if np.isnan(p) else p
 
 
 def safe_float(value, default: float) -> float:
@@ -44,7 +62,7 @@ def safe_float(value, default: float) -> float:
 def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")):
     """通用效应量阈值标签函数。
 
-    跨模块共享工具：被 root_cause.py 和 doe_opt.py 调用。
+    跨模块共享工具：被 root_cause 与 doe_opt 子包调用。
 
     Args:
         value: 待判定的效应量值
@@ -65,7 +83,7 @@ def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")
 def durbin_watson(residuals):
     """Durbin-Watson 统计量 — 检测残差一阶自相关。
 
-    跨模块共享工具：被 doe_opt.py (regression_analysis) 和 spc_monitor.py (trend_forecast) 调用。
+    跨模块共享工具：被 doe_opt 子包 (regression_analysis) 和 spc_monitor.py (trend_forecast) 调用。
 
     Args:
         residuals: 残差数组
@@ -82,8 +100,13 @@ def durbin_watson(residuals):
             f"请确保回归模型有足够的观测数据。"
         )
     diff = np.diff(residuals)
-    dw = np.sum(diff**2) / (np.sum(residuals**2) + EPSILON)
-    return float(dw)
+    # 审查 2026-09-16 D-2：原分母 `Σe² + EPSILON` 把微尺度残差（~1e-13）的 DW 压到 ~0
+    # → 假"正自相关"；DW 为量纲无关比值，仅残差全零（完美拟合）无定义 → 中性值 2.0
+    denom = float(np.sum(np.square(residuals)))
+    if denom == 0:
+        return 2.0
+    dw = float(np.sum(np.square(diff)) / denom)
+    return dw
 
 
 def round_for_display(values, decimals: int = 4):

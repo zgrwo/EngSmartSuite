@@ -2,12 +2,37 @@
 
 感谢你对 SmartSuite（工艺数据分析工具箱）的关注！
 
+初次贡献可从 [ROADMAP](ROADMAP.md#适合新贡献者的任务good-first-issue-候选) 的 good first issue 候选开始。
+
+## 第一个 PR（约 15 分钟）
+
+1. `python scripts/doctor.py` — 环境诊断（Python/git/依赖逐项检查，失败会给修复指引）
+2. `uv sync --frozen --all-extras` — 安装依赖（无 uv 时见下方路径 B）
+3. `python scripts/verify_all.py --quick` — 快速门禁（语法编译 + 全量测试；跳过文档检查）
+4. 从 [ROADMAP](ROADMAP.md#适合新贡献者的任务good-first-issue-候选) 挑一条任务，按下方「提交前必检」开工
+5. 提交前：`uv run pytest tests/ -q -x` + `uv run ruff check src/smartsuite/ scripts/ tests/ benchmarks/`
+6. 按 [Conventional Commits](https://www.conventionalcommits.org/) 提交，开 PR 时使用模板
+
+> 卡住了？在 Issue 里 `@zgrwo`，或直接开 Discussion。
+
 ## 开发环境
+
+### 路径 A：uv（推荐，可复现）
 
 ```bash
 git clone https://github.com/zgrwo/EngSmartSuite
 cd EngSmartSuite
-pip install -e ".[dev,report]"
+uv sync --frozen --all-extras   # 安装全部依赖（含测试/报告/Web/文档）
+uv run pytest tests/ -q         # 全部命令通过 uv run 执行
+```
+
+### 路径 B：pip（离线/无 uv 环境）
+
+```bash
+git clone https://github.com/zgrwo/EngSmartSuite
+cd EngSmartSuite
+pip install -e ".[dev,report,web]"
+pytest tests/ -q
 ```
 
 ## 新增分析方法流程（11 步注册链）
@@ -22,7 +47,7 @@ pip install -e ".[dev,report]"
 □ 7. templates/ — 创建 YAML 模板
 □ 8. tests/ — 至少覆盖 correctness + invariants 两层
 □ 9. docs/specification/api-reference.md — 更新 API 参考
-□ 10. docs/user-manual/user-manual.md — 更新用户手册（五段式）
+□ 10. docs/user-manual/ — 更新用户手册（五段式；方法章节位于 04–08）
 □ 11. skills/analysis-decision-tree.md — 更新决策树（如引入新场景）
 ```
 
@@ -38,10 +63,24 @@ pip install -e ".[dev,report]"
 ## 提交前必检
 
 ```bash
-ruff check src/smartsuite/ scripts/  # 零错误
-pytest tests/ -x -q              # 全绿
-python scripts/verify_consistency.py  # 一致性校验
+# uv（推荐）
+uv run ruff check src/smartsuite/ scripts/ tests/ benchmarks/        # 零错误
+uv run ruff format --check src/smartsuite/ scripts/ tests/ benchmarks/
+uv run pytest tests/ -x -q                                          # 全绿
+
+# pip 等价（无 uv 环境）
+ruff check src/smartsuite/ scripts/ tests/ benchmarks/
+ruff format --check src/smartsuite/ scripts/ tests/ benchmarks/
+pytest tests/ -x -q
 ```
+
+## 测试
+
+- 全量：`uv run pytest tests/ -q`（≈8 分钟）
+- 仅引擎：`uv run pytest tests/engine -q`
+- 仅服务/Web：`uv run pytest tests/services -q`
+- 仅回归防线：`uv run pytest tests/guards -q`
+- 性能基准：`uv run pytest benchmarks/ --benchmark-only -q`（非门禁）
 
 ## PR 规范
 
@@ -67,6 +106,11 @@ python scripts/verify_consistency.py  # 一致性校验
    规则见 `scripts/validate-commit-msg.sh`）——commit 类型决定版本号升降
 3. 手动指定版本：在 release PR 的 commit body 加 `Release-As: x.y.z` 强制覆盖
 4. 版本号遵循 Semantic Versioning：数值/算法变更 → major，新方法/API → minor，修复 → patch
+
+### 构件分发
+
+release-please 发版时会在 GitHub Release 附加 `dist/*.whl` 与 `dist/*.tar.gz`（见 `.github/workflows/release.yml`）。
+用户安装以 Release 构件为准；PyPI 发布尚未启用（W4 决策门）。
 
 ## 许可证
 

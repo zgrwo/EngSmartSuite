@@ -317,7 +317,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
 
     # Total Variation
     tv = np.sqrt(grr**2 + pv**2)
-    if tv < EPSILON:
+    # 审查 2026-09-16 D-1：原 `tv < EPSILON`（绝对 1e-10）把微尺度测量数据误判
+    # 零变异拒绝；只有总变异精确为 0（所有读数全同）才无法评估
+    if tv == 0:
         return AnalysisResult(
             task="gage_rr",
             status="error",
@@ -365,6 +367,26 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
             PALETTE["contrast"]["b"],
         ],
     )
+    # 数值标注：AV 常被合成公式下界截断为 0，光标不可见时靠文字可读
+    for yi, v in enumerate(values_pct):
+        ax.annotate(
+            f"{v:.3f}",
+            xy=(v, yi),
+            xytext=(4, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=8,
+        )
+    if tv_pct > 0 and av_pct / tv_pct < 0.005:
+        ax.annotate(
+            "AV≈0（合成公式下界截断）",
+            xy=(0, 1),
+            xytext=(6, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=7.5,
+            color=PALETTE["misc"]["grid"],
+        )
     ax.axvline(
         tv_pct,
         color=PALETTE["anomaly"]["primary"],
@@ -377,7 +399,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
         f"Gage R&R — {req.target_col} | %GRR={grr_sv:.1f}%, ndc={ndc} | {judge}",
         fontsize=10,
     )
-    ax.legend(fontsize=8)
+    ax.legend(fontsize=8, loc="upper right")
     fig.tight_layout()
 
     summary = (
@@ -487,7 +509,8 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
         )
     mu = float(data.mean())
     sigma = float(data.std(ddof=1))
-    if sigma < EPSILON:
+    # 审查 2026-09-16 D-1：原 `< EPSILON` 拒绝微尺度数据；改精确零判据
+    if sigma == 0:
         return AnalysisResult(
             task="tolerance_interval",
             status="error",
@@ -544,9 +567,23 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
         linewidth=2,
     )
     if side != "upper":
-        ax.axvline(lower, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=2)
+        ax.axvline(
+            lower,
+            color=PALETTE["anomaly"]["primary"],
+            linestyle="--",
+            linewidth=2,
+            label=f"下限={lower:.4f}",
+        )
     if side != "lower":
-        ax.axvline(upper, color=PALETTE["center"]["primary"], linestyle="--", linewidth=2)
+        ax.axvline(
+            upper,
+            color=PALETTE["center"]["primary"],
+            linestyle="--",
+            linewidth=2,
+            label=f"上限={upper:.4f}",
+        )
+    if side == "two-sided":
+        ax.legend(fontsize=8)
     ax.set_xlabel(req.target_col, fontsize=10)
     ax.set_title(f"容许区间 — {label}", fontsize=10)
     fig.tight_layout()
@@ -765,7 +802,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             color=PALETTE["target"]["primary"],
             linestyle="--",
             linewidth=1,
-            label=f"中位寿命={median_survival:.0f}",
+            label=f"中位寿命={median_survival:g}",
         )
     # Weibull 拟合曲线
     if weibull_shape and weibull_scale:
@@ -806,9 +843,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     fig.tight_layout()
 
     summary_parts = [
-        f"KM: 中位寿命={median_survival:.0f}"
-        if median_survival is not None
-        else "KM: 中位寿命未达到"
+        f"KM: 中位寿命={median_survival:g}" if median_survival is not None else "KM: 中位寿命未达到"
     ]
     if weibull_shape is not None:
         summary_parts.append(f"Weibull β={weibull_shape:.2f}, η={weibull_scale:.0f}")

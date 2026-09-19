@@ -1,5 +1,8 @@
 # EngSmartSuite (SmartSuite)
 
+> **语言与目标市场**：本项目面向国内制造业工艺工程师，文档与界面均为简体中文，暂不提供英文版。
+> 在线文档：<https://zgrwo.github.io/EngSmartSuite/>（首次 Pages 部署后可用，进度见 [ROADMAP](ROADMAP.md)）
+
 > 工艺数据分析工具箱：Python 引擎 + Flask Web UI + CLI，覆盖正态性检验、过程能力分析、可靠性工程、实验设计（DoE）等。
 
 ---
@@ -23,14 +26,23 @@ cd EngSmartSuite
 pip install -e ".[dev]"
 ```
 
+### 方式三：从 GitHub Release 安装（wheel 安装仍需联网拉取依赖）
+
+1. 打开 [Releases](https://github.com/zgrwo/EngSmartSuite/releases) 下载最新版 wheel（`smartsuite-x.y.z-py3-none-any.whl`）；
+2. `pip install smartsuite-x.y.z-py3-none-any.whl`。
+
+> wheel 仅含本项目代码，Python 依赖仍需从依赖索引下载；完全离线请先预下载依赖（参考项目内 `setup_offline` 脚本的做法）。
+
+> 暂未发布到 PyPI；稳定数个版本后再评估（见 [ROADMAP](ROADMAP.md) 决策门）。
+
 ### 验证安装
 
 ```bash
 # 命令行验证（列出全部支持的分析方法）
 python -m smartsuite.cli list
 
-# 或启动 Web UI
-python run_server.py
+# 或启动 Web UI（源码检出可改用 python run_server.py）
+python -m smartsuite.web.app
 # → 浏览器打开 http://localhost:5050
 ```
 
@@ -38,7 +50,7 @@ python run_server.py
 
 ## 模块速览
 
-> 完整签名、参数说明见 **[API 参考](docs/specification/api-reference.md)**；每个函数的详细示例见 **[用户手册](docs/user-manual/user-manual.md)**。
+> 完整签名、参数说明见 **[API 参考](docs/specification/api-reference.md)**；每个函数的详细示例见 **[用户手册](docs/user-manual/index.md)**。
 
 | 模块 | 做什么 |
 |------|------|
@@ -151,7 +163,10 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 ## 贡献
 
-请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解贡献流程（fork → PR → review）。
+- 新手入口：[CONTRIBUTING 的第一个 PR 路径](CONTRIBUTING.md#第一个-pr约-15-分钟)；任务从 [ROADMAP](ROADMAP.md) 的候选清单挑选
+- 审查标准：[人类审查清单](docs/governance/review-checklist.md)
+- **项目运营**：目前为单一维护者（业余时间）。Issue 通常在 72 小时内答复；PR 审查集中在周末。
+  若你希望成为长期贡献者，请从 ROADMAP 任务开始，累计 3 个合并 PR 后可申请 triage 权限。
 
 ---
 
@@ -171,7 +186,7 @@ pip install -e ".[dev]"
 pytest tests/ -x -q
 
 # 代码检查
-ruff check src/smartsuite/ scripts/
+ruff check src/smartsuite/ scripts/ tests/
 
 # 启动 Web UI
 python run_server.py
@@ -183,11 +198,13 @@ python run_server.py
 
 | 文档 | 角色 | 内容 |
 |------|------|------|
+| [在线文档站](https://zgrwo.github.io/EngSmartSuite/) | 全部文档 | Web 版手册，支持搜索与暗色主题 |
 | [API 参考](docs/specification/api-reference.md) | 数字唯一信源 | 分析方法签名与参数说明（方法总数唯一锚点） |
-| [用户手册](docs/user-manual/user-manual.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
+| [用户手册](docs/user-manual/index.md) | 学习教程 | 每个方法详细示例 + 结果解读 |
 | [context.md](docs/governance/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](docs/governance/project-structure.md) | 结构地图 | 文件职责与层级关系 |
 | [AGENTS.md](AGENTS.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
+| [ROADMAP.md](ROADMAP.md) | 公开路线图 | 方向、决策门与 good first issue 候选 |
 
 ---
 

@@ -16,4 +16,4 @@
 
 - 新增文档须登记 [project-structure.md](governance/project-structure.md) 目录树
 - 文档数字/计数一律链接到 [api-reference.md](specification/api-reference.md)，禁止硬编码（verify-docs 检查强制）
-- 本地工作产物（设计/计划文档、审查报告 → `logs/reports/`）不入库
+- 本地工作产物（审查报告 → `logs/reports/`）不入库

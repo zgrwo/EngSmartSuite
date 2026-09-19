@@ -1,8 +1,8 @@
 """run_affected_tests.py 的源文件→测试映射逻辑测试。
 
 映射约定（与脚本 docstring 保持一致）：
-  - engine/ → tests/test_engine；services/、core/ → tests/test_services
-  - web/ → E2E + 集成测试文件
+  - engine/ → tests/engine + tests/guards；services/、core/ → tests/services + tests/guards
+  - web/ → E2E + 集成测试文件 + tests/guards
   - scripts/ → tests/scripts 下 stem 子串匹配（无匹配 = 缺测 fail）
   - tests/ 自身变更 → 直接运行变更文件
   - 文档/配置变更 → skip
@@ -25,47 +25,52 @@ mod.loader.exec_module(run_affected_tests)
 map_source_to_tests = run_affected_tests.map_source_to_tests
 
 
-def test_engine_module_maps_to_test_engine_dir():
+def test_engine_module_maps_to_engine_and_guards():
     assert map_source_to_tests("src/smartsuite/engine/spc_monitor.py") == (
         "run",
-        ["tests/test_engine"],
+        ["tests/engine", "tests/guards"],
     )
-    assert map_source_to_tests("src/smartsuite/engine/root_cause.py") == (
+    assert map_source_to_tests("src/smartsuite/engine/root_cause/anova.py") == (
         "run",
-        ["tests/test_engine"],
+        ["tests/engine", "tests/guards"],
     )
 
 
-def test_services_and_core_map_to_test_services_dir():
+def test_services_and_core_map_to_services_and_guards():
     assert map_source_to_tests("src/smartsuite/services/orchestrator.py") == (
         "run",
-        ["tests/test_services"],
+        ["tests/services", "tests/guards"],
     )
     assert map_source_to_tests("src/smartsuite/core/contracts.py") == (
         "run",
-        ["tests/test_services"],
+        ["tests/services", "tests/guards"],
     )
 
 
-def test_web_modules_map_to_e2e_and_integration():
+def test_web_modules_map_to_e2e_integration_and_guards():
     expected = (
         "run",
         [
-            "tests/test_web_e2e.py",
-            "tests/test_integration.py",
-            "tests/test_integration_chemical.py",
-            "tests/test_integration_reliability.py",
-            "tests/test_integration_warranty.py",
+            "tests/integration/test_web_e2e.py",
+            "tests/integration/test_integration.py",
+            "tests/integration/test_integration_chemical.py",
+            "tests/integration/test_integration_reliability.py",
+            "tests/integration/test_integration_warranty.py",
+            "tests/guards",
         ],
     )
     assert map_source_to_tests("src/smartsuite/web/app.py") == expected
     assert map_source_to_tests("src/smartsuite/web/api.py") == expected
 
 
-def test_cli_maps_to_master_integration():
+def test_cli_maps_to_integration_and_services():
     assert map_source_to_tests("src/smartsuite/cli.py") == (
         "run",
-        ["tests/test_integration.py", "tests/test_master_integration.py", "tests/test_services"],
+        [
+            "tests/integration/test_integration.py",
+            "tests/integration/test_task_registry_smoke.py",
+            "tests/services",
+        ],
     )
 
 
@@ -93,16 +98,16 @@ def test_legacy_scripts_exempted():
 
 
 def test_test_file_change_runs_itself():
-    assert map_source_to_tests("tests/test_engine/test_correctness.py") == (
+    assert map_source_to_tests("tests/engine/test_correctness.py") == (
         "run",
-        ["tests/test_engine/test_correctness.py"],
+        ["tests/engine/test_correctness.py"],
     )
 
 
 def test_template_yaml_maps_to_services_and_workflows():
     assert map_source_to_tests("templates/example_anova.yaml") == (
         "run",
-        ["tests/test_services", "tests/test_workflows.py"],
+        ["tests/services", "tests/integration/test_workflows.py"],
     )
 
 
@@ -112,6 +117,15 @@ def test_docs_and_config_are_skipped():
     assert map_source_to_tests(".github/workflows/ci.yml") == ("skip", [])
     assert map_source_to_tests("README.md") == ("skip", [])
     assert map_source_to_tests("skills/smartsuite-dev.md") == ("skip", [])
+
+
+def test_packaging_and_root_config_are_skipped():
+    """审查 2026-09-19：MANIFEST.in 变更曾致门禁 FAIL（无后缀白名单盲区）。"""
+    assert map_source_to_tests("MANIFEST.in") == ("skip", [])
+    assert map_source_to_tests("uv.lock") == ("skip", [])
+    assert map_source_to_tests("LICENSE") == ("skip", [])
+    assert map_source_to_tests(".gitignore") == ("skip", [])
+    assert map_source_to_tests(".editorconfig") == ("skip", [])
 
 
 def test_unknown_path_is_failure():

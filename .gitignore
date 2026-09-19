@@ -6,11 +6,15 @@ __pycache__/
 # 缓存
 .pytest_cache/
 .ruff_cache/
+.benchmarks/
+.mypy_cache/
+.hypothesis/
 
 # 构建
 dist/
 build/
 *.egg
+site/
 
 # 虚拟环境
 .venv/
@@ -37,9 +41,6 @@ htmlcov/
 Thumbs.db
 desktop.ini
 
-# 类型检查缓存
-.mypy_cache/
-
 # Claude Code 配置（个人工具，不推送）
 .claude/
 
@@ -50,6 +51,7 @@ packages/
 smartsuite_report.html
 tests/results.pptx
 tests/demo_output/
+benchmark.json
 
 # 代码审查产物（本地保留，不推送，见 logs/reports/）
 logs/reports/*.md

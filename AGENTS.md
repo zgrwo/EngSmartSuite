@@ -88,7 +88,8 @@ EngSmartSuite/
 ├── docs/                             # 项目文档（governance / specification / user-manual / adr）
 ├── logs/                             # 审查报告/运行产物（本地保留，不入库）
 ├── src/                              # 主包（core / engine / services / web）
-├── tests/                            # 测试（含 tests/scripts/ 治理脚本测试）
+├── tests/                            # 测试（engine/services/integration/guards/crossval/scripts + data/）
+├── benchmarks/                       # 性能基准（pytest-benchmark，非测试防线）
 ├── skills/                           # Skill 定义（领域 5 + 过程 6）
 ├── templates/                        # YAML 分析模板 (45 个: 42 任务 + 2 方法变体 + 1 工作流指南)
 ├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）
@@ -97,9 +98,12 @@ EngSmartSuite/
 ├── run_server.py                   # Web UI 启动入口
 ├── setup_offline.bat               # 离线安装脚本（Windows）
 ├── setup_offline.sh                # 离线安装脚本（Linux/macOS）
+├── mkdocs.yml                        # 文档站配置（mkdocs-material）
 ├── pyproject.toml                    # 包配置 + ruff 规则
+├── uv.lock                           # 可复现依赖锁（uv）
 ├── AGENTS.md                         # 本文件
 ├── README.md                         # 用户向功能指南
+├── ROADMAP.md                        # 公开路线图（决策门 + good first issue 候选）
 ├── CONTRIBUTING.md                   # 贡献指南
 ├── CODE_OF_CONDUCT.md                # 贡献者行为准则
 ├── CHANGELOG.md                      # 变更记录
@@ -165,6 +169,7 @@ EngSmartSuite/
 | 模式 | 出现次数 | 根因 |
 |------|----------|------|
 | 代码审查多轮修复 | 15+ 轮 | 初始实现防御不足 |
+| 微尺度绝对阈值误判 | 1 | 带量纲量（se/σ/sp/tv）与绝对 EPSILON 比较判决，量纲缩放后结论翻转（2026-09-16 全量审查，见 skill 陷阱 9） |
 | falsy 陷阱 (value=0) | 5+ | `if value:` 对 0 为 False |
 | preprocess_data 解包错误 | 4+ | 返回值数量变更未同步调用方 |
 | CI YAML 结构损坏 | 3 | 内联代码缩进/花括号冲突 |
@@ -239,7 +244,7 @@ EngSmartSuite/
 | :--- | :--- |
 | [README.md](README.md) | 用户入口、模块速览、使用模式 |
 | [api-reference.md](docs/specification/api-reference.md) | 签名唯一信源 |
-| [user-manual.md](docs/user-manual/user-manual.md) | 用户手册 |
+| [用户手册](docs/user-manual/index.md) | 用户手册 |
 | [context.md](docs/governance/context.md) | 术语表 |
 | [project-structure.md](docs/governance/project-structure.md) | 结构地图 |
 | [documentation.md](docs/governance/documentation.md) | 文档职责 |

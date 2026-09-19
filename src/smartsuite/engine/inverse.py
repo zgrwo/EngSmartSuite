@@ -4,6 +4,7 @@ import json
 import logging
 import warnings
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -383,6 +384,7 @@ def _fit_forward(history, roles, model="auto", random_state=42):
             )
             if r2 > best_r2:
                 best_kind, best_r2, best_model = kind, r2, est
+        assert best_model is not None and best_kind is not None  # 候选循环至少产出一个模型
         best_model.fit(X, y)
         models.append(best_model)
         choices.append(best_kind)
@@ -571,6 +573,7 @@ def _fit_rate_forward(history, roles, time_col, random_state=42):
             )
             if r2 > best_r2:
                 best_name, best_r2, best_model, best_cols = name, r2, est, cols
+        assert best_model is not None and best_name is not None and best_cols is not None
         best_model.fit(train[best_cols][mask], rate)
         models.append(best_model)
         feature_choice.append(best_name)
@@ -933,6 +936,7 @@ def _solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, 
     u_result = {name: float(row[name]) for name in optimized}
     u_result.update(constants)
     if time_value is not None:
+        assert time_col is not None  # time_value 由 time_col 模型产出
         u_result[time_col] = float(time_value)
     at_bound = {}
     for name, value in u_result.items():
@@ -947,7 +951,7 @@ def _solve_one(forward, incoming_row, target, scale, weights, bounds, baseline, 
         )
     with np.errstate(divide="ignore", invalid="ignore"):
         residual_sigma = [float(dev) for dev in (pred - target_arr) / scale_arr]
-    info = {
+    info: dict[str, Any] = {
         "at_bound": at_bound,
         "residual_sigma": residual_sigma,
         "method": method,
@@ -1832,6 +1836,9 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 elif col in used_features:
                     invalid_inputs.append(col)
             if inject_time:
+                assert (
+                    time_col is not None and time_median is not None
+                )  # inject_time 成立即二者齐备
                 incoming[time_col] = time_median
             targets: list[float] = []
             invalid_targets: list[str] = []
@@ -1908,7 +1915,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                         "时间线性为模型假设，历史数据未覆盖，建议实验验证"
                     )
 
-            rec = {"请求行号": label}
+            rec: dict[str, Any] = {"请求行号": label}
             rec.update(incoming)
             for out_col, value in zip(roles.output, targets, strict=True):
                 rec[f"目标{out_col}"] = float(value)
@@ -1922,7 +1929,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 rec["状态"] = "可达"
             recommendation_rows.append(rec)
 
-            pred_row = {"请求行号": label}
+            pred_row: dict[str, Any] = {"请求行号": label}
             for out_col, value in zip(roles.output, pred, strict=True):
                 pred_row[f"预测{out_col}"] = float(value)
             for out_col, dev in zip(roles.output, resid_sigmas, strict=True):
@@ -1969,7 +1976,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                 if values
             }
             if means:
-                bottleneck = max(means, key=means.get)
+                bottleneck = max(means, key=lambda k: means[k])
         all_sigmas = [value for values in sigma_by_output.values() for value in values]
         if is_rate:
             choice_desc = "rate（时间线性速率模型）"

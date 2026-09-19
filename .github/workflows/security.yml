@@ -42,9 +42,10 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip_audit -r requirements.txt || { echo "::error::pip-audit 发现已知 CVE 依赖，请升级"; exit 1; }
           elif [ -f pyproject.toml ]; then
-            # 提取项目声明的 dependencies + dev extra 定向审计（不含 runner 预装系统包）；
+            # 提取 dependencies + 全部 extras（dev/web/report/docs/all，审查 2026-09-19 G-1：
+            # 此前只含 dev，flask/reportlab/pptx 等 extras 依赖的 CVE 在 PR 阶段无覆盖）；
             # 单行 python -c（避免 YAML block scalar 内多行缩进破坏解析）
-            python -c "import tomllib;d=tomllib.load(open('pyproject.toml','rb'));p=d.get('project',{});print('\n'.join(list(p.get('dependencies') or [])+list(p.get('optional-dependencies',{}).get('dev') or [])))" > pip-audit-deps.txt
+            python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); p=d.get('project',{}); o=p.get('optional-dependencies',{}); deps=list(p.get('dependencies') or [])+[x for v in o.values() for x in v]; print('\n'.join(deps))" > pip-audit-deps.txt
             python -m pip_audit -r pip-audit-deps.txt || { echo "::error::pip-audit 发现已知 CVE 依赖，请升级"; exit 1; }
             rm -f pip-audit-deps.txt
           else

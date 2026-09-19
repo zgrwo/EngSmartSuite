@@ -40,9 +40,12 @@ ROOT = Path(__file__).resolve().parent.parent
 # 本地/运行时/工具目录（不入库或无需声明），不参与存在性与未声明检查
 EXCLUDED_DIRS = {
     ".coverage",  # 覆盖率运行产物（.gitignore 已忽略）
+    ".benchmarks",  # pytest-benchmark 本地缓存（.gitignore 已忽略）
+    ".mypy_cache",  # mypy 类型检查缓存（.gitignore 已忽略）
     ".git",
     ".claude",
     ".codegraph",
+    ".hypothesis",  # hypothesis 示例数据库（.gitignore 已忽略）
     ".opencode-goal",  # opencode goal 会话产物（.gitignore 已忽略）
     ".pytest_cache",
     ".qoder",
@@ -50,8 +53,10 @@ EXCLUDED_DIRS = {
     ".superpowers",  # Superpowers 会话产物（.gitignore 已忽略）
     ".venv",
     "build",
+    "dist",  # 构建产物（.gitignore 已忽略）
     "logs",
     "packages",  # 离线安装缓存（.gitignore 忽略）
+    "site",  # mkdocs 文档站构建产物（.gitignore 已忽略）
     "__pycache__",
 }
 
@@ -85,7 +90,8 @@ def collect_doc_files(root: Path) -> list[str]:
     readme = root / "scripts" / "README.md"
     if readme.exists():
         docs.append("scripts/README.md")
-    return [d for d in docs if not d.startswith("docs/superpowers/")]
+    # 豁免：docs/superpowers 为会话产物（gitignore），不参与链接/反引号存在性检查
+    return [d for d in docs if not d.startswith(("docs/superpowers/",))]
 
 
 # ── 目录树解析（project-structure.md 即契约）──────────────────
@@ -458,8 +464,14 @@ def check_undeclared(root: Path, strict: bool) -> list[str]:
     if not declared:
         problems.append("[配置错误] 无法从 project-structure.md 解析顶层条目（目录树格式异常？）")
         return problems
-    for p in root.iterdir():
-        if p.name in declared or p.name in EXCLUDED_DIRS:
+    candidates = [
+        p for p in root.iterdir() if p.name not in declared and p.name not in EXCLUDED_DIRS
+    ]
+    # 审查 2026-09-19 F-2：.gitignore 忽略的本地产物（benchmark.json / htmlcov/ 等）豁免登记；
+    # 非 git 环境（迷你仓库/CI checkout 前）返回空集 → 行为与既有严格模式一致
+    ignored = _git_ignored_files(root, candidates)
+    for p in candidates:
+        if p.name in ignored:
             continue
         if p.is_file():
             problems.append(f"[未声明文件] {p.name}（请同步 project-structure.md 目录树）")

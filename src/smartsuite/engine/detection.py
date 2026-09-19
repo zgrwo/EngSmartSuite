@@ -14,7 +14,6 @@ from smartsuite.engine._constants import (
     DW_POSITIVE_AUTOCORR,
     DW_SAFE_LOWER,
     DW_SAFE_UPPER,
-    EPSILON,
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
@@ -87,10 +86,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
     # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
     # 审查 2026-09-05 B1：绝对阈值 1e-12 误判微尺度数据（std~1e-13，如单位换算后的
-    # 纳米/微应变数据）→ 相对阈值，复用 spc_xbar 同族修法（spc_charts.py #A2l）
-    _mean_abs = abs(float(np.mean(data.values)))
-    _scale = _mean_abs if _mean_abs > 1e-12 else 1.0
-    if float(np.std(data.values, ddof=1)) <= 1e-12 * _scale:
+    # 纳米/微应变数据）→ 相对阈值，复用 spc_xbar 同族修法（spc_charts 相对判据）
+    # 审查 2026-09-16 B-4：去掉 `_scale=1.0` 兜底（pico 级真实波动不再误报常量），
+    # 阈值相对数据自身幅值 |x|max
+    _abs_scale = float(np.max(np.abs(data.values)))
+    if _abs_scale == 0 or float(np.std(data.values, ddof=1)) <= 1e-12 * _abs_scale:
         return AnalysisResult(
             task="trend_forecast",
             status="error",
@@ -125,7 +125,9 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
         # ── 精度指标 ──
         # MAPE (处理零值)
-        mape_mask = np.abs(y) > EPSILON
+        # 审查 2026-09-16 D-2：原 |y|>EPSILON 绝对掩码会把微尺度序列（~1e-11）
+        # 整体排除 → MAPE 恒 N/A；改精确零判据（MAPE 为比值，量纲无关）
+        mape_mask = np.abs(y) > 0
         mape = (
             float(np.mean(np.abs(residuals[mape_mask] / y[mape_mask])) * 100)
             if mape_mask.sum() > 0
@@ -217,18 +219,28 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # ── 增强图表：2×2 布局 ──
         fig = Figure(figsize=(13, 9))
 
-        # 左上：趋势 + 预测 + 置信带
+        # 左上：趋势 + 预测 + 置信带（大样本时去掉点标记）
         ax1 = fig.add_subplot(2, 2, 1)
         hist_idx = np.arange(n)
-        ax1.plot(
-            hist_idx,
-            y,
-            "o-",
-            markersize=3,
-            label="历史数据",
-            color=PALETTE["data"]["primary"],
-            linewidth=1.2,
-        )
+        if n > 300:
+            ax1.plot(
+                hist_idx,
+                y,
+                "-",
+                linewidth=0.8,
+                label="历史数据",
+                color=PALETTE["data"]["primary"],
+            )
+        else:
+            ax1.plot(
+                hist_idx,
+                y,
+                "o-",
+                markersize=3,
+                label="历史数据",
+                color=PALETTE["data"]["primary"],
+                linewidth=1.2,
+            )
         ax1.plot(
             hist_idx,
             y_pred_in,
@@ -254,6 +266,21 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
             alpha=0.2,
             color=PALETTE["target"]["primary"],
             label="95% 预测区间",
+        )
+        # 预测区高亮 + 标注，避免预测点被上千个历史点淹没
+        ax1.axvspan(n + 0.5, n + steps + 0.5, color=PALETTE["misc"]["grid"], alpha=0.12, zorder=0)
+        _last_pred = float(predictions[-1])
+        _last_conf = float(conf_array[-1])
+        ax1.annotate(
+            f"预测 {_last_pred:.2f}\n95%区间 [{_last_pred - _last_conf:.2f}, {_last_pred + _last_conf:.2f}]",
+            xy=(n + steps, _last_pred),
+            xytext=(-36, 26),
+            textcoords="offset points",
+            ha="right",
+            fontsize=8,
+            color=PALETTE["target"]["primary"],
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.85, edgecolor="none"),
+            arrowprops=dict(arrowstyle="->", color=PALETTE["target"]["primary"], lw=0.8),
         )
         ax1.set_xlabel("时间点", fontsize=9)
         ax1.set_ylabel(req.target_col, fontsize=9)
@@ -284,9 +311,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         )
         ax3.set_xlabel("滞后阶数", fontsize=9)
         ax3.set_ylabel("自相关 (ACF)", fontsize=9)
+        if max_lag >= 5:
+            ax3.set_xticks(range(0, max_lag + 1, 5))
         ax3.set_title("残差自相关 (ACF)", fontsize=10)
 
-        # 右下：Actual vs Predicted
+        # 右下：实际值 vs 预测值
         ax4 = fig.add_subplot(2, 2, 4)
         ax4.scatter(y_pred_in, y, s=12, alpha=0.6, color=PALETTE["data"]["primary"])
         ax4.plot(
@@ -298,7 +327,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         )
         ax4.set_xlabel("预测值", fontsize=9)
         ax4.set_ylabel("实际值", fontsize=9)
-        ax4.set_title(f"Actual vs Predicted (R²={r2:.3f})", fontsize=10)
+        ax4.set_title(f"实际值 vs 预测值 (R²={r2:.3f})", fontsize=10)
         fig.tight_layout()
 
         # ── 汇总 ──
@@ -439,7 +468,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
 
             if peak_norm > best_stat_norm:
                 best_stat_norm = peak_norm
-                best_cp = start + peak_idx
+                best_cp = int(start + peak_idx)
                 best_seg_idx = seg_i
 
         if best_cp is not None and best_cp not in changepoints:
@@ -599,7 +628,9 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     )
 
     # ── 方法 2: Z-score ──
-    z_scores = np.abs((data - data.mean()) / (data.std(ddof=1) + EPSILON))
+    # 审查 2026-09-16 D-1：原分母 `std+EPSILON` 在微尺度下把 z 整体压低 ~1000×
+    # → 静默漏检；此处 std=0 已在 IQR==0 分支提前返回，直接相除（z 量纲无关）
+    z_scores = np.abs((data - data.mean()) / data.std(ddof=1))
     z_mask = z_scores > ZSCORE_OUTLIER_THRESHOLD
 
     # ── 方法 3: Isolation Forest ──
@@ -648,8 +679,13 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(10, 5))
     ax = fig.add_subplot(111)
     pos = np.arange(n)
-    ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.6)
-    ax.scatter(pos, data.values, s=12, color=PALETTE["data"]["primary"], alpha=0.6)
+    # 大样本时减细线与点，突出高/低置信标记
+    if n > 300:
+        ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=0.7, alpha=0.5)
+        ax.scatter(pos, data.values, s=4, color=PALETTE["data"]["primary"], alpha=0.5)
+    else:
+        ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.6)
+        ax.scatter(pos, data.values, s=12, color=PALETTE["data"]["primary"], alpha=0.6)
 
     # 低置信 (1票)
     low_conf_pos = np.where(any_flag & ~high_conf)[0]
@@ -894,10 +930,11 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     if method == "grubbs":
         # Grubbs 检验：每次检测最大偏差，迭代最多 5 个异常点
         # 类型安全转换（审查 2026-08-19 #1.4：CLI/YAML 字符串参数会 TypeError）
+        # 审查 2026-09-16 C-1：int(inf) 抛 OverflowError 且不在捕获元组内 → 补齐
         try:
             alpha_g = float(req.params.get("alpha", 0.05))
             max_outliers = int(req.params.get("max_outliers", 5))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
@@ -915,13 +952,22 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=[f"max_outliers 必须 ≥ 1，当前: {max_outliers}"],
             )
+        # 审查 2026-09-16 B-2：原 `sigma < EPSILON`（绝对 1e-10）在首次迭代对微尺度
+        # 数据直接 break → 静默返回 0 异常。常量列改为显式中文错误；迭代中 sigma 归零
+        # （剔除后剩余值全同）才 break（此时已返回已检出异常，语义正确）。
+        if data.nunique(dropna=True) <= 1:
+            return AnalysisResult(
+                task="anomaly_detect",
+                status="error",
+                messages=["目标列为常量列（标准差为 0），无法进行 Grubbs 检验"],
+            )
         vals = data.values.copy()
         mask = np.zeros(len(data), dtype=bool)
         keep_idx = np.arange(len(data))
         for _ in range(max_outliers):
             mu = np.mean(vals)
             sigma = np.std(vals, ddof=1)
-            if sigma < EPSILON:
+            if not np.isfinite(sigma) or sigma <= 0:
                 break
             g_scores = np.abs(vals - mu) / sigma
             max_idx = np.argmax(g_scores)
@@ -952,11 +998,13 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR
         )
     else:
-        if data_std < EPSILON:
+        # 审查 2026-09-16 D-1：原 `data_std < EPSILON`（绝对 1e-10）显式拒绝微尺度
+        # 数据；改精确零判据——只有真常量列才无法做 z 分数（z 本身量纲无关）
+        if data.nunique(dropna=True) <= 1:
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
-                messages=["数据标准差接近零，无法进行 Z-score 异常检测"],
+                messages=["目标列为常量列（标准差为 0），无法进行 Z-score 异常检测"],
             )
         z = np.abs((data - data.mean()) / data_std)
         mask = z > ZSCORE_OUTLIER_THRESHOLD
@@ -964,12 +1012,20 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     idx = data.index[mask]
     anomalies = req.data.loc[idx] if mask.sum() > 0 else pd.DataFrame()
 
-    # 异常检测散点图
+    # 异常检测散点图（大样本时减细线与点标记）
     fig = Figure(figsize=(9, 4))
     ax = fig.add_subplot(111)
     pos = np.arange(len(data))
-    ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, label="数据")
-    ax.scatter(pos, data.values, s=10, color=PALETTE["data"]["primary"])
+    if len(data) > 300:
+        ax.plot(
+            pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=0.7, label="数据"
+        )
+        ax.scatter(pos, data.values, s=3, color=PALETTE["data"]["primary"], alpha=0.6)
+    else:
+        ax.plot(
+            pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, label="数据"
+        )
+        ax.scatter(pos, data.values, s=10, color=PALETTE["data"]["primary"])
     if mask.sum() > 0:
         anomaly_pos = np.where(mask)[0]
         ax.scatter(

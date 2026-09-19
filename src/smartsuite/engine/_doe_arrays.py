@@ -5,7 +5,7 @@
 - three_level_oa(n_runs): GF(3) 饱和三水平正交表 OA(3^m, (3^m-1)/2)
 - L18: 标准田口混合水平表 OA(18, 2^1·3^7)（硬编码，正交性由测试校验）
 
-混合 2/3 水平的多列构造在 doe_opt._gen_taguchi 中以 L18 为基做直积实现，
+混合 2/3 水平的多列构造在 doe_opt.doe._gen_taguchi 中以 L18 为基做直积实现，
 不在此处硬编码 L36（避免 828 个数的转录风险）。
 """
 
@@ -73,7 +73,7 @@ def three_level_oa(n_runs: int) -> np.ndarray:
 
 # L18 = OA(18, 2^1·3^7)。标准田口混合水平表。
 # 列 0 为二水平(0/1)，列 1-7 为三水平(0/1/2)。
-# 正交性由 tests/test_engine/test_doe_design.py 的 test_l18_* 校验。
+# 正交性由 tests/engine/test_doe_design.py 的 test_l18_* 校验。
 L18 = np.array(
     [
         [0, 0, 0, 0, 0, 0, 0, 0],
