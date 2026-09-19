@@ -4,6 +4,7 @@ import logging
 import os
 import tempfile
 from logging.handlers import RotatingFileHandler
+from typing import Any, cast
 
 __version__ = "1.3.1"
 
@@ -58,14 +59,15 @@ def setup_logging(log_dir: str | None = None, console_level: int = logging.INFO)
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
-        fh._smartsuite_managed = True
+        # cast(Any)：logging.Handler 无该属性声明；幂等标记见 :33 getattr
+        cast(Any, fh)._smartsuite_managed = True
         root.addHandler(fh)
 
     # 控制台 handler — INFO 以上，紧凑格式
     ch = logging.StreamHandler()
     ch.setLevel(console_level)
     ch.setFormatter(logging.Formatter("[%(levelname)-5s] %(name)s | %(message)s"))
-    ch._smartsuite_managed = True
+    cast(Any, ch)._smartsuite_managed = True  # 同上（幂等标记，见 :33 getattr）
     root.addHandler(ch)
 
     logging.getLogger(__name__).info(

@@ -27,8 +27,8 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             task="distribution_summary", status="error", messages=["有效数据不足(至少3个点)"]
         )
 
-    # 描述性统计
-    desc = {
+    # 描述性统计（Any：混存数值与文本展示值，如 Shapiro-Wilk p="N/A"，供 Web 序列化）
+    desc: dict[str, Any] = {
         "样本量": n,
         "均值": float(data.mean()),
         "中位数": float(data.median()),
@@ -58,7 +58,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     # 正态性
     sw_p = float(sp_stats.shapiro(data)[1]) if n <= 5000 else None
     # 审查 2026-09-16 C-2：原 `if sw_p` 把合法的 p=0.0 与"未计算(None)"混同 → is not None
-    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"  # type: ignore[assignment]  # 展示字典有意混存数值/文本（Web 序列化）
+    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"
 
     # 分布拟合
     fits: dict[str, dict[str, Any]] = {}

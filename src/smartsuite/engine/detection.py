@@ -86,7 +86,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
 
     # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
     # 审查 2026-09-05 B1：绝对阈值 1e-12 误判微尺度数据（std~1e-13，如单位换算后的
-    # 纳米/微应变数据）→ 相对阈值，复用 spc_xbar 同族修法（spc_charts.py #A2l）
+    # 纳米/微应变数据）→ 相对阈值，复用 spc_xbar 同族修法（spc_charts 相对判据）
     # 审查 2026-09-16 B-4：去掉 `_scale=1.0` 兜底（pico 级真实波动不再误报常量），
     # 阈值相对数据自身幅值 |x|max
     _abs_scale = float(np.max(np.abs(data.values)))

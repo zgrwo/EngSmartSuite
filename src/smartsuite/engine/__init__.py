@@ -68,17 +68,20 @@ _font_loaded = False
 _env_font = os.environ.get("MATPLOTLIB_FONT_PATH")
 
 # 环境变量字体（跨平台通用）
-if _env_font and os.path.exists(
-    _env_font
-):  # pragma: no cover — 仅用户显式设置 MATPLOTLIB_FONT_PATH 时进入
+if _env_font and os.path.exists(_env_font):
     try:
         _fm.fontManager.addfont(_env_font)  # matplotlib API 无返回值（注册即生效）
+        # 审查 2026-09-19 C-1：族名取 FontProperties.get_name()（如 DejaVuSans.ttf →
+        # "DejaVu Sans"），文件名 stem 与注册族名常不一致会导致 findfont 静默回退默认字体
+        try:
+            _env_family = _fm.FontProperties(fname=_env_font).get_name()
+        except Exception:
+            _env_family = os.path.splitext(os.path.basename(_env_font))[0]
         # 仅当用户未自定义 font.family 时才覆盖（保护用户配置）
         if "font.family" not in matplotlib.rcParams or matplotlib.rcParams["font.family"] == [
             "sans-serif"
         ]:
-            # addfont 返回 None → 无法取 family_name，以文件名为族名（既有行为）
-            matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[0]
+            matplotlib.rcParams["font.family"] = _env_family
         _font_loaded = True
     except Exception as e:
         _logger.debug("环境变量字体 %s 加载失败: %s", _env_font, e)

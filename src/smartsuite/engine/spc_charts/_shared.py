@@ -13,9 +13,12 @@ def _natural_sort_key(v):
     用 numbers.Number 覆盖全部数值类型；bool 视为字符串（避免 True/1 混淆）。
     """
     import numbers
+    from typing import Any, cast
 
     if isinstance(v, numbers.Number) and not isinstance(v, bool):
-        return (0, float(v))  # type: ignore[arg-type]  # typeshed：Number 未声明 __float__（int/float/np 标量均有）
+        # typeshed 的 Number 未声明 __float__（int/float/np 标量运行时均有）；
+        # cast 仅为类型层断言，运行时无操作
+        return (0, float(cast(Any, v)))
     return (1, str(v))
 
 
