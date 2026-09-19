@@ -225,12 +225,14 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax1.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
         ax1.set_xlabel("拟合值", fontsize=9)
         ax1.set_ylabel("残差", fontsize=9)
-        ax1.set_title("Residual vs Fitted", fontsize=10)
+        ax1.set_title("残差 vs 拟合值", fontsize=10)
 
         # 2. Q-Q Plot
         ax2 = fig_res.add_subplot(2, 3, 2)
         sp_stats.probplot(residuals, dist="norm", plot=ax2)
-        ax2.set_title("Q-Q Plot", fontsize=10)
+        ax2.set_xlabel("理论分位数", fontsize=9)
+        ax2.set_ylabel("样本分位数", fontsize=9)
+        ax2.set_title("Q-Q 图（残差正态性）", fontsize=10)
 
         # 3. Scale-Location (sqrt|resid| vs fitted)
         ax3 = fig_res.add_subplot(2, 3, 3)
@@ -238,7 +240,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax3.scatter(fitted, sqrt_abs_resid, alpha=0.6, s=20, color=PALETTE["data"]["primary"])
         ax3.set_xlabel("拟合值", fontsize=9)
         ax3.set_ylabel("√|残差|", fontsize=9)
-        ax3.set_title("Scale-Location", fontsize=10)
+        ax3.set_title("尺度-位置图", fontsize=10)
 
         # 4. Cook's Distance (若计算失败则显示提示文本)
         ax4 = fig_res.add_subplot(2, 3, 4)
@@ -256,7 +258,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             )
             ax4.set_xlabel("观测序号", fontsize=9)
             ax4.set_ylabel("Cook's D", fontsize=9)
-            ax4.set_title("Cook's Distance (影响点诊断)", fontsize=10)
+            ax4.set_title("Cook 距离（影响点诊断）", fontsize=10)
             ax4.legend(fontsize=7.5)
         else:
             ax4.text(
@@ -269,7 +271,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
                 fontsize=9,
                 color=PALETTE["judge"]["warn"],
             )
-            ax4.set_title("Cook's Distance (不可用)", fontsize=10)
+            ax4.set_title("Cook 距离（不可用）", fontsize=10)
 
         # 5. Residual vs Leverage
         ax5 = fig_res.add_subplot(2, 3, 5)
@@ -279,7 +281,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             ax5.axhline(0, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1)
             ax5.set_xlabel("杠杆值", fontsize=9)
             ax5.set_ylabel("残差", fontsize=9)
-            ax5.set_title("Residuals vs Leverage", fontsize=10)
+            ax5.set_title("残差 vs 杠杆值", fontsize=10)
         else:
             ax5.text(
                 0.5,
@@ -291,7 +293,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
                 fontsize=9,
                 color=PALETTE["judge"]["warn"],
             )
-            ax5.set_title("Residuals vs Leverage (不可用)", fontsize=10)
+            ax5.set_title("残差 vs 杠杆值（不可用）", fontsize=10)
 
         # 6. Actual vs Predicted
         ax6 = fig_res.add_subplot(2, 3, 6)
@@ -306,7 +308,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
         ax6.set_xlabel("预测值", fontsize=9)
         ax6.set_ylabel("实际值", fontsize=9)
-        ax6.set_title(f"Actual vs Predicted (R²={model.rsquared:.3f})", fontsize=10)
+        ax6.set_title(f"实际值 vs 预测值 (R²={model.rsquared:.3f})", fontsize=10)
         ax6.legend(fontsize=7.5)
 
         fig_res.tight_layout()
@@ -462,13 +464,31 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     # 可视化
     fig = Figure(figsize=(7, 4))
     ax = fig.add_subplot(111)
-    nonzero_coefs = coef_df[coef_df["选中"] == "是"]
+    ax.set_axisbelow(True)
+    nonzero_coefs = coef_df[coef_df["选中"] == "是"].copy()
     if len(nonzero_coefs) > 0:
         colors = [
             PALETTE["target"]["primary"] if v < 0 else PALETTE["data"]["primary"]
             for v in nonzero_coefs["标准化系数"]
         ]
-        ax.barh(nonzero_coefs["变量"], nonzero_coefs["标准化系数"], color=colors)
+        ax.barh(nonzero_coefs["变量"], nonzero_coefs["标准化系数"], color=colors, height=0.5)
+        # 数值标注：负值柱的标签放在柱体内部，避免与 Y 轴刻度文字重叠
+        for y_i, v in enumerate(nonzero_coefs["标准化系数"]):
+            ax.annotate(
+                f"{v:+.4f}",
+                xy=(v, y_i),
+                xytext=(5 if v < 0 else 4, 0),
+                textcoords="offset points",
+                ha="left",
+                va="center",
+                fontsize=8,
+                color="white" if v < 0 else "black",
+                fontweight="bold" if v < 0 else "normal",
+            )
+        vmin = float(nonzero_coefs["标准化系数"].min())
+        vmax = float(nonzero_coefs["标准化系数"].max())
+        pad = max((vmax - vmin) * 0.2, 1e-12)
+        ax.set_xlim(min(vmin, 0.0) - pad, max(vmax, 0.0) + pad)
     ax.axvline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
     ax.set_xlabel("标准化系数", fontsize=10)
     ax.set_title(
@@ -551,31 +571,110 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
         max_diff_idx = np.argmax(np.abs(coef_df["差异"].values[1:])) + 1
         outlier_sensitive = coef_df.iloc[max_diff_idx]["变量"] if len(coef_df) > 1 else None
 
-        fig = Figure(figsize=(8, 4.5))
-        ax = fig.add_subplot(111)
-        x_pos = np.arange(len(coef_df))
-        width = 0.35
-        ax.bar(
-            x_pos - width / 2,
-            coef_df["Huber系数"],
-            width,
-            label="Huber 稳健",
-            color=PALETTE["data"]["primary"],
-        )
-        ax.bar(
-            x_pos + width / 2,
-            coef_df["OLS系数"],
-            width,
-            label="OLS",
-            color=PALETTE["data"]["secondary"],
-            alpha=0.7,
-        )
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(coef_df["变量"], rotation=45, ha="right", fontsize=8)
-        ax.set_ylabel("系数", fontsize=10)
-        ax.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
-        ax.set_title("Huber 稳健回归 vs OLS", fontsize=11)
-        ax.legend(fontsize=8)
+        # 截距与斜率量级悬殊时同轴柱状图会退化为"只有一侧有柱"，拆成两个面板
+        huber_vals = coef_df["Huber系数"].values
+        ols_vals = coef_df["OLS系数"].values
+        inter_mag = abs(float(huber_vals[0]))
+        slope_mag = float(np.max(np.abs(huber_vals[1:]))) if len(cols) > 0 else 0.0
+        split_panels = len(cols) >= 1 and slope_mag > 0 and inter_mag > 10 * slope_mag
+
+        fig = Figure(figsize=(9.5, 4.2) if split_panels else (8, 4.5))
+        if split_panels:
+            # 左：截距项
+            ax_i = fig.add_subplot(1, 2, 1)
+            ax_i.bar(
+                [0, 1],
+                [huber_vals[0], ols_vals[0]],
+                width=0.6,
+                color=[PALETTE["data"]["primary"], PALETTE["data"]["secondary"]],
+            )
+            ax_i.set_xticks([0, 1])
+            ax_i.set_xticklabels(["Huber 稳健", "OLS"], fontsize=9)
+            ax_i.set_title("截距项", fontsize=10)
+            ax_i.set_ylabel("系数", fontsize=10)
+            ax_i.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
+            for xi, v in enumerate([huber_vals[0], ols_vals[0]]):
+                ax_i.annotate(
+                    f"{v:.4f}",
+                    xy=(xi, v),
+                    xytext=(0, 4 if v >= 0 else -12),
+                    textcoords="offset points",
+                    ha="center",
+                    fontsize=8,
+                )
+            # 右：斜率项（独立量纲，同轴内对比 Huber/OLS）
+            ax = fig.add_subplot(1, 2, 2)
+            slope_df = coef_df.iloc[1:]
+            x_pos = np.arange(len(slope_df))
+            width = 0.35
+            ax.bar(
+                x_pos - width / 2,
+                slope_df["Huber系数"],
+                width,
+                color=PALETTE["data"]["primary"],
+            )
+            ax.bar(
+                x_pos + width / 2,
+                slope_df["OLS系数"],
+                width,
+                color=PALETTE["data"]["secondary"],
+                alpha=0.7,
+            )
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels(slope_df["变量"], rotation=20, ha="right", fontsize=8)
+            ax.set_title("斜率项", fontsize=10)
+            ax.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
+            ax.margins(y=0.35)
+            # 单类别时图例会盖住柱体，直接在基线上方标注系列名与数值
+            for xi, hv, ov in zip(x_pos, slope_df["Huber系数"], slope_df["OLS系数"], strict=True):
+                ax.annotate(
+                    f"Huber {hv:.4f}",
+                    xy=(xi - width / 2, 0.0),
+                    xytext=(0, 4),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    color=PALETTE["data"]["primary"],
+                )
+                ax.annotate(
+                    f"OLS {ov:.4f}",
+                    xy=(xi + width / 2, 0.0),
+                    xytext=(0, 4),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    color=PALETTE["data"]["secondary"],
+                )
+        else:
+            ax = fig.add_subplot(111)
+            x_pos = np.arange(len(coef_df))
+            width = 0.35
+            ax.bar(
+                x_pos - width / 2,
+                coef_df["Huber系数"],
+                width,
+                label="Huber 稳健",
+                color=PALETTE["data"]["primary"],
+            )
+            ax.bar(
+                x_pos + width / 2,
+                coef_df["OLS系数"],
+                width,
+                label="OLS",
+                color=PALETTE["data"]["secondary"],
+                alpha=0.7,
+            )
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels(coef_df["变量"], rotation=45, ha="right", fontsize=8)
+            ax.set_ylabel("系数", fontsize=10)
+            ax.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
+            ax.legend(fontsize=8)
+        if split_panels:
+            fig.suptitle("Huber 稳健回归 vs OLS（截距/斜率分栏）", fontsize=11)
+        else:
+            ax.set_title("Huber 稳健回归 vs OLS", fontsize=11)
         fig.tight_layout()
 
         summary = "稳健回归完成。" + (

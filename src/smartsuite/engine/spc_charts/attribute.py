@@ -251,9 +251,20 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         g_idx = gdata["_idx"].values
         g_stat = gdata["stat"].values
 
-        ax.plot(
-            g_idx, g_stat, "o-", markersize=5, color=color, linewidth=1.2, label=label, alpha=0.8
-        )
+        # 大样本时点+连线会形成"毛刷"噪声，退化为细线
+        if len(g_idx) > 300:
+            ax.plot(g_idx, g_stat, "-", color=color, linewidth=0.7, label=label, alpha=0.7)
+        else:
+            ax.plot(
+                g_idx,
+                g_stat,
+                "o-",
+                markersize=5,
+                color=color,
+                linewidth=1.2,
+                label=label,
+                alpha=0.8,
+            )
 
     # 控制限
     ax.axhline(

@@ -168,7 +168,7 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     conclusion = "两变量存在显著关联" if p_val < alpha else "两变量未发现显著关联"
 
-    # 可视化：堆叠柱状图
+    # 可视化：分组柱状图（各保养日状态内原料类型占比；堆叠会把两个状态的占比相加，无意义）
     fig = Figure(figsize=(8, 4.5))
     ax = fig.add_subplot(111)
     ctab_pct = ctab.div(ctab.sum(axis=0), axis=1) * 100
@@ -182,14 +182,14 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
     ]
     ctab_pct.plot(
         kind="bar",
-        stacked=True,
         ax=ax,
         color=bar_colors[: len(ctab_pct)],
         edgecolor="white",
         linewidth=0.5,
+        width=0.75,
     )
     ax.set_xlabel(col1, fontsize=10)
-    ax.set_ylabel("比例 (%)", fontsize=10)
+    ax.set_ylabel("组内比例 (%)", fontsize=10)
     ax.set_title(
         f"{test_name}: {col1} vs {col2} "
         f"({stat_label}={stat:.3f}, p={p_val:.4f}, {effect_name}={effect:.3f})",

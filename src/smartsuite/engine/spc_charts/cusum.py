@@ -170,10 +170,20 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         pos = np.arange(len(gr["data"]))
         total_alarms += len(gr["alarm_plus"]) + len(gr["alarm_minus"])
 
-        # 数据子图
-        ax1.plot(
-            pos, gr["data"], "o-", markersize=2, color=color, linewidth=0.8, alpha=0.7, label=label
-        )
+        # 数据子图（大样本时去掉点标记，避免"毛刷"噪声）
+        if len(pos) > 300:
+            ax1.plot(pos, gr["data"], "-", color=color, linewidth=0.7, alpha=0.7, label=label)
+        else:
+            ax1.plot(
+                pos,
+                gr["data"],
+                "o-",
+                markersize=2,
+                color=color,
+                linewidth=0.8,
+                alpha=0.7,
+                label=label,
+            )
         ax1.axhline(gr["mu"], color=color, linestyle="--", linewidth=0.8, alpha=0.4)
 
         # CUSUM 子图
@@ -232,7 +242,8 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
 
     ax2.set_xlabel("序号", fontsize=10)
     ax2.set_ylabel("CUSUM", fontsize=10)
-    ax2.legend(fontsize=7, ncol=2)
+    # 图例固定在右上空白区，避免 matplotlib 自动放置遮挡曲线
+    ax2.legend(fontsize=7, ncol=2, loc="upper right")
 
     fig.tight_layout()
 

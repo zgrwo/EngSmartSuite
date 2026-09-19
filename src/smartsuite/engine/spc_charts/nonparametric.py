@@ -156,16 +156,28 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     pos = np.arange(n)
     ax = fig.add_subplot(111)
 
-    ax.plot(
-        pos,
-        values,
-        "o-",
-        markersize=3,
-        color=PALETTE["data"]["primary"],
-        linewidth=1,
-        alpha=0.6,
-        label="数据",
-    )
+    # 大样本时去掉点标记并减细线宽，避免"毛刷"噪声淹没控制限与违规点
+    if n > 300:
+        ax.plot(
+            pos,
+            values,
+            "-",
+            color=PALETTE["data"]["primary"],
+            linewidth=0.7,
+            alpha=0.6,
+            label="数据",
+        )
+    else:
+        ax.plot(
+            pos,
+            values,
+            "o-",
+            markersize=3,
+            color=PALETTE["data"]["primary"],
+            linewidth=1,
+            alpha=0.6,
+            label="数据",
+        )
     ax.axhline(
         cl,
         color=PALETTE["control"]["primary"],
@@ -184,11 +196,21 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         )
         if ucl_2s is not None:
             ax.axhline(
-                ucl_2s, color=PALETTE["spec"]["secondary"], linestyle=":", linewidth=0.8, alpha=0.6
+                ucl_2s,
+                color=PALETTE["spec"]["secondary"],
+                linestyle=":",
+                linewidth=0.8,
+                alpha=0.6,
+                label="±2σ 警戒线",
             )
         if ucl_1s is not None:
             ax.axhline(
-                ucl_1s, color=PALETTE["spec"]["tertiary"], linestyle=":", linewidth=0.5, alpha=0.4
+                ucl_1s,
+                color=PALETTE["spec"]["tertiary"],
+                linestyle=":",
+                linewidth=0.5,
+                alpha=0.4,
+                label="±1σ 参考线",
             )
         ax.fill_between(pos, cl, ucl, alpha=0.04, color=PALETTE["center"]["primary"])
 

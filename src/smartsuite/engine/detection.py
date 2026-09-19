@@ -219,18 +219,28 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         # ── 增强图表：2×2 布局 ──
         fig = Figure(figsize=(13, 9))
 
-        # 左上：趋势 + 预测 + 置信带
+        # 左上：趋势 + 预测 + 置信带（大样本时去掉点标记）
         ax1 = fig.add_subplot(2, 2, 1)
         hist_idx = np.arange(n)
-        ax1.plot(
-            hist_idx,
-            y,
-            "o-",
-            markersize=3,
-            label="历史数据",
-            color=PALETTE["data"]["primary"],
-            linewidth=1.2,
-        )
+        if n > 300:
+            ax1.plot(
+                hist_idx,
+                y,
+                "-",
+                linewidth=0.8,
+                label="历史数据",
+                color=PALETTE["data"]["primary"],
+            )
+        else:
+            ax1.plot(
+                hist_idx,
+                y,
+                "o-",
+                markersize=3,
+                label="历史数据",
+                color=PALETTE["data"]["primary"],
+                linewidth=1.2,
+            )
         ax1.plot(
             hist_idx,
             y_pred_in,
@@ -256,6 +266,21 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
             alpha=0.2,
             color=PALETTE["target"]["primary"],
             label="95% 预测区间",
+        )
+        # 预测区高亮 + 标注，避免预测点被上千个历史点淹没
+        ax1.axvspan(n + 0.5, n + steps + 0.5, color=PALETTE["misc"]["grid"], alpha=0.12, zorder=0)
+        _last_pred = float(predictions[-1])
+        _last_conf = float(conf_array[-1])
+        ax1.annotate(
+            f"预测 {_last_pred:.2f}\n95%区间 [{_last_pred - _last_conf:.2f}, {_last_pred + _last_conf:.2f}]",
+            xy=(n + steps, _last_pred),
+            xytext=(-36, 26),
+            textcoords="offset points",
+            ha="right",
+            fontsize=8,
+            color=PALETTE["target"]["primary"],
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", alpha=0.85, edgecolor="none"),
+            arrowprops=dict(arrowstyle="->", color=PALETTE["target"]["primary"], lw=0.8),
         )
         ax1.set_xlabel("时间点", fontsize=9)
         ax1.set_ylabel(req.target_col, fontsize=9)
@@ -286,9 +311,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         )
         ax3.set_xlabel("滞后阶数", fontsize=9)
         ax3.set_ylabel("自相关 (ACF)", fontsize=9)
+        if max_lag >= 5:
+            ax3.set_xticks(range(0, max_lag + 1, 5))
         ax3.set_title("残差自相关 (ACF)", fontsize=10)
 
-        # 右下：Actual vs Predicted
+        # 右下：实际值 vs 预测值
         ax4 = fig.add_subplot(2, 2, 4)
         ax4.scatter(y_pred_in, y, s=12, alpha=0.6, color=PALETTE["data"]["primary"])
         ax4.plot(
@@ -300,7 +327,7 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         )
         ax4.set_xlabel("预测值", fontsize=9)
         ax4.set_ylabel("实际值", fontsize=9)
-        ax4.set_title(f"Actual vs Predicted (R²={r2:.3f})", fontsize=10)
+        ax4.set_title(f"实际值 vs 预测值 (R²={r2:.3f})", fontsize=10)
         fig.tight_layout()
 
         # ── 汇总 ──
@@ -652,8 +679,13 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     fig = Figure(figsize=(10, 5))
     ax = fig.add_subplot(111)
     pos = np.arange(n)
-    ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.6)
-    ax.scatter(pos, data.values, s=12, color=PALETTE["data"]["primary"], alpha=0.6)
+    # 大样本时减细线与点，突出高/低置信标记
+    if n > 300:
+        ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=0.7, alpha=0.5)
+        ax.scatter(pos, data.values, s=4, color=PALETTE["data"]["primary"], alpha=0.5)
+    else:
+        ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, alpha=0.6)
+        ax.scatter(pos, data.values, s=12, color=PALETTE["data"]["primary"], alpha=0.6)
 
     # 低置信 (1票)
     low_conf_pos = np.where(any_flag & ~high_conf)[0]
@@ -980,12 +1012,20 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     idx = data.index[mask]
     anomalies = req.data.loc[idx] if mask.sum() > 0 else pd.DataFrame()
 
-    # 异常检测散点图
+    # 异常检测散点图（大样本时减细线与点标记）
     fig = Figure(figsize=(9, 4))
     ax = fig.add_subplot(111)
     pos = np.arange(len(data))
-    ax.plot(pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, label="数据")
-    ax.scatter(pos, data.values, s=10, color=PALETTE["data"]["primary"])
+    if len(data) > 300:
+        ax.plot(
+            pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=0.7, label="数据"
+        )
+        ax.scatter(pos, data.values, s=3, color=PALETTE["data"]["primary"], alpha=0.6)
+    else:
+        ax.plot(
+            pos, data.values, "-", color=PALETTE["data"]["secondary"], linewidth=1, label="数据"
+        )
+        ax.scatter(pos, data.values, s=10, color=PALETTE["data"]["primary"])
     if mask.sum() > 0:
         anomaly_pos = np.where(mask)[0]
         ax.scatter(

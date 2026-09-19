@@ -138,9 +138,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 左: 3D 曲面
     if _has_3d:
         ax_3d = fig.add_subplot(1, 2, 1, projection="3d")
-        surf = ax_3d.plot_surface(
-            XI, YI, ZI, cmap=_rsm_cmap, alpha=0.85, linewidth=0, antialiased=True
-        )
+        ax_3d.plot_surface(XI, YI, ZI, cmap=_rsm_cmap, alpha=0.85, linewidth=0, antialiased=True)
+        ax_3d.view_init(elev=22, azim=-62)
         ax_3d.scatter(
             X1, X2, y, color=PALETTE["data"]["primary"], s=25, alpha=0.7, label="观测数据"
         )
@@ -161,7 +160,7 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         ax_3d.set_zlabel(req.target_col, fontsize=9)
         ax_3d.set_title(f"3D 响应面 — {req.target_col}\n(R²={r2:.3f})", fontsize=10)
         ax_3d.legend(fontsize=7.5, loc="upper left")
-        fig.colorbar(surf, ax=ax_3d, shrink=0.5, label=req.target_col)
+        # 色条只在 2D 面板保留一份，避免重复占位与 3D 面板拥挤
 
     # 右 (或全幅): 2D 填充等高线
     ax_contour = fig.add_subplot(1, 2 if _has_3d else 1, 2 if _has_3d else 1)

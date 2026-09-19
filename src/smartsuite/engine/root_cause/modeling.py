@@ -168,7 +168,10 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 图2: 决策树结构图 ──
     from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-    fig_tree = Figure(figsize=(12, max(tree.get_depth() * 1.2, 4)))
+    # 只显示前 3 层：更深层节点框会相互重叠、文字截断（宽度随叶子数 2^d 增长）
+    display_depth = min(3, tree.get_depth())
+    n_leaves = 2**display_depth
+    fig_tree = Figure(figsize=(max(14, n_leaves * 1.9), max(display_depth * 2.2, 4)))
     FigureCanvasAgg(fig_tree)  # plot_tree 需要 canvas renderer 初始化
     ax_tree = fig_tree.add_subplot(111)
     plot_tree(
@@ -177,11 +180,17 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
         feature_names=cols,
         filled=True,
         rounded=True,
-        fontsize=8,
+        fontsize=9,
         precision=2,
-        max_depth=4,
+        impurity=False,
+        max_depth=display_depth,
     )
-    ax_tree.set_title(f"决策树结构 — {req.target_col} (深度={tree.get_depth()})", fontsize=12)
+    depth_note = (
+        f"深度={tree.get_depth()}, 显示前 {display_depth} 层"
+        if tree.get_depth() > display_depth
+        else f"深度={tree.get_depth()}"
+    )
+    ax_tree.set_title(f"决策树结构 — {req.target_col} ({depth_note})", fontsize=12)
     fig_tree.tight_layout()
 
     # ── 汇总 ──
@@ -273,16 +282,33 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
             for v in vif_plot["VIF"]
         ]
         ax.barh(vif_plot["变量"], vif_plot["VIF"], color=colors)
-        ax.axvline(
-            threshold,
-            color=PALETTE["anomaly"]["primary"],
-            linestyle="--",
-            linewidth=1,
-            label=f"VIF={threshold:g} 阈值",
-        )
+        # 自适应轴范围：VIF 远低于阈值时不把阈值线画进来（否则柱子被压缩成一条）
+        vif_max = float(vif_plot["VIF"].max()) if len(vif_plot) else 1.0
+        xmax = vif_max * 1.08 if vif_max >= threshold else max(vif_max * 1.25, 1.05)
+        ax.set_xlim(0, xmax)
+        if threshold <= xmax:
+            ax.axvline(
+                threshold,
+                color=PALETTE["anomaly"]["primary"],
+                linestyle="--",
+                linewidth=1,
+                label=f"VIF={threshold:g} 阈值",
+            )
+            ax.legend(fontsize=8, loc="lower right")
+        else:
+            ax.annotate(
+                f"VIF={threshold:g} 阈值（当前全部未触及）",
+                xy=(xmax, 0.5),
+                xycoords=("data", "axes fraction"),
+                xytext=(-4, 0),
+                textcoords="offset points",
+                ha="right",
+                va="center",
+                fontsize=8,
+                color=PALETTE["anomaly"]["primary"],
+            )
         ax.set_xlabel("VIF", fontsize=9)
         ax.set_title("共线性诊断 — VIF", fontsize=11)
-        ax.legend(fontsize=8)
         fig.tight_layout()
 
         return AnalysisResult(

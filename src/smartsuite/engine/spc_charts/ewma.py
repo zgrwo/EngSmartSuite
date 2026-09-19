@@ -162,16 +162,28 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         pos = np.arange(gr["n"])
         total_violations += int(gr["violations"].sum())
 
-        ax.plot(
-            pos,
-            gr["data"],
-            "o-",
-            markersize=2,
-            alpha=0.3,
-            color=color,
-            linewidth=0.6,
-            label=f"{label} 原始" if has_groups else "原始数据",
-        )
+        # 原始数据（大样本时去掉点标记，避免"毛刷"噪声）
+        if gr["n"] > 300:
+            ax.plot(
+                pos,
+                gr["data"],
+                "-",
+                alpha=0.25,
+                color=color,
+                linewidth=0.8,
+                label=f"{label} 原始" if has_groups else "原始数据",
+            )
+        else:
+            ax.plot(
+                pos,
+                gr["data"],
+                "o-",
+                markersize=2,
+                alpha=0.3,
+                color=color,
+                linewidth=0.6,
+                label=f"{label} 原始" if has_groups else "原始数据",
+            )
         ax.plot(
             pos,
             gr["ewma"],
@@ -195,12 +207,24 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
 
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(y_col, fontsize=10)
-    ax.set_title(f"EWMA 控制图 — {y_col} (λ={lam}, L={L})", fontsize=11)
+    # 单组时图例移到坐标区上方，标题需上移让位（pad 见下）
+    if has_groups:
+        ax.set_title(f"EWMA 控制图 — {y_col} (λ={lam}, L={L})", fontsize=11)
+    else:
+        ax.set_title(f"EWMA 控制图 — {y_col} (λ={lam}, L={L})", fontsize=11, pad=26)
     if has_groups:
         ax.legend(fontsize=7, ncol=max(1, len(all_group_names) // 3 + 1))
+        fig.tight_layout()
     else:
-        ax.legend(fontsize=7.5, loc="upper left", ncol=2)
-    fig.tight_layout()
+        # 图例移到坐标区上方，避免遮挡左上角的数据与违规点
+        ax.legend(
+            fontsize=7.5,
+            ncol=3,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.0),
+            frameon=False,
+        )
+        fig.tight_layout(rect=(0, 0, 1, 0.92))
 
     # 汇总
     summary_parts = [f"EWMA (λ={lam}, L={L}) 检测到 {total_violations} 个违规点。"]

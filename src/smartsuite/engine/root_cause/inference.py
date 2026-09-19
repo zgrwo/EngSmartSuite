@@ -90,10 +90,24 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
         edgecolor="white",
     )
     ax.axvline(p_hat, color=PALETTE["target"]["primary"], linewidth=2, label=f"p_hat={p_hat:.4f}")
+    # 端点数值标注（区间很窄时文字才是可读信息）
+    for yi, (lo_v, hi_v) in enumerate([(wilson_lower, wilson_upper), (cp_lower, cp_upper)]):
+        ax.annotate(
+            f"[{lo_v:.4f}, {hi_v:.4f}]",
+            xy=(hi_v, yi),
+            xytext=(6, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=8,
+        )
+    # 自适应放大 x 轴：数据集中在某一段时不再画满 0~1 造成大片空白
+    lo = min(wilson_lower, cp_lower, p_hat)
+    hi = max(wilson_upper, cp_upper, p_hat)
+    pad = max((hi - lo) * 0.35, 0.005)
+    ax.set_xlim(max(0.0, lo - pad), min(1.0, hi + pad))
     ax.set_xlabel("比例", fontsize=10)
     ax.set_title(f"二项比例 {ci_level:.0%} CI — {req.target_col} (n={n})", fontsize=11)
-    ax.legend(fontsize=8)
-    ax.set_xlim(0, 1)
+    ax.legend(fontsize=8, loc="upper left")
     fig.tight_layout()
 
     summary = (

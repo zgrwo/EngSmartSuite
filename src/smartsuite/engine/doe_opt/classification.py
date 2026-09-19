@@ -258,32 +258,33 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     ll_model = model.llf
     mcfadden_r2 = float(1 - ll_model / ll_null) if ll_null != 0 else 0
 
-    # 可视化：OR 森林图
+    # 可视化：OR 森林图（errorbar 带端帽；数值明细见系数表与 summary）
     sig_vars = coef_df[coef_df["变量"] != "const"]
-    fig = Figure(figsize=(7, max(len(sig_vars) * 0.6, 3.5)))
+    fig = Figure(figsize=(7, max(len(sig_vars) * 0.55, 2.6)))
     ax = fig.add_subplot(111)
     sig_vars_plot = sig_vars.sort_values("OR (Odds Ratio)")
-    y_pos = range(len(sig_vars_plot))
-    ax.scatter(
-        sig_vars_plot["OR (Odds Ratio)"].values,
+    y_pos = np.arange(len(sig_vars_plot))
+    or_plot = sig_vars_plot["OR (Odds Ratio)"].values.astype(float)
+    lo_plot = sig_vars_plot["OR 95%CI下限"].values.astype(float)
+    hi_plot = sig_vars_plot["OR 95%CI上限"].values.astype(float)
+    ax.errorbar(
+        or_plot,
         y_pos,
-        s=60,
+        xerr=[or_plot - lo_plot, hi_plot - or_plot],
+        fmt="o",
         color=PALETTE["data"]["primary"],
+        ecolor=PALETTE["data"]["secondary"],
+        elinewidth=2,
+        capsize=3,
+        markersize=6,
         zorder=3,
     )
-    for i, (_, row) in enumerate(sig_vars_plot.iterrows()):
-        ax.plot(
-            [row["OR 95%CI下限"], row["OR 95%CI上限"]],
-            [i, i],
-            "-",
-            color=PALETTE["data"]["secondary"],
-            linewidth=2,
-        )
     ax.axvline(
         1, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6, label="OR=1"
     )
     ax.set_yticks(y_pos)
     ax.set_yticklabels(sig_vars_plot["变量"], fontsize=9)
+    ax.set_ylim(-0.55, len(sig_vars_plot) - 0.45)
     ax.set_xlabel("Odds Ratio (95% CI)", fontsize=10)
     ax.set_title(
         f"Logistic 回归 — {req.target_col} ({pos_label}) | "

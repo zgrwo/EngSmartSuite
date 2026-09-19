@@ -315,6 +315,9 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         ax = fig.add_subplot(n_rows, min(3, n_cols_plot), i + 1)
         d = req.data[col].dropna()
         sp_stats.probplot(d, dist="norm", plot=ax)
+        # probplot 默认英文轴标签，统一改为中文
+        ax.set_xlabel("理论分位数", fontsize=9)
+        ax.set_ylabel("样本分位数", fontsize=9)
         ax.set_title(col, fontsize=9)
     fig.tight_layout()
 

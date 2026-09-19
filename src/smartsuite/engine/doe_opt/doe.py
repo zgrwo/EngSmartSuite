@@ -267,16 +267,38 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
     ]
     ax.barh(ef["因子"], ef["主效应"], color=colors, height=0.6)
     ax.axvline(0, color=PALETTE["direction"]["zero"], linewidth=0.8)
+    # 自适应轴范围：主效应远小于 Lenth 阈值时不再把阈值线画进来（否则柱子被压成发丝）
+    max_abs = float(np.max(np.abs(effect_array))) if len(effect_array) else 0.0
+    xmax = max(max_abs * 1.35, 1e-12)
+    me_in_view = me > 0 and me <= xmax
+    if me_in_view:
+        xmax = max(xmax, me * 1.15)
+    ax.set_xlim(-xmax, xmax)
     if me > 0:
-        ax.axvline(
-            me,
-            color=PALETTE["anomaly"]["primary"],
-            linestyle="--",
-            linewidth=1,
-            alpha=0.6,
-            label=f"Lenth ME={round_for_display(me):g} (α={alpha})",
-        )
-        ax.axvline(-me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6)
+        if me_in_view:
+            ax.axvline(
+                me,
+                color=PALETTE["anomaly"]["primary"],
+                linestyle="--",
+                linewidth=1,
+                alpha=0.6,
+                label=f"Lenth ME={round_for_display(me):g} (α={alpha})",
+            )
+            ax.axvline(
+                -me, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1, alpha=0.6
+            )
+            ax.legend(fontsize=8)
+        else:
+            ax.text(
+                0.02,
+                0.96,
+                f"Lenth ME=±{round_for_display(me):g}（全部未达显著）",
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=8,
+                color=PALETTE["anomaly"]["primary"],
+            )
     # 标注效应值
     for i, (_, row) in enumerate(ef.iterrows()):
         v = row["主效应"]
@@ -296,7 +318,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         f"σ={round_for_display(grand_std):g}",
         fontsize=11,
     )
-    if me > 0:
+    if me_in_view:
         ax.legend(fontsize=8)
     fig.tight_layout()
 

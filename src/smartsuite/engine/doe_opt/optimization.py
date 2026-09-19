@@ -179,8 +179,33 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             fig.colorbar(cs, ax=ax, label="预测值", shrink=0.8)
         else:
             ax = fig.add_subplot(111)
-            ax.bar(range(len(predictions)), predictions, color=PALETTE["data"]["secondary"])
-            ax.set_xlabel("参数组合索引", fontsize=10)
+            # 按预测值排序（最优在前），否则候选差异被 0 起点柱高掩盖
+            order = np.argsort(predictions)
+            if direction == "maximize":
+                order = order[::-1]
+            pred_sorted = predictions[order]
+            x = np.arange(len(pred_sorted))
+            bar_colors = [
+                PALETTE["anomaly"]["primary"] if i == 0 else PALETTE["data"]["secondary"]
+                for i in range(len(pred_sorted))
+            ]
+            ax.bar(x, pred_sorted, color=bar_colors)
+            ax.set_xticks(x)
+            ax.set_xticklabels([str(int(i)) for i in order], fontsize=8)
+            span = float(pred_sorted.max() - pred_sorted.min())
+            if span > 0:
+                pad = span * 0.25
+                ax.set_ylim(float(pred_sorted.min()) - pad, float(pred_sorted.max()) + pad)
+            ax.annotate(
+                f"最优 {pred_sorted[0]:.4f}",
+                xy=(0, pred_sorted[0]),
+                xytext=(0, 6),
+                textcoords="offset points",
+                ha="center",
+                fontsize=8,
+                color=PALETTE["anomaly"]["primary"],
+            )
+            ax.set_xlabel("参数组合索引（纵轴已放大显示候选间差异）", fontsize=10)
             ax.set_ylabel("预测值", fontsize=10)
             ax.set_title(f"网格搜索 — {req.target_col}", fontsize=11)
         fig.tight_layout()
@@ -430,7 +455,8 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     # 右图: 得分分布 + 各目标期望值
     ax_score = fig.add_subplot(1, 2, 2) if len(objectives) == 2 else fig.add_subplot(111)
     top_n = min(20, len(score_valid))
-    top_idx = np.argsort(score_valid)[-top_n:]
+    # 最优在前（排名 1 在顶部）
+    top_idx = np.argsort(score_valid)[::-1][:top_n]
     # 显示各目标分解（PALETTE 对比色 + 数据色，支持 ≥5 目标）
     bar_colors = [
         PALETTE["data"]["primary"],  # 深蓝
@@ -460,10 +486,19 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
         )
         bottom_vals += contrib
     ax_score.invert_yaxis()
+    ax_score.set_yticks(range(top_n))
+    ax_score.set_yticklabels([str(i) for i in range(1, top_n + 1)], fontsize=8)
     ax_score.set_xlabel("加权期望值", fontsize=9)
     ax_score.set_ylabel("排名", fontsize=9)
     ax_score.set_title(f"多目标优化 — Top{top_n} 方案分解", fontsize=10)
-    ax_score.legend(fontsize=7.5, loc="lower right")
+    # 图例移出坐标系，避免遮挡柱条
+    ax_score.legend(
+        fontsize=7.5,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.14),
+        ncol=min(len(objectives), 3),
+        frameon=False,
+    )
 
     fig.tight_layout()
 
