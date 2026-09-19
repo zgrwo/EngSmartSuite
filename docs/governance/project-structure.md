@@ -30,6 +30,7 @@ EngSmartSuite/
 ├── src/
 │   └── smartsuite/                 # 主包
 │       ├── __init__.py             #   包初始化 + __version__ + check_core_deps()
+│       ├── py.typed                #   PEP 561 类型标记（下游 mypy 类型分发）
 │       ├── cli.py                  #   CLI 入口: smartsuite run / list
 │       │
 │       ├── core/                   # ① 数据契约层：仅 pandas+pydantic（AnalysisRequest 为 Pydantic BaseModel）

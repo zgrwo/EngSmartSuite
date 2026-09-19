@@ -73,6 +73,7 @@ where = ["src"]
 include = ["smartsuite*"]
 
 [tool.setuptools.package-data]
+"smartsuite" = ["py.typed"]
 "smartsuite.web" = ["templates/*", "static/*"]
 
 [tool.mypy]
