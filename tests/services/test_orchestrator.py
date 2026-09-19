@@ -9,6 +9,8 @@
 - NO_TARGET_TASKS 行为
 """
 
+import logging
+
 import pytest
 import numpy as np
 import pandas as pd
@@ -397,3 +399,69 @@ def test_orchestrate_unmapped_exception_falls_back_to_generic(monkeypatch):
     result = orchestrate(req)
     assert result.status == "error"
     assert "分析计算过程中出现异常" in result.messages[0]
+
+
+# ── error_id 关联日志与用户消息（审查 2026-09-19 E9）──
+
+
+def _extract_error_ids(messages: list[str]) -> list[str]:
+    """从用户消息中提取「错误编号: xxxxxxxx（…）」的编号。"""
+    ids = []
+    for m in messages:
+        if "错误编号: " in m:
+            ids.append(m.split("错误编号: ")[1].split("（")[0].strip())
+    return ids
+
+
+def test_error_id_in_log_and_messages(monkeypatch, caplog):
+    """未登记异常：日志与用户消息携带同一 error_id，用户可凭编号定位日志。"""
+    from smartsuite.services import orchestrator as orch
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ValueError("bad data")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    with caplog.at_level(logging.ERROR):
+        result = orchestrate(req)
+
+    assert result.status == "error"
+    ids = _extract_error_ids(result.messages)
+    assert len(ids) == 1, f"应恰有一条错误编号消息: {result.messages}"
+    assert len(ids[0]) == 8, f"错误编号应为 8 位 hex: {ids[0]!r}"
+    assert ids[0] in caplog.text, f"日志应含同一 error_id={ids[0]}，实际日志: {caplog.text}"
+    # 既有文案与顺序不变（error_id 追加在末尾）
+    assert "数据格式不符合分析要求" in result.messages[0]
+
+
+def test_error_id_present_for_smartsuite_error(monkeypatch, caplog):
+    """SmartSuiteError 分支（无 traceback 的 warning 日志）同样携带 error_id。"""
+    from smartsuite.core.exceptions import AnalysisError
+    from smartsuite.services import orchestrator as orch
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(AnalysisError("矩阵病态")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    with caplog.at_level(logging.WARNING):
+        result = orchestrate(req)
+
+    ids = _extract_error_ids(result.messages)
+    assert len(ids) == 1, f"SmartSuiteError 分支也应有错误编号: {result.messages}"
+    assert ids[0] in caplog.text, f"日志应含同一 error_id={ids[0]}，实际日志: {caplog.text}"
+
+
+def test_error_id_is_unique_per_failure(monkeypatch):
+    """两次失败必须拿到不同编号（否则用户无法区分现场）。"""
+    from smartsuite.services import orchestrator as orch
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ValueError("boom")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    first = _extract_error_ids(orchestrate(req).messages)
+    second = _extract_error_ids(orchestrate(req).messages)
+    assert first and second and first[0] != second[0], f"编号重复: {first} vs {second}"
+
+
+def test_success_path_has_no_error_id(monkeypatch):
+    """成功路径不得出现错误编号（防误报）。"""
+    assert (
+        _extract_error_ids(
+            orchestrate(AnalysisRequest(task="power_analysis", data=pd.DataFrame())).messages
+        )
+        == []
+    )

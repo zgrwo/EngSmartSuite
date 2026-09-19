@@ -2,6 +2,7 @@
 
 import logging
 import time
+import uuid
 from typing import Any
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
@@ -286,8 +287,11 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         return result
     except SmartSuiteError as e:
         elapsed = time.monotonic() - t0
+        # 审查 2026-09-19 E9：异常路径生成 error_id，让用户凭编号定位日志现场
+        error_id = uuid.uuid4().hex[:8]
         logger.warning(
-            "分析任务 SmartSuite异常: task=%s, elapsed=%.2fs, error=%s",
+            "分析任务 SmartSuite异常 [error_id=%s]: task=%s, elapsed=%.2fs, error=%s",
+            error_id,
             req.task,
             elapsed,
             str(e)[:200],
@@ -295,12 +299,18 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(
             task=req.task,
             status="error",
-            messages=[f"分析执行失败: {str(e)}", "如问题持续出现，请联系开发者"],
+            messages=[
+                f"分析执行失败: {str(e)}",
+                "如问题持续出现，请联系开发者",
+                f"错误编号: {error_id}（反馈时请提供此编号，便于定位日志）",
+            ],
         )
     except Exception as e:
         elapsed = time.monotonic() - t0
+        error_id = uuid.uuid4().hex[:8]
         logger.exception(
-            "分析任务执行失败: task=%s, elapsed=%.2fs, error_type=%s, error=%s",
+            "分析任务执行失败 [error_id=%s]: task=%s, elapsed=%.2fs, error_type=%s, error=%s",
+            error_id,
             req.task,
             elapsed,
             type(e).__name__,
@@ -329,6 +339,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
             messages=[
                 f"分析执行失败: {detail}",
                 "如问题持续出现，请联系开发者并提供数据样本",
+                f"错误编号: {error_id}（反馈时请提供此编号，便于定位日志）",
             ],
         )
 
