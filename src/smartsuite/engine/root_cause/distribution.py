@@ -15,6 +15,17 @@ from smartsuite.engine._utils import safe_float as _safe_float
 logger = logging.getLogger(__name__)
 
 
+def _shapiro_p(data: pd.Series) -> float:
+    """Shapiro-Wilk p 值 — 常量列显式短路。
+
+    scipy 版本行为不一致：<1.18 对零极差数据发 UserWarning 并返回 p=1.0，
+    >=1.18 静默返回 NaN。固定为确定性语义：无方差数据 W=1 → p=1.0。
+    """
+    if float(data.max()) == float(data.min()):
+        return 1.0
+    return float(sp_stats.shapiro(data)[1])
+
+
 def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     """分布特征摘要 — 描述性统计 + 正态/对数正态/Weibull 拟合。
 
@@ -56,7 +67,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     }
 
     # 正态性
-    sw_p = float(sp_stats.shapiro(data)[1]) if n <= 5000 else None
+    sw_p = _shapiro_p(data) if n <= 5000 else None
     # 审查 2026-09-16 C-2：原 `if sw_p` 把合法的 p=0.0 与"未计算(None)"混同 → is not None
     desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"
 
@@ -223,9 +234,9 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             )
             continue
 
-        _, sw_p = sp_stats.shapiro(d) if n <= 5000 else (None, None)
-        # scipy>=1.18 对常量/退化输入返回 NaN（旧版返回 p=1.0）；固定为确定性语义：
-        # 无方差数据 SW 统计量 W=1 → p=1.0（正态性检验不拒绝）
+        # 常量/退化输入由 _shapiro_p 显式短路；scipy>=1.18 对退化输入返回 NaN 的残余路径
+        # 仍统一为 p=1.0（正态性检验不拒绝）
+        sw_p = _shapiro_p(d) if n <= 5000 else None
         if sw_p is not None and np.isnan(sw_p):
             sw_p = 1.0
         # Anderson-Darling (更稳健的大样本检验)

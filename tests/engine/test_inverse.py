@@ -24,6 +24,12 @@ from smartsuite.engine.inverse import (
     _split_rows,
 )
 
+# pandas 2.3（Python 3.10 分叉）对含全 NA 列的 concat 发 FutureWarning；
+# _e2e_frame 刻意构造 target-only 全 NA 行，pandas 3.0 已移除该警告（3.11+ 无）
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:The behavior of DataFrame concatenation with empty or all-NA entries:FutureWarning"
+)
+
 
 def test_resolve_roles_auto_prefix():
     df = pd.DataFrame(

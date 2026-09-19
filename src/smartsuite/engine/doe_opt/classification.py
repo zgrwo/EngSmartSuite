@@ -270,7 +270,9 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     ax.errorbar(
         or_plot,
         y_pos,
-        xerr=[or_plot - lo_plot, hi_plot - or_plot],
+        # 嵌套 list：matplotlib 3.10 的 _safe_first_finite 对 ndarray 元素会触发
+        # numpy「ndim>0 转标量」DeprecationWarning（Python 3.10 环境已实测）
+        xerr=[(or_plot - lo_plot).tolist(), (hi_plot - or_plot).tolist()],
         fmt="o",
         color=PALETTE["data"]["primary"],
         ecolor=PALETTE["data"]["secondary"],
