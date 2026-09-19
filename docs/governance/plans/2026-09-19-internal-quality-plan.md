@@ -144,6 +144,10 @@ git commit -m "test(config): pytest 告警升级为 error 白名单制（新告�
 
 ## I2 — mypy 扩面（P1 #3）
 
+> **状态：已完成（2026-09-19）**。engine 66 处 + cli 2 处修复、零豁免；`uv run mypy` 覆盖 26 文件零错误。
+> Commits：`f9e206d`（engine 批）→ `9bad41a`（web/cli 收口）。
+> 额外修复：`engine/__init__.py` 字体分支死代码（addfont 恒返回 None，原 `family_name` 分支不可达；已按既有行为收敛并留注释）。
+
 ### Task I2.1: engine 批（66 err）
 
 **Files:**

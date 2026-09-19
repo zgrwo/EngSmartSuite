@@ -1,23 +1,25 @@
 # EngSmartSuite 路线图
 
 > 单一维护者项目（zgrwo）+ AI 协作。本文件公开方向与决策门，避免"猜测优先级"。
-> 最后更新：2026-09-18
+> 最后更新：2026-09-19
 
 ## 当前状态
 
-- v1.3.0：42 个分析方法，1033 项测试，覆盖率 89%，4 层测试防线 + 文档数值对账门禁。
-- 已知短板：无类型检查（engine/web）、无性能回归基线（本计划补齐中）。
+- v1.3.0：42 个分析方法，1034 项测试，覆盖率 89%，4 层测试防线 + 文档数值对账门禁。
+- 类型检查：mypy 全覆盖 `src/smartsuite`（core/services/engine/web/cli），CI 软门禁。
+- 测试告警：`filterwarnings = ["error", ...]` 白名单制，全量 0 告警。
+- 已知短板：巨石模块（root_cause.py 等）拆分中、覆盖率洼地 `engine/__init__.py`、社区回路。
 
 ## 2026 Q4
 
 - [ ] 文档站上线（mkdocs-material + GitHub Pages）并实现手册按章拆页 —— 仓库侧已完成，待首次 Pages 部署
-- [ ] uv 锁文件 + 可复现 CI；pyDOE3 替换死依赖
-- [ ] mypy 覆盖 core + services；性能基准周更
-- [ ] 类型检查扩展至 engine/（第一批：_utils/_constants/capability/detection）
+- [x] uv 锁文件 + 可复现 CI；pyDOE3 替换死依赖
+- [x] mypy 覆盖 core + services；性能基准周更（benchmarks/ + Benchmarks workflow）
+- [x] 类型检查扩展至 engine/ 及 web/、cli（2026-09-19 全覆盖，零豁免）
+- [x] 测试告警清零（error 白名单制，2026-09-19）
 
 ## 2027 H1
 
-- [ ] mypy 扩展至 web/ 与 cli
 - [ ] 覆盖率洼地 `engine/__init__.py`（52%）补齐
 - [ ] 第 2 位维护者路径：至少 2 名外部贡献者、3 个合并 PR 后开放 triage 权限
 
@@ -31,7 +33,7 @@
 
 ## 适合新贡献者的任务（good first issue 候选）
 
-1. 给 `web/` 的路由处理函数补类型注解（mypy 分批推进的前置）
+1. 拆分 `engine/spc_charts.py` 与 `engine/doe_opt.py`（巨石模块，子包化并收敛 lint 豁免）
 2. 为 `benchmarks/` 增加 `process_capability` 与 `correlation` 两个基准任务
 3. 手册某方法章节补充"常见参数误用"小节（每章 ≤30 行，附实际输出）
 4. 为 `templates/` 增加模板参数自动校验脚本的测试用例
