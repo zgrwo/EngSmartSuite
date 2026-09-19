@@ -171,7 +171,9 @@ def test_run_analysis_vif_inf_not_in_json():
             "c": [2.0, 4, 6, 8, 10, 12],
         }
     )
-    results = run_analysis("vif", dfv, [], ["a", "b", "c"], [])
+    # 共线设计矩阵：引擎有意给出 UserWarning（poorly conditioned），statsmodels 秩亏告警一并捕获
+    with pytest.warns(UserWarning, match="poorly conditioned"):
+        results = run_analysis("vif", dfv, [], ["a", "b", "c"], [])
     assert results[0]["status"] == "ok"
     text = json.dumps(results)
     assert "Infinity" not in text, "VIF inf 表不应产生 JSON Infinity"

@@ -318,6 +318,7 @@ def test_cli_unknown_category_warning_printed(monkeypatch, capsys, tmp_path):
     assert "已归入参照组" in out
 
 
+@pytest.mark.filterwarnings("ignore:.*found in sys.modules.*:RuntimeWarning")
 def test_cli_dunder_main_guard(monkeypatch, capsys):
     """`python -m smartsuite.cli` 入口守卫：run_name=__main__ 执行 main()（cli.py:241-242）。"""
     import runpy

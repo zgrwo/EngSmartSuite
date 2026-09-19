@@ -184,6 +184,8 @@ def test_hedges_g_micro_scale_matches_macro():
     assert g_micro == pytest.approx(g_macro, rel=1e-6)
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning")
 def test_hedges_g_zero_variance_warns_not_silent():
     df = pd.DataFrame({"g": ["A"] * 10 + ["B"] * 10, "y": [1.0] * 10 + [2.0] * 10})
     r = orchestrate(

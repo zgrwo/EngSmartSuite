@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest
@@ -916,6 +917,8 @@ def test_roc_perfect_classifier():
 # ── Logistic 回归正确性 ──
 
 
+@pytest.mark.filterwarnings("ignore::statsmodels.tools.sm_exceptions.PerfectSeparationWarning")
+@pytest.mark.filterwarnings("ignore::statsmodels.tools.sm_exceptions.ConvergenceWarning")
 def test_logistic_regression_separated_data():
     """Logistic 回归：(A) 良好分离数据 OR>2 (B) 完美分离数据触发收敛警告。"""
     from smartsuite.engine.doe_opt import logistic_regression

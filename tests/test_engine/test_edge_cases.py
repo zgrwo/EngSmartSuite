@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.doe_opt import (
@@ -826,6 +827,8 @@ def test_anova_constant_target_rejected():
     assert any("常量" in m for m in r.messages)
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning")
 def test_box_chart_group_col_equals_target_or_subcol():
     """Round-2 #A3：box_chart group_col 与目标列/次分类列同列时不得崩溃。"""
     from smartsuite.engine.exploratory import box_chart
@@ -1475,6 +1478,8 @@ def test_anova_quote_column_rejected():
 # ── Round-2 批次D：常量列边界定向 + EWMA 回归 ──
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning")
 def test_normality_check_constant_column():
     """边界定向（Round-2 批次D #6）：normality_check 常量列必须有明确结果。
 
@@ -1603,6 +1608,8 @@ def test_normality_check_non_numeric_rejected():
     assert any("数值" in m for m in r.messages)
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning")
 def test_distribution_summary_constant_data_graceful():
     """P3：distribution_summary 常量数据不得输出 NaN 拟合（Weibull beta=3.9e8 垃圾）。"""
     from smartsuite.engine.root_cause import distribution_summary

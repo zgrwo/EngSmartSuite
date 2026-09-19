@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine.root_cause import (
@@ -123,6 +124,7 @@ def test_mcnemar_numeric_binary_data():
     )
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
 def test_cronbach_zero_variance_item():
     """Cronbach's α 对零方差题项：精确断言（Round-2 批次D #2c）。
 
