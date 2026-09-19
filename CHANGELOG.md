@@ -2,6 +2,108 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.3.1...v1.4.0) (2026-09-19)
+
+
+### ✨ 新功能
+
+* **packaging:** PEP 561 py.typed 类型分发标记 ([702aae2](https://github.com/zgrwo/EngSmartSuite/commit/702aae248b73e5fccf7fd4834de22ab279ab368a))
+
+
+### 🐛 Bug 修复
+
+* **ci:** 3.10 分叉告警修复 + full 矩阵补回 Windows 3.12/3.13 + vulture 噪声过滤 ([d742741](https://github.com/zgrwo/EngSmartSuite/commit/d742741583ae963beb2b5cf287fbd03f26846b4e))
+* **ci:** full 矩阵补回 Windows 3.12/3.13，vulture 过滤噪声，3.10 补服务测试 ([761c44b](https://github.com/zgrwo/EngSmartSuite/commit/761c44bc79645e85bf60cc91db9c275e518ef188))
+* **ci:** mypy 固定 win32 平台口径并忽略 tight_layout 环境告警 ([7cebc80](https://github.com/zgrwo/EngSmartSuite/commit/7cebc80036bb1a4f89c74e63790d99491e170d86))
+* **ci:** setup-uv 引用固定为现存 tag v10.1.0（浮动 v10 不存在，15 处） ([85d649d](https://github.com/zgrwo/EngSmartSuite/commit/85d649db12b7a6f09763db006a2fae15705a85d4))
+* **docs:** 修正文档站端口/API 示例与计数等最终审查发现 ([3b92c54](https://github.com/zgrwo/EngSmartSuite/commit/3b92c54ed7d702990196db4cf237cdb38d23a100))
+* **engine:** Shapiro 调用统一走 _utils.shapiro_p（scipy&lt;1.18 常量列告警） ([e359938](https://github.com/zgrwo/EngSmartSuite/commit/e3599386d7609b5d3ad6bb6c13cefb6d5e9cae2b))
+* **engine:** VIF 秩亏 statsmodels 告警静默（引擎自有条件数告警已覆盖） ([9784b69](https://github.com/zgrwo/EngSmartSuite/commit/9784b69bba5e59fcbaf4eaee9ea192851a5316f7))
+* **engine:** 修复发版审查 C-1/B-2/G-2（字体族名/类型标注收口/注释） ([2c9077a](https://github.com/zgrwo/EngSmartSuite/commit/2c9077a060595409d9760f2a5296e076e9b00038))
+* **engine:** 修复手册配图暴露的 15 处图表布局缺陷 ([1bd6fb9](https://github.com/zgrwo/EngSmartSuite/commit/1bd6fb95d626e164707f63bb98bb0a37f4177c30))
+* **engine:** 修复第二轮发版审查 C-1/C-2/D-1/D-2（比例功效/类型门禁/参考线守卫/组合上限） ([5ab3211](https://github.com/zgrwo/EngSmartSuite/commit/5ab32112dc2f6f6ea77e3c69f09aa0508f7975fc))
+* **engine:** 消除 Python 3.10 依赖分叉触发的版本相关告警 ([29117b1](https://github.com/zgrwo/EngSmartSuite/commit/29117b177946bdb273b0edfc695b404b63af6e00))
+* **engine:** 退化路径不再泄漏 statsmodels/lowess 第三方告警（零数值变更） ([cacfbb8](https://github.com/zgrwo/EngSmartSuite/commit/cacfbb8a12110b4d43f2465fd7d530611f600f09))
+* **governance:** verify_docs 豁免 mypy/pytest-benchmark 本地缓存与基准产物 ([e8c8ac8](https://github.com/zgrwo/EngSmartSuite/commit/e8c8ac8ba908f0452471addcbb6d7aff54da2f1e))
+* **governance:** verify_docs 豁免 site/dist 构建产物 ([ac5959a](https://github.com/zgrwo/EngSmartSuite/commit/ac5959a925335815b42fa36af9fbd944a0aa446c))
+* **review:** 修复 2026-09-16 全量审查 B-1..B-5/C-1..C-3/D-1/D-2（微尺度绝对阈值族） ([9bba5b9](https://github.com/zgrwo/EngSmartSuite/commit/9bba5b9fef8320b5e70a6dd0df5868e176977990))
+* **tests:** 修复未关闭句柄泄漏（日志 handler/openpyxl/werkzeug 临时文件） ([d156628](https://github.com/zgrwo/EngSmartSuite/commit/d1566285a5aceb9944c8a65c3566d6244e1d9f93))
+* **web:** 修复视觉检查全部布局问题（响应式/标签/对比度/toast 等） ([0e7ad7b](https://github.com/zgrwo/EngSmartSuite/commit/0e7ad7bd59842d91b9d6e0d2e61f3023c4f12e5f))
+* **web:** 修复视觉检查全部布局问题（窄屏响应式/标签/对比度/toast 等 10 项） ([7a59a66](https://github.com/zgrwo/EngSmartSuite/commit/7a59a66c820e3a5ef2ed4a383c5e49e35661ba7f))
+* **web:** 序列化 fillna 改 where 掩码（pandas 2.3 downcast 告警） ([ca875b9](https://github.com/zgrwo/EngSmartSuite/commit/ca875b974c5bc778017851491c10c88de9694f58))
+
+
+### 📄 文档
+
+* **contributing:** 增加第一个 PR 路径、uv 命令与分层测试说明 ([0fee1df](https://github.com/zgrwo/EngSmartSuite/commit/0fee1dfbc5f481023cae88bd633545384e1560fb))
+* **contributing:** 明确 GitHub Release 构件分发路径 ([18c5f6f](https://github.com/zgrwo/EngSmartSuite/commit/18c5f6f970738796462d68df68c07476ac273629))
+* **gallery:** 代表方法示例集（复用脚本生成图） ([e762ddf](https://github.com/zgrwo/EngSmartSuite/commit/e762ddff52349a3924b0a60648ddd0024f1cb263))
+* **governance:** ai-review-prompt 同步事实漂移（子包/覆盖率/新工作流） ([732ef79](https://github.com/zgrwo/EngSmartSuite/commit/732ef798e51b61ad2e4391b743c97b669bc86f11))
+* **governance:** 人类审查清单（从 AI 审查 Prompt 降维） ([94a8fb3](https://github.com/zgrwo/EngSmartSuite/commit/94a8fb3470cb2685accd119cba05ef3eb824edee))
+* **manual:** 用户手册按章拆页并适配数值新鲜度门禁 ([9636568](https://github.com/zgrwo/EngSmartSuite/commit/963656891768eba1bd8de11b1676e74953135176))
+* **plan:** I1 告警清零完成状态登记 ([e527aca](https://github.com/zgrwo/EngSmartSuite/commit/e527acaf8463fa91151969ab6793c51663c93ec4))
+* **plan:** mkdocs 排除内部执行计划目录 ([67a9ffc](https://github.com/zgrwo/EngSmartSuite/commit/67a9ffc998a3cdf6a7d55551058060f27e7e1840))
+* **plan:** 内功补齐实施计划（告警清零/类型扩面/root_cause 拆分） ([5fa93ca](https://github.com/zgrwo/EngSmartSuite/commit/5fa93ca1b75cf77581e44bfd5f6204f5803c54f8))
+* **plan:** 外功补齐执行计划入库并登记治理树（verify_docs 豁免前瞻引用） ([44fab9c](https://github.com/zgrwo/EngSmartSuite/commit/44fab9cdafa8ed894a0eb7dec9dd216d39571e3a))
+* **readme:** 维护模式声明与贡献者入口收口 ([0c8f2b7](https://github.com/zgrwo/EngSmartSuite/commit/0c8f2b7e44ec6456ced14808f2071ead9f910d04))
+* **readme:** 语言与目标市场声明、在线文档与 Release 安装入口 ([fee445e](https://github.com/zgrwo/EngSmartSuite/commit/fee445efc0ec548d6205f40e845126754a95b469))
+* **roadmap:** root_cause 拆分完成；spc_charts/doe_opt 列为后续候选 ([586a4ac](https://github.com/zgrwo/EngSmartSuite/commit/586a4acfb8f6d0546fac7a0ce22b110efec989a1))
+* **roadmap:** 公开路线图、决策门与新贡献者任务清单 ([5291b5a](https://github.com/zgrwo/EngSmartSuite/commit/5291b5a317214d87fae8eed0436414ccda89708b))
+* **roadmap:** 类型检查全覆盖与告警清零完成，同步内功计划 I2 状态 ([a09072f](https://github.com/zgrwo/EngSmartSuite/commit/a09072fd866e1c2c97e22ec3a6f645edf9bccf39))
+* **site:** 引入 mkdocs-material 骨架与文档首页 ([3a7b01e](https://github.com/zgrwo/EngSmartSuite/commit/3a7b01e7fbd62622cc9b4810f33ee6befadc4b75))
+* **skills:** 参考线参数同步显式拒绝范式（D-1 isfinite） ([b256755](https://github.com/zgrwo/EngSmartSuite/commit/b256755a04e1fdcfc681d27b8b05a9543ca2dd2b))
+* **user-manual:** 重新生成 37 张示例图并同步图注 ([601b8f3](https://github.com/zgrwo/EngSmartSuite/commit/601b8f3217520e677f0b530c78f21cf219813b36))
+* 同步测试数 1015 与 CI quick 的 guards 步骤 ([a16c018](https://github.com/zgrwo/EngSmartSuite/commit/a16c018f737070437a534189ef16331310bda6a9))
+
+
+### 🔧 重构
+
+* **engine:** root_cause 拆分为子包（纯搬迁，零行为变更） ([b1e224a](https://github.com/zgrwo/EngSmartSuite/commit/b1e224a85005a4b98d2dd2739fe07c32a8152d70))
+* **engine:** spc_charts/doe_opt 拆分为子包（纯搬迁，零行为变更） ([30d559c](https://github.com/zgrwo/EngSmartSuite/commit/30d559cf6e75822231d76472215d5ee4d89bd2a2))
+* **engine:** 子包 lint 豁免收敛 B905/B007（zip strict + 未用循环变量） ([e4c81d9](https://github.com/zgrwo/EngSmartSuite/commit/e4c81d9eaa1d9d724f327c151f285b007c99cbdd))
+
+
+### ✅ 测试
+
+* **bench:** pytest-benchmark 性能基线（3 任务 × 3 规模）与周更工作流 ([995d21e](https://github.com/zgrwo/EngSmartSuite/commit/995d21e27a6e68a54b958890631bc6ad7ca625ac))
+* **config:** pytest 告警升级为 error 白名单制（新告警即红） ([a87acf1](https://github.com/zgrwo/EngSmartSuite/commit/a87acf1767efdbf3546739c314eb630868e71b8c))
+* **engine:** hypothesis 属性测试（量纲不变量/falsy 0/退化输入） ([f396a0a](https://github.com/zgrwo/EngSmartSuite/commit/f396a0a6e4c8dfeb860b0f2662dda642da8704f6))
+* **engine:** root_cause 公开 API 钉子（拆分前置安全网） ([3319207](https://github.com/zgrwo/EngSmartSuite/commit/33192073b8812634880c1efca80563a9a3326abf))
+* **engine:** spc_charts/doe_opt 公开 API 钉子（拆分前置安全网） ([4735826](https://github.com/zgrwo/EngSmartSuite/commit/473582667ca1a0bac32fb3a232528f52fc5d9210))
+* **engine:** 补 2026-09-19 发版审查回归（同族微尺度/rate/字体/容差） ([0da313a](https://github.com/zgrwo/EngSmartSuite/commit/0da313a770ac3896155453738f242121f08f6766))
+* **engine:** 补第二轮发版审查回归 C-1/D-1/D-2（独立参考/非有限值/组合上限） ([6df814a](https://github.com/zgrwo/EngSmartSuite/commit/6df814ab5e956ae71f793673fa2fedb00edf1388))
+* **engine:** 退化场景第三方告警改为显式预期（pytest.warns/filterwarnings） ([a50ccc8](https://github.com/zgrwo/EngSmartSuite/commit/a50ccc8bf6e695eb17c58a2805c26cfa595fc8db))
+* **governance:** 补 verify_docs site/dist 构建产物豁免回归测试 ([c930468](https://github.com/zgrwo/EngSmartSuite/commit/c930468b62020c8913e77dc695de38c8f11da103))
+* **guards:** 补 shapiro_p 常量短路与原生一致性测试 ([03ef9ae](https://github.com/zgrwo/EngSmartSuite/commit/03ef9ae2d156840962acf14c2da03a8a28eda439))
+* **guards:** 补 Web UI 布局/反馈静态守卫（视觉检查修复面） ([bb70647](https://github.com/zgrwo/EngSmartSuite/commit/bb706470a5c70dec86add408f21724e609305a34))
+
+
+### ⚙️ CI
+
+* **docs:** mkdocs-material 构建并发布 GitHub Pages ([3fbf8fb](https://github.com/zgrwo/EngSmartSuite/commit/3fbf8fb5cf8b7b212ba52989728abc0093a8464f))
+* **quality:** 覆盖率门禁 70→85 并前置到 PR；engine/__init__ 平台分支收口 ([ea197eb](https://github.com/zgrwo/EngSmartSuite/commit/ea197ebf0875813e187ee565af8ae8a8e685921e))
+* **types:** mypy 全覆盖 src/smartsuite（web+cli 收口） ([9bad41a](https://github.com/zgrwo/EngSmartSuite/commit/9bad41a6bd75bdd75883b1a5cf02f72405fc0a51))
+* **types:** mypy 扩面至 engine（66 处修复，零豁免） ([f9e206d](https://github.com/zgrwo/EngSmartSuite/commit/f9e206d861a7dffddf28989676e219cd49511cbe))
+* **types:** mypy 软门禁覆盖 core+services（engine/web 后续推进） ([5dcf254](https://github.com/zgrwo/EngSmartSuite/commit/5dcf254bc9cb33f48876c049ebebb3764187100f))
+
+
+### 🧹 维护
+
+* **deps-dev:** bump ruff from 0.16.5 to 0.16.6 ([742d19e](https://github.com/zgrwo/EngSmartSuite/commit/742d19e5eccd14f21665b5286681a39316111ea8))
+* **deps:** pyDOE2 死库替换为 pyDOE3（基准测试保持全绿） ([406510e](https://github.com/zgrwo/EngSmartSuite/commit/406510e36ed2d6774cfbf9f791cf583eec9cca8b))
+* **deps:** uv.lock 同步 ruff 0.16.6（[#36](https://github.com/zgrwo/EngSmartSuite/issues/36) 合并遗漏） ([8e30d99](https://github.com/zgrwo/EngSmartSuite/commit/8e30d9923a305fa0a48ece5993e4f077e7580233))
+* **deps:** 引入 uv 锁文件并将 CI 安装切换为 uv sync --frozen ([575b352](https://github.com/zgrwo/EngSmartSuite/commit/575b352836388968eb971988f1a64b0257712695))
+* **engine:** 工程内功收口 —— 子包拆分 + mypy 全覆盖 + 两轮发版审查修复 ([f94a61d](https://github.com/zgrwo/EngSmartSuite/commit/f94a61d9f3dd2f7727f36839d5d191aa58a2c549))
+* **governance:** root_cause 子包登记与引用更新 ([1f4bae5](https://github.com/zgrwo/EngSmartSuite/commit/1f4bae5449dccbfb34f9479c2f5068a93ded0e50))
+* **governance:** spc_charts/doe_opt 子包登记与引用更新 ([7d8e114](https://github.com/zgrwo/EngSmartSuite/commit/7d8e114736de41860f097e505b1628404e2cc243))
+* **governance:** 移除已完成的执行计划目录并清理引用 ([5df38b9](https://github.com/zgrwo/EngSmartSuite/commit/5df38b92f905a5ec27644dce5f7b3aecdea191da))
+* **packaging:** 补充 MIT License classifier ([d29ce82](https://github.com/zgrwo/EngSmartSuite/commit/d29ce826a3fcc96c190455de24524b4b158d93fb))
+* **release:** uv.lock 同步 smartsuite 版本 1.3.1 ([148052a](https://github.com/zgrwo/EngSmartSuite/commit/148052a3867a5628b09075fde51193e4ecaea32b))
+* **release:** 修复发版审查治理项（D-1/F-1..F-4/G-1） ([e145b4e](https://github.com/zgrwo/EngSmartSuite/commit/e145b4e5b11b2cb728f762e4e0a397e95105691a))
+* **scripts:** verify_all 纳入 mypy 类型检查（与 CI quality 同口径） ([14adf88](https://github.com/zgrwo/EngSmartSuite/commit/14adf8838a3aad8d634daef1392bc9a0c70e3ab6))
+* **scripts:** 手册图生成脚本对齐手册数据与配置 ([9b3593c](https://github.com/zgrwo/EngSmartSuite/commit/9b3593ccb7a12e1288899550ba68956435e299ad))
+* **tests:** tests 5S（目录/命名/差分去重/guards 路由） ([bc649bc](https://github.com/zgrwo/EngSmartSuite/commit/bc649bc20982d069e88a67eab6ede74c08ce7436))
+
 ## [1.3.1](https://github.com/zgrwo/EngSmartSuite/compare/v1.3.0...v1.3.1) (2026-09-13)
 
 
