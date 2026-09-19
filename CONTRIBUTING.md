@@ -106,6 +106,11 @@ pytest tests/ -x -q
 3. 手动指定版本：在 release PR 的 commit body 加 `Release-As: x.y.z` 强制覆盖
 4. 版本号遵循 Semantic Versioning：数值/算法变更 → major，新方法/API → minor，修复 → patch
 
+### 构件分发
+
+release-please 发版时会在 GitHub Release 附加 `dist/*.whl` 与 `dist/*.tar.gz`（见 `.github/workflows/release.yml`）。
+用户安装以 Release 构件为准；PyPI 发布尚未启用（W4 决策门）。
+
 ## 许可证
 
 提交代码即表示同意以 MIT 许可证发布。
