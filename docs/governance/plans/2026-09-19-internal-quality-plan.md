@@ -28,6 +28,10 @@
 
 ## I1 — 测试告警清零（P1 #4）
 
+> **状态：已完成（2026-09-19）**。24 warnings → 0；`filterwarnings=["error", ...]` 生效；全量 1034 passed。
+> Commits：`cacfbb8`（引擎抑制）→ `9784b69`（VIF）→ `a50ccc8`（测试显式预期）→ `d156628`（句柄泄漏修复）→ `a87acf1`（error 门禁）。
+> 额外发现并修复：日志 handler 未关闭（3 处）、openpyxl workbook 未关闭（2 处）、werkzeug TestClient 大 multipart 临时文件（conftest 强制内存编码）。
+
 ### Task I1.1: 引擎侧最小抑制（3 处，零数值变更）
 
 **Files:**
