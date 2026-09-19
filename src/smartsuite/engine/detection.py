@@ -441,7 +441,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
 
             if peak_norm > best_stat_norm:
                 best_stat_norm = peak_norm
-                best_cp = start + peak_idx
+                best_cp = int(start + peak_idx)
                 best_seg_idx = seg_i
 
         if best_cp is not None and best_cp not in changepoints:

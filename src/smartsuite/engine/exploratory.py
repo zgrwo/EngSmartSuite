@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -371,7 +372,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             groups = all_groups  # 全空则回退
 
     # ── 描述统计 ──
-    stat_rows = []
+    stat_rows: list[dict[str, Any]] = []
     for g in groups:
         gdata = sub[sub[group_col] == g][req.target_col]
         stat_rows.append(

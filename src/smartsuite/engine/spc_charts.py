@@ -47,7 +47,7 @@ def _natural_sort_key(v):
     import numbers
 
     if isinstance(v, numbers.Number) and not isinstance(v, bool):
-        return (0, float(v))
+        return (0, float(v))  # type: ignore[arg-type]  # typeshed：Number 未声明 __float__（int/float/np 标量均有）
     return (1, str(v))
 
 
@@ -751,6 +751,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     ax2 = None
     disp_key = _disp_key
     if lower_title != "—":
+        assert lower_cl is not None and lower_ucl is not None and lower_lcl is not None
         ax2 = fig.add_subplot(212)
         ax2.axhline(
             lower_cl,
@@ -999,6 +1000,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         "is_stable": is_stable,
     }
     if use_s_chart:
+        assert _s_bar is not None and lower_ucl is not None and lower_lcl is not None
         metadata["s_bar"] = float(_s_bar)
         metadata["ucl_s"] = float(lower_ucl)
         metadata["lcl_s"] = float(lower_lcl)
@@ -2063,12 +2065,12 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         violations = sorted(set(list(np.where(values > ucl)[0]) + list(np.where(values < lcl)[0])))
         side_note = f"双侧控制限 (拟合={best_name})"
 
-    limit_label = []
+    limit_parts = []
     if ucl is not None:
-        limit_label.append(f"UCL={ucl:.4f}")
+        limit_parts.append(f"UCL={ucl:.4f}")
     if lcl is not None:
-        limit_label.append(f"LCL={lcl:.4f}")
-    limit_label = " / ".join(limit_label) if limit_label else "N/A"
+        limit_parts.append(f"LCL={lcl:.4f}")
+    limit_label = " / ".join(limit_parts) if limit_parts else "N/A"
 
     # 偏度评估
     skew_val = float(data.skew())

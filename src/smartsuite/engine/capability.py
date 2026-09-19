@@ -217,29 +217,26 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     within_sigma = float(np.mean(mr) / 1.128) if len(mr) > 0 else sigma_overall
 
     # ── 计算各项能力指数 ──
-    has_upper = usl is not None
-    has_lower = lsl is not None
-    has_both = has_upper and has_lower
 
     # Cp/Cpk (短期/组内) — 单侧公差仅计算 Cpk
     cp = (
         float((usl - lsl) / (6 * within_sigma))
-        if has_both and np.isfinite(within_sigma) and within_sigma > 0
+        if usl is not None and lsl is not None and np.isfinite(within_sigma) and within_sigma > 0
         else None
     )
-    if has_upper and has_lower:
+    if usl is not None and lsl is not None:
         cpk_val = (
             float(min((usl - mu) / (3 * within_sigma), (mu - lsl) / (3 * within_sigma)))
             if np.isfinite(within_sigma) and within_sigma > 0
             else None
         )
-    elif has_upper:
+    elif usl is not None:
         cpk_val = (
             float((usl - mu) / (3 * within_sigma))
             if np.isfinite(within_sigma) and within_sigma > 0
             else None
         )
-    elif has_lower:
+    elif lsl is not None:
         cpk_val = (
             float((mu - lsl) / (3 * within_sigma))
             if np.isfinite(within_sigma) and within_sigma > 0
@@ -249,23 +246,27 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         cpk_val = None
 
     # Pp/Ppk (长期/整体) — 单侧公差仅计算 Ppk
-    pp = float((usl - lsl) / (6 * sigma_overall)) if has_both and sigma_overall > 0 else None
-    if has_upper and has_lower:
+    pp = (
+        float((usl - lsl) / (6 * sigma_overall))
+        if usl is not None and lsl is not None and sigma_overall > 0
+        else None
+    )
+    if usl is not None and lsl is not None:
         ppk_val = (
             float(min((usl - mu) / (3 * sigma_overall), (mu - lsl) / (3 * sigma_overall)))
             if sigma_overall > 0
             else None
         )
-    elif has_upper:
+    elif usl is not None:
         ppk_val = float((usl - mu) / (3 * sigma_overall)) if sigma_overall > 0 else None
-    elif has_lower:
+    elif lsl is not None:
         ppk_val = float((mu - lsl) / (3 * sigma_overall)) if sigma_overall > 0 else None
     else:
         ppk_val = None
 
     # Cpm (Taguchi 能力指数, 需双侧公差)
     cpm = None
-    if has_both and target is not None and sigma_overall > 0:
+    if usl is not None and lsl is not None and target is not None and sigma_overall > 0:
         tau = np.sqrt(sigma_overall**2 + (mu - target) ** 2)
         cpm = float((usl - lsl) / (6 * tau)) if tau > 0 else None
 

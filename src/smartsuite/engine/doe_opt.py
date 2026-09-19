@@ -927,7 +927,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     # ── 增强图表 ──
     score_valid = scores[valid_rows]
     fig = Figure(figsize=(12, 5))
-    pareto_idx: list = []
+    pareto_idx: np.ndarray = np.array([], dtype=int)
 
     # 左图: 如果恰好 2 个目标 → Pareto 前沿
     if len(objectives) == 2:
@@ -1757,15 +1757,13 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     # 全零模型（Lasso 全压缩）时 max=0 → 阈值 0，全「否」保持本义。
     _coef_scale = float(np.max(np.abs(coefs)))
     nonzero = np.abs(coefs) > 1e-6 * _coef_scale
-    n_selected = int(np.sum(nonzero))
+    n_selected = int(np.count_nonzero(nonzero))
     r2 = float(model.score(X_scaled, y))
 
     # 收敛性检查：max_iter 用尽且未收敛时警告用户
     convergence_warning = ""
     if hasattr(model, "n_iter_"):
-        n_iter_actual = (
-            int(model.n_iter_) if np.isscalar(model.n_iter_) else int(np.max(model.n_iter_))
-        )
+        n_iter_actual = int(np.max(np.asarray(model.n_iter_)))
         if n_iter_actual >= _lasso_max_iter:
             convergence_warning = (
                 "⚠ Lasso 模型在最大迭代次数内未收敛，系数可能不准确，建议增大 max_iter 或调整 alpha"
@@ -2176,9 +2174,11 @@ def _gen_taguchi(factors):
     cols, p2, p3 = [], 0, 0
     for f in factors:
         if len(f["levels"]) == 2:
+            assert two_cols is not None  # 分支保证：二水平因子必有二水平列来源
             cols.append(two_cols[:, p2])
             p2 += 1
         else:
+            assert three_cols is not None  # 分支保证：三水平因子必有三水平列来源
             cols.append(three_cols[:, p3])
             p3 += 1
     return np.column_stack(cols), name, spec
@@ -2380,6 +2380,8 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
             if n_runs is None:
                 n_runs = next((n for n in _PB_SUPPORTED if n - 1 >= k), None)
             try:
+                if n_runs is None:  # 无支持的默认运行数
+                    raise TypeError("n_runs 无默认值")
                 n_runs = int(n_runs)
             except (ValueError, TypeError):
                 return AnalysisResult(

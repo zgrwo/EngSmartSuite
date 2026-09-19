@@ -70,17 +70,13 @@ _env_font = os.environ.get("MATPLOTLIB_FONT_PATH")
 # 环境变量字体（跨平台通用）
 if _env_font and os.path.exists(_env_font):
     try:
-        _font_prop = _fm.fontManager.addfont(_env_font)
+        _fm.fontManager.addfont(_env_font)  # matplotlib API 无返回值（注册即生效）
         # 仅当用户未自定义 font.family 时才覆盖（保护用户配置）
         if "font.family" not in matplotlib.rcParams or matplotlib.rcParams["font.family"] == [
             "sans-serif"
         ]:
-            if hasattr(_font_prop, "family_name") and _font_prop.family_name:
-                matplotlib.rcParams["font.family"] = _font_prop.family_name
-            else:
-                matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[
-                    0
-                ]
+            # addfont 返回 None → 无法取 family_name，以文件名为族名（既有行为）
+            matplotlib.rcParams["font.family"] = os.path.splitext(os.path.basename(_env_font))[0]
         _font_loaded = True
     except Exception as e:
         _logger.debug("环境变量字体 %s 加载失败: %s", _env_font, e)

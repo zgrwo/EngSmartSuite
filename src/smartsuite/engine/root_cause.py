@@ -1,6 +1,7 @@
 import logging
 import warnings
 from math import sqrt
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -846,7 +847,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     if len(group_names) > 6:
         for label in ax_box.get_xticklabels():
             label.set_rotation(30)
-            label.set_ha("right")
+            label.set_horizontalalignment("right")
     ax_box.tick_params(labelsize=9)
     for patch in bp["boxes"]:
         patch.set_facecolor(PALETTE["data"]["secondary"])
@@ -1872,10 +1873,11 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if len(groups) > 6:
             for label in ax.get_xticklabels():
                 label.set_rotation(30)
-                label.set_ha("right")
+                label.set_horizontalalignment("right")
         ax.tick_params(labelsize=9)
         for patch in bp["boxes"]:
             patch.set_facecolor(PALETTE["data"]["secondary"])
+        assert group_col is not None  # 分组检验路径必有分组列
         ax.set_xlabel(group_col, fontsize=10)
         ax.set_ylabel(req.target_col, fontsize=10)
         ax.set_title(f"{test_name} (H={stat:.2f}, p={p:.4f})", fontsize=11)
@@ -2089,9 +2091,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         tau_mk, p = sp_stats.kendalltau(np.arange(n), vals)
         # 从 τ-B 反推 S：τ-B = S / sqrt(n0*(n0-n2)) → 考虑 y 方向结校正
         n0 = n * (n - 1) / 2
-        unique_vals, counts = np.unique(vals, return_counts=True)
-        n2 = np.sum(counts * (counts - 1) / 2)  # y 方向结校正
-        S = int(round(tau_mk * np.sqrt(max(n0 * (n0 - n2), 1.0))))
+        _, tie_counts = np.unique(vals, return_counts=True)
+        n_ties = np.sum(tie_counts * (tie_counts - 1) / 2)  # y 方向结校正
+        S = int(round(tau_mk * np.sqrt(max(n0 * (n0 - n_ties), 1.0))))
         effect_size = float(tau_mk)
         # 从 p 值反推近似 Z（用于展示）
         p_safe = max(
@@ -3726,10 +3728,10 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     # 正态性
     sw_p = float(sp_stats.shapiro(data)[1]) if n <= 5000 else None
     # 审查 2026-09-16 C-2：原 `if sw_p` 把合法的 p=0.0 与"未计算(None)"混同 → is not None
-    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"
+    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"  # type: ignore[assignment]  # 展示字典有意混存数值/文本（Web 序列化）
 
     # 分布拟合
-    fits = {}
+    fits: dict[str, dict[str, Any]] = {}
     # Normal
     mu, sigma = sp_stats.norm.fit(data)
     ks_norm = float(sp_stats.kstest(data, sp_stats.norm(loc=mu, scale=sigma).cdf)[1])
