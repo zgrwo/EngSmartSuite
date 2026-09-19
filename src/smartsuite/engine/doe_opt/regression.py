@@ -626,10 +626,14 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
             ax.axhline(0, color=PALETTE["direction"]["zero"], linewidth=0.5)
             ax.margins(y=0.35)
             # 单类别时图例会盖住柱体，直接在基线上方标注系列名与数值
-            for xi, hv, ov in zip(x_pos, slope_df["Huber系数"], slope_df["OLS系数"], strict=True):
+            # 审查 2026-09-19 C-2：循环变量不得复用上方面板的 `xi`（int/numpy 整数
+            # 类型冲突使 mypy 门禁红），改名 xpos_i
+            for xpos_i, hv, ov in zip(
+                x_pos, slope_df["Huber系数"], slope_df["OLS系数"], strict=True
+            ):
                 ax.annotate(
                     f"Huber {hv:.4f}",
-                    xy=(xi - width / 2, 0.0),
+                    xy=(xpos_i - width / 2, 0.0),
                     xytext=(0, 4),
                     textcoords="offset points",
                     ha="center",
@@ -639,7 +643,7 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
                 )
                 ax.annotate(
                     f"OLS {ov:.4f}",
-                    xy=(xi + width / 2, 0.0),
+                    xy=(xpos_i + width / 2, 0.0),
                     xytext=(0, 4),
                     textcoords="offset points",
                     ha="center",

@@ -315,6 +315,14 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             ax.legend(fontsize=7.5, loc="upper right")
 
     _ref_lines: list[tuple[float, str, str, str]] = []
+    # 审查 2026-09-19 D-1：float() 不拦 inf/nan（capability C1 同族），显式拒绝
+    _ref_labels = {
+        "usl": "规格上限 USL",
+        "lsl": "规格下限 LSL",
+        "ucl": "控制上限 UCL",
+        "lcl": "控制下限 LCL",
+        "cl": "中心线 CL",
+    }
     for key, color, style in [
         ("usl", PALETTE["anomaly"]["primary"], "-"),
         ("lsl", PALETTE["anomaly"]["primary"], "-"),
@@ -325,15 +333,37 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         val = req.params.get(key)
         if val is not None:
             try:
-                _ref_lines.append((float(val), color, style, key.upper()))
+                val_f = float(val)
             except (ValueError, TypeError):
-                pass
+                return AnalysisResult(
+                    task="box_chart",
+                    status="error",
+                    messages=[f"{_ref_labels[key]} 值无效: {val}，请输入数值"],
+                )
+            if not np.isfinite(val_f):
+                return AnalysisResult(
+                    task="box_chart",
+                    status="error",
+                    messages=[f"{_ref_labels[key]} 必须为有限数值，当前: {val!r}"],
+                )
+            _ref_lines.append((val_f, color, style, key.upper()))
     target_val = req.params.get("target")
     if target_val is not None:
         try:
-            _ref_lines.append((float(target_val), PALETTE["direction"]["zero"], ":", "Target"))
+            target_f = float(target_val)
         except (ValueError, TypeError):
-            pass
+            return AnalysisResult(
+                task="box_chart",
+                status="error",
+                messages=[f"目标值 Target 值无效: {target_val}，请输入数值"],
+            )
+        if not np.isfinite(target_f):
+            return AnalysisResult(
+                task="box_chart",
+                status="error",
+                messages=[f"目标值 Target 必须为有限数值，当前: {target_val!r}"],
+            )
+        _ref_lines.append((target_f, PALETTE["direction"]["zero"], ":", "Target"))
 
     sub = req.data[_cols_needed].dropna()
     if len(sub) < 5:

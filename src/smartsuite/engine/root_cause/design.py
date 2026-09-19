@@ -6,9 +6,6 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
-from smartsuite.engine._constants import (
-    EPSILON,
-)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import safe_float as _safe_float
 from smartsuite.engine.root_cause._shared import _safe_int
@@ -162,7 +159,8 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
                     status="error",
                     messages=[f"p0/p1 必须在 (0, 1) 区间内，当前: p0={p0}, p1={p1}"],
                 )
-            # Round-2 P3：p0==p1 时 required_n 爆炸到 3.9e10
+            # 审查 2026-09-19 C-1：守卫已拒绝 d<1e-9（d>0 恒成立），分母必须用精确 d²。
+            # 旧 `d**2 + EPSILON`（1e-10）在 1e-9<d<1e-4 时静默低估样本量（陷阱 9 同族）。
             if abs(p1 - p0) < 1e-9:
                 return AnalysisResult(
                     task="power_analysis",
@@ -173,10 +171,8 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
             z_beta = abs(sp_stats.norm.ppf(1 - target_power))
             d = abs(p1 - p0)
             # 双比例检验: 总方差 = p0*(1-p0) + p1*(1-p1)
-            required = ceil(
-                (z_alpha + z_beta) ** 2 * (p0 * (1 - p0) + p1 * (1 - p1)) / (d**2 + EPSILON)
-            )
-            label = f"比例检验所需样本量: {required} (p0={p0}, p1={p1}, d={d:.3f})"
+            required = ceil((z_alpha + z_beta) ** 2 * (p0 * (1 - p0) + p1 * (1 - p1)) / d**2)
+            label = f"比例检验所需样本量: {required} (p0={p0}, p1={p1}, d={d:.3g})"
         else:
             return AnalysisResult(
                 task="power_analysis",

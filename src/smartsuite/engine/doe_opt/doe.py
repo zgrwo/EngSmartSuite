@@ -1,6 +1,7 @@
 """DOE 实验设计与效应分析（doe_analysis / doe_design）。"""
 
 import logging
+import math
 from itertools import combinations, product
 
 import numpy as np
@@ -700,7 +701,9 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
     oa_name, oa_spec = None, None
     try:
         if method == "full_factorial":
-            total = int(np.prod([len(f["levels"]) for f in factors]))
+            # 审查 2026-09-19 D-2：np.prod 按 int64 累乘会回绕（50+ 个因子时为 0），
+            # 绕过上限检查直达 MemoryError；math.prod 为任意精度整数
+            total = math.prod(len(f["levels"]) for f in factors)
             if total > 10000:
                 return AnalysisResult(
                     task="doe_design",

@@ -366,37 +366,57 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     )
 
     # 规格限
+    # 审查 2026-09-19 D-1：float() 不拦 inf/nan（capability C1 同族），必须 isfinite
+    # 显式拒绝，不再静默忽略非法参数（哨兵 L1）
     for spec_key, spec_label in [("usl", "USL"), ("lsl", "LSL")]:
         spec_val = req.params.get(spec_key)
         if spec_val is not None:
             try:
                 sv = float(spec_val)
             except (ValueError, TypeError):
-                sv = None
-            if sv is not None:
-                ax1.axhline(
-                    sv,
-                    color=PALETTE["anomaly"]["primary"],
-                    linestyle="-",
-                    linewidth=1.2,
-                    alpha=0.9,
-                    label=f"{spec_label}={sv}",
+                return AnalysisResult(
+                    task="spc_xbar",
+                    status="error",
+                    messages=[f"规格限 {spec_label} 值无效: {spec_val}，请输入数值"],
                 )
+            if not np.isfinite(sv):
+                return AnalysisResult(
+                    task="spc_xbar",
+                    status="error",
+                    messages=[f"规格限 {spec_label} 必须为有限数值，当前: {spec_val!r}"],
+                )
+            ax1.axhline(
+                sv,
+                color=PALETTE["anomaly"]["primary"],
+                linestyle="-",
+                linewidth=1.2,
+                alpha=0.9,
+                label=f"{spec_label}={sv}",
+            )
     target_spec = req.params.get("target")
     if target_spec is not None:
         try:
             tv = float(target_spec)
         except (ValueError, TypeError):
-            tv = None
-        if tv is not None:
-            ax1.axhline(
-                tv,
-                color=PALETTE["direction"]["zero"],
-                linestyle=":",
-                linewidth=1.0,
-                alpha=0.6,
-                label=f"Target={tv}",
+            return AnalysisResult(
+                task="spc_xbar",
+                status="error",
+                messages=[f"目标值 Target 值无效: {target_spec}，请输入数值"],
             )
+        if not np.isfinite(tv):
+            return AnalysisResult(
+                task="spc_xbar",
+                status="error",
+                messages=[f"目标值 Target 必须为有限数值，当前: {target_spec!r}"],
+            )
+        ax1.axhline(
+            tv,
+            color=PALETTE["direction"]["zero"],
+            linestyle=":",
+            linewidth=1.0,
+            alpha=0.6,
+            label=f"Target={tv}",
+        )
 
     # ── 分组独立控制限线（有分组时每组画自己的限）──
     if has_groups and group_limits:
