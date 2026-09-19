@@ -8,7 +8,7 @@
 - v1.3.0：42 个分析方法，1034 项测试，覆盖率 89%，4 层测试防线 + 文档数值对账门禁。
 - 类型检查：mypy 全覆盖 `src/smartsuite`（core/services/engine/web/cli），CI 软门禁。
 - 测试告警：`filterwarnings = ["error", ...]` 白名单制，全量 0 告警。
-- 已知短板：巨石模块（root_cause.py 等）拆分中、覆盖率洼地 `engine/__init__.py`、社区回路。
+- 已知短板：`spc_charts.py` / `doe_opt.py` 巨石模块待拆、覆盖率洼地 `engine/__init__.py`、社区回路。
 
 ## 2026 Q4
 
@@ -17,6 +17,7 @@
 - [x] mypy 覆盖 core + services；性能基准周更（benchmarks/ + Benchmarks workflow）
 - [x] 类型检查扩展至 engine/ 及 web/、cli（2026-09-19 全覆盖，零豁免）
 - [x] 测试告警清零（error 白名单制，2026-09-19）
+- [x] 巨石模块 `root_cause.py` 拆分为子包（3,999 行 → 10 文件，公开 API 不变，2026-09-19）
 
 ## 2027 H1
 

@@ -231,6 +231,11 @@ git commit -m "docs(roadmap): 类型检查全覆盖 src/smartsuite 已完成"
 
 ## I3 — root_cause.py 拆分为子包（P1 #1）
 
+> **状态：已完成（2026-09-19）**。3,999 行 / 35 顶层段 → 10 文件子包（33 def + 2 常量）；公开 API 与 engine 导出同一对象；全量 1036 passed / 0 warnings；mypy 零错误。
+> Commits：`3319207`（钉子测试）→ `b1e224a`（机械搬迁）→ `1f4bae5`（治理登记）。
+> 搬迁方式：AST codemod 按函数名映射切分 + 按实际引用裁剪 import（107 项 lint 自动修复后仅剩 13 项迁移遗留豁免，已重挂载）。
+> 测试适配 1 处：`test_sw_p_exact_zero_not_shown_as_na` 的 monkeypatch 目标从 `rc.sp_stats` 改为 `root_cause.distribution.sp_stats`。
+
 > 目标：3,999 行 / 33 个顶层 def 的巨石模块 → `engine/root_cause/` 子包，导入路径与 13 个公开函数名不变。本次为**纯搬迁**：函数体逐字复制，仅新增 import 与模块归属；per-file-ignores 重挂载到新文件（收敛留作 good first issue）。
 
 ### Task I3.1: 公开 API 钉子测试（先测后拆）
