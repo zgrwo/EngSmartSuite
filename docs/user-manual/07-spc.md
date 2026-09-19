@@ -119,7 +119,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 ![EWMA 控制图](images/spc_ewma_1.png)
 
-*蓝线=EWMA 平滑值(λ=0.2)，浅蓝=原始数据点，红虚线=时变控制限(L=2.7)。*
+*蓝线=EWMA 平滑值(λ=0.2)，浅蓝=原始数据，蓝色虚线=时变控制限(L=2.7)，红X=违规点。*
 
 #### 数值结果（Web UI ≡ Python） EWMA 平滑线 + 时变控制限 + 违规点。
 
@@ -186,7 +186,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 ![趋势预测 2×2 诊断](images/trend_forecast_1.png)
 
-*趋势+预测(橙带)/残差(DW≈2)/ACF自相关/Actual vs Predicted(R²≈0)*
+*趋势+预测(橙带)/残差(DW≈2)/ACF自相关/实际值 vs 预测值(R²≈0)*
 
 #### 数值结果（Web UI ≡ Python） R²=0.0002, DW=1.979, MAPE=N/A, RMSE=1.2415。数据无趋势（随机数据），预测区间较宽。2×2 诊断图（趋势+预测/残差/ACF/Actual vs Predicted）。
 
@@ -375,7 +375,7 @@ X-bar 图（上）+ R 图（下），含 ±1σ/±2σ/±3σ 区域着色 + Wester
 
 ![非参数控制图(双侧)](images/spc_nonparametric_1.png)
 
-*非参数控制图(双侧) — 控制限由 Lognormal 分布 PPF 计算，上下限不对称。红线=控制限, 绿线=中位数, 红X=违规点。*
+*非参数控制图(双侧) — 控制限由 Lognormal 分布 PPF 计算，上下限不对称。金色虚线=控制限(CL/UCL/LCL)，点线=±2σ/±1σ 参考线，红X=违规点。*
 
 #### 数值结果（Web UI ≡ Python）
 

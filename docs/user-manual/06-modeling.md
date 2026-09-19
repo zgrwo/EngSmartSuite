@@ -22,7 +22,7 @@
 
 ![回归诊断 6 宫格](images/regression_1.png)
 
-*6 宫格诊断：Residual vs Fitted / Q-Q / Scale-Location / Cook's D / Leverage / Actual vs Predicted。*
+*6 宫格诊断：残差 vs 拟合值 / Q-Q 图 / 尺度-位置图 / Cook 距离 / 残差 vs 杠杆值 / 实际值 vs 预测值。*
 
 #### 数值结果（Web UI ≡ Python）
 
@@ -276,11 +276,11 @@ _本方法输出实验设计矩阵表格，不生成图表。_
 
 ![ROC 曲线](images/roc_analysis_1.png)
 
-*AUC=0.489≈0.5模型无区分力，红色圆点=最佳阈值(Youden's J=0.03)*
+*AUC=0.489≈0.5模型无区分力，红色圆点=最佳阈值(Youden's J=0.05)*
 
 #### 数值结果（Web UI ≡ Python）
 
-AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0.03。ROC 曲线接近对角线。
+AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0.05。ROC 曲线接近对角线。
 
 #### 解读说明
 
@@ -367,7 +367,7 @@ AUC=0.489（≈0.5，随机数据无区分力），最佳阈值 Youden's J 约 0
 
 ![Huber vs OLS 系数对比](images/robust_regression_1.png)
 
-*深蓝=Huber稳健回归，浅蓝=OLS。随机数据无异常值，两种方法几乎一致*
+*深蓝=Huber稳健回归，浅蓝=OLS。左栏对比截距项，右栏对比斜率项（量级差异大时自动分栏）。随机数据无异常值，两种方法几乎一致*
 
 #### 数值结果（Web UI ≡ Python）
 
