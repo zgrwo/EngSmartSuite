@@ -215,6 +215,14 @@ def test_undeclared_excludes_build_artifacts(tmp_path):
     assert verify_docs.check_undeclared(root, strict=True) == []
 
 
+def test_undeclared_excludes_tool_caches(tmp_path):
+    """回归：.mypy_cache/（mypy）与 .benchmarks/（pytest-benchmark）本地缓存豁免登记。"""
+    root = build_repo(tmp_path)
+    (root / ".mypy_cache").mkdir()
+    (root / ".benchmarks").mkdir()
+    assert verify_docs.check_undeclared(root, strict=True) == []
+
+
 # ── 向量 6b：git tag 版本漂移（审查 2026-09-05 E1）────────────
 
 
