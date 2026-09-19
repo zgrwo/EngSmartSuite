@@ -211,7 +211,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         exclude:
           # 3.12/3.13 仅排除 macOS（runner 成本高、无平台特有分支）；
           # Windows 为主部署平台，3.12/3.13 补回验证（2026-09-19 决定）
