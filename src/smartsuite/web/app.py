@@ -27,7 +27,8 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
-from smartsuite.core.exceptions import ValidationError
+from smartsuite.core.exceptions import CsvEncodingError, ValidationError
+from smartsuite.services.data_io import read_csv_with_encoding
 from smartsuite.services.orchestrator import (
     GROUP_COLORS,
     NO_DATA_TASKS,
@@ -228,26 +229,24 @@ def upload():
     f_bytes = f.read()
 
     if ext == ".csv":
-        # CSV 文件：多编码尝试 (UTF-8 BOM → UTF-8 → GBK → Latin-1 兜底)
-        df = None
-        for encoding in ["utf-8-sig", "utf-8", "gbk", "latin-1"]:
-            try:
-                # Round-2 P3：先探测行数（只读 max_rows+1 行），超限直接拒绝，
-                # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒。
-                # 审查 #P2：探测 nrows=100_001 未超限 ⟺ 文件行数 ≤ 100_000，
-                # probe 已是完整数据——直接复用，避免同一文件全量重读两次。
-                probe = pd.read_csv(io.BytesIO(f_bytes), encoding=encoding, nrows=100_001)
-                if len(probe) > 100_000:
-                    return jsonify({"error": "数据行数超过限制 (100000行)，请减少数据量"}), 400
-                df = probe
-                break
-            except UnicodeError:
-                continue
-            except Exception:
-                logger.exception("CSV 文件解析失败 (encoding=%s)", encoding)
-                return jsonify({"error": "无法解析 CSV 文件，请确认文件格式正确"}), 400
-        if df is None:
-            return jsonify({"error": "无法识别 CSV 文件编码，请转换为 UTF-8 后重试"}), 400
+        # CSV 文件：多编码尝试（UTF-8 BOM → UTF-8 → GBK）。审查 2026-09-19 E5：
+        # 移除 latin-1 兜底——latin-1 对任意字节序列恒可解码，会把 UTF-16/Big5
+        # 中文表头静默读成乱码（'ÿþyb!k'），用户据此得到错误的 Cp/Cpk 结论。
+        try:
+            # Round-2 P3：先探测行数（只读 max_rows+1 行），超限直接拒绝，
+            # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒。
+            # 审查 #P2：探测 nrows=100_001 未超限 ⟺ 文件行数 ≤ 100_000，
+            # probe 已是完整数据——直接复用，避免同一文件全量重读两次。
+            df = read_csv_with_encoding(io.BytesIO(f_bytes), nrows=100_001)
+        except CsvEncodingError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception:
+            # CsvParseError（结构非法/空文件）与其余意外解析异常统一为中文 400，
+            # 与改造前行为一致；traceback 只进日志，不曝给用户
+            logger.exception("CSV 文件解析失败")
+            return jsonify({"error": "无法解析 CSV 文件，请确认文件格式正确"}), 400
+        if len(df) > 100_000:
+            return jsonify({"error": "数据行数超过限制 (100000行)，请减少数据量"}), 400
     else:
         # Excel 文件：Zip bomb 防护
         try:

@@ -397,6 +397,7 @@ class AnalysisResult:
 | 函数 | 用途 |
 |------|------|
 | `validate_data(df, target_col, feature_cols)` | 校验列存在性、类型、缺失值 |
+| `read_csv_with_encoding(source, *, nrows=None)` | 多编码（UTF-8 BOM → UTF-8 → GBK）读取 CSV；全部失败抛 `CsvEncodingError`，结构非法抛 `CsvParseError`（Web/CLI 共用；不含 latin-1 兜底） |
 | `preprocess_data(df, features, categorical_cols=None)` | One-Hot 编码 + 中位数插补 |
 | `missing_pattern_analysis(df)` | 缺失模式诊断 + 高基数检测 |
 | `recommend_analysis(df, target_col=None)` | 基于数据结构智能推荐分析方法 |

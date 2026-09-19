@@ -5,9 +5,13 @@ auto_generate_subgroup_col / infer_group_col / preprocess_for_task
 此前仅被 Web/CLI 路径间接调用，本文件补直接单测。
 """
 
+import io
+
 import numpy as np
 import pandas as pd
+import pytest
 
+from smartsuite.core.exceptions import CsvEncodingError, CsvParseError
 from smartsuite.services.data_io import (
     auto_generate_subgroup_col,
     infer_group_col,
@@ -15,6 +19,7 @@ from smartsuite.services.data_io import (
     preprocess_data,
     preprocess_for_task,
     prepare_spc_subgroup_col,
+    read_csv_with_encoding,
 )
 
 
@@ -348,3 +353,57 @@ def test_infer_hypothesis_group_col_appends_external_group(monkeypatch):
     feats, params = dio.infer_hypothesis_group_col(df, ["强度"], None, {})
     assert params.get("group_col") == "产线"
     assert "产线" in feats, "外部分组列应被追加"
+
+
+# ── read_csv_with_encoding（审查 2026-09-19 E5：移除 latin-1 静默兜底）──
+
+
+def test_read_csv_with_encoding_reads_gbk(tmp_path):
+    p = tmp_path / "gbk.csv"
+    p.write_bytes("强度,温度\n45.1,180\n".encode("gbk"))
+    df = read_csv_with_encoding(p)
+    assert list(df.columns) == ["强度", "温度"]
+
+
+def test_read_csv_with_encoding_reads_utf8_bom(tmp_path):
+    p = tmp_path / "bom.csv"
+    p.write_bytes("强度,温度\n45.1,180\n".encode("utf-8-sig"))
+    df = read_csv_with_encoding(p)
+    assert list(df.columns) == ["强度", "温度"]
+
+
+def test_read_csv_with_encoding_rejects_utf16(tmp_path):
+    """UTF-16 不再被 latin-1 静默读成乱码（E5 复现 3.1）。"""
+    p = tmp_path / "utf16.csv"
+    p.write_bytes("强度,温度\n45.1,180\n".encode("utf-16"))
+    with pytest.raises(CsvEncodingError, match="无法识别 CSV 文件编码"):
+        read_csv_with_encoding(p)
+
+
+def test_read_csv_with_encoding_rejects_big5(tmp_path):
+    p = tmp_path / "big5.csv"
+    p.write_bytes("強度,溫度\n45.1,180\n".encode("big5"))
+    with pytest.raises(CsvEncodingError, match="无法识别 CSV 文件编码"):
+        read_csv_with_encoding(p)
+
+
+def test_read_csv_with_encoding_bytesio_reseek():
+    """BytesIO 源：utf-8 尝试消耗流位置后，gbk 重试前必须 seek(0)。"""
+    buf = io.BytesIO("强度,温度\n45.1,180\n".encode("gbk"))
+    df = read_csv_with_encoding(buf)
+    assert list(df.columns) == ["强度", "温度"]
+
+
+def test_read_csv_with_encoding_parse_error(tmp_path):
+    """编码可解码但结构非法 → CsvParseError（区别于编码错误）。"""
+    p = tmp_path / "bad.csv"
+    p.write_bytes(b"a,b\n1,2\n1,2,3\n")
+    with pytest.raises(CsvParseError, match="无法解析 CSV 文件"):
+        read_csv_with_encoding(p)
+
+
+def test_read_csv_with_encoding_nrows(tmp_path):
+    p = tmp_path / "many.csv"
+    p.write_bytes(b"a\n" + b"1\n" * 50)
+    df = read_csv_with_encoding(p, nrows=10)
+    assert len(df) == 10

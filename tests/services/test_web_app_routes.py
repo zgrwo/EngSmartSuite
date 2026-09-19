@@ -9,7 +9,11 @@
 不覆盖（导入期/环境分支，单测不可达）：app.py:21-28 flask ImportError
 退出分支、129-154 SECRET_KEY 文件/env 分支（模块导入时执行）、402-409
 `__main__` argparse 守卫、275-278（xlsx >100k 行需巨型 fixture，CSV 路径
-已在 test_upload_limits.py 覆盖同判据）、249-250（latin-1 恒可解码，不可达）。
+已在 test_upload_limits.py 覆盖同判据）。
+
+注：审查 2026-09-19 E5 后 CSV 读取下沉至 `services.data_io.read_csv_with_encoding`，
+原先「latin-1 恒可解码→df is None 不可达」已不成立：回退链不再含 latin-1，
+「全部编码失败」分支由 `test_upload_csv_all_encodings_fail` 直接覆盖。
 """
 
 import io
@@ -120,7 +124,7 @@ def test_upload_bad_extension_400(client):
 
 
 def test_upload_csv_gbk_decoded(client):
-    """GBK 中文表头 CSV：utf-8 解码失败后回退 gbk 成功（app.py:233-243）。"""
+    """GBK 中文表头 CSV：utf-8 解码失败后回退 gbk 成功（read_csv_with_encoding）。"""
     content = "强度,温度\n45.1,180\n46.3,182\n".encode("gbk")
     resp = _post_csv(client, content)
     assert resp.status_code == 200, resp.get_json()
@@ -129,10 +133,22 @@ def test_upload_csv_gbk_decoded(client):
 
 
 def test_upload_csv_garbage_parse_error_400(client):
-    """字段数不一致的垃圾 CSV：utf-8 可解码但解析异常 → 400（app.py:244-248）。"""
+    """字段数不一致的垃圾 CSV：utf-8 可解码但解析异常 → 400（CsvParseError）。"""
     resp = _post_csv(client, b"a,b\n1,2\n1,2,3\n")
     assert resp.status_code == 400
     assert "无法解析 CSV" in resp.get_json()["error"]
+
+
+def test_upload_csv_utf16_rejected_not_garbled(client):
+    """UTF-16 中文 CSV：不再被 latin-1 静默读成乱码返回 200（审查 2026-09-19 E5）。
+
+    回归防线：修复前该请求返回 200，列名显示为 'ÿþyb!k' 等乱码，用户会基于
+    错误数据得出 Cp/Cpk 结论。
+    """
+    content = "强度,温度\n45.1,180\n46.3,182\n".encode("utf-16")
+    resp = _post_csv(client, content)
+    assert resp.status_code == 400, f"UTF-16 应被拒绝: {resp.get_json()}"
+    assert "无法识别 CSV 文件编码" in resp.get_json()["error"]
 
 
 def test_upload_excel_bad_zip_400(client):
@@ -432,7 +448,7 @@ def test_periodic_cleanup_survives_getmtime_oserror(client, monkeypatch):
 
 
 def test_upload_csv_all_encodings_fail(client, monkeypatch):
-    """全部编码均解码失败 → 「无法识别 CSV 文件编码」（app.py:249-250 防御兜底）。"""
+    """全部编码均解码失败 → 「无法识别 CSV 文件编码」（CsvEncodingError → 400）。"""
 
     def _undecodable(*args, **kwargs):
         raise UnicodeDecodeError("utf-8", b"", 0, 1, "bad")

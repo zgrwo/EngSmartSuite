@@ -3,13 +3,64 @@
 import logging
 import uuid
 import warnings
+from pathlib import Path
+from typing import IO
 
 import numpy as np
 import pandas as pd
 
-from smartsuite.core.exceptions import ValidationError
+from smartsuite.core.exceptions import CsvEncodingError, CsvParseError, ValidationError
 
 logger = logging.getLogger(__name__)
+
+# CSV 多编码回退链（审查 2026-09-19 E5）：
+# **不含 latin-1** —— latin-1 对任意字节序列均可解码，会让 UTF-16/Big5 文件
+# 静默通过并产出乱码列名，用户基于错误数据得出结论且看不到任何报错。
+_CSV_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "gbk")
+
+_CSV_ENCODING_MSG = "无法识别 CSV 文件编码，请转换为 UTF-8 后重试"
+_CSV_PARSE_MSG = "无法解析 CSV 文件，请确认文件格式正确"
+
+
+def read_csv_with_encoding(
+    source: str | Path | IO[bytes], *, nrows: int | None = None
+) -> pd.DataFrame:
+    """按受支持编码逐个尝试读取 CSV；全部失败或结构非法时抛中文异常。
+
+    Web（`web/app.py`）与 CLI（`cli.py`）共用此函数，保证两条入口的编码策略、
+    行数探测与错误文案完全一致。
+
+    参数:
+        source: 文件路径或二进制流（如 `BytesIO`）。流式源在每次尝试前 `seek(0)`，
+            否则上一次尝试已消耗流位置，后续编码必然误报解码失败。
+        nrows: 仅读前 n 行（Web 行数探测用），`None` 表示全量。
+
+    异常:
+        CsvEncodingError: 全部编码均解码失败（文件是 UTF-16/Big5 等）。
+        CsvParseError: 编码可解码但结构非法（列数不一致、空文件）。
+
+    设计要点（为何非 UnicodeError 也继续尝试）:
+        某编码「能解码但解析失败」时，另一编码仍可能同时满足解码与解析
+        （典型场景：GBK 字节恰好构成合法 utf-8 序列 → 乱码文本 → 列数错乱），
+        因此记录首个解析异常后继续扫完回退链；最终优先报结构错误
+        （比「无法识别编码」更贴近真实原因）。
+    """
+    parse_error: Exception | None = None
+    for encoding in _CSV_ENCODINGS:
+        if not isinstance(source, (str, Path)):
+            source.seek(0)
+        try:
+            return pd.read_csv(source, encoding=encoding, nrows=nrows)
+        except UnicodeError:
+            # 编码不匹配（UnicodeDecodeError ⊂ UnicodeError）→ 尝试下一种
+            continue
+        except (pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
+            if parse_error is None:
+                parse_error = exc
+
+    if parse_error is not None:
+        raise CsvParseError(_CSV_PARSE_MSG) from parse_error
+    raise CsvEncodingError(_CSV_ENCODING_MSG)
 
 
 def _is_text_dtype(col: pd.Series) -> bool:

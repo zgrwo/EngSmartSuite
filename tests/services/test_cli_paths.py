@@ -133,13 +133,25 @@ def test_cli_input_not_found(monkeypatch, capsys, tmp_path):
 
 
 def test_cli_csv_gbk_encoding_fallback(monkeypatch, capsys, tmp_path):
-    """GBK 中文 CSV：utf-8 失败 → gbk 成功，分析正常完成（cli.py:35-39）。"""
+    """GBK 中文 CSV：utf-8 失败 → gbk 成功，分析正常完成（read_csv_with_encoding）。"""
     data = _write_csv(
         tmp_path, "gbk.csv", "强度,温度\n45.1,180\n46.3,182\n47.2,185\n".encode("gbk")
     )
     tpl = _write_yaml(tmp_path, _CORR_TPL)
     out, _ = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data])
     assert "相关" in out, f"应输出相关性分析结果: {out[:300]}"
+
+
+def test_cli_csv_utf16_encoding_rejected(monkeypatch, capsys, tmp_path):
+    """UTF-16 中文 CSV：latin-1 兜底移除 → 明确报错而非基于乱码分析（E5）。"""
+    data = _write_csv(tmp_path, "u16.csv", "强度,温度\n45.1,180\n46.3,182\n".encode("utf-16"))
+    tpl = _write_yaml(tmp_path, _CORR_TPL)
+    with pytest.raises(SystemExit) as ei:
+        _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data])
+    assert ei.value.code == 1
+    err = capsys.readouterr().err
+    assert "无法识别 CSV 文件编码" in err, f"应有编码识别失败中文提示: {err!r}"
+    assert "Traceback" not in err
 
 
 def test_cli_csv_parser_error_friendly(monkeypatch, capsys, tmp_path):
@@ -161,7 +173,7 @@ def test_cli_csv_parser_error_friendly(monkeypatch, capsys, tmp_path):
 
 
 def test_cli_csv_empty_file_friendly(monkeypatch, capsys, tmp_path):
-    """空 CSV（EmptyDataError ⊂ ValueError）同样走中文友好文案，不泄漏英文。"""
+    """空 CSV（EmptyDataError → CsvParseError）同样走中文友好文案，不泄漏英文。"""
     data = _write_csv(tmp_path, "empty.csv", b"")
     tpl = _write_yaml(tmp_path, _CORR_TPL)
     with pytest.raises(SystemExit) as ei:
@@ -288,7 +300,7 @@ def test_cli_figure_save_failure_graceful(monkeypatch, capsys, tmp_path):
 
 
 def test_cli_csv_encoding_exhausted_friendly(monkeypatch, capsys, tmp_path):
-    """全部编码均解码失败 → 「无法识别 CSV 编码」中文 ValueError（cli.py:43, 143-145）。"""
+    """全部编码均解码失败 → 「无法识别 CSV 文件编码」中文提示（CsvEncodingError 分支）。"""
 
     def _undecodable(*args, **kwargs):
         raise UnicodeDecodeError("utf-8", b"", 0, 1, "bad")
