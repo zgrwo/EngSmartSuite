@@ -16,11 +16,13 @@
 """
 
 import math
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine import (
@@ -38,7 +40,7 @@ from smartsuite.engine import (
     trend_forecast,
     xbar_r_chart,
 )
-from smartsuite.engine._utils import durbin_watson
+from smartsuite.engine._utils import durbin_watson, shapiro_p
 from smartsuite.services.orchestrator import orchestrate
 from smartsuite.web.api import _serialize_table
 
@@ -260,6 +262,21 @@ def test_hedges_g_zero_variance_warns_not_silent():
     )
     assert float(r.metadata["effect_size"]) == 0.0
     assert any("变异" in m for m in r.messages), "零方差返回 0 必须伴随警告，不得静默"
+
+
+def test_shapiro_p_constant_column_returns_one_without_warning():
+    """shapiro_p 常量列短路：scipy 1.15/1.17 会发「range zero」UserWarning，必须提前拦截。
+
+    非退化输入与 scipy 原生结果逐值一致（回归护栏）。
+    """
+    constant = pd.Series([5.0] * 20)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert shapiro_p(constant) == 1.0
+
+    rng = np.random.default_rng(0)
+    sample = pd.Series(rng.normal(size=30))
+    assert shapiro_p(sample) == pytest.approx(float(sp_stats.shapiro(sample)[1]), rel=1e-12)
 
 
 # ── B-4: 微尺度常量判据 ────────────────────────────────────────────────────
