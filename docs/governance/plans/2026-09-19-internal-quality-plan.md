@@ -437,7 +437,7 @@ git commit -m "docs(roadmap): root_cause 拆分完成；spc_charts/doe_opt 列�
 
 ## 后续（另立计划 / good first issue，不在本计划执行）
 
-1. `spc_charts.py`（2,218 行）与 `doe_opt.py`（2,461 行）同模式拆分
+1. `spc_charts.py`（2,218 行）与 `doe_opt.py`（2,461 行）同模式拆分 —— **已完成（2026-09-19）**：`spc_charts/` 8 文件 / `doe_opt/` 6 文件，公开 API 不变，全量 1040 passed / mypy 零错误
 2. `hypothesis.py`（~1.4k）再抽 `hypothesis_test` 的 dispatch 与实现
 3. per-file-ignores 收敛（N803/N806/B905 等变量重命名）
 4. `root_cause` 包内助手提升为公共 `_utils`（如通用效应量）——仅当第三处复用出现时

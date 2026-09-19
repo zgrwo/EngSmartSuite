@@ -5,10 +5,10 @@
 
 ## 当前状态
 
-- v1.3.0：42 个分析方法，1034 项测试，覆盖率 89%，4 层测试防线 + 文档数值对账门禁。
+- v1.3.0：42 个分析方法，1040 项测试，覆盖率 89%，4 层测试防线 + 文档数值对账门禁。
 - 类型检查：mypy 全覆盖 `src/smartsuite`（core/services/engine/web/cli），CI 软门禁。
 - 测试告警：`filterwarnings = ["error", ...]` 白名单制，全量 0 告警。
-- 已知短板：`spc_charts.py` / `doe_opt.py` 巨石模块待拆、覆盖率洼地 `engine/__init__.py`、社区回路。
+- 已知短板：覆盖率洼地 `engine/__init__.py`、子包迁移遗留 lint 豁免收敛、社区回路。
 
 ## 2026 Q4
 
@@ -18,6 +18,7 @@
 - [x] 类型检查扩展至 engine/ 及 web/、cli（2026-09-19 全覆盖，零豁免）
 - [x] 测试告警清零（error 白名单制，2026-09-19）
 - [x] 巨石模块 `root_cause.py` 拆分为子包（3,999 行 → 10 文件，公开 API 不变，2026-09-19）
+- [x] 巨石模块 `spc_charts.py` / `doe_opt.py` 同模式拆分为子包（2,220/2,471 行 → 8/6 文件，公开 API 不变，2026-09-19）
 
 ## 2027 H1
 
@@ -34,7 +35,7 @@
 
 ## 适合新贡献者的任务（good first issue 候选）
 
-1. 拆分 `engine/spc_charts.py` 与 `engine/doe_opt.py`（巨石模块，子包化并收敛 lint 豁免）
+1. 收敛 `root_cause/`、`doe_opt/`、`spc_charts/` 子包的迁移遗留 lint 豁免（N803/B007/B905/SIM108 变量重命名，逐文件摘除 per-file-ignores）
 2. 为 `benchmarks/` 增加 `process_capability` 与 `correlation` 两个基准任务
 3. 手册某方法章节补充"常见参数误用"小节（每章 ≤30 行，附实际输出）
 4. 为 `templates/` 增加模板参数自动校验脚本的测试用例

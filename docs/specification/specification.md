@@ -86,9 +86,9 @@ smartsuite/
 │   └── exceptions.py   # 分层异常体系（3 层）
 │
 ├── engine/        # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
-│   ├── root_cause.py   # 要因分析
-│   ├── doe_opt.py      # DOE/优化
-│   ├── spc_charts.py   # SPC 控制图
+│   ├── root_cause/     # 要因分析（子包）
+│   ├── doe_opt/        # DOE/优化（子包）
+│   ├── spc_charts/     # SPC 控制图（子包）
 │   ├── capability.py   # 过程能力
 │   ├── detection.py    # 异常检测
 │   ├── reliability.py  # 可靠性/MSA

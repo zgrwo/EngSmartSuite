@@ -42,7 +42,7 @@ def safe_float(value, default: float) -> float:
 def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")):
     """通用效应量阈值标签函数。
 
-    跨模块共享工具：被 root_cause.py 和 doe_opt.py 调用。
+    跨模块共享工具：被 root_cause 与 doe_opt 子包调用。
 
     Args:
         value: 待判定的效应量值
@@ -63,7 +63,7 @@ def threshold_label(value, thresholds, labels=("可忽略", "小", "中", "大")
 def durbin_watson(residuals):
     """Durbin-Watson 统计量 — 检测残差一阶自相关。
 
-    跨模块共享工具：被 doe_opt.py (regression_analysis) 和 spc_monitor.py (trend_forecast) 调用。
+    跨模块共享工具：被 doe_opt 子包 (regression_analysis) 和 spc_monitor.py (trend_forecast) 调用。
 
     Args:
         residuals: 残差数组

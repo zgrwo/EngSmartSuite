@@ -54,8 +54,22 @@ EngSmartSuite/
 │       │   │   ├── association.py  #     contingency / cohens_kappa / cronbach_alpha
 │       │   │   ├── inference.py    #     proportion_ci / variance_test
 │       │   │   └── distribution.py #     distribution_summary / normality_check
-│       │   ├── doe_opt.py          #   DOE/优化 (regression, response_surface, grid_search...)
-│       │   ├── spc_charts.py       #   SPC 控制图 (xbar_r, cusum, ewma, attribute...)
+│       │   ├── doe_opt/            #   DOE/优化子包（2026-09-19 由 doe_opt.py 拆分，公开 API 不变）
+│       │   │   ├── __init__.py     #     11 个公开函数 re-export
+│       │   │   ├── regression.py   #     regression / lasso / robust / quantile
+│       │   │   ├── response_surface.py # response_surface_analysis
+│       │   │   ├── optimization.py #     grid_search / multi_objective_opt
+│       │   │   ├── classification.py #   roc_analysis / logistic_regression
+│       │   │   └── doe.py          #     doe_analysis / doe_design + 设计矩阵生成器
+│       │   ├── spc_charts/         #   SPC 控制图子包（2026-09-19 由 spc_charts.py 拆分，公开 API 不变）
+│       │   │   ├── __init__.py     #     5 个公开函数 re-export
+│       │   │   ├── _shared.py      #     共享助手（自然排序/分组解析）
+│       │   │   ├── we_rules.py     #     Western Electric 规则 + X-bar/S 常数
+│       │   │   ├── xbar_r.py       #     xbar_r_chart
+│       │   │   ├── attribute.py    #     attribute_chart
+│       │   │   ├── cusum.py        #     cusum_chart
+│       │   │   ├── ewma.py         #     ewma_chart
+│       │   │   └── nonparametric.py #    spc_nonparametric
 │       │   ├── spc_monitor.py      #   SPC 统一入口（向后兼容，委托至子模块）
 │       │   ├── capability.py       #   过程能力 (Cp/Cpk, Sigma Level, 统计容许区间)
 │       │   ├── detection.py        #   异常检测 (trend_forecast, changepoint...)
@@ -308,7 +322,8 @@ smartsuite/core/      ← ① 数据契约层：仅 pandas+pydantic（AnalysisRe
 
 | 模式 | 说明 | 示例 |
 |------|------|------|
-| `{domain}.py` | 按分析领域划分引擎模块 | doe_opt.py, capability.py |
+| `{domain}.py` | 按分析领域划分引擎模块 | capability.py, detection.py |
+| `{domain}/` | 巨石分析领域拆分为子包（`__init__` re-export 公开 API） | root_cause/, doe_opt/, spc_charts/ |
 | `_{name}.py` | 内部工具（下划线前缀） | _palette.py, _constants.py |
 | `test_{name}.py` | 测试文件 | test_correctness.py |
 
