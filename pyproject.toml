@@ -92,6 +92,7 @@ markers = [
     "benchmark: 性能基准（benchmarks/ 专用，不进入 tests/ 防线）",
 ]
 filterwarnings = [
+    "error",
     "ignore:Glyph .* missing from font:UserWarning",
 ]
 
