@@ -10,6 +10,7 @@ from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine import CPK_GOOD, CPK_MINIMUM, DW_SAFE_LOWER, DW_SAFE_UPPER, PALETTE, _to_argb
 from smartsuite.services.data_io import missing_pattern_analysis, recommend_analysis
 from smartsuite.services.orchestrator import orchestrate
+from smartsuite.services.reporter import close_figures
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,12 @@ def _excel_cell_text(val: object) -> str:
 
 
 def _close_figures(result):
-    """关闭 AnalysisResult 中的所有 matplotlib Figure，防止内存泄漏。"""
-    if hasattr(result, "figures"):
-        # 审查 2026-09-01 C-7：fig.clear() 不清除绘图后端引用，统一用 plt.close
-        import matplotlib.pyplot as plt
+    """关闭 AnalysisResult 中的所有 matplotlib Figure，防止内存泄漏。
 
-        for fig in result.figures:
-            plt.close(fig)
+    审查 2026-09-19 E19/5.5：pyplot 关闭逻辑已下沉 services.reporter.close_figures
+    （与 CLI 共用单一实现）；此处仅保留适配器，容忍 result 无 figures 字段。
+    """
+    close_figures(getattr(result, "figures", None) or [])
 
 
 def _clean_inf(df: pd.DataFrame) -> pd.DataFrame:

@@ -27,6 +27,7 @@ from smartsuite.services.orchestrator import (
     TASK_REGISTRY,
     orchestrate,
 )
+from smartsuite.services.reporter import close_figures
 
 
 def _read_data_file(filepath: str, sheet=0) -> pd.DataFrame:
@@ -234,11 +235,8 @@ def main():
                 except Exception as e:
                     logger.exception("图表保存失败: %s", out_path)
                     print(f"错误: 图表保存失败: {e}", file=sys.stderr)
-        # Figure 无 close() 方法（matplotlib API），须经 pyplot 关闭（Agg 后端已就绪）
-        import matplotlib.pyplot as _plt
-
-        for fig in result.figures:
-            _plt.close(fig)
+        # 图窗释放：与审计层共用单一实现（services.reporter.close_figures）
+        close_figures(result.figures)
         for msg in result.messages:
             print(f"  [{result.status}] {msg}")
 

@@ -32,6 +32,28 @@ def _validate_output_path(output_path: str) -> str:
     return abs_path
 
 
+def close_figures(figs=None) -> None:
+    """关闭 matplotlib 图窗，释放绘图后端引用（全仓唯一实现）。
+
+    审查 2026-09-19 E19 / 5.5：`cli.py` 与 `services/audit.py` 此前各写一份
+    「惰性 import pyplot + 逐个 close」逻辑，现统一到本函数，避免两处漂移。
+    放在 `services/` 而非 `engine/_utils.py`：AGENTS.md 规定 cli.py 只依赖
+    services/、不得直接依赖 engine/。
+
+    参数:
+        figs: 待关闭的 Figure 列表；传 `None` 表示关闭**全部**图窗
+            （`plt.close("all")` 语义）；空列表为无操作。
+
+    注意: `Figure` 无 `close()` 方法（matplotlib API），必须经 pyplot 关闭；
+    2026-09-01 C-7 教训：`fig.clear()` 不释放绘图后端引用。
+    """
+    if figs is None:
+        plt.close("all")
+        return
+    for fig in figs:
+        plt.close(fig)
+
+
 def _fmt_html_cell(x) -> str:
     """HTML 表格数值格式：常规量级保留 4 位小数，微尺度改用 4 位有效数字科学计数。
 
