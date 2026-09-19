@@ -43,7 +43,17 @@ EngSmartSuite/
 │       │   ├── _constants.py       #   统计分析常量（阈值/乘数/效应量判定）
 │       │   ├── _doe_arrays.py      #   DOE 设计矩阵（中心复合/Box-Behnken 编码表）
 │       │   ├── _utils.py           #   共享工具函数 (safe_float, threshold_label)
-│       │   ├── root_cause.py       #   要因分析 (correlation, anova, hypothesis_test...)
+│       │   ├── root_cause/         #   要因分析子包（2026-09-19 由 root_cause.py 拆分，公开 API 不变）
+│       │   │   ├── __init__.py     #     13 个公开函数 re-export
+│       │   │   ├── _shared.py      #     共享助手（效应量/CI/分组解析）
+│       │   │   ├── correlation.py  #     correlation_analysis
+│       │   │   ├── anova.py        #     anova_analysis
+│       │   │   ├── hypothesis.py   #     hypothesis_test + _ht_* 检验族
+│       │   │   ├── modeling.py     #     decision_tree_analysis / vif_analysis
+│       │   │   ├── design.py       #     power_analysis
+│       │   │   ├── association.py  #     contingency / cohens_kappa / cronbach_alpha
+│       │   │   ├── inference.py    #     proportion_ci / variance_test
+│       │   │   └── distribution.py #     distribution_summary / normality_check
 │       │   ├── doe_opt.py          #   DOE/优化 (regression, response_surface, grid_search...)
 │       │   ├── spc_charts.py       #   SPC 控制图 (xbar_r, cusum, ewma, attribute...)
 │       │   ├── spc_monitor.py      #   SPC 统一入口（向后兼容，委托至子模块）
@@ -298,7 +308,7 @@ smartsuite/core/      ← ① 数据契约层：仅 pandas+pydantic（AnalysisRe
 
 | 模式 | 说明 | 示例 |
 |------|------|------|
-| `{domain}.py` | 按分析领域划分引擎模块 | root_cause.py, doe_opt.py |
+| `{domain}.py` | 按分析领域划分引擎模块 | doe_opt.py, capability.py |
 | `_{name}.py` | 内部工具（下划线前缀） | _palette.py, _constants.py |
 | `test_{name}.py` | 测试文件 | test_correctness.py |
 
