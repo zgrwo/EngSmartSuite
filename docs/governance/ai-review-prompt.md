@@ -48,7 +48,7 @@
 ```
 web/  (Flask: app.py / api.py / static/app.js)   ← 依赖 services/，禁止直接 import engine/
   ↓
-services/  (orchestrator / bridge / data_io / reporter / audit)   ← 唯一桥接层
+services/  (task_spec / config / orchestrator / error_messages / bridge / data_io / reporter / audit)   ← 唯一桥接层
   ↓
 engine/  (纯 Python：root_cause/ doe_opt/ spc_charts/ 子包（2026-09-19 拆分）+
           capability / detection / reliability / exploratory / inverse +

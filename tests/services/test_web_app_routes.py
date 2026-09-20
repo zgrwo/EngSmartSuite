@@ -27,6 +27,7 @@ import zipfile
 import pandas as pd
 import pytest
 
+from smartsuite.services import config as config_module
 from smartsuite.services.orchestrator import TASK_REGISTRY
 from smartsuite.web import app as app_module
 from smartsuite.web.app import app as flask_app
@@ -245,7 +246,8 @@ def test_cleanup_uploads_removes_tracked_files(client):
 
 def test_periodic_cleanup_purges_stale_and_missing(client, monkeypatch):
     """定期清理：过期文件（mtime>24h）删除、幽灵路径移出追踪表（app.py:70-100）。"""
-    monkeypatch.setattr(app_module, "_CLEANUP_INTERVAL", 1)  # 每次请求都触发
+    # 审查 2026-09-19 B7：阈值已集中到 services/config.py，且以属性访问读取 → 可打补丁
+    monkeypatch.setattr(config_module, "CLEANUP_INTERVAL_REQUESTS", 1)  # 每次请求都触发
     stale = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)  # noqa: SIM115
     stale.close()
     old_t = time.time() - 90_000
@@ -515,7 +517,7 @@ def test_cleanup_uploads_survives_unlink_oserror(monkeypatch):
 
 def test_periodic_cleanup_survives_getmtime_oserror(client, monkeypatch):
     """getmtime 失败 → 跳过该文件继续清理其余（app.py:87-100）。"""
-    monkeypatch.setattr(app_module, "_CLEANUP_INTERVAL", 1)
+    monkeypatch.setattr(config_module, "CLEANUP_INTERVAL_REQUESTS", 1)
 
     def _boom(path):
         if path.endswith(".parquet"):

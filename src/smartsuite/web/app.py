@@ -31,6 +31,7 @@ except ImportError:
 
 from smartsuite.core.constants import GROUP_COLORS
 from smartsuite.core.exceptions import CsvEncodingError, ValidationError
+from smartsuite.services import config
 from smartsuite.services.data_io import read_csv_with_encoding
 from smartsuite.services.orchestrator import (
     NO_DATA_TASKS,
@@ -47,9 +48,7 @@ logger = logging.getLogger(__name__)
 _UPLOAD_FILES: list[str] = []
 _upload_lock = threading.Lock()
 
-# 审查 2026-09-01 S-4：单次分析的目标列/特征列数量上限（防 DoS 与浏览器卡顿）
-_MAX_TARGETS = 50
-_MAX_FEATURES = 100
+# 单次分析的目标列/特征列数量上限见 services/config.py（审查 2026-09-19 B7 集中）
 
 
 def _cleanup_uploads() -> None:
@@ -67,7 +66,7 @@ atexit.register(_cleanup_uploads)
 
 # ── 定期清理过期临时文件（每 N 次请求触发一次）──
 _request_counter = 0
-_CLEANUP_INTERVAL = 50  # 每 50 次上传/分析请求尝试清理
+# 清理间隔见 services/config.py 的 CLEANUP_INTERVAL_REQUESTS
 
 
 def _periodic_cleanup() -> None:
@@ -76,7 +75,7 @@ def _periodic_cleanup() -> None:
     should_cleanup = False
     with _upload_lock:
         _request_counter += 1
-        if _request_counter % _CLEANUP_INTERVAL == 0:
+        if _request_counter % config.CLEANUP_INTERVAL_REQUESTS == 0:
             should_cleanup = True
 
     if not should_cleanup:
@@ -155,13 +154,13 @@ else:
         _fallback_key = secrets.token_hex(32)
         app.config["SECRET_KEY"] = _fallback_key
         logger.warning("无法持久化密钥到 %s，使用临时密钥", _secret_file)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = config.UPLOAD_MAX_BYTES
 # Session 安全配置
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # 审查 2026-09-01 S-3：本地 HTTP 默认 False；公网 HTTPS 部署可设环境变量开启
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SMARTSUITE_COOKIE_SECURE") == "1"
-app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 小时后过期，限制 CSRF token 重用窗口
+app.config["PERMANENT_SESSION_LIFETIME"] = config.SESSION_LIFETIME_SECONDS  # 1 小时；限制 CSRF token 重用窗口
 
 
 @app.after_request
@@ -239,7 +238,7 @@ def upload():
             # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒。
             # 审查 #P2：探测 nrows=100_001 未超限 ⟺ 文件行数 ≤ 100_000，
             # probe 已是完整数据——直接复用，避免同一文件全量重读两次。
-            df = read_csv_with_encoding(io.BytesIO(f_bytes), nrows=100_001)
+            df = read_csv_with_encoding(io.BytesIO(f_bytes), nrows=config.CSV_PROBE_ROWS)
         except CsvEncodingError as e:
             return jsonify({"error": str(e)}), 400
         except Exception:
@@ -247,16 +246,16 @@ def upload():
             # 与改造前行为一致；traceback 只进日志，不曝给用户
             logger.exception("CSV 文件解析失败")
             return jsonify({"error": "无法解析 CSV 文件，请确认文件格式正确"}), 400
-        if len(df) > 100_000:
+        if len(df) > config.MAX_DATA_ROWS:
             return jsonify({"error": "数据行数超过限制 (100000行)，请减少数据量"}), 400
     else:
         # Excel 文件：Zip bomb 防护
         try:
             with zipfile.ZipFile(io.BytesIO(f_bytes)) as zf:
                 total_size = sum(info.file_size for info in zf.infolist())
-                if total_size > 200 * 1024 * 1024:
+                if total_size > config.MAX_ZIP_UNCOMPRESSED_BYTES:
                     return jsonify({"error": "文件解压后过大（限制200MB），请减少数据量"}), 400
-                if len(zf.infolist()) > 1000:
+                if len(zf.infolist()) > config.MAX_ZIP_ENTRIES:
                     return jsonify({"error": "文件包含过多条目，可能不是有效的 Excel 文件"}), 400
         except zipfile.BadZipFile:
             return jsonify({"error": "不是有效的 Excel 文件，请确认文件格式正确"}), 400
@@ -271,8 +270,8 @@ def upload():
         return jsonify({"error": "文件为空或无法读取数据"}), 400
 
     # ── 大数据防护：限制行数和列数，防止 OOM ──
-    max_rows = 100_000
-    max_cols = 500
+    max_rows = config.MAX_DATA_ROWS
+    max_cols = config.MAX_DATA_COLS
     if df.shape[0] > max_rows:
         return jsonify(
             {"error": f"数据行数 ({df.shape[0]}) 超过限制 ({max_rows}行)，请减少数据量"}
@@ -284,7 +283,7 @@ def upload():
 
     # 大文件内存警告（当前实现将整个文件读入内存）
     _mem_mb = len(f_bytes) / (1024 * 1024)
-    if _mem_mb > 20:
+    if len(f_bytes) > config.LARGE_FILE_WARN_BYTES:
         logger.warning("上传文件较大 (%.0f MB)，内存占用可能较高", _mem_mb)
 
     # 先写新文件再清理旧文件（避免写失败时丢失已有数据）
@@ -343,10 +342,10 @@ def analyze():
         if not isinstance(params, dict):
             return jsonify({"error": "params 必须是字典"}), 400
         # 审查 2026-09-01 S-4：目标列/特征列数量上限 → 400
-        if len(targets) > _MAX_TARGETS:
-            return jsonify({"error": f"目标列数量不能超过 {_MAX_TARGETS}"}), 400
-        if len(features) > _MAX_FEATURES:
-            return jsonify({"error": f"特征列数量不能超过 {_MAX_FEATURES}"}), 400
+        if len(targets) > config.MAX_TARGETS:
+            return jsonify({"error": f"目标列数量不能超过 {config.MAX_TARGETS}"}), 400
+        if len(features) > config.MAX_FEATURES:
+            return jsonify({"error": f"特征列数量不能超过 {config.MAX_FEATURES}"}), 400
         if task not in TASK_REGISTRY:
             return jsonify(
                 {"error": f"未知的分析任务「{task}」，支持: {list(TASK_REGISTRY.keys())}"}

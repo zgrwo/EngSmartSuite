@@ -82,7 +82,9 @@ EngSmartSuite/
 │       ├── services/               # ② 应用服务层：唯一桥接层
 │       │   ├── __init__.py
 │       │   ├── task_spec.py        #   TASK_SPECS（任务注册唯一事实源）+ derive 派生
-│       │   ├── orchestrator.py     #   7 组注册结构（由 task_spec.derive 派生）+ 编排
+│       │   ├── config.py           #   应用限制常量（上传/行数/zip/会话阈值）
+│       │   ├── orchestrator.py     #   编排 + 任务注册结构（由 task_spec.derive 派生）
+│       │   ├── error_messages.py   #   异常→中文工艺术语映射 + 统一错误结果组装
 │       │   ├── data_io.py          #   Excel 读写 + 校验 + 预处理
 │       │   ├── reporter.py         #   多格式输出: to_excel / to_pdf / to_ppt / to_html
 │       │   ├── bridge.py           #   引擎能力出口（web 经此取 round_for_display）
