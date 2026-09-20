@@ -74,7 +74,12 @@ EngSmartSuite/
 │       │   │   └── nonparametric.py #    spc_nonparametric
 │       │   ├── spc_monitor.py      #   SPC 统一入口（向后兼容，委托至子模块）
 │       │   ├── capability.py       #   过程能力 (Cp/Cpk, Sigma Level, 统计容许区间)
-│       │   ├── detection.py        #   异常检测 (trend_forecast, changepoint...)
+│       │   ├── detection/          #   异常检测子包（2026-09-21 由 detection.py 拆分，公开 API 不变）
+│       │   │   ├── __init__.py     #     4 个公开函数 re-export（+ 3 个守护测试依赖的私有助手）
+│       │   │   ├── trend.py        #     trend_forecast（含 ACF/Ljung-Box/DW 私助）
+│       │   │   ├── change_point.py #     change_point_detect
+│       │   │   ├── outlier.py      #     outlier_consensus
+│       │   │   └── anomaly.py      #     anomaly_detect
 │       │   ├── reliability.py      #   可靠性/MSA (gage_rr, tolerance_interval, survival_analysis)
 │       │   ├── inverse.py          #   工艺参数反解 (inverse_solve: 角色识别/前向建模/约束求解)
 │       │   └── exploratory.py      #   探索性分析 (box_chart, scatter_plot...)
@@ -115,6 +120,7 @@ EngSmartSuite/
 │   │   ├── test_doe_pydoe3_parity.py #   DOE vs pyDOE3 交叉验证（无 pyDOE3 时自动跳过）
 │   │   ├── test_doe_opt_package_parity.py # DOE/优化子包拆分组装对照
 │   │   ├── test_root_cause_package_parity.py # 要因分析子包拆分组装对照
+│   │   ├── test_detection_package_parity.py # 异常检测子包拆分组装对照
 │   │   ├── test_spc_charts_package_parity.py # SPC 图表子包拆分组装对照
 │   │   ├── test_spc_monitor.py
 │   │   ├── test_utils.py
