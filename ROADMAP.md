@@ -37,6 +37,9 @@
 
 ## 适合新贡献者的任务（good first issue 候选）
 
+> 开工流程、开发环境与提交前必检见 [CONTRIBUTING.md](CONTRIBUTING.md#第一个-pr约-15-分钟)。
+> 选好一条后请开 Issue 认领，避免两人同时动同一处。
+
 1. 为 `benchmarks/` 增加 `process_capability` 与 `correlation` 两个基准任务
 2. 手册某方法章节补充"常见参数误用"小节（每章 ≤30 行，附实际输出）
 3. 为 `templates/` 增加模板参数自动校验脚本的测试用例
