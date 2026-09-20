@@ -41,6 +41,7 @@
 > 选好一条后请开 Issue 认领，避免两人同时动同一处。
 
 1. 为 `benchmarks/` 增加 `process_capability` 与 `correlation` 两个基准任务
-2. 手册某方法章节补充"常见参数误用"小节（每章 ≤30 行，附实际输出）
-3. 为 `templates/` 增加模板参数自动校验脚本的测试用例
-4. 补 `docs/gallery.md` 中缺失方法的示例图与一句话解读
+2. 为 `templates/` 增加模板参数自动校验脚本的测试用例
+3. 补 `docs/gallery.md` 中缺失方法的示例图与一句话解读
+4. 把「常见参数误用」小节推广到 01–03 / 09–10 章节：方法章节已于 2026-09-19（C5）完成，可直接沿用同一模式
+   —— 先实跑采集真实输出，再用 `tests/services/test_manual_usage_pitfalls.py` 的双向契约断言兜住
