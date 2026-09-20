@@ -241,12 +241,9 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             else:
                 # 旧版 scipy 无 pvalue，用 5% 临界值近似判定
                 ad_p = None
-            if ad_p is not None:
-                ad_normal = ad_p > alpha
-            else:
-                # scipy < 1.16 无 pvalue：临界值近似固定 5% 会让 alpha 参数失效
-                # （Round-2 批次D #2e），A-D 不参与判定，仅展示统计量；SW 已提供 p 值
-                ad_normal = None
+            # scipy < 1.16 无 pvalue：临界值近似固定 5% 会让 alpha 参数失效
+            # （Round-2 批次D #2e），A-D 不参与判定，仅展示统计量；SW 已提供 p 值
+            ad_normal = ad_p > alpha if ad_p is not None else None
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)
             ad_stat, ad_p, ad_normal = None, None, None
@@ -264,22 +261,13 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         else:
             normality = f"非正态 (S-W p={sw_p:.4f})" if sw_p is not None else "—"
             if skew > 1.5:
-                if (d > 0).all():
-                    recommendation = "Box-Cox (右偏严重)"
-                else:
-                    recommendation = "Yeo-Johnson (右偏严重)"
+                recommendation = "Box-Cox (右偏严重)" if (d > 0).all() else "Yeo-Johnson (右偏严重)"
             elif skew > 0.5:
-                if (d > 0).all():
-                    recommendation = "对数变换 log(x)"
-                else:
-                    recommendation = "平方根变换 √(x+const)"
+                recommendation = "对数变换 log(x)" if (d > 0).all() else "平方根变换 √(x+const)"
             elif skew < -1.5:
                 recommendation = "平方变换 x²"
             elif skew < -0.5:
-                if (d > 0).all():
-                    recommendation = "倒数变换 1/x"
-                else:
-                    recommendation = "反射+对数变换"
+                recommendation = "倒数变换 1/x" if (d > 0).all() else "反射+对数变换"
             else:
                 recommendation = "Box-Cox / Yeo-Johnson"
 

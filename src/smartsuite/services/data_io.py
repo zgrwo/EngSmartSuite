@@ -160,7 +160,7 @@ def preprocess_data(
                     n_unique - 1,
                 )
             # 单唯一值列 (如全 NaN→"(缺失)"): drop_first 会导致零列输出, 保留该列
-            _drop_first = True if n_unique > 1 else False
+            _drop_first = n_unique > 1
             dummies = pd.get_dummies(col_str, prefix=col, drop_first=_drop_first)
             # 对齐已知类别映射
             if known_cat_map and col in known_cat_map:

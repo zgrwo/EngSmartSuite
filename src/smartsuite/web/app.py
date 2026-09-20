@@ -1,6 +1,7 @@
 """Flask application — SmartSuite Web UI 入口。"""
 
 import atexit
+import contextlib
 import functools
 import logging
 import os
@@ -145,11 +146,9 @@ else:
             _fallback_key = secrets.token_hex(32)
             _secret_file.write_text(_fallback_key)
             app.config["SECRET_KEY"] = _fallback_key
-        # 限制密钥文件权限（仅 owner 可读写）
-        try:
+        # 限制密钥文件权限（仅 owner 可读写）；chmod 失败（如 Windows/只读卷）不阻断启动
+        with contextlib.suppress(OSError):
             os.chmod(_secret_file, 0o600)
-        except OSError:
-            pass
     except OSError:
         _fallback_key = secrets.token_hex(32)
         app.config["SECRET_KEY"] = _fallback_key
@@ -160,7 +159,9 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # 审查 2026-09-01 S-3：本地 HTTP 默认 False；公网 HTTPS 部署可设环境变量开启
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SMARTSUITE_COOKIE_SECURE") == "1"
-app.config["PERMANENT_SESSION_LIFETIME"] = config.SESSION_LIFETIME_SECONDS  # 1 小时；限制 CSRF token 重用窗口
+app.config["PERMANENT_SESSION_LIFETIME"] = (
+    config.SESSION_LIFETIME_SECONDS
+)  # 1 小时；限制 CSRF token 重用窗口
 
 
 @app.after_request
@@ -294,10 +295,8 @@ def upload():
             df.to_parquet(tmp.name)
         except Exception as exc:
             logger.error("上传数据 parquet 保存失败: %s (%s)", tmp.name, exc, exc_info=True)
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp.name)
-            except OSError:
-                pass
             return jsonify({"error": "数据保存失败，请重试"}), 500
         # 新文件写入成功，更新 session 并清理旧文件
         old_path = session.get("_data_path")

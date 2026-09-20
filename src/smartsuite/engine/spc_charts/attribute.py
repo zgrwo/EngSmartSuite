@@ -329,10 +329,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     def _fmt_attr_labels(vals):
         labels = []
         for v in vals:
-            if hasattr(v, "strftime"):
-                s = v.strftime("%m-%d")
-            else:
-                s = str(v)
+            s = v.strftime("%m-%d") if hasattr(v, "strftime") else str(v)
             if len(s) > 15:
                 s = s[:14] + "…"
             labels.append(s)
