@@ -209,7 +209,8 @@ EngSmartSuite/
 │   └── adr/                        #   架构决策记录
 │       ├── adr-template.md         #   ADR 模板
 │       ├── 0001-three-layer-architecture.md   #   ADR-001 三层架构
-│       └── 0002-web-ui-replaces-excel-layer.md # ADR-002 Web UI 替代 Excel
+│       ├── 0002-web-ui-replaces-excel-layer.md # ADR-002 Web UI 替代 Excel
+│       └── 0003-deployment-scope-single-user.md # ADR-003 部署形态（单机单用户）
 │
 ├── logs/                           # 审查报告/运行产物（本地保留，不入库）
 │

@@ -60,6 +60,31 @@ python scripts/demo.py          # → ./demo_output/{correlation,process_capabil
 
 ---
 
+## 部署与安全边界
+
+> 决策记录见 [ADR-003 部署形态](docs/adr/0003-deployment-scope-single-user.md)。
+
+**SmartSuite 设计用于本机单用户**：服务默认只监听 `127.0.0.1`，没有用户认证与权限控制。
+
+- **不建议**用 `smartsuite-web --host 0.0.0.0` 直接暴露到网络——那等于让内网任何人都能进入分析界面，
+  上传的数据也会以明文临时文件落在本机（默认 24 小时后清理）。
+- 需要内网共享时，请在你的运维体系里自行加一层反向代理并启用鉴权：
+
+```bash
+# Windows 友好的 WSGI 服务器示例（端口只对本机开放，由 nginx 对外）
+pip install waitress
+waitress-serve --listen=127.0.0.1:5050 smartsuite.web.app:app
+
+# nginx 反代 + basic auth（要点两行）
+# location / { auth_basic "SmartSuite"; auth_basic_user_file /etc/nginx/.htpasswd;
+#              proxy_pass http://127.0.0.1:5050; }
+```
+
+- 分析引擎与单机使用路径是稳定的；「生产就绪」**不包含**“公网服务”承诺——`Development Status: 5`
+  描述的是项目成熟度，不是部署拓扑。
+
+---
+
 ## 模块速览
 
 > 完整签名、参数说明见 **[API 参考](docs/specification/api-reference.md)**；每个函数的详细示例见 **[用户手册](docs/user-manual/index.md)**。
