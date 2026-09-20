@@ -278,6 +278,7 @@ EngSmartSuite/
 ├── scripts/                        # 开发辅助脚本
 │   ├── README.md
 │   ├── common.py
+│   ├── demo.py                     #   60 秒演示（3 个代表任务 → 自包含 HTML 报告）
 │   ├── doctor.py                   #   环境就绪性诊断
 │   ├── verify_all.py               #   一键全量验证入口
 │   ├── run_affected_tests.py       #   影响范围测试路由

@@ -1,5 +1,27 @@
 # 示例集
 
+## 60 秒复跑
+
+一条命令，用仓库内置演示数据跑出三份可打开的报告（自包含 HTML，图表 Base64 内嵌，单文件即可发给同事）：
+
+```bash
+python scripts/demo.py              # → ./demo_output/*.html
+python scripts/demo.py --png        # 额外导出 PNG
+python scripts/demo.py -o 我的目录   # 指定输出目录
+```
+
+三个任务共用同一份注塑演示数据（`tests/data/injection_process.xlsx`），覆盖三条分析主线：
+
+| 任务 | 演示什么 | 预期输出要点（本机实跑，数据固定所以可复现） |
+| :--- | :--- | :--- |
+| `correlation` | 要因筛选：哪些工艺参数与拉伸强度相关 | 最强因子「熔体温度」（r≈+0.31）；Bonferroni 校正后 2/10 对显著 |
+| `process_capability` | 过程监控：Cp/Cpk 是否达标 | Cpk≈1.01（判定「勉强」）；DPMO≈2,368 |
+| `regression` | 建模优化：工艺参数能否解释循环周期 | R²≈0.935；显著变量 2/5；最重要变量「冷却时间」；DW≈2.01 |
+
+> 上述数值来自仓库固定的演示数据，可复现；换成自己的数据后结果自然不同。
+
+---
+
 一页看全工具能产出什么。以下 12 张图复用用户手册的实跑配图：除通用参数反解（`inverse_solve`，脚本内置样本）外，均由 `tests/data/injection_process.xlsx`（注塑工艺 1000 行演示数据）生成。
 
 每个方法对应一个 `templates/example_*.yaml` 模板，命令见各节；把 `--input` 换成自己的数据、`--outdir` 指定输出目录即可复跑。参数选择与数值解读见[用户手册](user-manual/index.md)。

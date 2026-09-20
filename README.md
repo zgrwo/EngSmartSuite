@@ -48,6 +48,16 @@ python run_server.py            # 源码检出：读环境变量并自动打开�
 # → 浏览器打开 http://localhost:5050
 ```
 
+### 60 秒看到产出
+
+不想先读手册？用仓库内置演示数据一条命令跑出报告（自包含 HTML，图表已内嵌）：
+
+```bash
+python scripts/demo.py          # → ./demo_output/{correlation,process_capability,regression}.html
+```
+
+跑的是三条分析主线（要因筛选 / 过程监控 / 建模优化），详见[示例集](docs/gallery.md#60-秒复跑)。
+
 ---
 
 ## 模块速览
