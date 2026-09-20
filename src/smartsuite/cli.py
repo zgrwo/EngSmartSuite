@@ -6,8 +6,6 @@ import logging
 import os
 import sys
 
-logger = logging.getLogger(__name__)
-
 import pandas as pd
 import yaml
 
@@ -28,6 +26,8 @@ from smartsuite.services.orchestrator import (
     orchestrate,
 )
 from smartsuite.services.reporter import close_figures
+
+logger = logging.getLogger(__name__)
 
 
 def _read_data_file(filepath: str, sheet=0) -> pd.DataFrame:

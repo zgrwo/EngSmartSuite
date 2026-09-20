@@ -13,8 +13,10 @@ import time as _time
 
 import pandas as pd
 
-# ── matplotlib 配置由引擎层统一管理（含中文字体 + 配色方案）──
-# orchestrator 导入会级联触发 engine/__init__.py 中的全局 matplotlib 配置
+# ── matplotlib 配置由引擎层统一管理（后端 Agg + 中文字体 + 配色方案）──
+# 下方 services 导入会级联触发 engine/__init__.py 中的全局配置；因此 web/ 下任何
+# 模块都**不得**再自设后端或在模块级导入 pyplot（见 B3 守卫
+# tests/guards/test_matplotlib_backend_order.py）
 
 try:
     from flask import Flask, jsonify, render_template, request, session

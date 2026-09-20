@@ -71,10 +71,29 @@ def test_fmt_html_cell_bool_stays_text():
     assert _fmt_html_cell(np.bool_(True)) == "True"
 
 
-@pytest.mark.parametrize("value", [np.float32("nan"), np.float32("inf"), np.float32("-inf")])
+@pytest.mark.parametrize(
+    "value",
+    [np.float32("nan"), np.float32("inf"), np.float32("-inf")],
+)
 def test_fmt_html_cell_nonfinite_numpy_no_crash(value):
     """numpy 非有限值仍走原样输出，不得抛异常。"""
     assert _fmt_html_cell(value) in ("nan", "inf", "-inf")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (2.5e6, "2.50e+06"),
+        (np.float64(1e9), "1.00e+09"),
+        (np.float32(3.2e7), "3.20e+07"),
+    ],
+)
+def test_fmt_html_cell_large_magnitude_uses_scientific(value, expected):
+    """≥1e6 保持 `.2e` 科学计数口径（2026-09-16 B-5 修复时明确保留的分支）。
+
+    该分支自 v1.4.0 起一直无测试覆盖（CI 覆盖率报告可见），此处补齐。
+    """
+    assert _fmt_html_cell(value) == expected
 
 
 def test_to_html_float32_column_uses_scale_aware_format(tmp_path):
