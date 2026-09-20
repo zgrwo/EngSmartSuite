@@ -1,12 +1,11 @@
 """Web 安全套件共享夹具（审查 2026-09-19 C4）。
 
-与 `tests/services/conftest.py` 相同的隔离思路：模块级临时文件追踪表必须在每个
-用例前后清空，否则上一个用例留下的路径会干扰清理逻辑的断言。
+上传临时目录的隔离由 `tests/conftest.py` 的 autouse 夹具统一负责（审查 2026-09-21
+D2：进程级注册表已移除，隔离手段改为每个测试一个上传目录）。
 """
 
 import pytest
 
-from smartsuite.web import app as app_module
 from smartsuite.web.app import app as flask_app
 
 
@@ -15,18 +14,6 @@ def client():
     flask_app.config.update(TESTING=True)
     with flask_app.test_client() as c:
         yield c
-
-
-@pytest.fixture(autouse=True)
-def _reset_upload_tracking():
-    """隔离模块级临时文件追踪列表（先清理遗留文件，再清空追踪表）。"""
-    app_module._cleanup_uploads()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
-    yield
-    app_module._cleanup_uploads()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
 
 
 @pytest.fixture()

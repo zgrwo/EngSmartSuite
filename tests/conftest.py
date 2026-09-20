@@ -39,6 +39,19 @@ def _stream_encode_multipart_in_memory(values, *args, **kwargs):
 _werkzeug_test.stream_encode_multipart = _stream_encode_multipart_in_memory
 
 
+@pytest.fixture(autouse=True)
+def _isolated_upload_dir(tmp_path, monkeypatch):
+    """上传临时目录按测试隔离（审查 2026-09-21 D2）。
+
+    D2 后「哪些临时文件属于本进程」不再记在内存注册表里，而靠目录扫描判定。若所有
+    测试共用系统临时目录，任一次 `_cleanup_uploads()` 都会删掉其他测试（乃至开发者
+    本机正在运行的服务）的文件。故每个测试指向独立目录。
+    """
+    from smartsuite.services import config
+
+    monkeypatch.setenv(config.UPLOAD_DIR_ENV, str(tmp_path / "smartsuite-uploads"))
+
+
 @pytest.fixture
 def sample_doe_data() -> pd.DataFrame:
     """注塑 DOE 实验数据：料温、模温、注射压力、保压时间 → 强度、不良率"""

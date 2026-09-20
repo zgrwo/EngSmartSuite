@@ -12,6 +12,7 @@
 
 import io
 import os
+import pathlib
 import tempfile
 
 import pytest
@@ -127,9 +128,14 @@ def test_path_traversal_filename_cannot_escape_temp_dir(client, csrf):
 
     with client.session_transaction() as sess:
         stored = sess["_data_path"]
-    assert os.path.dirname(os.path.realpath(stored)) == os.path.realpath(tempfile.gettempdir()), (
-        f"上传文件落到了临时目录之外：{stored}"
+    # 审查 2026-09-21 D2：落盘位置由服务端决定（专用上传目录，位于系统临时目录之下），
+    # 文件名中的 `../` 不得影响它。
+    from smartsuite.web import app as app_module
+
+    assert pathlib.Path(stored).parent == app_module._upload_dir(), (
+        f"上传文件落到服务端指定目录之外：{stored}"
     )
+    assert os.path.realpath(stored).startswith(os.path.realpath(tempfile.gettempdir()) + os.sep)
 
 
 # ── 错误响应不泄漏内部信息 ──

@@ -9,7 +9,6 @@ import pathlib
 import secrets
 import sys
 import tempfile
-import threading
 import time as _time
 
 import pandas as pd
@@ -45,62 +44,68 @@ from smartsuite.web.api import column_info, run_analysis
 
 logger = logging.getLogger(__name__)
 
-# 上传文件的临时追踪，确保进程退出时清理
-_UPLOAD_FILES: list[str] = []
-_upload_lock = threading.Lock()
+# ── 上传临时文件：专用目录 + mtime TTL 扫描（审查 2026-09-21 D2）──
+# 原实现用进程级注册表（_UPLOAD_FILES / _upload_lock / _request_counter）追踪临时文件：
+# 多 worker 下各进程只看得见自己创建的文件，别人的过期文件无人清理（泄漏），且
+# 「清理间隔」是按本进程请求数计数的。改为状态落在文件系统上：任何 worker 都能扫全量。
+_last_sweep_at = 0.0
 
 # 单次分析的目标列/特征列数量上限见 services/config.py（审查 2026-09-19 B7 集中）
 
 
-def _cleanup_uploads() -> None:
-    with _upload_lock:
-        paths = list(_UPLOAD_FILES)
-    for path in paths:
+def _upload_dir() -> pathlib.Path:
+    """上传数据专用目录（按需创建）；`SMARTSUITE_UPLOAD_DIR` 可覆盖（测试/运维）。"""
+    override = os.environ.get(config.UPLOAD_DIR_ENV)
+    directory = (
+        pathlib.Path(override)
+        if override
+        else pathlib.Path(tempfile.gettempdir()) / config.UPLOAD_DIR_NAME
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _sweep_expired(*, force: bool = False) -> int:
+    """删除本目录内 mtime 超过 TTL 的 parquet，返回删除数。
+
+    默认按 `CLEANUP_MIN_INTERVAL_SECONDS` 节流（避免每个请求都做目录 I/O）；
+    `force=True` 跳过节流（测试与显式清理入口用）。
+    """
+    global _last_sweep_at
+    now = _time.time()
+    if not force and now - _last_sweep_at < config.CLEANUP_MIN_INTERVAL_SECONDS:
+        return 0
+    _last_sweep_at = now
+    removed = 0
+    for path in _upload_dir().glob("*.parquet"):
         try:
-            if os.path.exists(path):
-                os.unlink(path)
+            if now - path.stat().st_mtime > config.UPLOAD_TTL_SECONDS:
+                path.unlink()
+                removed += 1
         except OSError:
-            pass
+            logger.debug("过期上传文件清理失败: %s", path, exc_info=True)
+    return removed
+
+
+def _cleanup_uploads() -> None:
+    """进程退出兜底：删除本目录内全部临时文件。
+
+    目录由本应用独占（单机单用户部署，见 ADR-003）；会话数据本身是无状态的
+    parquet，进程退出后不再有任何引用，故无需区分「谁创建的」。
+    """
+    for path in _upload_dir().glob("*.parquet"):
+        try:
+            path.unlink()
+        except OSError:
+            logger.debug("退出清理临时文件失败: %s", path, exc_info=True)
 
 
 atexit.register(_cleanup_uploads)
 
-# ── 定期清理过期临时文件（每 N 次请求触发一次）──
-_request_counter = 0
-# 清理间隔见 services/config.py 的 CLEANUP_INTERVAL_REQUESTS
-
 
 def _periodic_cleanup() -> None:
-    """清理不存在对应 session 的过期临时文件。"""
-    global _request_counter
-    should_cleanup = False
-    with _upload_lock:
-        _request_counter += 1
-        if _request_counter % config.CLEANUP_INTERVAL_REQUESTS == 0:
-            should_cleanup = True
-
-    if not should_cleanup:
-        return
-
-    # 文件 I/O 在锁外执行，避免阻塞上传请求
-    now = _time.time()
-    with _upload_lock:
-        paths_snapshot = list(_UPLOAD_FILES)
-    for path in paths_snapshot:
-        try:
-            if os.path.exists(path):
-                mtime = os.path.getmtime(path)
-                if now - mtime > 86400:  # 24 hours
-                    os.unlink(path)
-                    with _upload_lock:
-                        if path in _UPLOAD_FILES:
-                            _UPLOAD_FILES.remove(path)
-            else:
-                with _upload_lock:
-                    if path in _UPLOAD_FILES:
-                        _UPLOAD_FILES.remove(path)
-        except OSError:
-            pass
+    """请求路径上的过期清理（节流由 `_sweep_expired` 承担）。"""
+    _sweep_expired()
 
 
 # ── CSRF 防护 ──
@@ -288,27 +293,23 @@ def upload():
         logger.warning("上传文件较大 (%.0f MB)，内存占用可能较高", _mem_mb)
 
     # 先写新文件再清理旧文件（避免写失败时丢失已有数据）
-    with _upload_lock:
-        tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-        tmp.close()
-        try:
-            df.to_parquet(tmp.name)
-        except Exception as exc:
-            logger.error("上传数据 parquet 保存失败: %s (%s)", tmp.name, exc, exc_info=True)
-            with contextlib.suppress(OSError):
-                os.unlink(tmp.name)
-            return jsonify({"error": "数据保存失败，请重试"}), 500
-        # 新文件写入成功，更新 session 并清理旧文件
-        old_path = session.get("_data_path")
-        session["_data_path"] = tmp.name
-        _UPLOAD_FILES.append(tmp.name)
-        if old_path and os.path.exists(old_path):
-            try:
-                os.unlink(old_path)
-                if old_path in _UPLOAD_FILES:
-                    _UPLOAD_FILES.remove(old_path)
-            except OSError:
-                pass
+    tmp = tempfile.NamedTemporaryFile(
+        dir=_upload_dir(), prefix="ss-", suffix=".parquet", delete=False
+    )
+    tmp.close()
+    try:
+        df.to_parquet(tmp.name)
+    except Exception as exc:
+        logger.error("上传数据 parquet 保存失败: %s (%s)", tmp.name, exc, exc_info=True)
+        with contextlib.suppress(OSError):
+            os.unlink(tmp.name)
+        return jsonify({"error": "数据保存失败，请重试"}), 500
+    # 新文件写入成功，更新 session 并清理上一份（本 session 自己的旧文件）
+    old_path = session.get("_data_path")
+    session["_data_path"] = tmp.name
+    if old_path and old_path != tmp.name and os.path.exists(old_path):
+        with contextlib.suppress(OSError):
+            os.unlink(old_path)
     return jsonify({"columns": column_info(df), "shape": list(df.shape)})
 
 

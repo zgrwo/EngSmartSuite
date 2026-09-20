@@ -36,7 +36,9 @@ def test_limit_values_match_pre_refactor():
     assert config.MAX_TARGETS == 50
     assert config.MAX_FEATURES == 100
     assert config.SESSION_LIFETIME_SECONDS == 3600
-    assert config.CLEANUP_INTERVAL_REQUESTS == 50
+    assert config.UPLOAD_TTL_SECONDS == 86400
+    assert config.CLEANUP_MIN_INTERVAL_SECONDS == 600
+    assert config.UPLOAD_DIR_NAME == "smartsuite-uploads"
 
 
 def test_csv_probe_rows_derives_from_row_limit():
@@ -78,7 +80,8 @@ def test_web_app_references_config_constants():
         "MAX_TARGETS",
         "MAX_FEATURES",
         "SESSION_LIFETIME_SECONDS",
-        "CLEANUP_INTERVAL_REQUESTS",
+        "UPLOAD_TTL_SECONDS",
+        "CLEANUP_MIN_INTERVAL_SECONDS",
     }
     missing = expected - used
     assert not missing, f"web/app.py 未引用这些集中常量：{sorted(missing)}"

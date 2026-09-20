@@ -11,7 +11,7 @@
 不同于 `core/constants.py` 的领域常量（配色等与业务语义绑定的值）。
 
 取值用 `config.X` 属性访问而非 `from ... import X`：属性访问在运行时解析，测试可
-`monkeypatch.setattr(config, "CLEANUP_INTERVAL_REQUESTS", 1)` 而无需改产品代码。
+`monkeypatch.setattr(config, "CLEANUP_MIN_INTERVAL_SECONDS", 0)` 而无需改产品代码。
 """
 
 # ── 上传与解析 ──
@@ -50,11 +50,25 @@ MAX_FEATURES = 100
 SESSION_LIFETIME_SECONDS = 3600
 """会话有效期（同时限制 CSRF token 的重用窗口）。"""
 
-CLEANUP_INTERVAL_REQUESTS = 50
-"""每 N 次上传/分析请求尝试清理一次过期临时文件。"""
+UPLOAD_DIR_ENV = "SMARTSUITE_UPLOAD_DIR"
+"""覆盖上传临时目录的环境变量名（测试隔离 / 运维指定数据盘）。"""
+
+UPLOAD_DIR_NAME = "smartsuite-uploads"
+"""专用临时目录名（位于系统临时目录下）。"""
+
+UPLOAD_TTL_SECONDS = 86400
+"""上传临时文件保留时长（24 小时，按 mtime 判定过期）。"""
+
+CLEANUP_MIN_INTERVAL_SECONDS = 600
+"""两次清理扫描的最小间隔。
+
+审查 2026-09-21 D2：原为「每 N 次请求触发一次」的进程级计数器，多 worker 下各进程
+只数自己的请求（清理频率被稀释到 1/N），且计数器本身就是需要共享的进程级状态。
+改为时间节流：每个 worker 各自节流即可，扫描是幂等的。
+"""
 
 __all__ = [
-    "CLEANUP_INTERVAL_REQUESTS",
+    "CLEANUP_MIN_INTERVAL_SECONDS",
     "CSV_PROBE_ROWS",
     "LARGE_FILE_WARN_BYTES",
     "MAX_DATA_COLS",
@@ -64,5 +78,8 @@ __all__ = [
     "MAX_ZIP_ENTRIES",
     "MAX_ZIP_UNCOMPRESSED_BYTES",
     "SESSION_LIFETIME_SECONDS",
+    "UPLOAD_DIR_ENV",
+    "UPLOAD_DIR_NAME",
     "UPLOAD_MAX_BYTES",
+    "UPLOAD_TTL_SECONDS",
 ]

@@ -19,8 +19,8 @@
 import io
 import logging
 import os
+import pathlib
 import sys
-import tempfile
 import time
 import zipfile
 
@@ -38,18 +38,6 @@ def client():
     flask_app.config.update(TESTING=True)
     with flask_app.test_client() as c:
         yield c
-
-
-@pytest.fixture(autouse=True)
-def _reset_upload_tracking():
-    """隔离模块级临时文件追踪列表：先清理上一测试遗留文件，再清空追踪表。"""
-    app_module._cleanup_uploads()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
-    yield
-    app_module._cleanup_uploads()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
 
 
 def _csrf(client):
@@ -221,46 +209,87 @@ def test_upload_parquet_save_failure_500(client, monkeypatch):
 
 
 def test_upload_replaces_old_session_file(client):
-    """二次上传：旧临时文件被删除并移出追踪表（app.py:303-312）。"""
+    """二次上传：旧临时文件被删除，新文件落在专用目录内。"""
     assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
     with client.session_transaction() as sess:
         old_path = sess["_data_path"]
     assert os.path.exists(old_path)
     assert _post_csv(client, b"a,b\n3,4\n").status_code == 200
+    with client.session_transaction() as sess:
+        new_path = sess["_data_path"]
+    assert new_path != old_path
     assert not os.path.exists(old_path), "旧上传文件应被删除"
-    assert old_path not in app_module._UPLOAD_FILES
+    assert pathlib.Path(new_path).parent == app_module._upload_dir()
 
 
-def test_cleanup_uploads_removes_tracked_files(client):
-    """atexit 兜底清理：_cleanup_uploads 删除全部受追踪临时文件（app.py:52-60）。
+# ── D2：上传目录 + mtime TTL 扫描（无进程级注册表）──
 
-    注：该函数只负责删文件，不摘除追踪表条目（摘除是 _periodic_cleanup 的职责）。
-    """
+
+def test_upload_lands_in_dedicated_dir(client):
+    """D2：上传文件写入专用目录；进程级注册表已移除。"""
+    assert not hasattr(app_module, "_UPLOAD_FILES"), "进程级注册表应已移除"
+    assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
+    with client.session_transaction() as sess:
+        path = pathlib.Path(sess["_data_path"])
+    assert path.parent == app_module._upload_dir(), "上传文件必须落在专用目录内"
+    assert path.exists()
+
+
+def test_sweep_expired_removes_stale_keeps_fresh():
+    """D2：按 mtime 扫描——过期文件删除、未过期文件保留（不依赖任何注册表）。"""
+    upload_dir = app_module._upload_dir()
+    stale = upload_dir / "ss-stale.parquet"
+    fresh = upload_dir / "ss-fresh.parquet"
+    stale.write_bytes(b"x")
+    fresh.write_bytes(b"x")
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    os.utime(stale, (old_t, old_t))
+
+    assert app_module._sweep_expired(force=True) == 1
+    assert not stale.exists(), "过期文件应被删除"
+    assert fresh.exists(), "未过期文件必须保留"
+
+
+def test_cleanup_uploads_clears_upload_dir(client):
+    """atexit 兜底：进程退出清空本目录全部临时文件（不再依赖注册表）。"""
     assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
     with client.session_transaction() as sess:
         path = sess["_data_path"]
-    assert os.path.exists(path)
+    (app_module._upload_dir() / "ss-exit.parquet").write_bytes(b"x")
+
     app_module._cleanup_uploads()
+
     assert not os.path.exists(path)
+    assert list(app_module._upload_dir().glob("*.parquet")) == []
 
 
-def test_periodic_cleanup_purges_stale_and_missing(client, monkeypatch):
-    """定期清理：过期文件（mtime>24h）删除、幽灵路径移出追踪表（app.py:70-100）。"""
-    # 审查 2026-09-19 B7：阈值已集中到 services/config.py，且以属性访问读取 → 可打补丁
-    monkeypatch.setattr(config_module, "CLEANUP_INTERVAL_REQUESTS", 1)  # 每次请求都触发
-    stale = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)  # noqa: SIM115
-    stale.close()
-    old_t = time.time() - 90_000
-    os.utime(stale.name, (old_t, old_t))
-    ghost = stale.name + ".ghost"
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.extend([stale.name, ghost])
+def test_periodic_cleanup_sweeps_stale_via_request(client, monkeypatch):
+    """D2：请求路径触发清理（节流由 CLEANUP_MIN_INTERVAL_SECONDS 控制）。"""
+    monkeypatch.setattr(config_module, "CLEANUP_MIN_INTERVAL_SECONDS", 0)
+    stale = app_module._upload_dir() / "ss-stale.parquet"
+    stale.write_bytes(b"x")
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    os.utime(stale, (old_t, old_t))
+
     assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
-    assert not os.path.exists(stale.name), "过期文件应被定期清理删除"
-    with app_module._upload_lock:
-        assert stale.name not in app_module._UPLOAD_FILES
-        assert ghost not in app_module._UPLOAD_FILES
-        assert len(app_module._UPLOAD_FILES) == 1, "仅剩本次上传的新文件"
+    assert not stale.exists(), "过期文件应由请求路径上的清理删除"
+
+
+def test_sweep_expired_is_throttled(monkeypatch):
+    """节流：距上次扫描不足下限时直接返回 0（避免每请求都做目录 I/O）。"""
+    monkeypatch.setattr(config_module, "CLEANUP_MIN_INTERVAL_SECONDS", 3600)
+    upload_dir = app_module._upload_dir()
+    stale = upload_dir / "ss-throttled.parquet"
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    stale.write_bytes(b"x")
+    os.utime(stale, (old_t, old_t))
+
+    app_module._sweep_expired(force=True)  # 建立时间戳（并清掉当前过期文件）
+    stale.write_bytes(b"x")
+    os.utime(stale, (old_t, old_t))
+
+    assert app_module._sweep_expired() == 0, "节流窗口内不应扫描"
+    assert stale.exists()
 
 
 # ── analyze 校验分支 ──
@@ -500,39 +529,34 @@ def test_run_server_delegates_to_cli():
 # ── 清理链 OSError 防御分支 ──
 
 
-def test_cleanup_uploads_survives_unlink_oserror(monkeypatch):
-    """unlink 失败（文件被占用等）→ 静默跳过，不中断清理（app.py:56-60）。"""
+def test_cleanup_uploads_survives_unlink_oserror(client, monkeypatch):
+    """unlink 失败（文件被占用等）→ 跳过该文件，不中断清理。"""
+    assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
+    with client.session_transaction() as sess:
+        path = sess["_data_path"]
 
-    def _busy(path, *args, **kwargs):
+    def _busy(self, *args, **kwargs):
         raise OSError("文件被占用")
 
-    monkeypatch.setattr(os, "unlink", _busy)
-    monkeypatch.setattr(os.path, "exists", lambda p: True)  # 强制进入 unlink 分支
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.append("Z:/occupied/dummy.parquet")
+    monkeypatch.setattr(pathlib.Path, "unlink", _busy)
     app_module._cleanup_uploads()  # 不应抛异常
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
+    assert os.path.exists(path)
 
 
-def test_periodic_cleanup_survives_getmtime_oserror(client, monkeypatch):
-    """getmtime 失败 → 跳过该文件继续清理其余（app.py:87-100）。"""
-    monkeypatch.setattr(config_module, "CLEANUP_INTERVAL_REQUESTS", 1)
+def test_sweep_expired_survives_stat_oserror(monkeypatch):
+    """mtime 读取失败 → 跳过该文件继续清理（防御分支不抛异常）。"""
+    broken = app_module._upload_dir() / "ss-broken.parquet"
+    broken.write_bytes(b"x")
+    real_stat = pathlib.Path.stat
 
-    def _boom(path):
-        if path.endswith(".parquet"):
+    def _boom(self, **kwargs):
+        if self.suffix == ".parquet":
             raise OSError("stat 失败")
-        return time.time()
+        return real_stat(self, **kwargs)
 
-    real_exists = os.path.exists
-    monkeypatch.setattr(os.path, "getmtime", _boom)
-    stale = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)  # noqa: SIM115
-    stale.close()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.append(stale.name)
-    assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
-    # getmtime 抛 OSError → 该路径未被删除也未被移出（防御分支不中断请求）
-    assert os.path.exists(stale.name)
+    monkeypatch.setattr(pathlib.Path, "stat", _boom)
+    assert app_module._sweep_expired(force=True) == 0
+    assert broken in list(app_module._upload_dir().glob("*.parquet"))
 
 
 # ── 上传解析防御分支 ──
