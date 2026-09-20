@@ -150,7 +150,9 @@ def test_partial_table_sorted_by_absolute_partial():
     df = result.tables["partial_correlations"]
 
     assert list(df.columns) == ["因子", "零阶相关(r)", "偏相关(r_partial)", "p值", "变化"]
-    assert list(df["因子"]) == sorted(df["因子"], key=lambda f: -abs(_partial_row(result, f)["偏相关(r_partial)"]))
+    assert list(df["因子"]) == sorted(
+        df["因子"], key=lambda f: -abs(_partial_row(result, f)["偏相关(r_partial)"])
+    )
 
 
 def test_control_and_target_excluded_from_factor_list():

@@ -154,5 +154,5 @@ def test_error_responses_do_not_leak_internals(client, csrf, payload, filename):
     assert resp.status_code == 400, (resp.status_code, resp.get_json())
 
     body = resp.get_data(as_text=True)
-    for leaked in ("Traceback", "site-packages", "File \"", "smartsuite/", "smartsuite\\\\"):
+    for leaked in ("Traceback", "site-packages", 'File "', "smartsuite/", "smartsuite\\\\"):
         assert leaked not in body, f"响应泄漏内部信息 {leaked!r}：{body[:200]}"
