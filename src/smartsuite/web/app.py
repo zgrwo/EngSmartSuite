@@ -29,10 +29,10 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
+from smartsuite.core.constants import GROUP_COLORS
 from smartsuite.core.exceptions import CsvEncodingError, ValidationError
 from smartsuite.services.data_io import read_csv_with_encoding
 from smartsuite.services.orchestrator import (
-    GROUP_COLORS,
     NO_DATA_TASKS,
     NO_TARGET_TASKS,
     TASK_GROUPS,

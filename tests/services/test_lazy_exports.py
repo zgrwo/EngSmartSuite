@@ -120,18 +120,29 @@ def test_engine_all_names_resolve_or_are_constants():
         assert getattr(engine, name) is not None, f"{name} 不可解析"
 
 
-# ── orchestrator 的惰性桥接 ──
+# ── 桥接出口（B4：借道改为显式模块）──
 
 
-def test_orchestrator_lazy_round_for_display_bridge():
-    """web 经 orchestrator 引用 round_for_display；惰性解析后语义不变。"""
-    orch = importlib.import_module("smartsuite.services.orchestrator")
+def test_bridge_exports_engine_display_rounding():
+    """web 经 `services.bridge` 取引擎的展示口径；必须是同一函数对象。"""
     from smartsuite.engine._utils import round_for_display as real
+    from smartsuite.services.bridge import round_for_display as bridged
 
-    assert orch.round_for_display is real
+    assert bridged is real
 
 
-def test_orchestrator_unknown_attribute_raises():
+def test_orchestrator_no_longer_carries_borrowed_names():
+    """B4：orchestrator 不再为 web 转手导出（借道退出它，改为命名出口）。"""
     orch = importlib.import_module("smartsuite.services.orchestrator")
+
+    assert not hasattr(orch, "round_for_display")
+    assert not hasattr(orch, "GROUP_COLORS")
     with pytest.raises(AttributeError):
-        _ = orch.毫无此名
+        _ = orch.round_for_display
+
+
+def test_orchestrator_has_no_lazy_bridge_left():
+    """orchestrator 的 __getattr__ 惰性桥接已移除（避免两条并行取用路径）。"""
+    orch = importlib.import_module("smartsuite.services.orchestrator")
+
+    assert "__getattr__" not in vars(orch)

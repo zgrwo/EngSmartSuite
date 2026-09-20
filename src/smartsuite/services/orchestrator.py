@@ -3,32 +3,11 @@
 import logging
 import time
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from smartsuite.core.constants import GROUP_COLORS  # noqa: F401 — re-export for web layer
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
 from smartsuite.services.task_spec import TASK_SPECS, derive
-
-if TYPE_CHECKING:  # 类型层声明；运行时按需导入（见下方 __getattr__）
-    from smartsuite.engine._utils import round_for_display  # noqa: F401
-
-
-def __getattr__(name: str):
-    """惰性桥接 `round_for_display`（web 经 orchestrator 引用）。
-
-    审查 2026-09-19 B2：模块级 `from smartsuite.engine._utils import …` 会触发
-    `engine/__init__`（matplotlib + 中文字体扫描），使只需任务清单的 CLI 冷启动
-    白付绘图栈成本。改为按需导入，`from smartsuite.services.orchestrator import
-    round_for_display` 的语义不变。
-    """
-    if name == "round_for_display":
-        from smartsuite.engine._utils import round_for_display
-
-        globals()["round_for_display"] = round_for_display
-        return round_for_display
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
 
 logger = logging.getLogger(__name__)
 

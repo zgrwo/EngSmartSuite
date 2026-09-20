@@ -17,6 +17,7 @@ import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import ValidationError
+from smartsuite.services.bridge import round_for_display
 from smartsuite.services.data_io import (
     infer_hypothesis_group_col,
     prepare_spc_subgroup_col,
@@ -27,7 +28,6 @@ from smartsuite.services.orchestrator import (
     NO_TARGET_TASKS,
     RAW_CAT_TASKS,
     orchestrate,
-    round_for_display,
 )
 from smartsuite.services.reporter import close_figures
 

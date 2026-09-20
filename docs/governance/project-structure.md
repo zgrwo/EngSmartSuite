@@ -36,6 +36,7 @@ EngSmartSuite/
 │       ├── core/                   # ① 数据契约层：仅 pandas+pydantic（AnalysisRequest 为 Pydantic BaseModel）
 │       │   ├── __init__.py
 │       │   ├── contracts.py        #   AnalysisRequest / AnalysisResult
+│       │   ├── constants.py        #   GROUP_COLORS（跨层配色常量，纯数据：web/engine 都取）
 │       │   └── exceptions.py       #   分层异常体系（3 层）
 │       │
 │       ├── engine/                 # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
@@ -84,6 +85,7 @@ EngSmartSuite/
 │       │   ├── orchestrator.py     #   7 组注册结构（由 task_spec.derive 派生）+ 编排
 │       │   ├── data_io.py          #   Excel 读写 + 校验 + 预处理
 │       │   ├── reporter.py         #   多格式输出: to_excel / to_pdf / to_ppt / to_html
+│       │   ├── bridge.py           #   引擎能力出口（web 经此取 round_for_display）
 │       │   └── audit.py            #   综合审计: process_audit / batch_analyze
 │       │
 │       └── web/                    # Web UI 层 (Flask)

@@ -122,8 +122,10 @@ EngSmartSuite/
 ### 1. 架构隔离
 
 - engine/ 零业务框架依赖（纯 Python + numpy/scipy/pandas + matplotlib/sklearn/statsmodels 统计栈；禁止 xlwings/flask）
-- web/ 通过 orchestrator 间接调用 engine/
+- web/ 通过 services/ 间接调用 engine/：编排走 `orchestrator.py`，引擎能力出口走 `bridge.py`（借道导出不得挂在无关模块上）
+- cli.py 只依赖 services/（第五入口，不直接依赖 engine/）
 - 新增分析函数必须走 8 步注册清单（注册只有 1 处：`services/task_spec.py` 的 `TASK_SPECS`）
+- 以上分层方向由 `tests/guards/test_layer_boundaries.py` 强制（引擎零框架依赖 / web 与 cli 不直取 engine / core 不反向依赖 / services 无 F401 借道豁免）
 
 ### 2. 防错原则
 
