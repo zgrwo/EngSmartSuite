@@ -1,6 +1,6 @@
 """自相关与 Lasso 微尺度回归 — ACF 分母相对判据、Lasso 相对选择阈值。
 
-B3：detection.py `_acf_values` 分母保护 `denom <= 1e-12` 为量纲绑定绝对判据，
+B3：detection `trend` 模块的 `_acf_values` 分母保护 `denom <= 1e-12` 为量纲绑定绝对判据，
 微尺度残差（~1e-13，纳米/微应变数据）恒命中退化分支，AR(1) 真实自相关
 [1, 0.45, 0.211] 被静默吞为 [1, 0, 0]（trend_forecast 的 DW/Ljung-Box 随之误判）。
 修复：改为相对判据 `denom <= 1e-12 * max(Σx², 1e-300)`（与 exploratory.py ssx 同族）。
@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.engine.detection import _acf_values
+from smartsuite.engine.detection.trend import _acf_values
 from smartsuite.engine.doe_opt import lasso_regression
 
 

@@ -81,7 +81,15 @@ EngSmartSuite/
 │       │   │   ├── outlier.py      #     outlier_consensus
 │       │   │   └── anomaly.py      #     anomaly_detect
 │       │   ├── reliability.py      #   可靠性/MSA (gage_rr, tolerance_interval, survival_analysis)
-│       │   ├── inverse.py          #   工艺参数反解 (inverse_solve: 角色识别/前向建模/约束求解)
+│       │   ├── inverse/            #   工艺参数反解子包（2026-09-21 由 inverse.py 拆分，公开 API 不变）
+│       │   │   ├── __init__.py     #     re-export inverse_parameter_solve / DEFAULT_PREFIXES
+│       │   │   ├── _roles.py       #     角色识别与行拆分
+│       │   │   ├── _params.py      #     参数解析与任务级默认值
+│       │   │   ├── _models.py      #     前向/速率模型拟合
+│       │   │   ├── _bounds.py      #     边界、尺度与权重规整
+│       │   │   ├── _solver.py      #     单请求求解与可达性采样
+│       │   │   ├── _report.py      #     公式、表格与图窗
+│       │   │   └── solve.py        #     inverse_parameter_solve（公开入口）
 │       │   └── exploratory.py      #   探索性分析 (box_chart, scatter_plot...)
 │       │
 │       ├── services/               # ② 应用服务层：唯一桥接层
@@ -131,6 +139,7 @@ EngSmartSuite/
 │   │   ├── test_fuzz.py            #   模糊测试
 │   │   ├── test_hypothesis_doe_capability.py # 假设检验/DOE/过程能力 回归
 │   │   ├── test_inverse.py         #   工艺参数反解（角色/建模/求解/可达/端到端）
+│   │   ├── test_inverse_package_parity.py # 工艺参数反解子包拆分组装对照
 │   │   ├── test_engine_bootstrap.py #  引擎包根初始化（MATPLOTLIB_FONT_PATH 分支）
 │   │   ├── test_engine_input_guards.py # 引擎输入防护（审查修复钉死）
 │   │   └── test_spc_hypothesis_basics.py # SPC/假设检验基础覆盖

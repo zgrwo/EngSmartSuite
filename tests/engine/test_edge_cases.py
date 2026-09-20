@@ -1233,7 +1233,7 @@ def test_ljung_box_q_matches_statsmodels():
     """Round-2 #A3a：Ljung-Box Q 与 statsmodels 参考一致（旧 np.corrcoef 偏大）。"""
     import statsmodels.stats.diagnostic as sm_diag
 
-    from smartsuite.engine.detection import _ljung_box
+    from smartsuite.engine.detection.trend import _ljung_box
 
     np.random.seed(7)
     x = np.random.normal(0, 1, 200)
@@ -1252,7 +1252,7 @@ def test_acf_values_match_statsmodels():
     """
     import statsmodels.tsa.stattools as sm_ts
 
-    from smartsuite.engine.detection import _acf_values
+    from smartsuite.engine.detection.trend import _acf_values
 
     np.random.seed(7)
     x = np.random.normal(0, 1, 200)

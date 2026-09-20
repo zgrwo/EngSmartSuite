@@ -250,7 +250,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
     ),
     TaskSpec(
         key="inverse_solve",
-        func_path="smartsuite.engine.inverse:inverse_parameter_solve",
+        func_path="smartsuite.engine.inverse.solve:inverse_parameter_solve",
         label="工艺参数反解",
         group="建模优化",
         default_params={
@@ -315,28 +315,28 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
     ),
     TaskSpec(
         key="trend_forecast",
-        func_path="smartsuite.engine.detection:trend_forecast",
+        func_path="smartsuite.engine.detection.trend:trend_forecast",
         label="趋势预测",
         group="过程监控",
         default_params={"forecast_steps": 5},
     ),
     TaskSpec(
         key="anomaly_detect",
-        func_path="smartsuite.engine.detection:anomaly_detect",
+        func_path="smartsuite.engine.detection.anomaly:anomaly_detect",
         label="异常检测",
         group="过程监控",
         default_params={"method": "iqr", "alpha": 0.05, "max_outliers": 5},
     ),
     TaskSpec(
         key="change_point",
-        func_path="smartsuite.engine.detection:change_point_detect",
+        func_path="smartsuite.engine.detection.change_point:change_point_detect",
         label="变点检测",
         group="过程监控",
         default_params={"n_changepoints": 5},
     ),
     TaskSpec(
         key="outlier_consensus",
-        func_path="smartsuite.engine.detection:outlier_consensus",
+        func_path="smartsuite.engine.detection.outlier:outlier_consensus",
         label="异常共识(3方法投票)",
         group="过程监控",
     ),
