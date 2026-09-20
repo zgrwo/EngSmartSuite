@@ -155,7 +155,13 @@ EngSmartSuite/
 │   │   ├── test_micro_scale_guards.py     # 微尺度绝对阈值同族/展示层/哨兵
 │   │   ├── test_acf_lasso_guards.py       # ACF 与 Lasso 微尺度相对判据
 │   │   ├── test_capability_spc_guards.py  # 能力/SPC/DOE 防护（规格限哨兵/相对判据/分组校验）
+│   │   ├── test_layer_boundaries.py       # 分层方向 + 借道导出显式化（AST，AGENTS.md 红线）
+│   │   ├── test_lazy_imports.py           # 按需加载契约（子进程断言 sys.modules 内容）
+│   │   ├── test_matplotlib_backend_order.py # Agg 后端时序 + 全仓不得模块级导入 pyplot
+│   │   ├── test_figure_cleanup.py         # 图窗释放（close_figures 单一实现）
 │   │   └── test_cross_layer_guards.py     # 跨层防护（序列化/预处理/Web API 校验）
+│   ├── security/                   #   Web 安全回归（按攻击面组织：CSRF/CSP/上传/不泄漏）
+│   │   └── test_web_security.py    #   跨端点不变量：POST 端点自动发现 + CSRF 全覆盖
 │   ├── crossval/                   #   关键方法交叉验证（手工公式/已知性质）
 │   │   └── test_method_crossval.py
 │   └── scripts/                    #   治理脚本测试
