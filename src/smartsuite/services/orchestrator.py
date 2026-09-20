@@ -2,11 +2,11 @@
 
 import logging
 import time
-import uuid
 from typing import Any
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
+from smartsuite.services.error_messages import build_error_result, new_error_id
 from smartsuite.services.task_spec import TASK_SPECS, derive
 
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     except SmartSuiteError as e:
         elapsed = time.monotonic() - t0
         # 审查 2026-09-19 E9：异常路径生成 error_id，让用户凭编号定位日志现场
-        error_id = uuid.uuid4().hex[:8]
+        error_id = new_error_id()
         logger.warning(
             "分析任务 SmartSuite异常 [error_id=%s]: task=%s, elapsed=%.2fs, error=%s",
             error_id,
@@ -115,18 +115,10 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
             elapsed,
             str(e)[:200],
         )
-        return AnalysisResult(
-            task=req.task,
-            status="error",
-            messages=[
-                f"分析执行失败: {str(e)}",
-                "如问题持续出现，请联系开发者",
-                f"错误编号: {error_id}（反馈时请提供此编号，便于定位日志）",
-            ],
-        )
+        return build_error_result(req.task, e, error_id)
     except Exception as e:
         elapsed = time.monotonic() - t0
-        error_id = uuid.uuid4().hex[:8]
+        error_id = new_error_id()
         logger.exception(
             "分析任务执行失败 [error_id=%s]: task=%s, elapsed=%.2fs, error_type=%s, error=%s",
             error_id,
@@ -135,29 +127,5 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
             type(e).__name__,
             str(e)[:200],
         )
-        # 将异常转为中文工艺术语，不暴露原始 traceback
-        err_cls = type(e).__name__
-        detail_map = {
-            "ValueError": "数据格式不符合分析要求，请检查目标列和因子列的数据类型",
-            "KeyError": "数据处理异常（键不存在）：请检查数据列名与参数配置；若列名无误则可能是引擎内部错误，请反馈日志",
-            "TypeError": "数据类型不匹配，请确保所有因子列为数值型或类别型",
-            "IndexError": "数据索引异常，请检查数据是否包含空行或异常索引",
-            "MemoryError": "数据量过大超出内存限制，请减少数据行数或列数",
-            "LinAlgError": "矩阵运算失败，数据可能存在严重共线性或数值异常",
-            "OverflowError": "数值溢出，数据中可能存在极端值，请检查数据范围",
-            "RuntimeError": "计算过程出现运行时错误，请检查参数设置是否合适",
-            "AttributeError": "数据结构异常，请确认数据列名和格式正确",
-            "FileNotFoundError": "找不到指定的文件，请检查文件路径",
-            "ZeroDivisionError": "计算中遇到除零错误，数据可能存在常数列或标准差为零",
-            "ImportError": "缺少必要的依赖库，请确认已安装完整的 smartsuite[all]",
-        }
-        detail = detail_map.get(err_cls, "分析计算过程中出现异常，请检查数据完整性")
-        return AnalysisResult(
-            task=req.task,
-            status="error",
-            messages=[
-                f"分析执行失败: {detail}",
-                "如问题持续出现，请联系开发者并提供数据样本",
-                f"错误编号: {error_id}（反馈时请提供此编号，便于定位日志）",
-            ],
-        )
+        # 异常→工艺术语的映射与消息组装集中于 services/error_messages.py（审查 B5）
+        return build_error_result(req.task, e, error_id)
