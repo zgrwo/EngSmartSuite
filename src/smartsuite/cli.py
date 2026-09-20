@@ -25,7 +25,6 @@ from smartsuite.services.orchestrator import (
     TASK_REGISTRY,
     orchestrate,
 )
-from smartsuite.services.reporter import close_figures
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +234,11 @@ def main():
                 except Exception as e:
                     logger.exception("图表保存失败: %s", out_path)
                     print(f"错误: 图表保存失败: {e}", file=sys.stderr)
-        # 图窗释放：与审计层共用单一实现（services.reporter.close_figures）
+        # 图窗释放：与审计层共用单一实现（services.reporter.close_figures）。
+        # 函数内导入（审查 2026-09-19 B2）：reporter 模块级导入 matplotlib.pyplot，
+        # 模块级拉入它会让 `smartsuite list`（只需任务清单）付满额绘图栈启动成本。
+        from smartsuite.services.reporter import close_figures
+
         close_figures(result.figures)
         for msg in result.messages:
             print(f"  [{result.status}] {msg}")

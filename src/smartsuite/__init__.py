@@ -1,7 +1,9 @@
 """SmartSuite — 工艺数据分析工具箱。"""
 
+import importlib.util
 import logging
 import os
+import sys
 import tempfile
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
@@ -88,14 +90,30 @@ _CORE_DEPS: dict[str, str] = {
 }
 
 
+def _module_available(pkg: str) -> bool:
+    """依赖是否可用——**只探测不导入**（审查 2026-09-19 B2 第①层）。
+
+    原实现用 `__import__` 真实导入 6 个核心依赖，使任何 `import smartsuite.*`
+    （哪怕只取数据契约）都付满额启动成本（实测 sklearn 单项 0.89s、合计 ~1.5s）。
+
+    `find_spec` 对已导入模块走 `sys.modules[name].__spec__`，个别模块该值为 None
+    会抛 ValueError——此时模块已在 sys.modules 中，等价于「可用」。
+    语义差异：本函数只回答「能否找到」，不回答「导入是否成功」；已安装但导入即
+    失败的损坏环境不再命中友善文案，而会在首次实际使用时暴露原始错误。
+    """
+    if pkg in sys.modules:
+        return True
+    try:
+        return importlib.util.find_spec(pkg) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def check_core_deps():
     """检查核心依赖，缺失时抛出友好的中文 ImportError。"""
-    missing: list[str] = []
-    for pkg, hint in _CORE_DEPS.items():
-        try:
-            __import__(pkg)
-        except ImportError:
-            missing.append(f"  • {pkg} → {hint}")
+    missing = [
+        f"  • {pkg} → {hint}" for pkg, hint in _CORE_DEPS.items() if not _module_available(pkg)
+    ]
 
     if missing:
         msg = (

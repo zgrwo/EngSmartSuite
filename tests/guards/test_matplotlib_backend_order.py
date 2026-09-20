@@ -29,13 +29,18 @@ import smartsuite
 _SRC = Path(smartsuite.__file__).parent
 _ROOT = _SRC.parents[1]
 
-# 每个入口都必须在**新解释器**中解析出 agg 后端
+# 入口 → (语句, 期望)
+#   "required"  = 必须加载 matplotlib 且后端为 Agg（后端配置的归属路径）
+#   "forbidden" = 不得加载（B2 惰性化目标：不需要绘图就不付绘图栈成本）
+#   "optional"  = 允许加载；**若**加载则后端必须已是 Agg
 _ENTRY_POINTS = [
-    ("CLI", "import smartsuite.cli"),
-    ("Web app", "import smartsuite.web.app"),
-    ("Web api", "import smartsuite.web.api"),
-    ("services.reporter", "import smartsuite.services.reporter"),
-    ("engine", "import smartsuite.engine"),
+    ("CLI", "import smartsuite.cli", "forbidden"),
+    ("services.reporter", "import smartsuite.services.reporter", "forbidden"),
+    ("services.orchestrator", "import smartsuite.services.orchestrator", "forbidden"),
+    ("Web app", "import smartsuite.web.app", "optional"),
+    ("Web api", "import smartsuite.web.api", "optional"),
+    ("engine", "import smartsuite.engine", "required"),
+    ("engine 分析子模块", "import smartsuite.engine.root_cause.correlation", "required"),
 ]
 
 
@@ -53,7 +58,17 @@ _MEMORY_HINTS = ("Memory allocation", "OpenBLAS error", "unable to allocate")
 
 
 def _run_probe(statement: str) -> subprocess.CompletedProcess:
-    code = f"{statement}\nimport matplotlib\nprint(matplotlib.get_backend().lower())"
+    code = (
+        f"{statement}\n"
+        "import sys\n"
+        "loaded = 'matplotlib' in sys.modules\n"
+        "if loaded:\n"
+        "    import matplotlib\n"
+        "    backend = matplotlib.get_backend()\n"
+        "else:\n"
+        "    backend = '-';\n"
+        'print(f"{loaded}|{backend}")\n'
+    )
     return subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
@@ -65,8 +80,11 @@ def _run_probe(statement: str) -> subprocess.CompletedProcess:
     )
 
 
-def _backend_in_fresh_interpreter(statement: str) -> str:
-    """在独立解释器中执行 statement 后读取后端名（小写）。
+def _backend_in_fresh_interpreter(statement: str) -> tuple[bool, str]:
+    """在独立解释器中执行 statement，返回 (是否加载了 matplotlib, 后端名)。
+
+    必须先探测 sys.modules 再导入 matplotlib——否则"后端为 agg"只是因为探测
+    代码自己把 matplotlib 拉进来了（本文件早期版本的真实缺陷）。
 
     内存不足时重试一次：这类失败是环境（父进程已持有全套依赖）而非被测契约的问题，
     但**不得静默跳过**——两次都失败仍报错，并在消息中区分“环境无法探测”与“后端错误”。
@@ -77,22 +95,41 @@ def _backend_in_fresh_interpreter(statement: str) -> str:
     assert proc.returncode == 0, (
         f"子进程无法完成后端探测（环境内存不足或导入失败）：\n{proc.stderr[-600:]}"
     )
-    return (proc.stdout or "").strip().splitlines()[-1]
+    loaded, _, backend = (proc.stdout or "").strip().splitlines()[-1].partition("|")
+    return loaded == "True", backend.lower()
 
 
-@pytest.mark.parametrize(("name", "statement"), _ENTRY_POINTS)
-def test_entry_point_resolves_to_agg_backend(name, statement):
-    """五个入口在全新解释器中都必须得到 agg（防 TkAgg 等交互后端）。"""
-    backend = _backend_in_fresh_interpreter(statement)
-    assert backend == "agg", f"{name}: 期望 agg 后端，实际 {backend!r}"
+@pytest.mark.parametrize(("name", "statement", "expectation"), _ENTRY_POINTS)
+def test_matplotlib_load_and_backend_by_entry_point(name, statement, expectation):
+    """按入口分层断言：配置归属路径必须加载且为 agg；免绘图路径不得加载。"""
+    loaded, backend = _backend_in_fresh_interpreter(statement)
+    if expectation == "required":
+        assert loaded, f"{name}: 应加载 matplotlib（后端配置的归属路径）"
+    if expectation == "forbidden":
+        assert not loaded, f"{name}: 不需要绘图却加载了 matplotlib（B2 惰性化回退）"
+    assert (not loaded) or backend == "agg", (
+        f"{name}: matplotlib 在导入期被加载却锁定了非 Agg 后端（{backend}）"
+    )
 
 
-def test_reporter_import_keeps_agg_in_this_process():
-    """本进程内导入 reporter 后后端仍为 agg（与上条互补：锁当前解释器状态）。"""
+def test_close_figures_does_not_disturb_resolved_backend():
+    """进程内：engine 配置已生效时，close_figures 内部的惰性 pyplot 导入不得改变后端。
+
+    B2 后 reporter 不再模块级导入 pyplot（否则会早于 engine 配置锁定 tkagg），
+    因此这里锁的是「惰性导入发生在配置之后」这一实际使用路径。
+    """
     import matplotlib
-    import smartsuite.services.reporter  # noqa: F401
+    import matplotlib.pyplot as plt
 
+    import smartsuite.engine  # noqa: F401 — 确保后端配置已执行
+    from smartsuite.services.reporter import close_figures
+
+    before = matplotlib.get_backend()
+    fig = plt.figure()
+    close_figures([fig])
+    assert matplotlib.get_backend() == before
     assert matplotlib.get_backend().lower() == "agg"
+    assert plt.get_fignums() == []
 
 
 # ── 静态守卫 ──
@@ -153,19 +190,22 @@ def _module_level_imports(tree: ast.Module) -> set[str]:
 
 
 def test_web_does_not_import_pyplot_at_module_level():
-    """web/ 不得在模块级导入 pyplot：它早于 engine 配置，会锁定错误后端。
+    """全仓不得在任何模块级导入 pyplot：它早于 engine 的 Agg 配置，会锁定错误后端。
 
-    需要 pyplot 时改为函数内导入（届时 engine 配置必然已执行）。
+    `matplotlib.figure` / `matplotlib` 允许模块级导入（不锁后端，engine 子模块用它
+    构造 Figure），**pyplot 只能函数内按需导入**。
     """
     offenders = {}
-    for path in _iter_source_files(_SRC / "web"):
+    for path in _iter_source_files(_SRC):
         imported = _module_level_imports(ast.parse(path.read_text(encoding="utf-8")))
         if "matplotlib.pyplot" in imported:
             offenders[str(path.relative_to(_SRC))] = "模块级 import matplotlib.pyplot"
-    assert not offenders, f"web/ 模块级导入 pyplot（时序脆弱）：{offenders}"
+    assert not offenders, (
+        f"以下位置在模块级导入 pyplot（会锁定非 Agg 后端，改为函数内导入）：{offenders}"
+    )
 
 
-def test_engine_package_never_imports_pyplot():
+def test_engine_package_does_not_import_pyplot_at_module_level():
     """引擎层只用 matplotlib.figure 对象，不依赖 pyplot（避免锁定后端）。"""
     offenders = {}
     for path in _iter_source_files(_SRC / "engine"):

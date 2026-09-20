@@ -7,8 +7,6 @@ import numbers
 import os
 import warnings
 
-import matplotlib.pyplot as plt
-
 from smartsuite.core.contracts import AnalysisResult
 from smartsuite.core.exceptions import OutputError
 
@@ -47,6 +45,11 @@ def close_figures(figs=None) -> None:
     注意: `Figure` 无 `close()` 方法（matplotlib API），必须经 pyplot 关闭；
     2026-09-01 C-7 教训：`fig.clear()` 不释放绘图后端引用。
     """
+    # 函数内导入（审查 2026-09-19 B2）：模块级导入 pyplot 会让
+    # `import smartsuite.services.reporter` 在 engine 配置 Agg 之前锁定后端
+    # （本机默认为 tkagg），也使只需表格输出的调用方白付绘图栈成本。
+    import matplotlib.pyplot as plt
+
     if figs is None:
         plt.close("all")
         return
@@ -116,7 +119,7 @@ def to_excel(result: AnalysisResult, workbook, sheet_name: str = "分析结果")
             pic.pictures.add(
                 buf, left=pic.range("A1").left, top=pic.range("A1").top, width=600, height=450
             )
-            plt.close(fig)
+            close_figures([fig])
         return sheet_name
     except Exception as e:
         logger.exception("Excel 输出失败")
@@ -195,7 +198,7 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
                 c.drawImage(ImageReader(buf), 50, y - 300, width=450, height=300)
             finally:
                 # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
-                plt.close(fig)
+                close_figures([fig])
             y -= 320
 
         c.save()
@@ -234,7 +237,7 @@ def to_ppt(result: AnalysisResult, output_path: str, template_path: str | None =
                 slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5), Inches(12), Inches(6.5))
             finally:
                 # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
-                plt.close(fig)
+                close_figures([fig])
 
         prs.save(output_path)
         return output_path
@@ -334,7 +337,7 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
                 )
             finally:
                 # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
-                plt.close(fig)
+                close_figures([fig])
 
         # 元数据
         if result.metadata:

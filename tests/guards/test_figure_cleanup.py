@@ -74,11 +74,23 @@ def test_close_figures_is_idempotent():
 # ── 分层可达性：共享实现必须能被两侧导入 ──
 
 
-def test_cli_reuses_same_function_object():
-    """cli.py 应复用 reporter.close_figures（同一函数对象，非副本）。"""
-    from smartsuite.cli import close_figures as cli_close_figures
+def test_cli_delegates_figure_cleanup_to_shared_implementation():
+    """cli.py 必须调用 services.reporter.close_figures（不得自行实现关闭逻辑）。
 
-    assert cli_close_figures is close_figures
+    B2 后该导入改为**函数内**（模块级导入 reporter 会让 `smartsuite list`
+    拉起 matplotlib），故改为 AST 断言「已导入且确实调用」，而非模块属性身份。
+    """
+    path = _SRC / "cli.py"
+    assert "smartsuite.services.reporter" in _imported_module_names(path), (
+        "cli.py 应从 smartsuite.services.reporter 导入 close_figures"
+    )
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "close_figures" in called, "cli.py 应实际调用 close_figures（防只导入不用）"
 
 
 def test_audit_keeps_adapter_to_shared_implementation():

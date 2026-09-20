@@ -11,6 +11,7 @@ matplotlib = _mpl  # 向后兼容别名
 import logging
 import os
 import platform
+from importlib import import_module
 
 import matplotlib.font_manager as _fm  # noqa: E402 — 显式导入，供字体加载使用
 
@@ -142,7 +143,7 @@ if not _font_loaded:  # pragma: no cover — 完全无中文字体环境才触�
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 # ── 统一可视化样式 ──
-from smartsuite.engine._palette import GROUP_COLORS  # noqa: F401 — 公开导出，供 services 层使用
+from smartsuite.core.constants import GROUP_COLORS  # noqa: F401 — 公开导出（定义已下沉 core，避免此处拉起引擎）
 from smartsuite.engine._palette import PALETTE  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._palette import _to_argb  # noqa: F401 — 公开导出，供 services 层使用
 from smartsuite.engine._constants import (
@@ -163,81 +164,36 @@ _palette_style = get_palette_style()
 for key, val in _palette_style.items():
     matplotlib.rcParams[key] = val
 
-try:
-    from smartsuite.engine.doe_opt import (
-        doe_analysis,
-        doe_design,
-        grid_search,
-        lasso_regression,
-        logistic_regression,
-        multi_objective_opt,
-        quantile_regression,
-        regression_analysis,
-        response_surface_analysis,
-        robust_regression,
-        roc_analysis,
-    )
-except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
-    raise ImportError(
-        f"SmartSuite 引擎初始化失败 (doe_opt): {e}\n"
-        "请确保已安装所有核心依赖：pip install smartsuite"
-    ) from e
+# ── 分析函数惰性导出（审查 2026-09-19 B2 第③层）──
+# 此前 4 个 try/except 在导入期急切拉入 42 个分析函数（连带 sklearn/statsmodels/
+# scipy，实测 doe_opt 单块 0.71s），使任何触碰 engine 的路径都付满额启动成本。
+# 改为 PEP 562 模块级 __getattr__：按名解析、只加载命中所在子包、结果写回 globals 缓存。
+# 保留原有的中文 ImportError 提示（依赖缺失时的友好文案）。
+_LAZY_SUBPACKAGES: tuple[str, ...] = (
+    "smartsuite.engine.doe_opt",
+    "smartsuite.engine.root_cause",
+    "smartsuite.engine.spc_monitor",
+    "smartsuite.engine.inverse",
+)
 
-try:
-    from smartsuite.engine.root_cause import (
-        anova_analysis,
-        cohens_kappa,
-        contingency_analysis,
-        correlation_analysis,
-        cronbach_alpha,
-        decision_tree_analysis,
-        distribution_summary,
-        hypothesis_test,
-        normality_check,
-        power_analysis,
-        proportion_ci,
-        variance_test,
-        vif_analysis,
-    )
-except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
-    raise ImportError(
-        f"SmartSuite 引擎初始化失败 (root_cause): {e}\n"
-        "请确保已安装所有核心依赖：pip install smartsuite"
-    ) from e
 
-try:
-    from smartsuite.engine.spc_monitor import (
-        anomaly_detect,
-        attribute_chart,
-        bootstrap_ci,
-        box_chart,
-        change_point_detect,
-        cusum_chart,
-        ewma_chart,
-        gage_rr,
-        median_ci,
-        outlier_consensus,
-        process_capability_analysis,
-        scatter_plot,
-        spc_nonparametric,
-        survival_analysis,
-        tolerance_interval,
-        trend_forecast,
-        xbar_r_chart,
-    )
-except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
-    raise ImportError(
-        f"SmartSuite 引擎初始化失败 (spc_monitor): {e}\n"
-        "请确保已安装所有核心依赖：pip install smartsuite"
-    ) from e
+def __getattr__(name: str):
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    for package in _LAZY_SUBPACKAGES:
+        try:
+            module = import_module(package)
+        except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
+            raise ImportError(
+                f"SmartSuite 引擎初始化失败 ({package.rsplit('.', 1)[-1]}): {e}；"
+                "请确保已安装所有核心依赖：pip install smartsuite"
+            ) from e
+        if hasattr(module, name):
+            attr = getattr(module, name)
+            globals()[name] = attr  # 缓存：后续访问不再进 __getattr__
+            return attr
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-try:
-    from smartsuite.engine.inverse import inverse_parameter_solve
-except ImportError as e:  # pragma: no cover — 核心依赖缺失才触发的防御分支
-    raise ImportError(
-        f"SmartSuite 引擎初始化失败 (inverse): {e}\n"
-        "请确保已安装所有核心依赖：pip install smartsuite"
-    ) from e
 
 __all__ = [
     "CPK_GOOD",
