@@ -39,6 +39,11 @@ with contextlib.suppress(AttributeError, ValueError):
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# 子进程环境硬化（限 BLAS 线程 + UTF-8）：防内存紧张时子进程 OpenBLAS 分配失败
+# 导致的间歇性假红（详见 scripts/common.py 的 child_env 说明）
+sys.path.insert(0, str(ROOT / "scripts"))
+from common import child_env  # noqa: E402
+
 # 映射表：src 子目录前缀 → 目标测试（目录或文件，相对 ROOT）
 _SRC_TEST_MAP: list[tuple[str, tuple[str, ...]]] = [
     # 回归防线 guards/ 钉住引擎/服务/web 的历史修复——层变更必须带跑
@@ -258,7 +263,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     r = subprocess.run(
-        [sys.executable, "-m", "pytest", *target_tests, "-q", "--tb=short"], cwd=ROOT
+        [sys.executable, "-m", "pytest", *target_tests, "-q", "--tb=short"],
+        cwd=ROOT,
+        env=child_env(),
     )
     return r.returncode
 

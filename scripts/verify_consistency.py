@@ -5,9 +5,15 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# 子进程环境硬化（限 BLAS 线程 + UTF-8）：防内存紧张时子进程 OpenBLAS 分配失败
+# 导致的间歇性假红（详见 scripts/common.py 的 child_env 说明）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import child_env  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -508,6 +514,7 @@ else:
         encoding="utf-8",
         errors="replace",  # 第二轮 #17：子进程输出含无法解码字节时不抛异常
         cwd=ROOT,
+        env=child_env(),
     )
     # 仅检查 returncode，不 grep "failed" 单词 —
     # statsmodels ConvergenceWarning 中含有 "failed to converge" 文字会误判
@@ -530,7 +537,7 @@ r = subprocess.run(
     encoding="utf-8",
     errors="replace",  # 第二轮 #17：同上
     cwd=ROOT,
-    env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    env=child_env(),
 )
 stdout = r.stdout or ""
 check(

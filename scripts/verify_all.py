@@ -39,6 +39,9 @@ with contextlib.suppress(AttributeError, ValueError):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from common import child_env  # noqa: E402
+
 PYTHON = sys.executable
 
 
@@ -47,7 +50,7 @@ def run_step(name: str, cmd: list[str]) -> bool:
     print(f"\n=== {name} ===")
     print(f"  命令: {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, cwd=ROOT)
+        result = subprocess.run(cmd, cwd=ROOT, env=child_env())
     except OSError as e:
         print(f"  [FAIL] {name} 失败（工具未找到: {e}）")
         return False

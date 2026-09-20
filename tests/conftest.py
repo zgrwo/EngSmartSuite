@@ -3,6 +3,22 @@ import pathlib
 
 pytest._repo_root = pathlib.Path(__file__).resolve().parent.parent
 
+# 子进程内存硬化（2026-09-19 B3 根因诊断）：本项目多处守卫/门禁以 subprocess 起**新解释器**
+# （tests/guards/*、scripts/verify_consistency.py 的嵌套 pytest 与 CLI 探针）。子进程
+# import numpy 时 OpenBLAS 按 CPU 核数建线程池，而父进程已持有全套引擎依赖，内存紧张时
+# 子进程会直接以 “OpenBLAS error: Memory allocation still failed after 10 retries” 退出，
+# 表现为无关门禁间歇性假红（曾误判为“未解释现象”）。子进程只需读后端名/跑断言，无 BLAS
+# 并行需求，故在会话级统一限制线程数；用 setdefault 尊重用户显式设置。
+import os as _os
+
+for _var in (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    _os.environ.setdefault(_var, "1")
+
 import numpy as np
 import pandas as pd
 import pytest
