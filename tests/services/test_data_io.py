@@ -381,10 +381,34 @@ def test_read_csv_with_encoding_rejects_utf16(tmp_path):
 
 
 def test_read_csv_with_encoding_rejects_big5(tmp_path):
+    """Big5 样本被拒（安全失败）。
+
+    注意样本依赖性（2026-09-21 实测）：本例通过是因为「度」在 GBK 下不可解码。
+    换成全部由 GBK 可解码汉字组成的 Big5 表头（如「批號」），当前会被静默误解码。
+    该缺口由 `test_big5_short_header_is_silently_misdecoded_as_gbk_known_gap` 钉住。
+    """
     p = tmp_path / "big5.csv"
     p.write_bytes("強度,溫度\n45.1,180\n".encode("big5"))
     with pytest.raises(CsvEncodingError, match="无法识别 CSV 文件编码"):
         read_csv_with_encoding(p)
+
+
+def test_big5_short_header_is_silently_misdecoded_as_gbk_known_gap(tmp_path):
+    """**已知缺口**（2026-09-21 实测，待用户决策）：短表头 Big5 被 GBK 静默误解码。
+
+    成因：常用区 Big5 汉字 82.9%（次常用区 98.0%）在 GBK 下**可解码但解成别的字**，
+    故 k 个汉字组成的表头约有 0.829^k 概率静默乱码（k=1 ≈ 83%、k=2 ≈ 69%）；
+    只有含任一 GBK 不可解码的汉字时才会抛 `CsvEncodingError`（安全失败）。
+
+    复现：`python -c` 把 `批號\nB23\n` 以 Big5 存入文件后调用 `read_csv_with_encoding`。
+
+    本用例是**报警钉子**而非规格：修复（引入编码探测，见 ROADMAP 决策门「非 UTF-8
+    编码探测」）后这里会抛 `CsvEncodingError`，该失败即提醒同步更新本用例与 ROADMAP。
+    """
+    p = tmp_path / "big5_short.csv"
+    p.write_bytes("批號\nB23\n".encode("big5"))
+    df = read_csv_with_encoding(p)
+    assert list(df.columns) == ["у腹"], "此处不再乱码 → 编码探测缺口已修复，请更新文档与 ROADMAP"
 
 
 def test_read_csv_with_encoding_bytesio_reseek():
