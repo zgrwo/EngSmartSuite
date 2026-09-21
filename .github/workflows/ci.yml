@@ -89,6 +89,11 @@ jobs:
         # 而 `uv sync --frozen` 在锁过期时仍退出 0（根包版本不参与依赖图求解），
         # 故本仓已三次手工补齐（148052a 1.3.1 / 8e30d99 ruff 0.16.6 / eeef512 1.4.0）。
         # --offline：无漂移时零网络开销（实测 1ms），避免索引拖慢或抖动。
+        # 文案说明（审查 2026-09-21 G-3）：若**缓存未命中且同时存在漂移**，本步会以
+        # "Packages were unavailable because the network was disabled …" 报错而非
+        # "lockfile needs to be updated"——退出码仍为 1（门禁有效），但文案指向缓存。
+        # 多数情况不会命中该分支：漂移来自 release-please 改 pyproject（uv.lock 未变），
+        # setup-uv 缓存键依赖 uv.lock → 缓存命中、文案正确。
         run: uv lock --offline --check
 
       - name: 安装依赖（冻结锁文件）
