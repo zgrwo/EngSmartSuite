@@ -356,6 +356,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         group="过程监控",
         default_params={
             "mode": "facet",
+            "show_stats": True,
             "group_col": None,
             "usl": None,
             "lsl": None,

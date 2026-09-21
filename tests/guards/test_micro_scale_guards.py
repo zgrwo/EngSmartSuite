@@ -690,6 +690,33 @@ def test_box_chart_micro_scale_group_stats_scale_with_magnitude():
         assert micro_v == pytest.approx(macro_v * 1e-9, rel=0.02), f"{col} 未随量纲同比缩放"
 
 
+def test_box_chart_annotations_match_table_at_micro_scale():
+    """box_chart 箱体下方标注必须与 group_statistics 表逐位一致（微尺度不归零）。
+
+    对应陷阱 9「展示层二次舍入」：标注若用固定 `:g`，对 1e6 量级只留 6 位有效数字，
+    微尺度靠科学计数；修复后走与表格同口径的展示格式化。
+    """
+    rng = np.random.default_rng(11)
+    n = 40
+    df = pd.DataFrame({"y": rng.normal(5.0, 1.0, n) * 1e-9, "g": ["A", "B"] * (n // 2)})
+    r = box_chart(
+        AnalysisRequest(task="box_chart", data=df, target_col="y", feature_cols=["g"], params={})
+    )
+    assert r.status == "ok", r.messages
+    texts = [t.get_text() for t in r.figures[0].axes[0].texts if t.get_text()]
+    stats = r.tables["group_statistics"]
+    for i, (_, row) in enumerate(stats.iterrows()):
+        lines = texts[i * 5 : i * 5 + 5]  # 每组 5 行，顺序固定：n/均值/标准差/最大/最小
+        assert len(lines) == 5, f"第 {i + 1} 组标注行数异常: {lines}"
+        for line, col in zip(lines[1:], ("均值", "标准差", "最大值", "最小值"), strict=True):
+            shown = float(line.split(" ", 1)[1])
+            expected = float(row[col])
+            assert shown != 0.0, f"第 {i + 1} 组「{col}」标注在微尺度下归零: {lines}"
+            assert shown == pytest.approx(expected, rel=1e-6), (
+                f"第 {i + 1} 组「{col}」标注 {shown} 与表格 {expected} 不一致"
+            )
+
+
 def test_grid_search_micro_scale_optimal_params_scale_with_magnitude():
     rng = np.random.default_rng(3)
     n = 80

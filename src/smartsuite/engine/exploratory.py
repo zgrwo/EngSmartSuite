@@ -269,6 +269,76 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     )
 
 
+def _annotate_group_stats(
+    ax,
+    groups: list,
+    group_data: list,
+    stat_rows: list[dict[str, Any]],
+    ref_lines: list[tuple[float, str, str, str]],
+) -> None:
+    """在每个箱体正下方标注 n/均值/标准差/最大值/最小值。
+
+    不改变图形尺寸：把 y 轴下界下压约数据跨度的 1/3，箱体被压缩到坐标区上部，
+    下沿留出的空白带承载标注；标注用 get_xaxis_transform（x 数据坐标 + y 轴比例
+    坐标）绘制，因此与箱体共用同一套 x 位置（同一套类别 key），无需新增坐标轴。
+    """
+    d_lo = min(float(np.min(d)) for d in group_data if len(d))
+    d_hi = max(float(np.max(d)) for d in group_data if len(d))
+    # 跨度取「数据 ∪ 参考线」——保证标注带始终占坐标区下沿约 1/4，
+    # 文字与箱体不可能重叠（即使 USL 远离数据）；箱体被压缩是必然代价
+    lo = min([d_lo] + [val for val, _c, _s, _lab in ref_lines])
+    hi = max([d_hi] + [val for val, _c, _s, _lab in ref_lines])
+    span = hi - lo
+    if not np.isfinite(span) or span <= 0:  # 常量数据：给一个可用的相对跨度
+        span = max(abs(hi), 1.0)
+    ax.set_ylim(lo - 0.34 * span, hi + 0.06 * span)
+
+    n_groups = len(groups)
+    fontsize = 8.5 if n_groups <= 10 else 7.5 if n_groups <= 20 else 6.5
+
+    def _fmt_ann(v) -> str:
+        """标注数值格式：与 group_statistics 表逐位一致。
+
+        round_for_display 对常规量级取 3 位小数、对微尺度改按有效数字；此处反过来
+        判别：能整除到 3 位小数的（常规量级）用定点输出（避开 :g 对大数值的 6 位
+        有效数字二次舍入），否则（微尺度）用 :g 保持紧凑可读。
+        """
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return str(v)
+        if not np.isfinite(f):
+            return str(f)
+        if np.round(f, 3) == f:
+            return f"{f:.3f}".rstrip("0").rstrip(".") or "0"
+        return f"{f:g}"
+
+    # 图宽随组数增长（每组固定约 1.2in），注解无需旋转即可横向放下；
+    # 旋转会让 5 行文字斜插进相邻行，反而重叠
+    y_positions = (0.215, 0.170, 0.125, 0.080, 0.035)
+    transform = ax.get_xaxis_transform()
+    for idx, row in enumerate(stat_rows, 1):
+        lines = (
+            f"n={row['样本量']}",
+            f"均值 {_fmt_ann(row['均值'])}",
+            f"标准差 {_fmt_ann(row['标准差'])}",
+            f"最大 {_fmt_ann(row['最大值'])}",
+            f"最小 {_fmt_ann(row['最小值'])}",
+        )
+        for y, text in zip(y_positions, lines, strict=True):
+            ax.text(
+                idx,
+                y,
+                text,
+                transform=transform,
+                ha="center",
+                va="center",
+                fontsize=fontsize,
+                color=PALETTE["misc"]["edge"],
+                clip_on=False,
+            )
+
+
 def box_chart(req: AnalysisRequest) -> AnalysisResult:
     """分组箱线图 — 按类别因子分组展示分布，支持嵌套和分面两种次分类模式。
 
@@ -364,6 +434,12 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
                 messages=[f"目标值 Target 必须为有限数值，当前: {target_val!r}"],
             )
         _ref_lines.append((target_f, PALETTE["direction"]["zero"], ":", "Target"))
+
+    # show_stats：在非分面单图模式下，把 n/均值/标准差/最大值/最小值标注到每个箱体正下方
+    # （标注带占用坐标区下沿，箱体自动压缩，图形整体尺寸不变；分面模式不标注）
+    show_stats = req.params.get("show_stats", True)
+    if isinstance(show_stats, str):
+        show_stats = show_stats.lower() not in ("false", "0", "no", "")
 
     sub = req.data[_cols_needed].dropna()
     if len(sub) < 5:
@@ -484,9 +560,14 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     else:
         fig = Figure(figsize=(max(len(groups) * 1.2, 6), 5))
         ax = fig.add_subplot(111)
+        # show_stats 开启时 n 移入标注块，刻度标签只留类别名（避免重复展示）
+        tick_labels = [
+            str(g) if show_stats else f"{g}\n(n={len(d)})"
+            for g, d in zip(groups, group_data, strict=False)
+        ]
         bp = ax.boxplot(
             group_data,
-            tick_labels=[f"{g}\n(n={len(d)})" for g, d in zip(groups, group_data, strict=False)],
+            tick_labels=tick_labels,
             patch_artist=True,
             widths=0.5,
         )
@@ -512,6 +593,8 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         ax.set_title(title, fontsize=11)
         _adjust_xlabels(ax, len(groups), fig)
         _draw_ref_lines(ax)
+        if show_stats:
+            _annotate_group_stats(ax, groups, group_data, stat_rows, _ref_lines)
     fig.tight_layout()
 
     n_total = sum(s["样本量"] for s in stat_rows)  # 按实际显示的分组汇总

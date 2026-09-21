@@ -213,7 +213,7 @@ const TASK_PARAMS = {
   doe_analysis:      { alpha: 0.05 },
   doe_design:        { method: 'full_factorial', factors: '', replicates: 1, randomize: 'true', seed: 42, center_points: 3, alpha: 'rotatable', n_runs: '' },
   variance_test:     { group_col: '', alpha: 0.05 },
-  box_chart:         { mode: 'facet', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
+  box_chart:         { mode: 'facet', show_stats: 'true', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
   scatter_plot:      { fit: 'none', show_ci: 'true', group_col: '' },
   correlation:       { method: 'pearson', control_vars: '' },
   contingency:       { alpha: 0.05 },
@@ -347,6 +347,10 @@ const PARAM_META = {
     type: 'select', label: '置信带',
     options: [['true', '显示 95% 置信带'], ['false', '隐藏']]
   },
+  show_stats: {
+    type: 'select', label: '箱体统计标注',
+    options: [['true', '显示 n/均值/标准差/最大/最小'], ['false', '隐藏 (刻度标签显示 n)']]
+  },
   'method@doe_design': {
     type: 'select', label: '设计方法',
     options: [
@@ -408,7 +412,7 @@ const PARAM_LABELS = {
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
   current_n: '当前样本量 n (achieved 模式)', n_groups: '组数 k (anova)', p0: '基准比例 (proportion)', p1: '目标比例 (proportion)',
-  fit: '拟合类型', show_ci: '显示置信带', threshold: '分类阈值',
+  fit: '拟合类型', show_ci: '显示置信带', show_stats: '箱体统计标注', threshold: '分类阈值',
   'threshold@vif': 'VIF 阈值',
   factors: '因子定义', replicates: '重复次数', randomize: '随机化',
   seed: '随机种子', center_points: '中心点重复数', n_runs: '运行数',

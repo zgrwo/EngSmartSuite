@@ -1402,6 +1402,136 @@ def test_box_chart_group_statistics():
     assert result.metadata["n_groups"] == 2
 
 
+def test_box_chart_stats_annotations_under_each_box():
+    """分组箱线图: 每个类别正下方应标注 n/均值/标准差/最大值/最小值，
+    且箱体被压缩在图内（整体尺寸不变）。
+
+    断言口径来自 review 2026-09-21 之后的箱线图标注需求：
+      ① 刻度标签只留类别名（n 统一进标注块，不重复）
+      ② 每组 5 行标注文本，数值与 group_statistics 表逐项一致
+      ③ 标注文本 x 位置与箱体 x 位置一致（共用一套 key）
+      ④ y 轴下界被压低到数据最小值以下（为标注腾出空间，箱体自动压缩）
+    """
+    from smartsuite.engine.exploratory import box_chart
+
+    np.random.seed(7)
+    n = 40
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * n + ["B"] * n,
+            "val": np.concatenate([np.random.normal(100, 10, n), np.random.normal(115, 8, n)]),
+        }
+    )
+    result = box_chart(
+        AnalysisRequest(task="box_chart", data=df, target_col="val", feature_cols=["group"])
+    )
+    assert result.status == "ok", f"box_chart 失败: {result.messages}"
+    fig = result.figures[0]
+    ax = fig.axes[0]
+    stats = result.tables["group_statistics"]
+
+    # ① 刻度标签不再重复 n
+    labels = [t.get_text() for t in ax.get_xticklabels()]
+    assert labels == ["A", "B"], f"刻度标签应为纯类别名，实际: {labels}"
+
+    # ② 每组 5 行标注，数值与统计表一致
+    texts = [t for t in ax.texts if t.get_text()]
+    for i, (_, row) in enumerate(stats.iterrows()):
+        block = [t.get_text() for t in texts if abs(t.get_position()[0] - (i + 1)) < 1e-6]
+        assert len(block) == 5, f"第 {i + 1} 组应有 5 行标注，实际: {block}"
+        keys = ["n=", "均值 ", "标准差 ", "最大 ", "最小 "]
+        cols = ["样本量", "均值", "标准差", "最大值", "最小值"]
+        for line, key, col in zip(block, keys, cols, strict=True):
+            assert line.startswith(key), f"第 {i + 1} 组标注顺序/标签错: {block}"
+            assert float(line[len(key) :]) == pytest.approx(float(row[col])), (
+                f"第 {i + 1} 组「{col}」={row[col]} 与标注「{line}」不一致"
+            )
+
+    # ③ 标注 x 位置与箱体 x 位置一致（共用一套 key）
+    box_x = [np.mean(p.get_path().vertices[:, 0]) for p in ax.patches]
+    for i, bx in enumerate(box_x):
+        assert any(abs(t.get_position()[0] - bx) < 0.3 for t in texts), (
+            f"第 {i + 1} 个箱体 (x={bx}) 下方无对齐标注"
+        )
+
+    # ④ y 轴下界低于数据最小值（标注带在同一坐标区内）
+    assert ax.get_ylim()[0] < df["val"].min(), "y 轴下界未下压，标注会压住箱体"
+
+
+def test_box_chart_stats_band_clear_of_boxes_even_with_far_ref_line():
+    """即使 USL 远离数据（1000 vs 1~8），标注仍必须全部落在数据下方的预留带内。
+
+    回归点：标注带宽度若改按「数据跨度」而非「数据 ∪ 参考线」，则参考线远离数据时
+    标注会浮到箱体中间（review 过程中的一次错误尝试）。
+    """
+    from smartsuite.engine.exploratory import box_chart
+
+    np.random.seed(9)
+    df = pd.DataFrame({"group": ["A"] * 20 + ["B"] * 20, "val": np.random.normal(5, 1, 40)})
+    result = box_chart(
+        AnalysisRequest(
+            task="box_chart",
+            data=df,
+            target_col="val",
+            feature_cols=["group"],
+            params={"usl": 1000},
+        )
+    )
+    assert result.status == "ok", f"box_chart 失败: {result.messages}"
+    ax = result.figures[0].axes[0]
+    data_bottom_disp = ax.transData.transform((0.0, float(df["val"].min())))[1]
+    for t in ax.texts:
+        assert t.get_text(), "空文本不应出现"
+        y_disp = ax.transAxes.transform((0.0, t.get_position()[1]))[1]
+        assert y_disp < data_bottom_disp, f"标注「{t.get_text()}」压住箱体区"
+
+
+def test_box_chart_stats_annotation_toggle_and_facet():
+    """show_stats=False 关闭标注；分面模式（次分类分面）不添加标注。"""
+    from smartsuite.engine.exploratory import box_chart
+
+    np.random.seed(8)
+    n = 40
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * n + ["B"] * n,
+            "sub": ["x"] * (n // 2) + ["y"] * (n // 2) + ["x"] * (n // 2) + ["y"] * (n // 2),
+            "val": np.random.normal(100, 10, 2 * n),
+        }
+    )
+    # 关闭标注
+    r_off = box_chart(
+        AnalysisRequest(
+            task="box_chart",
+            data=df[["group", "val"]],
+            target_col="val",
+            feature_cols=["group"],
+            params={"show_stats": "false"},
+        )
+    )
+    assert r_off.status == "ok", f"show_stats=false 失败: {r_off.messages}"
+    assert not [t for t in r_off.figures[0].axes[0].texts if t.get_text()], (
+        "show_stats=false 不应出现统计标注"
+    )
+    # 关闭后刻度标签恢复带 n 的旧样式
+    assert any("n=" in t.get_text() for t in r_off.figures[0].axes[0].get_xticklabels())
+
+    # 分面模式：多面板均不加标注
+    r_facet = box_chart(
+        AnalysisRequest(
+            task="box_chart",
+            data=df,
+            target_col="val",
+            feature_cols=["group", "sub"],
+            params={"mode": "facet"},
+        )
+    )
+    assert r_facet.status == "ok", f"分面模式失败: {r_facet.messages}"
+    assert r_facet.metadata["has_sub"] is True, "应走分面分支"
+    for ax in r_facet.figures[0].axes:
+        assert not [t for t in ax.texts if t.get_text()], "分面模式不应添加统计标注"
+
+
 # ── 散点图正确性 ──
 
 
