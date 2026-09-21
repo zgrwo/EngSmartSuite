@@ -1,9 +1,18 @@
-"""Web UI ≡ CLI ≡ Python ≡ 用户手册 四路一致性验证。
+"""Web UI ≡ CLI ≡ Python **三路径**一致性验证。
 
-使用 tests/data/injection_process.xlsx (1000行×44列 注塑工艺数据)，
-逐条对照 docs/user-manual/（按章拆页）中记录的预期数值，
-验证所有 4 条路径（Python 直接调用 / CLI 模拟 / Web API / 手册文档）
-产生完全一致的数值结果。
+使用 tests/data/injection_process.xlsx (1000行×44列 注塑工艺数据)，验证
+三条**代码路径**（Python 直接调用 / CLI 模拟 / Web API）在
+「同一份数据 + 同一组参数」下产生完全一致的数值结果。
+
+范围声明（审查 2026-09-21 E4-2 订正）：
+本文件**不解析** docs/user-manual/ —— 早期 docstring 声称「四路含用户手册」
+与实现不符（文件内无任何手册读取代码），且曾把手册值写错
+（决策树用例标「手册预期≈0.2607」，而手册 §4.4 实为 0.194，差异源于本文件用
+**未预处理**原始数据、手册对应含预处理的 Web 工作流）。
+手册数值的核对职责在：
+  - `scripts/verify_manual_claims.py`（引擎输出 ↔ 手册 CLAIM，含预处理管道）；
+  - `tests/services/test_manual_usage_pitfalls.py`（手册参数用法 ↔ 引擎契约）。
+原理由：同一事实只在一处定义（SSOT），避免两套手册核对逻辑各自漂移。
 
 原则: 同一份数据 + 同一组参数 → 同一个数字
 """
@@ -209,7 +218,11 @@ def test_manual_4_3_hypothesis_test(raw_df):
 
 
 def test_manual_4_4_decision_tree(raw_df):
-    """手册 §4.4: 决策树 — 冷却时间最重要 (排列重要性=0.2607)"""
+    """决策树三路径一致性：冷却时间最重要（本文件用未预处理数据 → 排列重要性≈0.26）。
+
+    注：该值**不是手册值**（手册 §4.4 为 0.194，对应含预处理的 Web 工作流），
+    本用例只验证路径间一致，手册核对见模块 docstring 的范围声明（审查 E4-2）。
+    """
     features = ["熔体温度", "模具温度", "注射压力", "冷却时间"]
     r_py, r_cli, r_web, py_st, cli_st, web_st = _compare_3paths(
         "decision_tree", raw_df, "不良率", features, {"max_depth": 5}, [], raw_cat=False
@@ -243,7 +256,7 @@ def test_manual_4_4_decision_tree(raw_df):
 
         # 排列重要性约为 0.26
         assert 0.1 < top_perm < 0.5, (
-            f"{path_name}: 冷却时间排列重要性={top_perm:.4f}，手册预期≈0.2607"
+            f"{path_name}: 冷却时间排列重要性={top_perm:.4f}（未预处理基线≈0.26）"
         )
 
     # 三路径排列重要性一致（决策树含随机性，允许 ±0.05 差异）
@@ -586,8 +599,10 @@ def test_all_methods_3path_behavior(raw_df, task):
         extra_params["chart_type"] = "p"
         extra_params["subgroup_col"] = "车间"
     elif task == "survival_analysis":
-        extra_params["time_col"] = "循环周期"
-        extra_params["event_col"] = "首件合格"
+        # 审查 2026-09-21 E4-2：原传 time_col/event_col —— 引擎读取的是
+        # target_col（时间列）与 feature_cols[0]（事件列），这两个 params 被**静默忽略**，
+        # 属误导性死参数，故移除（生存分析的时间/事件列由调用处的列角色决定）。
+        pass
     elif task == "hypothesis_test":
         extra_params["test"] = "ttest_ind"
     elif task == "doe_design":
