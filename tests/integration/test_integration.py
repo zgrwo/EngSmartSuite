@@ -59,9 +59,14 @@ def test_all_tasks_registered():
 
     assert len(eng.__all__) > 0, "engine.__all__ 为空，注册表验证无效"
     registered_func_names = {f.__name__ for f in TASK_REGISTRY.values()}
-    # __all__ → TASK_REGISTRY: engine 导出的都在 registry 中
-    # 排除配色常量（GROUP_COLORS/PALETTE，非分析函数，不在 TASK_REGISTRY 中）
-    _analysis_names = {n for n in eng.__all__ if not n.isupper()}
+    # __all__ → TASK_REGISTRY: engine 导出的**分析函数**都在 registry 中。
+    # 排除两类非分析任务的公开导出：
+    #   ① 全大写常量（GROUP_COLORS / PALETTE / *_GOOD 等）；
+    #   ② 共享工具/口径（审查 R1-10 公开 round_for_display 供 services 层桥接，
+    #      它是最展示舍入口径、不是分析任务，自然不在 TASK_REGISTRY）。
+    # 新增此类导出时必须在此显式登记，避免用启发式默默放宽。
+    _utility_exports = {"round_for_display"}
+    _analysis_names = {n for n in eng.__all__ if not n.isupper() and n not in _utility_exports}
     missing_in_registry = _analysis_names - registered_func_names
     assert not missing_in_registry, f"engine.__all__ 中有未注册的函数: {missing_in_registry}"
     # TASK_REGISTRY → __all__: registry 中的都在 engine 导出中
