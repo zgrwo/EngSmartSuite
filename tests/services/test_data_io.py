@@ -5,6 +5,7 @@ auto_generate_subgroup_col / infer_group_col / preprocess_for_task
 此前仅被 Web/CLI 路径间接调用，本文件补直接单测。
 """
 
+import codecs
 import io
 
 import numpy as np
@@ -372,12 +373,17 @@ def test_read_csv_with_encoding_reads_utf8_bom(tmp_path):
     assert list(df.columns) == ["强度", "温度"]
 
 
-def test_read_csv_with_encoding_rejects_utf16(tmp_path):
-    """UTF-16 不再被 latin-1 静默读成乱码（E5 复现 3.1）。"""
+def test_read_csv_with_encoding_reads_utf16_bom(tmp_path):
+    """UTF-16（带 BOM）由「报错」改为正确读取（ADR-0004 决策 1）。
+
+    本用例 2026-09-21 由 `test_read_csv_with_encoding_rejects_utf16` 反转而来——
+    E5 时代 utf-16 无支持、必须报错；BOM 是文件自描述，现可确定性识别。
+    原意图（不得被 latin-1/GBK 静默读成乱码）仍由列名断言守住。
+    """
     p = tmp_path / "utf16.csv"
     p.write_bytes("强度,温度\n45.1,180\n".encode("utf-16"))
-    with pytest.raises(CsvEncodingError, match="无法识别 CSV 文件编码"):
-        read_csv_with_encoding(p)
+    df = read_csv_with_encoding(p)
+    assert list(df.columns) == ["强度", "温度"]
 
 
 def test_read_csv_with_encoding_rejects_big5(tmp_path):
@@ -431,3 +437,70 @@ def test_read_csv_with_encoding_nrows(tmp_path):
     p.write_bytes(b"a\n" + b"1\n" * 50)
     df = read_csv_with_encoding(p, nrows=10)
     assert len(df) == 10
+
+
+# ── BOM 确定性判定（ADR-0004）──
+
+
+def _bom_csv(tmp_path, name: str, text: str, bom: bytes, codec: str):
+    """构造「BOM + 指定编码正文」的 CSV 文件（跨平台显式拼 BOM，不依赖本机字节序）。"""
+    p = tmp_path / name
+    p.write_bytes(bom + text.encode(codec))
+    return p
+
+
+@pytest.mark.parametrize(
+    ("bom", "codec"),
+    [
+        (codecs.BOM_UTF16_LE, "utf-16-le"),
+        (codecs.BOM_UTF16_BE, "utf-16-be"),
+    ],
+)
+def test_utf16_bom_file_reads_correctly(tmp_path, bom, codec):
+    """UTF-16 BOM 文件：由「无法识别编码」变为正确读取（ADR-0004 决策 1）。"""
+    text = "批號,溫度\nB2301,235\n"
+    p = _bom_csv(tmp_path, "u16.csv", text, bom, codec)
+    df = read_csv_with_encoding(p)
+    assert list(df.columns) == ["批號", "溫度"]
+    assert df["溫度"].tolist() == [235]
+
+
+@pytest.mark.parametrize(
+    ("bom", "codec"),
+    [
+        (codecs.BOM_UTF32_LE, "utf-32-le"),
+        (codecs.BOM_UTF32_BE, "utf-32-be"),
+    ],
+)
+def test_utf32_bom_not_misread_as_utf16(tmp_path, bom, codec):
+    """UTF-32 BOM：长 BOM 必须优先比较，否则被当成 UTF-16 解出乱码（ADR-0004 约束）。"""
+    text = "批號,溫度\nB2301,235\n"
+    p = _bom_csv(tmp_path, "u32.csv", text, bom, codec)
+    df = read_csv_with_encoding(p)
+    assert list(df.columns) == ["批號", "溫度"]
+
+
+def test_utf8_bom_columns_clean(tmp_path):
+    """UTF-8 BOM 文件：BOM 不出现在首列名中（既有行为，BOM 改造后不得回归）。"""
+    p = tmp_path / "u8.csv"
+    p.write_bytes(codecs.BOM_UTF8 + "批号,温度\nB1,235\n".encode())
+    assert list(read_csv_with_encoding(p).columns) == ["批号", "温度"]
+
+
+def test_bom_sniff_does_not_consume_bytesio():
+    """BytesIO 源：BOM 嗅探后流位置必须复位，否则后续读取丢首行。"""
+    buf = io.BytesIO(codecs.BOM_UTF16_LE + "批號,溫度\nB2301,235\n".encode("utf-16-le"))
+    df = read_csv_with_encoding(buf)
+    assert list(df.columns) == ["批號", "溫度"]
+    assert len(df) == 1
+
+
+def test_fallback_chain_excludes_utf16_and_utf32():
+    """ADR-0004 约束：无 BOM 的自动回退链禁止含 utf-16/utf-32。
+
+    否则无 BOM 的 GBK 文件（字节数为偶数时）会被 utf-16 静默解码成乱码——
+    用一类静默错误换另一类，正是本决策要避免的。
+    """
+    from smartsuite.services import data_io
+
+    assert data_io._CSV_ENCODINGS == ("utf-8-sig", "utf-8", "gbk")

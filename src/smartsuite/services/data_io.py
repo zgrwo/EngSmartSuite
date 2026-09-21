@@ -1,5 +1,6 @@
 """Data I/O — Excel 数据读写与校验。"""
 
+import codecs
 import logging
 import uuid
 import warnings
@@ -20,6 +21,36 @@ _CSV_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "gbk")
 
 _CSV_ENCODING_MSG = "无法识别 CSV 文件编码，请转换为 UTF-8 后重试"
 _CSV_PARSE_MSG = "无法解析 CSV 文件，请确认文件格式正确"
+
+# BOM 检测表（ADR-0004 决策 1）：BOM 是文件自描述，判定确定、无启发式。
+# 顺序不可调换——UTF-32LE 的 BOM 前两字节与 UTF-16LE 相同，长 BOM 必须优先比较，
+# 否则 UTF-32 文件会被当成 UTF-16 解出乱码。
+_BOMS: tuple[tuple[bytes, str], ...] = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def _bom_encoding(head: bytes) -> str | None:
+    """按文件头 BOM 判定编码；无 BOM 返回 None。"""
+    for bom, encoding in _BOMS:
+        if head.startswith(bom):
+            return encoding
+    return None
+
+
+def _read_head(source: str | Path | IO[bytes], size: int = 4) -> bytes:
+    """读取源前 size 字节用于 BOM 判定，且不改变流的后续读取位置。"""
+    if isinstance(source, (str, Path)):
+        with open(source, "rb") as fh:
+            return fh.read(size)
+    source.seek(0)
+    head = source.read(size)
+    source.seek(0)
+    return head
 
 
 def read_csv_with_encoding(
@@ -46,11 +77,15 @@ def read_csv_with_encoding(
         （比「无法识别编码」更贴近真实原因）。
     """
     parse_error: Exception | None = None
-    for encoding in _CSV_ENCODINGS:
+    # 有 BOM 时只认 BOM 指定的编码，不回退——UTF-16 文件被 GBK 兜底读取只会产出
+    # 乱码，报错比猜测有用（ADR-0004 决策 1）；无 BOM 时维持既有回退链。
+    bom = _bom_encoding(_read_head(source))
+    chain: tuple[str, ...] = (bom,) if bom is not None else _CSV_ENCODINGS
+    for enc in chain:
         if not isinstance(source, (str, Path)):
             source.seek(0)
         try:
-            return pd.read_csv(source, encoding=encoding, nrows=nrows)
+            return pd.read_csv(source, encoding=enc, nrows=nrows)
         except UnicodeError:
             # 编码不匹配（UnicodeDecodeError ⊂ UnicodeError）→ 尝试下一种
             continue

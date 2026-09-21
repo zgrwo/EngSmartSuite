@@ -142,16 +142,16 @@ def test_cli_csv_gbk_encoding_fallback(monkeypatch, capsys, tmp_path):
     assert "相关" in out, f"应输出相关性分析结果: {out[:300]}"
 
 
-def test_cli_csv_utf16_encoding_rejected(monkeypatch, capsys, tmp_path):
-    """UTF-16 中文 CSV：latin-1 兜底移除 → 明确报错而非基于乱码分析（E5）。"""
+def test_cli_csv_utf16_bom_now_readable(monkeypatch, capsys, tmp_path):
+    """UTF-16 BOM 中文 CSV：ADR-0004 后由「明确报错」改为「正确读取」。
+
+    本用例 2026-09-21 由 test_cli_csv_utf16_encoding_rejected 反转而来——
+    E5 时代 utf-16 无支持、必须报错；BOM 是文件自描述，现可确定性识别。
+    """
     data = _write_csv(tmp_path, "u16.csv", "强度,温度\n45.1,180\n46.3,182\n".encode("utf-16"))
     tpl = _write_yaml(tmp_path, _CORR_TPL)
-    with pytest.raises(SystemExit) as ei:
-        _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data])
-    assert ei.value.code == 1
-    err = capsys.readouterr().err
-    assert "无法识别 CSV 文件编码" in err, f"应有编码识别失败中文提示: {err!r}"
-    assert "Traceback" not in err
+    out, _ = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data])
+    assert "相关" in out, f"UTF-16 文件应能正常分析: {out[:300]}"
 
 
 def test_cli_csv_parser_error_friendly(monkeypatch, capsys, tmp_path):

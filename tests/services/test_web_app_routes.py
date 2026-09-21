@@ -128,16 +128,17 @@ def test_upload_csv_garbage_parse_error_400(client):
     assert "无法解析 CSV" in resp.get_json()["error"]
 
 
-def test_upload_csv_utf16_rejected_not_garbled(client):
-    """UTF-16 中文 CSV：不再被 latin-1 静默读成乱码返回 200（审查 2026-09-19 E5）。
+def test_upload_csv_utf16_bom_decoded(client):
+    """UTF-16 BOM 中文 CSV：ADR-0004 后由「400 拒绝」改为正确解码。
 
-    回归防线：修复前该请求返回 200，列名显示为 'ÿþyb!k' 等乱码，用户会基于
-    错误数据得出 Cp/Cpk 结论。
+    本用例 2026-09-21 由 test_upload_csv_utf16_rejected_not_garbled 反转而来；
+    仍守住原意图——列名不得是 'ÿþyb!k' 这类乱码。
     """
     content = "强度,温度\n45.1,180\n46.3,182\n".encode("utf-16")
     resp = _post_csv(client, content)
-    assert resp.status_code == 400, f"UTF-16 应被拒绝: {resp.get_json()}"
-    assert "无法识别 CSV 文件编码" in resp.get_json()["error"]
+    assert resp.status_code == 200, resp.get_json()
+    names = [c["name"] for c in resp.get_json()["columns"]]
+    assert names[:2] == ["强度", "温度"], f"UTF-16 应正确解码: {names[:2]}"
 
 
 def test_upload_excel_bad_zip_400(client):
