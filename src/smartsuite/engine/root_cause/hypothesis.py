@@ -1032,7 +1032,20 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
         conclusion = "前后存在显著变化" if p < alpha else "前后未发现显著变化"
         # Odds Ratio = b/c（保留原始值，不做截断）
-        or_val = b / (c + EPSILON)
+        # 审查 2026-09-21 B-5：原 `b / (c + EPSILON)` 有两处失真——
+        # ① c=0 时给出**伪有限值**（b=30 → OR=3e11，还被写进 summary 与图表标题），
+        #    使 metadata 里 `np.isinf(or_val)` 守卫成为死代码；
+        # ② c>0 时引入 1e-10 级假精度（b=10,c=2 → 4.99999999975）。
+        # 按定义处理：OR=b/c 在 c=0 时为∞、b=c=0 时未定义，两者一律给 None。
+        or_val: float | None
+        or_text: str
+        if b == 0 and c == 0:
+            or_val, or_text = None, "无法计算（无不一致对 b=c=0）"
+        elif c == 0:
+            or_val, or_text = None, "∞（c=0，无反向变化对）"
+        else:
+            or_val = b / c
+            or_text = f"{or_val:.2f}"
 
         # 可视化：前后对比堆叠柱状图
         fig = Figure(figsize=(5, 4))
@@ -1053,7 +1066,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         for i, (_cat, cnt) in enumerate(zip(categories, counts, strict=True)):
             ax.text(i, cnt + max(counts) * 0.02, str(cnt), ha="center", fontsize=9)
         ax.set_ylabel("频数", fontsize=10)
-        ax.set_title(f"{test_name} (p={p:.4f}, OR={or_val:.2f})", fontsize=10)
+        ax.set_title(f"{test_name} (p={p:.4f}, OR={or_text})", fontsize=10)
         fig.tight_layout()
 
         return AnalysisResult(
@@ -1066,7 +1079,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                         "统计量(χ²)": [f"{stat:.3f}"],
                         "p值": [f"{p:.4f}"],
                         "显著性水平": [str(alpha)],
-                        "效应量(OR)": [f"{or_val:.3f}"],
+                        "效应量(OR)": [or_text],
                         "结论": [conclusion],
                     }
                 ),
@@ -1079,13 +1092,13 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 ),
             },
             figures=[fig],
-            summary=f"McNemar: {conclusion} (χ²={stat:.2f}, p={p:.4f}, OR=b/c={or_val:.2f})",
+            summary=f"McNemar: {conclusion} (χ²={stat:.2f}, p={p:.4f}, OR=b/c={or_text})",
             metadata={
                 "test": test_name,
                 "statistic": float(stat),
                 "p_value": float(p),
                 "alpha": alpha,
-                "odds_ratio": float(or_val) if not np.isinf(or_val) else None,
+                "odds_ratio": or_val,
                 "n_pairs": len(sub),
                 "discordant_pairs": b + c,
             },

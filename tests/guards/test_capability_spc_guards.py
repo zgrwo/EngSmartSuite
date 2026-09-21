@@ -364,3 +364,59 @@ def test_mcnemar_small_discordant_warms_exact_binomial():
     df2 = pd.DataFrame({"pre": col1b, "post": col2b})
     r2 = hypothesis_test(_mk("hypothesis_test", df2, "post", ["pre", "post"], {"test": "mcnemar"}))
     assert r2.status == "ok" and not r2.messages
+
+
+# ── B-5（2026-09-21 审查）：McNemar OR 的未定义/伪有限值 ──────────────────────
+def _mcnemar_df(b: int, c: int, a: int = 30, d: int = 30):
+    """2×2 配对表：a=一致(1,1)、b=(1→0)、c=(0→1)、d=一致(0,0)。"""
+    pre = [1] * a + [1] * b + [0] * c + [0] * d
+    post = [1] * a + [0] * b + [1] * c + [0] * d
+    return pd.DataFrame({"pre": pre, "post": post})
+
+
+def test_mcnemar_odds_ratio_c_zero_is_not_fake_finite():
+    """c=0（OR→∞）不得输出伪有限值 3e11 并写进 summary（审查 B-5 P2）。
+
+    修复前实测 b=30,c=0 → `odds_ratio=300000000000.0`，
+    summary 显示「OR=b/c=300000000000.00」；且 metadata 的
+    `float(or_val) if not np.isinf(or_val) else None` 因伪有限值而成为死代码。
+    """
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _mk("hypothesis_test", _mcnemar_df(30, 0), "pre", ["pre", "post"], {"test": "mcnemar"})
+    )
+    assert r.status == "ok", r.messages
+    assert r.metadata["odds_ratio"] is None, (
+        f"c=0 时 OR 无有限值，应为 None，实际 {r.metadata['odds_ratio']}"
+    )
+    assert "300000000000" not in r.summary, f"summary 不得显示伪有限 OR: {r.summary}"
+    assert "∞" in r.summary or "无法计算" in r.summary, f"应显式说明 OR 不可用: {r.summary}"
+
+
+def test_mcnemar_odds_ratio_zero_zero_is_undefined():
+    """b=c=0（0/0 未定义）不得伪装成「OR=0.00 / 无关联」（审查 B-5）。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _mk("hypothesis_test", _mcnemar_df(0, 0), "pre", ["pre", "post"], {"test": "mcnemar"})
+    )
+    assert r.status == "ok", r.messages
+    assert r.metadata["odds_ratio"] is None, (
+        f"0/0 未定义，应为 None，实际 {r.metadata['odds_ratio']}"
+    )
+    assert "无法计算" in r.summary or "未定义" in r.summary, f"应显式说明: {r.summary}"
+
+
+def test_mcnemar_odds_ratio_exact_without_epsilon_residue():
+    """c>0 时 OR 应为精确 b/c（EPSILON 引入 1e-10 级假精度，审查 B-5）。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _mk("hypothesis_test", _mcnemar_df(10, 2), "pre", ["pre", "post"], {"test": "mcnemar"})
+    )
+    assert r.status == "ok", r.messages
+    assert r.metadata["odds_ratio"] == 5.0, (
+        f"b/c=10/2 应精确为 5.0，实际 {r.metadata['odds_ratio']}"
+    )
+    assert "4.9999" not in r.summary, f"summary 不得带 EPSILON 残差: {r.summary}"
