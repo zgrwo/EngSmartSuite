@@ -815,3 +815,39 @@ def test_new_file_selection_resets_encoding_selector():
     assert re.search(r"getElementById\('encoding'\)\.value\s*=\s*''", body), (
         "选择新文件时未复位编码下拉框 → 编码声明会跨文件粘滞并静默读错（R1-1）"
     )
+
+
+# ── R1-2（2026-09-21 审查）：清理不得误删他人在同目录的文件 ────────────────
+def test_sweep_expired_only_deletes_own_files():
+    """清理只删本应用创建的文件（`ss-` 前缀），保留同目录内的其他 parquet。
+
+    审查 R1-2：`_sweep_expired`/`_cleanup_uploads` 原先按 `*.parquet` 全量匹配。
+    目录默认独占（ADR-003），但 `SMARTSUITE_UPLOAD_DIR` 可被运维指向共享位置，
+    此时无关文件会被删除（实测：10 天前的 other_tool_data.parquet 被清理）。
+    本应用自身文件一律由 `NamedTemporaryFile(prefix="ss-")` 创建，故按前缀收窄即
+    可在不改变自身语义的前提下消除该风险。
+    """
+    upload_dir = app_module._upload_dir()
+    own = upload_dir / "ss-mine.parquet"
+    foreign = upload_dir / "other_tool_data.parquet"
+    own.write_bytes(b"x")
+    foreign.write_bytes(b"x")
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    os.utime(own, (old_t, old_t))
+    os.utime(foreign, (old_t, old_t))
+
+    assert app_module._sweep_expired(force=True) == 1
+    assert not own.exists(), "本应用的过期文件应被删除"
+    assert foreign.exists(), "非本应用创建的文件不得删除（R1-2）"
+
+
+def test_cleanup_uploads_only_deletes_own_files(client):
+    """atexit 兜底清理同样只删本应用文件。"""
+    foreign = app_module._upload_dir() / "other_tool_data.parquet"
+    foreign.write_bytes(b"x")
+    (app_module._upload_dir() / "ss-exit2.parquet").write_bytes(b"x")
+
+    app_module._cleanup_uploads()
+
+    assert foreign.exists(), "退出清理不得删除非本应用文件（R1-2）"
+    assert not list(app_module._upload_dir().glob("ss-*.parquet"))

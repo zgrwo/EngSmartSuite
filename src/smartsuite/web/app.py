@@ -65,8 +65,19 @@ def _upload_dir() -> pathlib.Path:
     return directory
 
 
+def _is_own_upload(path: pathlib.Path) -> bool:
+    """是否为本应用创建的上传临时文件（命名单一来源，审查 R1-2）。
+
+    上传文件一律由 `NamedTemporaryFile(prefix="ss-", suffix=".parquet")` 创建
+    （见 `/api/upload`），故 `ss-*.parquet` 即本应用所有物。按前缀收窄清理范围后，
+    即使运维把 `SMARTSUITE_UPLOAD_DIR` 指向共享目录，也不会误删他人在同目录内的
+    parquet（原先按 `*.parquet` 全量匹配，实测会删除无关文件）。
+    """
+    return path.name.startswith("ss-") and path.suffix == ".parquet"
+
+
 def _sweep_expired(*, force: bool = False) -> int:
-    """删除本目录内 mtime 超过 TTL 的 parquet，返回删除数。
+    """删除本目录内 mtime 超过 TTL 的**本应用** parquet，返回删除数。
 
     默认按 `CLEANUP_MIN_INTERVAL_SECONDS` 节流（避免每个请求都做目录 I/O）；
     `force=True` 跳过节流（测试与显式清理入口用）。
@@ -78,6 +89,8 @@ def _sweep_expired(*, force: bool = False) -> int:
     _last_sweep_at = now
     removed = 0
     for path in _upload_dir().glob("*.parquet"):
+        if not _is_own_upload(path):
+            continue
         try:
             if now - path.stat().st_mtime > config.UPLOAD_TTL_SECONDS:
                 path.unlink()
@@ -88,12 +101,15 @@ def _sweep_expired(*, force: bool = False) -> int:
 
 
 def _cleanup_uploads() -> None:
-    """进程退出兜底：删除本目录内全部临时文件。
+    """进程退出兜底：删除本目录内**本应用**的全部临时 parquet。
 
-    目录由本应用独占（单机单用户部署，见 ADR-003）；会话数据本身是无状态的
-    parquet，进程退出后不再有任何引用，故无需区分「谁创建的」。
+    会话数据本身是无状态的 parquet，进程退出后不再有任何引用，故无需区分
+    「哪个会话的」；但仍需区分「哪个应用的」——`SMARTSUITE_UPLOAD_DIR`
+    可被运维指向共享位置，此时不得删掉他人文件（审查 R1-2）。
     """
     for path in _upload_dir().glob("*.parquet"):
+        if not _is_own_upload(path):
+            continue
         try:
             path.unlink()
         except OSError:

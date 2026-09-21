@@ -51,7 +51,13 @@ SESSION_LIFETIME_SECONDS = 3600
 """会话有效期（同时限制 CSRF token 的重用窗口）。"""
 
 UPLOAD_DIR_ENV = "SMARTSUITE_UPLOAD_DIR"
-"""覆盖上传临时目录的环境变量名（测试隔离 / 运维指定数据盘）。"""
+"""覆盖上传临时目录的环境变量名（测试隔离 / 运维指定数据盘）。
+
+注意：清理只看**本应用文件**（`ss-*.parquet`，由上传路径的
+`NamedTemporaryFile(prefix="ss-")` 命名，审查 R1-2 收窄），因此指向共享目录
+不会再误删他人文件；但本目录仍建议独占（ADR-003 单机单用户定位），避免与其他
+应用的文件命名撞车。
+"""
 
 UPLOAD_DIR_NAME = "smartsuite-uploads"
 """专用临时目录名（位于系统临时目录下）。"""
