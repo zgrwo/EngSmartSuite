@@ -38,11 +38,12 @@
 | # | 陷阱 | 正确做法 |
 |---|------|----------|
 | 14 | **`Path.rglob` 在文件上不迭代** → 扫描脚本对单文件路径静默输出"无发现"（门禁说谎） | 扫描入口先校验 `scope.is_dir()`，文件路径显式报错 |
-| 15 | **`check_undeclared` 只查根级** → 子目录新增 `docs/*.md` 等静默通过 | 对 SSOT 关键子目录（docs/skills）逐文件比对目录树声明（verify_docs.py --strict） |
+| 15 | **`check_undeclared` 只查一层** → 两层以上文件（`docs/adr/*.md`、`.github/workflows/*.yml`、`tests/scripts/*.py`）静默通过；2026-09-21 实测漏登记 16 个文件而 `--strict` 仍退出 0 | **递归**比对（F4-1 起）：目录树中**已逐项列出子项**的目录，其全部文件必须声明；汇总性目录（如 `images/`）内容豁免 |
 | 16 | **类型注解安全判定用子串匹配**（`"list" in hint.lower()`）→ `Optional[list[float]]` 被误判 | 解析注解 AST 取顶层类型构造器，`X \| None` 联合视为 Optional |
 | 17 | **工具命名映射未归一化连字符/下划线**（`validate-commit-msg.sh` vs `test_validate_commit_msg.py` 子串匹配失效）→ 门禁谎报"缺测" | 比较前统一分隔符：`stem.replace('-', '_')` 再子串匹配（见 run_affected_tests.py） |
 | 18 | **ruff per-file ignore 无理由注释**（来源：本仓 pyproject.toml 历史教训）→ 后人 copy-paste 忽略规则，无上下文 | 每条 per-file-ignores/noqa 必须带中文理由注释；新增规则类别需先确认非"覆盖问题"而是"约定豁免" |
 | 19 | **配置流断裂（声明→解析→传递→读取→使用任一环断开）** → 参数在配置中声明但链路某节点静默失效 | 新增注册点后立即用一致性检查断言多注册表键集一致（CI consistency job：TASK_REGISTRY == DEFAULT_PARAMS == TASK_LABELS == TASK_GROUPS） |
+| 21 | **跨解释器浮点末位差异改变门禁产物**（2026-09-21 E5-2）：`verify_manual_claims` 的输出文本在 3.14 与 3.12 下出现 1e-15 级差异（被容差吸收，不改变判定）→ 若产物被当作逐字节快照对比，会表现成 flake | 遇此类 flake **先查环境**（解释器版本/平台），再归因代码；产物比对留容差，不做字节级快照 |
 | 20 | **验证脚本 `if __name__ == "__main__"` 守卫被绕过**（`spec_from_file_location` 加载时 `__name__` 恒为模块 stem）→ 校验逻辑不执行仍 exit 0（门禁说谎） | 测试用入口断言（`main()` 直接调用）；CI 直接跑脚本而非 import |
 
 ## 套件历史踩坑（从 AGENTS.md「历史经验」固化）
