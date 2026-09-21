@@ -591,3 +591,28 @@ def test_iqr_zero_constant_column_both_reject():
     r_o = outlier_consensus(_mk("outlier_consensus", df, "y", [], {}))
     assert r_a.status == "error" and "IQR=0" in " ".join(r_a.messages)
     assert r_o.status == "error" and "IQR=0" in " ".join(r_o.messages)
+
+
+def test_iqr_outlier_mask_direct_unit():
+    """`detection._shared.iqr_outlier_mask` 直接单测（质量守卫要求公共函数有直测）。
+
+    三态：正常数据 → 返回 (掩码, 下界, 上界) 且边界与掩码同源；常量列（IQR=0）
+    → 返回 None（由调用方生成任务级中文错误）。
+    """
+    from smartsuite.engine._constants import IQR_OUTLIER_MULTIPLIER
+    from smartsuite.engine.detection._shared import iqr_outlier_mask
+
+    data = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 100.0])
+    result = iqr_outlier_mask(data, IQR_OUTLIER_MULTIPLIER)
+    assert result is not None
+    mask, lower, upper = result
+    q1, q3 = data.quantile(0.25), data.quantile(0.75)
+    iqr = q3 - q1
+    assert lower == pytest.approx(q1 - IQR_OUTLIER_MULTIPLIER * iqr)
+    assert upper == pytest.approx(q3 + IQR_OUTLIER_MULTIPLIER * iqr)
+    assert int(mask.sum()) == 1, "仅 100 应被判为异常"
+    assert bool(mask.iloc[-1]) is True
+
+    assert iqr_outlier_mask(pd.Series([5.0] * 10), IQR_OUTLIER_MULTIPLIER) is None, (
+        "常量列（IQR=0）应返回 None 交由调用方报错"
+    )
