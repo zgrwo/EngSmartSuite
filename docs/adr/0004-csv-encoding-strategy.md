@@ -47,8 +47,13 @@
 3. **回退链保持不变**：未指定且无 BOM 时，仍按 `utf-8-sig → utf-8 → gbk` 依次尝试；
    全部失败抛 `CsvEncodingError`（安全失败，不猜）。
 4. **明确不做**：
-   - utf-16/utf-32 **不进入**自动回退链（无 BOM 的 GBK 文件可被 `utf-16` 静默解码成乱码，
-     属于新增静默错误通路）；
+   - utf-16/utf-32 **不进入**自动回退链——回退链**仅在无 BOM 时执行**，而 pandas 的
+     `utf-16` 解码器**要求文件带 BOM**（实测：无 BOM 时抛
+     `UnicodeError: UTF-16 stream does not start with BOM`，奇偶长度均然，见回归锚点
+     `tests/services/test_data_io.py` 的 `test_bomless_bytes_are_not_decoded_by_utf16_codec`）。
+     因此该链项永远不可能命中，属**死代码**；带 BOM 的情形已在决策 1 中前置处理。
+     （订正：本条早期写作「无 BOM 的 GBK 文件可被 utf-16 静默解码成乱码」——
+     该表述未实测、且经验证**不成立**，见「演进」）
    - 不引入 charset-normalizer / chardet / cchardet；
    - 不做基于内容的启发式编码判别。
 
@@ -82,5 +87,11 @@
 
 - **2026-09-21**: 建立本决策，替代 `ROADMAP.md`「非 UTF-8 编码探测」决策门的原定方向
   （由自动探测改为显式声明 + BOM 确定性判定）。
+- **2026-09-21（同日修订）**：纠正「决策 4」的论据。原文声称「无 BOM 的 GBK 文件可被
+  `utf-16` 静默解码成乱码」，属**未实测的推测**；2026-09-21 两轮审查 R1-6 实测
+  `pd.read_csv(encoding="utf-16")` 对无 BOM 字节抛
+  `UnicodeError: UTF-16 stream does not start with BOM`（奇偶长度均然）。
+  **决策本身不变**（utf-16/utf-32 仍不入链），但论据改为可复现的「死代码」论证，
+  并新增回归锚点钉住该 pandas 行为。教训：ADR 中的因果陈述必须附实测证据。
 - 若将来出现真实繁体数据、且用户不接受手动选择编码，可重新评估「探测 + 高置信度才采用」
   方案，需新开 ADR 并废弃本条。

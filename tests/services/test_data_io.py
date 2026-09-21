@@ -500,8 +500,10 @@ def test_bom_sniff_does_not_consume_bytesio():
 def test_fallback_chain_excludes_utf16_and_utf32():
     """ADR-0004 约束：无 BOM 的自动回退链禁止含 utf-16/utf-32。
 
-    否则无 BOM 的 GBK 文件（字节数为偶数时）会被 utf-16 静默解码成乱码——
-    用一类静默错误换另一类，正是本决策要避免的。
+    理由（2026-09-21 订正）：回退链**仅在无 BOM 时执行**，而 pandas 的 `utf-16`
+    解码器要求 BOM（无 BOM 抛 `UnicodeError`）——该链项永远不可能命中，属死代码。
+    早期理由写作「无 BOM 的 GBK 会被 utf-16 静默解码成乱码」，经验证**不成立**
+    （审查 R1-6），已同步修正 ADR 与 data_io 注释。
     """
     from smartsuite.services import data_io
 
@@ -547,8 +549,9 @@ def test_explicit_unsupported_encoding_rejected_with_options(tmp_path):
 def test_explicit_encoding_mismatch_reports_chinese_error(tmp_path):
     """声明的编码与实际不符：报错文案需点明「指定编码」并提示改选自动。
 
-    用 utf-8-sig 而非 utf-16 构造不匹配：utf-16 对偶数字节的非 UTF-16 内容
-    可静默解码（用户显式声明的取舍），不会抛错，无法用于本用例。
+    用 utf-8-sig 构造不匹配（Big5 字节不是合法 UTF-8）。
+    （订正：早期 docstring 称「utf-16 可静默解码故不能用」，该说法经实测不成立——
+    utf-16 对无 BOM 内容同样抛错，见 test_bomless_bytes_are_not_decoded_by_utf16_codec。）
     """
     p = tmp_path / "big5.csv"
     p.write_bytes("批號,溫度\nB2301,235\n".encode("big5"))
@@ -571,3 +574,30 @@ def test_explicit_encoding_applies_to_bytesio_nrows():
     df = read_csv_with_encoding(buf, nrows=5, encoding="big5")
     assert list(df.columns) == ["批號", "溫度"]
     assert len(df) == 5
+
+
+def test_bomless_bytes_are_not_decoded_by_utf16_codec():
+    """证据锚点（ADR-0004 决策 4 论据）：pandas 的 `utf-16` 解码器**要求 BOM**。
+
+    性质说明：本用例是**外部行为的特征化钉子**（不是 TDD 的红-绿循环）——它的价值
+    在于让 ADR 的论据可被 CI 复验，避免文档里的因果陈述再次变成未实测的推测
+    （2026-09-21 审查 R1-6 即因此纠错）。
+
+    实测（2026-09-21，奇数 19B 与偶数 18B 均然）：
+
+        pd.read_csv(io.BytesIO(gbk_bytes), encoding="utf-16")
+        → UnicodeError: UTF-16 stream does not start with BOM
+
+    推论：把 `"utf-16"` 放进自动回退链是**死代码**——回退链仅在无 BOM 时执行，
+    而 BOM 场景已由 `_bom_encoding` 前置覆盖（带 BOM 的 UTF-16 文件在自动模式下
+    本就能正确读取，见 `test_utf16_bom_file_reads_correctly`）。
+    若 pandas 将来放宽 BOM 要求，本用例会失败并提醒同步修订 ADR 的论据。
+    """
+    import io
+
+    import pandas as pd
+
+    for text in ("批号,温度\nB123,235\n", "批次,温度\nAB1,235\n"):
+        raw = text.encode("gbk")
+        with pytest.raises(UnicodeError, match="BOM"):
+            pd.read_csv(io.BytesIO(raw), encoding="utf-16")

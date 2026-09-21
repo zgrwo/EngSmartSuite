@@ -93,8 +93,11 @@ def read_csv_with_encoding(
         （比「无法识别编码」更贴近真实原因）。
 
     设计要点（为何无 BOM 时不猜 UTF-16）:
-        GBK 字节数为偶数时可被 `utf-16` 静默解码成乱码，把它放进回退链等于用一类
-        静默错误换另一类（ADR-0004）。
+        回退链**仅在无 BOM 时执行**，而 pandas 的 `utf-16` 解码器要求文件带 BOM
+        （无 BOM 时抛 `UnicodeError: UTF-16 stream does not start with BOM`，
+        2026-09-21 实测，奇偶长度均然）——因此该链项永远不可能命中，属**死代码**；
+        带 BOM 的情形已由 `_bom_encoding` 前置处理（ADR-0004 决策 1/4）。
+        （订正：早期注释写「可被 utf-16 静默解码成乱码」，该推测经验证不成立。）
     """
     if encoding is not None and encoding not in SUPPORTED_CSV_ENCODINGS:
         raise CsvEncodingError(
