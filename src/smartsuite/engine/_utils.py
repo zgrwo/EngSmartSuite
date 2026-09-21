@@ -31,6 +31,18 @@ def shapiro_p(data) -> float:
     return 1.0 if np.isnan(p) else p
 
 
+def is_positive_finite(value: float) -> bool:
+    """参数守卫谓词：是否为**正的有限数**。
+
+    审查 2026-09-21 D-1（P1）：`x <= 0` 作为「必须为正」的守卫会漏两路——
+    NaN 与任何数比较恒为 False（IEEE-754），`+Inf` 也不满足 `<= 0`。
+    实测 `k/h/L="nan"|"inf"` 绕过守卫后 CUSUM 报警数由 4 静默降为 0。
+
+    用法：`if not is_positive_finite(k): return AnalysisResult(status="error", ...)`
+    """
+    return bool(np.isfinite(value)) and value > 0
+
+
 def safe_float(value, default: float) -> float:
     """安全转换参数值为 float，防御 CLI/YAML 字符串参数导致的 TypeError。
 

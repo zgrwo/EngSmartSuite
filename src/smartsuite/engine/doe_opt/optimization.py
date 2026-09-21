@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import is_positive_finite
 
 logger = logging.getLogger(__name__)
 
@@ -304,9 +305,14 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             messages=["权重列表必须全部为数值"],
         )
     weight_sum = np.sum(weights)
-    if weight_sum <= 0:
+    # 审查 2026-09-21 D-1（同族）：float("nan")/float("inf") 不抛异常，而
+    # `weight_sum <= 0` 对 NaN 恒 False、对 +Inf 亦为 False → 权重和静默通过守卫，
+    # 随后归一化除零 → 实测 status=ok 且 summary 输出「得分: nan」。
+    if not all(np.isfinite(w) for w in weights) or not is_positive_finite(float(weight_sum)):
         return AnalysisResult(
-            task="multi_objective", status="error", messages=["权重之和必须大于零"]
+            task="multi_objective",
+            status="error",
+            messages=[f"权重必须为有限数值且总和大于零，当前: {weights}"],
         )
     weights = np.array(weights) / weight_sum
 

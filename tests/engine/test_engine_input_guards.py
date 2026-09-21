@@ -12,6 +12,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 
@@ -87,6 +88,103 @@ def test_spc_ewma_rejects_nan_sigma():
     r = ewma_chart(_req("spc_ewma", df, target="y", params={"mu": "nan", "sigma": "nan"}))
     assert r.status == "error"
     assert any("有限数值" in m or "NaN" in m for m in r.messages)
+
+
+# ── 2b. CUSUM/EWMA 结构参数 k/h/L 的非有限守卫（审查 2026-09-21 D-1）──
+# `x <= 0` 对 NaN 恒为 False（IEEE-754 比较语义）、对 +Inf 亦为 False，
+# 于是 nan/inf 参数绕过「必须为正」守卫，静默关闭全部报警（实测报警数 4→0）。
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
+@pytest.mark.parametrize("key", ["k", "h"])
+def test_spc_cusum_rejects_non_positive_finite_k_h(bad, key):
+    from smartsuite.engine.spc_monitor import cusum_chart
+
+    np.random.seed(1)
+    df = pd.DataFrame(
+        {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
+    )
+    r = cusum_chart(_req("spc_cusum", df, target="y", params={key: bad}))
+    assert r.status == "error", f"{key}={bad!r} 应报错而非静默抑制报警"
+    assert any(key in m for m in r.messages), f"错误文案应点明参数名 {key}: {r.messages}"
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
+def test_spc_ewma_rejects_non_positive_finite_lambda_width(bad):
+    from smartsuite.engine.spc_monitor import ewma_chart
+
+    np.random.seed(1)
+    df = pd.DataFrame(
+        {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
+    )
+    r = ewma_chart(_req("spc_ewma", df, target="y", params={"L": bad}))
+    assert r.status == "error", f"L={bad!r} 应报错而非静默产出无效控制限"
+    assert any("L" in m for m in r.messages), f"错误文案应点明参数名 L: {r.messages}"
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
+def test_spc_cusum_ewma_alarm_count_stable_for_legal_params(bad):
+    from smartsuite.engine.spc_monitor import cusum_chart
+
+    np.random.seed(1)
+    df = pd.DataFrame(
+        {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
+    )
+    r = cusum_chart(_req("spc_cusum", df, target="y", params={"k": 0.5, "h": 5.0}))
+    assert r.status == "ok"
+    assert r.tables, "合法参数必须仍产出表格"
+
+
+# ── 2c. multi_objective 权重非有限（同族 D-1）──
+# `weights=[float(w) for w in weights]` 对 "nan"/"inf" 恒成功，
+# `weight_sum <= 0` 又漏 NaN/+Inf → 得分静默输出 nan（实测 summary "得分: nan"）。
+@pytest.mark.parametrize(
+    "bad_weights",
+    [["nan", 1.0], ["inf", 1.0], ["-inf", 1.0], ["nan", "nan"], [0.0, 0.0], [-1.0, 1.0]],
+)
+def test_multi_objective_rejects_non_finite_or_non_positive_weights(bad_weights):
+    from smartsuite.engine.doe_opt.optimization import multi_objective_opt
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(0, 1, 30),
+            "y1": rng.normal(5, 1, 30),
+            "y2": rng.normal(3, 1, 30),
+        }
+    )
+    objs = [
+        {"col": "y1", "direction": "maximize"},
+        {"col": "y2", "direction": "minimize"},
+    ]
+    r = multi_objective_opt(
+        _req(
+            "multi_objective", df, target="y1", params={"objectives": objs, "weights": bad_weights}
+        )
+    )
+    assert r.status == "error", f"weights={bad_weights!r} 应报错而非输出 得分=nan"
+    assert any("权重" in m for m in r.messages)
+
+
+def test_multi_objective_legal_weights_unchanged():
+    """对照守卫：合法权重下多目标优化正常产出（防把守卫改成永远拒绝）。"""
+    from smartsuite.engine.doe_opt.optimization import multi_objective_opt
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(0, 1, 30),
+            "y1": rng.normal(5, 1, 30),
+            "y2": rng.normal(3, 1, 30),
+        }
+    )
+    objs = [
+        {"col": "y1", "direction": "maximize"},
+        {"col": "y2", "direction": "minimize"},
+    ]
+    r = multi_objective_opt(
+        _req("multi_objective", df, target="y1", params={"objectives": objs, "weights": [0.5, 0.5]})
+    )
+    assert r.status == "ok", r.messages
+    assert "nan" not in (r.summary or "").lower(), "合法权重不得输出 nan 得分"
 
 
 # ── 3. alpha (0,1) 校验 ──

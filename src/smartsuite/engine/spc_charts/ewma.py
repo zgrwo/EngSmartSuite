@@ -7,6 +7,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import is_positive_finite
 from smartsuite.engine.spc_charts._shared import _resolve_groups
 
 
@@ -40,11 +41,12 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"λ (平滑参数) 必须在 (0, 1] 范围内，当前值: {lam}"],
         )
     # 审查 2026-08-19 #2.8：L≤0 时控制限退化/反转导致全部点误报警
-    if L <= 0:
+    # 审查 2026-09-21 D-1：`L <= 0` 漏 NaN/+Inf（比较恒 False）→ 须用谓词守卫
+    if not is_positive_finite(L):
         return AnalysisResult(
             task="spc_ewma",
             status="error",
-            messages=[f"L (控制限宽度) 必须大于 0，当前值: {L}"],
+            messages=[f"L (控制限宽度) 必须为正的有限数，当前值: {L}"],
         )
 
     user_mu = req.params.get("mu")
