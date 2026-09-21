@@ -231,6 +231,60 @@ se = resid_std / np.sqrt(Sxx) if Sxx > 0 else float("nan")
 t_val = float(beta[1] / se) if np.isfinite(se) and se > 0 else float("nan")
 ```
 
+### 陷阱 10：第三方库告警在 `filterwarnings=error` 下被 `except Exception` 吞成业务错误
+
+**现象**（2026-09-21 R1-4 后续，`vif` 完全共线）：`vif_analysis` 返回 `status=error`、
+消息「VIF 计算失败」，**已算出的数值表全部丢失**；同一代码在默认 warnings 过滤器下
+（直接脚本运行）完全正常 → 典型的“只有 pytest / CI 复现”。
+
+**根因**：`pyproject.toml` 的 `filterwarnings = ["error", ...]` 把第三方库内部的告警
+升为异常；被函数外层 `except Exception` 当业务错误捕获。同一种输入在不同依赖分支
+会以**不同形式**发告警——静默必须两条都覆盖（2026-09-21 实测）：
+
+| 依赖分支 | 告警 | 位置 |
+|---|---|---|
+| statsmodels ≥0.15 | `UserWarning("The design matrix is poorly conditioned (condition number=...)")` | 库内自算 `np.linalg.cond(X) > 1e4` 后 `warnings.warn(..., stacklevel=2)` |
+| statsmodels 0.14 | `RuntimeWarning: divide by zero encountered in scalar divide` | 库内 `vif = 1.0/(1.0-r_sq)`，完全共线 r_sq==1 |
+
+既存静默只写了 `SingularMatrixWarning`，两种形态都漏。
+
+**识别信号**：测试报 `DID NOT WARN` / `RuntimeWarning: divide by zero encountered` /
+`VIF 计算失败`，而同一输入在普通脚本里 `status=ok` → 极可能是库告警泄漏。
+
+**排查手法（勿按消息关键词猜，先定位来源）**：
+```python
+with warnings.catch_warnings(record=True) as ws:
+    warnings.simplefilter("always")
+    result = analyze(...)
+for w in ws:
+    print(w.category.__name__, w.message, w.filename, w.lineno)   # 定位到 site-packages 行
+```
+- 按 `w.filename` 判断是**库内部**还是本项目代码，再决定静默还是修值；
+- **两个依赖分支都要跑**：本项目 venv 为 py3.12 + statsmodels 0.15，系统 Python 可能
+  是 py3.14 + statsmodels 0.14（`pyproject` 允许 `>=0.14`）——单分支的“已修好”可能
+  在另一分支仍失败（本陷阱即因此经历一轮误判：0.14 无此 UserWarning，不代表 0.15 没有）。
+
+**修复模板**：
+```python
+# ❌ 只静默了矩阵奇异告警，另两种形态仍泄漏
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", SingularMatrixWarning)
+    vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+
+# ✅ 库英文告警按消息窄静默 + errstate 只管除零/无效（不吞其他告警）
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", SingularMatrixWarning)
+    warnings.filterwarnings(
+        "ignore", message="The design matrix is poorly conditioned", category=UserWarning
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+```
+
+**回归防线**：`tests/services/test_service_guards.py`（用例 `test_run_analysis_vif_inf_not_in_json`
+同时钉住：引擎路径真值 >1e10（inf 与 1e15 两种形态）、**不泄漏告警**、
+序列化无 `Infinity` 且非有限值清为空串）。
+
 ---
 
 ## 🟢 最佳实践模板
@@ -402,6 +456,7 @@ result_b = results_b[0]
 | `sum(axis=None)` FutureWarning | pandas 弃用 | 改为 `.sum().sum()` 链式调用 |
 | Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
 | 微尺度(ppb/pico)数据结论翻转 / Web 整列 0.0000 | 绝对 `EPSILON` 判决或展示层固定舍入 | 见陷阱 9：守卫改精确零、判决相对化、展示走 `round_for_display` |
+| 测试报 `DID NOT WARN` / `divide by zero encountered` / 「VIF 计算失败」，同输入脚本却 `status=ok` | 第三方库告警在 `filterwarnings=error` 下升为异常，被 `except Exception` 吞成业务错误（数值表全丢）；同一输入在不同依赖分支发不同告警（statsmodels ≥0.15 条件数 UserWarning / 0.14 FP 除零） | 见陷阱 10：先 `warnings.catch_warnings(record=True)` 定位 `w.filename/w.lineno`，再按消息窄静默 + `np.errstate`；**两个依赖分支都要跑** |
 
 ---
 

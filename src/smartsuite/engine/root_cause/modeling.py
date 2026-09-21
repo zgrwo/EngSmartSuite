@@ -248,10 +248,24 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     try:
         X = sm.add_constant(df)
-        # 秩亏由本函数后续条件数告警（poorly conditioned）统一表达，此处静默 statsmodels 英文告警
+        # 共线性由本函数的中文 summary（VIF>阈值 / 无穷大 VIF）统一表达，此处窄静默
+        # statsmodels 的英文告警——跨版本两种形态，均需静默：
+        #   ① statsmodels ≥0.15：variance_inflation_factor 自身对 cond(X)>1e4 发
+        #      UserWarning("The design matrix is poorly conditioned ...")；
+        #   ② statsmodels 0.14：内部 `1/(1-R²)` 在完全共线（R²==1）时除零，发 numpy
+        #      RuntimeWarning。
+        # 两者在项目 pytest 配置 `filterwarnings = error` 下都会升为异常，被外层
+        # except 吞成「VIF 计算失败」，已算出的数值表全部丢失（2026-09-21 复审）。
+        # 按消息窄静默、errstate 只管除零/无效，不吞掉其他告警。
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SingularMatrixWarning)
-            vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+            warnings.filterwarnings(
+                "ignore",
+                message="The design matrix is poorly conditioned",
+                category=UserWarning,
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
         vif_full = pd.DataFrame({"变量": X.columns, "VIF": vif_vals})
         # 排除无意义的 const 列
         vif_data = vif_full[vif_full["变量"] != "const"].copy()

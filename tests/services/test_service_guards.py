@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import tempfile
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -169,13 +170,24 @@ def test_serialize_table_inf_replaced():
 
 
 def test_run_analysis_vif_inf_not_in_json():
-    """共线设计矩阵：VIF 应为**有限大值**（statsmodels 0.15 实测 ~1e15）且 JSON 无 Infinity。
+    """共线设计矩阵：VIF 极大（完全共线时为 inf）→ JSON 必须无 Infinity 字面量，且引擎不得泄漏告警。
 
-    2026-09-21 审查 R1-4：原断言 `"Infinity" not in text` 在实测值有限时**恒真**、
-    无法失败（docstring 声称「产生 inf 表」与实测不符，属假绿）。
-    现改为可失败的量级断言（证明共线性确实被检出），inf 路径另由
-    test_vif_infinite_vif_does_not_abort_task 显式覆盖。
+    2026-09-21 审查 R1-4 引入本用例；复审时发现两处问题：
+      ① 原 `pytest.warns(UserWarning, match="poorly conditioned")` 只在部分依赖分支成立：
+         statsmodels ≥0.15 的 `variance_inflation_factor` 确实自行发出
+         `UserWarning("The design matrix is poorly conditioned (condition number=...)")`，
+         而 0.14 分支不发此告警（改为内部 `1/(1-R²)` 完全共线除零 → numpy RuntimeWarning）。
+         二者在 `filterwarnings = error` 下均升为异常，被 `vif_analysis` 外层 except 吞成
+         「VIF 计算失败」→ 数值表全丢（原用例在 0.15 分支即因此报错，而非“假绿”）。
+         故本用例不再断言“引擎会发某条告警”，改为钉住真实契约：**不得向调用方泄漏任何告警**。
+      ② `vif_values` 取自 Web 序列化后的表格，非有限值已被 `_serialize_table` 清为 `''`，
+         对其做 `v > 1e10` / `np.isfinite` 断言必抛 TypeError（断言体不可达，已两分支复现）。
+
+    现按真实契约重写：数值断言走引擎路径（numpy 值，inf 与 1e15 两种形态均要求 >1e10），
+    JSON 断言只验序列化结果，并将「告警泄漏」本身钉住。
     """
+    from smartsuite.core.contracts import AnalysisRequest
+    from smartsuite.engine.root_cause.modeling import vif_analysis
     from smartsuite.web.api import run_analysis
 
     dfv = pd.DataFrame(
@@ -185,19 +197,35 @@ def test_run_analysis_vif_inf_not_in_json():
             "c": [2.0, 4, 6, 8, 10, 12],
         }
     )
-    # 共线设计矩阵：引擎有意给出 UserWarning（poorly conditioned），statsmodels 秩亏告警一并捕获
-    with pytest.warns(UserWarning, match="poorly conditioned"):
-        results = run_analysis("vif", dfv, [], ["a", "b", "c"], [])
-    assert results[0]["status"] == "ok"
-    text = json.dumps(results)
-    assert "Infinity" not in text, "VIF inf 表不应产生 JSON Infinity"
 
-    # 可失败断言：共线列的 VIF 必须显著大于 1（原缺此断言 → 断言体系空转）
+    # ① 引擎路径：完全共线必须被检出（VIF 极大；statsmodels 0.14 给 inf、0.15 给 ~1e15 均可）
+    engine_result = vif_analysis(
+        AnalysisRequest(
+            task="vif", data=dfv, target_col="", feature_cols=["a", "b", "c"], params={}
+        )
+    )
+    assert engine_result.status == "ok", f"完全共线不应使任务失败: {engine_result.messages}"
+    truth = engine_result.tables["vif_table"]["VIF"].to_numpy(dtype=float)
+    assert len(truth) == 3
+    assert all(v > 1e10 for v in truth), f"完全共线的 VIF 应为极大值，实测: {truth}"
+    assert "共线" in engine_result.summary, f"应给出共线性告警: {engine_result.summary!r}"
+
+    # ② 不得泄漏告警（statsmodels 内部除零 RuntimeWarning；filterwarnings=error 下即中断）
+    with warnings.catch_warnings(record=True) as leaked:
+        warnings.simplefilter("always")
+        results = run_analysis("vif", dfv, [], ["a", "b", "c"], [])
+    assert not leaked, (
+        f"vif 不应向调用方泄漏告警: {[(w.category.__name__, str(w.message)) for w in leaked]}"
+    )
+
+    # ③ 序列化侧：非有限 VIF 清为空串，JSON 无 Infinity 字面量
+    assert results[0]["status"] == "ok"
+    assert "Infinity" not in json.dumps(results), "VIF inf 表不应产生 JSON Infinity"
     tbl = next(iter(results[0]["tables"].values()))
-    vif_values = [row[tbl["columns"].index("VIF")] for row in tbl["data"]]
-    assert vif_values, "VIF 表不得为空"
-    assert all(v > 1e10 for v in vif_values), f"完全共线的 VIF 应为极大值，实测: {vif_values}"
-    assert all(np.isfinite(v) for v in vif_values), f"JSON 侧不得出现非有限值: {vif_values}"
+    vif_col = [row[tbl["columns"].index("VIF")] for row in tbl["data"]]
+    assert vif_col, "VIF 表不得为空"
+    for cell in vif_col:
+        assert cell in ("",) or np.isfinite(float(cell)), f"序列化后不得残留非有限值: {cell!r}"
 
 
 def test_vif_infinite_vif_does_not_abort_task(monkeypatch):

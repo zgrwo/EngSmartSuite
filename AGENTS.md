@@ -44,7 +44,7 @@
 
 | 范围 | Skill 文件 | 内容 |
 | :--- | :--- | :--- |
-| 修改任何源码前 | `skills/smartsuite-dev.md` | 7 大高发陷阱 + 5 套修复模板 |
+| 修改任何源码前 | `skills/smartsuite-dev.md` | 10 大高发陷阱 + 5 套修复模板 |
 | 为用户推荐分析方法 | `skills/analysis-decision-tree.md` | 决策树 → 选分析方法 |
 | 创造性工作前 | `skills/brainstorming/` | 探索意图/需求/设计后再实现 |
 | 多步任务动代码前 | `skills/writing-plans/` | 写执行计划 |
