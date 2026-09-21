@@ -14,6 +14,7 @@ import pandas as pd
 # 导致的间歇性假红（详见 scripts/common.py 的 child_env 说明）
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import child_env  # noqa: E402
+from templates_gate import validate_template_tasks  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -563,6 +564,18 @@ check(
     "CLI lists core methods",
     all(n in stdout for n in ["anova", "correlation", "spc_xbar", "trend_forecast"]),
     f"output_len={len(stdout)}",
+)
+
+# ============================================================
+section("10. Templates task keys")
+# ============================================================
+# 审查 2026-09-21 G-7：templates/*.yaml 的 task 键原先**无任何门禁**——任务改名/删除后
+# 模板会静默失效（用户跑到「未知的分析任务」才发现）。实测当时 45/45 合法，属潜在盲区。
+_template_problems = validate_template_tasks(Path("templates"), set(TASK_REGISTRY))
+check(
+    "templates/*.yaml 的 task 键均已注册",
+    not _template_problems,
+    "; ".join(_template_problems) if _template_problems else f"{len(TASK_REGISTRY)} 个任务均可达",
 )
 
 # ============================================================
