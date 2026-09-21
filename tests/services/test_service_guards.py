@@ -169,7 +169,13 @@ def test_serialize_table_inf_replaced():
 
 
 def test_run_analysis_vif_inf_not_in_json():
-    """VIF 共线场景产生 inf 表 → 序列化后 JSON 无 Infinity（防 JSON.parse 崩）。"""
+    """共线设计矩阵：VIF 应为**有限大值**（statsmodels 0.15 实测 ~1e15）且 JSON 无 Infinity。
+
+    2026-09-21 审查 R1-4：原断言 `"Infinity" not in text` 在实测值有限时**恒真**、
+    无法失败（docstring 声称「产生 inf 表」与实测不符，属假绿）。
+    现改为可失败的量级断言（证明共线性确实被检出），inf 路径另由
+    test_vif_infinite_vif_does_not_abort_task 显式覆盖。
+    """
     from smartsuite.web.api import run_analysis
 
     dfv = pd.DataFrame(
@@ -185,6 +191,39 @@ def test_run_analysis_vif_inf_not_in_json():
     assert results[0]["status"] == "ok"
     text = json.dumps(results)
     assert "Infinity" not in text, "VIF inf 表不应产生 JSON Infinity"
+
+    # 可失败断言：共线列的 VIF 必须显著大于 1（原缺此断言 → 断言体系空转）
+    tbl = next(iter(results[0]["tables"].values()))
+    vif_values = [row[tbl["columns"].index("VIF")] for row in tbl["data"]]
+    assert vif_values, "VIF 表不得为空"
+    assert all(v > 1e10 for v in vif_values), f"完全共线的 VIF 应为极大值，实测: {vif_values}"
+    assert all(np.isfinite(v) for v in vif_values), f"JSON 侧不得出现非有限值: {vif_values}"
+
+
+def test_vif_infinite_vif_does_not_abort_task(monkeypatch):
+    """statsmodels 返回 inf 时不得使整个任务 status=error（审查 R1-4）。
+
+    背景：`pyproject.toml` 允许 `statsmodels>=0.14`，该版本下完全共线可返回 inf；
+    此时 `xmax = inf * 1.08` → `ax.set_xlim(0, inf)` 使 matplotlib 抛错，被
+    `except Exception` 捕获后 **整个 vif 任务报错**，已算出的 VIF 表全部丢失。
+    """
+    import smartsuite.engine.root_cause.modeling as modeling
+    from smartsuite.core.contracts import AnalysisRequest
+
+    monkeypatch.setattr(modeling, "variance_inflation_factor", lambda arr, i: float("inf"))
+    df = pd.DataFrame(
+        {"a": [1.0, 2, 3, 4, 5, 6], "b": [1.0, 2, 3, 4, 5, 6], "c": [2.0, 4, 6, 8, 10, 12]}
+    )
+    r = modeling.vif_analysis(
+        AnalysisRequest(task="vif", data=df, target_col="", feature_cols=["a", "b", "c"], params={})
+    )
+    assert r.status == "ok", f"inf 不应使任务整体失败: {r.messages}"
+    assert any("共线" in m for m in [r.summary]), f"应给出共线性告警: {r.summary!r}"
+    assert r.figures, "应仍产出图表"
+    for fig in r.figures:
+        for ax in fig.axes:
+            lo, hi = ax.get_xlim()
+            assert np.isfinite(lo) and np.isfinite(hi), f"轴范围必须有限，实测 ({lo}, {hi})"
 
 
 # ─────────────────────────── app.py (任务 11) ───────────────────────────

@@ -267,6 +267,9 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
                 f"⚠ {len(invalid_vif)} 个变量 VIF<1 异常（{bad_cols}），"
                 "可能为零方差常量列或数值计算误差，请检查数据"
             )
+        # 审查 2026-09-21 R1-4：inf 意味着**完全共线**（非仅仅「风险」），显式告知
+        if not np.all(np.isfinite(vif_data["VIF"].to_numpy(dtype=float))):
+            vif_warnings.append("⚠ 存在无穷大 VIF（变量完全共线），不可同时入模，请删除冗余变量")
         warning = (
             "; ".join(vif_warnings)
             if vif_warnings
@@ -281,10 +284,21 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
             PALETTE["target"]["primary"] if v > threshold else PALETTE["data"]["primary"]
             for v in vif_plot["VIF"]
         ]
-        ax.barh(vif_plot["变量"], vif_plot["VIF"], color=colors)
         # 自适应轴范围：VIF 远低于阈值时不把阈值线画进来（否则柱子被压缩成一条）
-        vif_max = float(vif_plot["VIF"].max()) if len(vif_plot) else 1.0
+        # 审查 2026-09-21 R1-4：statsmodels 在完全共线时可返回 inf（pyproject 允许
+        # >=0.14）。两个陷阱：① inf*1.08 → set_xlim(0, inf) 让 matplotlib 抛错；
+        # ② 直接把 inf 送入 barh，其内部变换发 RuntimeWarning（warnings-as-errors
+        # 下同样中断）→ 两者都被外层 except Exception 吞成「VIF 计算失败」，
+        # 已算出的 VIF 表全部丢失。处理：轴范围只按有限值定；inf 柱在**图上**
+        # 截断绘制（数值表仍如实给出 inf）。
+        values = vif_plot["VIF"].to_numpy(dtype=float)
+        finite_vals = values[np.isfinite(values)]
+        vif_max = float(finite_vals.max()) if finite_vals.size else 1.0
+        if bool(np.any(~np.isfinite(values))):
+            vif_max = max(vif_max, threshold)
         xmax = vif_max * 1.08 if vif_max >= threshold else max(vif_max * 1.25, 1.05)
+        plot_values = np.where(np.isfinite(values), values, xmax)
+        ax.barh(vif_plot["变量"], plot_values, color=colors)
         ax.set_xlim(0, xmax)
         if threshold <= xmax:
             ax.axvline(
