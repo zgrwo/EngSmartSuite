@@ -20,6 +20,7 @@ import io
 import logging
 import os
 import pathlib
+import re
 import sys
 import time
 import zipfile
@@ -46,10 +47,13 @@ def _csrf(client):
     return resp.get_json()["token"]
 
 
-def _post_csv(client, content: bytes, filename: str = "data.csv"):
+def _post_csv(client, content: bytes, filename: str = "data.csv", encoding: str | None = None):
+    data: dict = {"file": (io.BytesIO(content), filename)}
+    if encoding is not None:
+        data["encoding"] = encoding
     return client.post(
         "/api/upload",
-        data={"file": (io.BytesIO(content), filename)},
+        data=data,
         content_type="multipart/form-data",
         headers={"X-CSRF-Token": _csrf(client)},
     )
@@ -139,6 +143,37 @@ def test_upload_csv_utf16_bom_decoded(client):
     assert resp.status_code == 200, resp.get_json()
     names = [c["name"] for c in resp.get_json()["columns"]]
     assert names[:2] == ["强度", "温度"], f"UTF-16 应正确解码: {names[:2]}"
+
+
+def test_upload_csv_explicit_big5_encoding(client):
+    """encoding=big5：繁体表头正确返回（ADR-0004 决策 2）。"""
+    content = "批號,溫度\nB2301,235\n".encode("big5")
+    resp = _post_csv(client, content, encoding="big5")
+    assert resp.status_code == 200, resp.get_json()
+    names = [c["name"] for c in resp.get_json()["columns"]]
+    assert names[:2] == ["批號", "溫度"]
+
+
+def test_upload_csv_unsupported_encoding_400(client):
+    """白名单外编码：400 + 中文错误（不透传 pandas 英文异常）。"""
+    content = "批号,温度\nB1,235\n".encode("gbk")
+    resp = _post_csv(client, content, encoding="latin-1")
+    assert resp.status_code == 400
+    assert "不支持的编码" in resp.get_json()["error"]
+
+
+def test_frontend_encoding_options_within_backend_allowlist():
+    """前端编码下拉框选项 ⊆ 后端白名单（ADR-0004 约束：白名单只定义一处）。"""
+    from smartsuite.services.data_io import SUPPORTED_CSV_ENCODINGS
+
+    html = (pathlib.Path(app_module.__file__).parent / "templates" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    block = re.search(r'<select id="encoding".*?</select>', html, re.S)
+    assert block, "index.html 应存在 id=encoding 的下拉框"
+    values = set(re.findall(r'<option value="([^"]*)"', block.group(0)))
+    values.discard("")  # 空值 = 自动识别
+    assert values <= set(SUPPORTED_CSV_ENCODINGS), f"前端出现后端不支持的编码: {values}"
 
 
 def test_upload_excel_bad_zip_400(client):

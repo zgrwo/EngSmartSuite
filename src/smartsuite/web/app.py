@@ -239,12 +239,18 @@ def upload():
         # CSV 文件：多编码尝试（UTF-8 BOM → UTF-8 → GBK）。审查 2026-09-19 E5：
         # 移除 latin-1 兜底——latin-1 对任意字节序列恒可解码，会把 UTF-16/Big5
         # 中文表头静默读成乱码（'ÿþyb!k'），用户据此得到错误的 Cp/Cpk 结论。
+        # ADR-0004：BOM（UTF-8/16/32）确定性判定；表单可选 encoding 字段供用户
+        # 显式声明编码（繁体 Big5 等），空串/缺省 = 自动。
         try:
             # Round-2 P3：先探测行数（只读 max_rows+1 行），超限直接拒绝，
             # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒。
             # 审查 #P2：探测 nrows=100_001 未超限 ⟺ 文件行数 ≤ 100_000，
             # probe 已是完整数据——直接复用，避免同一文件全量重读两次。
-            df = read_csv_with_encoding(io.BytesIO(f_bytes), nrows=config.CSV_PROBE_ROWS)
+            df = read_csv_with_encoding(
+                io.BytesIO(f_bytes),
+                nrows=config.CSV_PROBE_ROWS,
+                encoding=(request.form.get("encoding") or "").strip() or None,
+            )
         except CsvEncodingError as e:
             return jsonify({"error": str(e)}), 400
         except Exception:

@@ -57,8 +57,10 @@ const catKw = ['日期','班次','车间','机台','模具','编号','操作','�
 const yKw = ['不良','强度','伸长','冲击','粗糙','偏差','波动','效率'];
 
 // File upload
-document.getElementById('file-input').addEventListener('change', async e => {
-  const f = e.target.files[0]; if (!f) return;
+let lastFile = null;
+
+async function uploadFile(f) {
+  lastFile = f;
   document.getElementById('filename').textContent = f.name;
   document.getElementById('shape').textContent = '上传中...';
   // 审查 2026-08-19 M3：前端预检 50MB，避免 413 HTML 响应导致"网络错误"误报
@@ -66,10 +68,14 @@ document.getElementById('file-input').addEventListener('change', async e => {
     showToast('文件超过 50MB 限制，请减少数据量后重试');
     document.getElementById('filename').textContent = '未选择文件';
     document.getElementById('shape').textContent = '';
-    e.target.value = '';
+    document.getElementById('file-input').value = '';
+    lastFile = null;
     return;
   }
   const fd = new FormData(); fd.append('file', f);
+  // ADR-0004：可选显式编码；空值 = 后端自动（BOM → utf-8-sig → utf-8 → gbk）
+  const enc = document.getElementById('encoding').value;
+  if (enc) fd.append('encoding', enc);
   try {
     const r = await fetchWithCsrf('/api/upload', { method: 'POST', body: fd });
     let d = {};
@@ -92,6 +98,16 @@ document.getElementById('file-input').addEventListener('change', async e => {
     document.getElementById('filename').textContent = '未选择文件';
     document.getElementById('shape').textContent = '';
   }
+}
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  uploadFile(f);
+});
+
+// 切换编码后用同一文件立即重传：否则用户看到乱码列名后必须重新选一次文件
+document.getElementById('encoding').addEventListener('change', () => {
+  if (lastFile) uploadFile(lastFile);
 });
 
 // Column rendering — uses data-* attributes + addEventListener (no inline handlers)
