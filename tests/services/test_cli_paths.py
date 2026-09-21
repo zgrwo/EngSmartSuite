@@ -374,12 +374,8 @@ def test_cli_encoding_flag_hint_for_excel(monkeypatch, capsys, tmp_path):
     无意义）。提示走 stderr，不污染 stdout 的分析结果，也不改变读取行为。
     """
     xlsx = tmp_path / "data.xlsx"
-    pd.DataFrame({"强度": [45.1, 46.3, 47.2], "温度": [180, 182, 185]}).to_excel(
-        xlsx, index=False
-    )
+    pd.DataFrame({"强度": [45.1, 46.3, 47.2], "温度": [180, 182, 185]}).to_excel(xlsx, index=False)
     tpl = _write_yaml(tmp_path, _CORR_TPL)
-    out, err = _run_cli(
-        monkeypatch, capsys, ["run", tpl, "-i", str(xlsx), "--encoding", "big5"]
-    )
+    out, err = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", str(xlsx), "--encoding", "big5"])
     assert "仅对 CSV 生效" in err, f"应显式提示 --encoding 被忽略，实际 stderr={err!r}"
     assert "相关" in out, f"提示不应影响分析本身: {out[:200]}"
