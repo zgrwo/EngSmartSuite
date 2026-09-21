@@ -408,8 +408,10 @@ def test_big5_short_header_is_silently_misdecoded_as_gbk_known_gap(tmp_path):
 
     复现：`python -c` 把 `批號\nB23\n` 以 Big5 存入文件后调用 `read_csv_with_encoding`。
 
-    本用例是**报警钉子**而非规格：修复（引入编码探测，见 ROADMAP 决策门「非 UTF-8
-    编码探测」）后这里会抛 `CsvEncodingError`，该失败即提醒同步更新本用例与 ROADMAP。
+    **现状出口（2026-09-21 起）**：不声明编码时本用例仍成立；改用 `encoding="big5"`
+    （CLI `--encoding big5` / Web 上传面板“文件编码”下拉框）即可正确解码，
+    见 `test_explicit_big5_decodes_traditional_header` 与 ADR-0004。
+    自动探测方案经实测否证（GBK/Big5 短样本不可分，误判率最高 51.5%），不再计划实施。
     """
     p = tmp_path / "big5_short.csv"
     p.write_bytes("批號\nB23\n".encode("big5"))

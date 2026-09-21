@@ -10,7 +10,8 @@
 
 2026-09-19 完成 E5 修复（移除 latin-1 兜底）后，CSV 自动回退链固定为
 `utf-8-sig → utf-8 → gbk`，并留下一个已知缺口，由报警钉子测试钉住：
-`tests/services/test_data_io.py::test_big5_short_header_is_silently_misdecoded_as_gbk_known_gap`
+`tests/services/test_data_io.py` 中的
+`test_big5_short_header_is_silently_misdecoded_as_gbk_known_gap`
 ——Big5 短表头被 GBK **静默误解码**（`批號` → `у腹`），用户会基于错误列名得到错误结论。
 
 2026-09-21 对「引入编码探测依赖」做了可行性验证（charset-normalizer 3.5.1，
@@ -60,7 +61,7 @@
 
 ## 约束
 
-- `services/data_io.py::read_csv_with_encoding` 是 Web 与 CLI 唯一的 CSV 读取入口，
+- `services/data_io.py` 中的 `read_csv_with_encoding` 是 Web 与 CLI 唯一的 CSV 读取入口，
   两条入口的编码策略、错误文案必须一致（差分测试守护）。
 - 受支持编码白名单只在 `services/data_io.py` 定义一处（`SUPPORTED_CSV_ENCODINGS`）；
   Web 下拉框选项必须取自该白名单（一致性测试守护）。

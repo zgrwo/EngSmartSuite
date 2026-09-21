@@ -411,7 +411,8 @@ Task key 按业务场景分为 5 组（定义在 `TASK_GROUPS` 中，`web/app.py
 | 函数 | 用途 |
 |------|------|
 | `validate_data(df, target_col, feature_cols)` | 校验列存在性、类型、缺失值 |
-| `read_csv_with_encoding(source, *, nrows=None)` | 多编码（UTF-8 BOM → UTF-8 → GBK）读取 CSV；全部失败抛 `CsvEncodingError`，结构非法抛 `CsvParseError`（Web/CLI 共用；不含 latin-1 兜底） |
+| `read_csv_with_encoding(source, *, nrows=None, encoding=None)` | 多编码读取 CSV。`encoding=None`：先按 BOM 判定（UTF-8/UTF-16/UTF-32），无 BOM 再走 UTF-8 BOM → UTF-8 → GBK；显式 `encoding` 取值见 `SUPPORTED_CSV_ENCODINGS`（`utf-8-sig`/`gbk`/`gb18030`/`big5`/`utf-16`）。解码失败抛 `CsvEncodingError`，结构非法抛 `CsvParseError`（Web/CLI 共用；不含 latin-1 兜底；ADR-0004） |
+| `SUPPORTED_CSV_ENCODINGS` | 可显式声明的 CSV 编码白名单（唯一来源：CLI `--encoding` 与 Web 上传面板下拉框；ADR-0004） |
 | `preprocess_data(df, features, categorical_cols=None)` | One-Hot 编码 + 中位数插补 |
 | `missing_pattern_analysis(df)` | 缺失模式诊断 + 高基数检测 |
 | `recommend_analysis(df, target_col=None)` | 基于数据结构智能推荐分析方法 |

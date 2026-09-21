@@ -26,6 +26,7 @@
 - [x] 巨石模块 `detection.py` / `inverse.py` 拆分为子包（1,099/2,082 行 → 5/8 文件，公开 API 不变，2026-09-21）
 - [x] 上传临时文件去进程级状态：专用目录 + mtime TTL 扫描（`web/app.py`，2026-09-21）
 - [x] 部署形态决策：维持单机/单用户（[ADR-003](docs/adr/0003-deployment-scope-single-user.md)，2026-09-21）
+- [x] 非 UTF-8 编码策略定向：自动探测经实测否证，改为 BOM 确定性判定 + 用户显式声明（[ADR-004](docs/adr/0004-csv-encoding-strategy.md)，2026-09-21）
 
 ## 2027 H1
 
@@ -38,7 +39,7 @@
 | 发布 PyPI | uv.lock 稳定 ≥2 个 releases，且 Release 安装类 Issue ≥1 个月为零 | ⏳ 未触发 |
 | 英文/国际化 | ≥3 个来自非中文用户的 Issue 或功能请求 | ⏳ 未触发 |
 | 第二维护者 | 外部合并 PR ≥3 且贡献者 ≥2 人 | ⏳ 未触发 |
-| 非 UTF-8 编码探测（charset-normalizer/chardet） | 出现繁体（Big5）来源的真实用户数据或误读报告 | ⏳ 未触发 |
+| 非 UTF-8 编码探测（charset-normalizer/chardet） | 出现繁体（Big5）来源的真实用户数据或误读报告 | ✅ 已评估并定向：自动探测经实测否证（GBK/Big5 短样本不可分），改走 BOM 判定 + 显式声明（[ADR-004](docs/adr/0004-csv-encoding-strategy.md)，2026-09-21） |
 
 ## 适合新贡献者的任务（good first issue 候选）
 
