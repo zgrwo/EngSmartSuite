@@ -96,7 +96,11 @@ def test_export_workbook_custom_tasks(sample_doe_data):
 
     # Round-2 P3：anova 需要类别因子（数值连续列现被拒绝）
     df = sample_doe_data.copy()
-    df["水平"] = np.random.choice(["低", "中", "高"], len(df))
+    # 审查 2026-09-21 E5-1：改用局部 Generator 而非依赖 conftest 的全局
+    # `np.random.seed(42)` 状态——既让本用例自含可复现，也避免
+    # `np.random.seed()` 重播全局状态影响同进程内后续用例。
+    rng = np.random.default_rng(42)
+    df["水平"] = rng.choice(["低", "中", "高"], len(df))
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         path = f.name
     try:

@@ -44,7 +44,7 @@ jobs:
         run: uv sync --frozen --all-extras
       - name: Run test quality guard
         # WARN 基线 29（审查 #P1-7）：新增弱断言/恒真断言即 FAIL
-        run: uv run python scripts/test_quality_guard.py --max-warn 29
+        run: uv run python scripts/test_quality_guard.py --max-warn 17
 
   docs-consistency:
     name: 文档一致性（断链/目录树/裸异常/版本漂移）

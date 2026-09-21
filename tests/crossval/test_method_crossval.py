@@ -9,6 +9,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.orchestrator import orchestrate
@@ -143,16 +144,25 @@ def _make_gage_rr_data():
 
 
 # ═══════════════════════════════════════════════════════════
-# 测试 1: ANOVA — 对比 R aov() 输出
+# 测试 1: ANOVA — 手工公式交叉验证（本文件不含 R 数值，口径见文件头 2026-08-19 #3.2）
 # ═══════════════════════════════════════════════════════════
 
 
 class TestAnovaCrossVal:
-    """R 参考: summary(aov(y ~ group, data=df))
-    F(2,21) ≈ 大值, p < 0.001 (三组均值明显不同)
+    """手工公式口径：单因素 ANOVA 的 F = (SSB/(k-1)) / (SSW/(n-k))。
+
+    预期性质：三组均值差异极大 → F 远大于 10、p < 0.001。
     """
 
     def test_anova_f_statistic(self):
+        """F 与手算一致（不再仅凭 summary 文案判显著）。
+
+        审查 2026-09-21 E4-1：原用例把 `metadata.get("effect_sizes", {})` 赋给
+        `f_val` 但**从未断言**（死变量），最终只用 `"p=" in summary or "显著" in summary`
+        —— 既没验证 F，也会因文案调整而误判。本文件声明的口径是「手工公式/已知性质
+        交叉验证」，故此处对账：被测值是 `anova_enhanced` 表中 statsmodels 算出的 F，
+        参考值是手算 F，两者独立。
+        """
         df = _make_anova_data()
         r = orchestrate(
             AnalysisRequest(
@@ -164,10 +174,20 @@ class TestAnovaCrossVal:
             )
         )
         assert r.status == "ok"
-        # 三组均值差异极大，F 应远大于 10
-        f_val = r.metadata.get("effect_sizes", {})
-        # 通过 summary 确认显著
-        assert "p=" in r.summary or "显著" in r.summary
+        table = r.tables["anova_enhanced"]
+        f_reported = float(table.loc[table["来源"].str.contains("group"), "F值"].iloc[0])
+
+        groups = [g["y"].to_numpy(dtype=float) for _, g in df.groupby("group")]
+        k, n = len(groups), len(df)
+        grand_mean = float(df["y"].mean())
+        ssb = sum(len(g) * (g.mean() - grand_mean) ** 2 for g in groups)
+        ssw = sum(float(((g - g.mean()) ** 2).sum()) for g in groups)
+        f_manual = (ssb / (k - 1)) / (ssw / (n - k))
+
+        assert f_reported == pytest.approx(f_manual, rel=1e-9), (
+            f"F 与手算不一致：引擎 {f_reported} vs 手算 {f_manual}"
+        )
+        assert f_manual > 10, f"三组均值差异极大，F 应远大于 10，实测 {f_manual:.2f}"
 
     def test_anova_effect_size_bounds(self):
         df = _make_anova_data()
