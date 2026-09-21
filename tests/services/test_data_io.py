@@ -601,3 +601,28 @@ def test_bomless_bytes_are_not_decoded_by_utf16_codec():
         raw = text.encode("gbk")
         with pytest.raises(UnicodeError, match="BOM"):
             pd.read_csv(io.BytesIO(raw), encoding="utf-16")
+
+
+def test_bomless_utf16_short_header_silently_misdecoded_known_gap():
+    """**已知缺口（报警钉子）**：无 BOM 的 UTF-16LE 可能被 GBK 静默误解码。
+
+    2026-09-21 审查 R1-5 实测（6 个样本）：5 个走「安全失败」抛 CsvEncodingError，
+    1 个（`料号,数量\nAB1,235\nAC2,240\n`）**静默成功**且列名为乱码
+    `['檈鱏', 'Unnamed: 1']`——即无 BOM 的 UTF-16 存在样本相关的静默乱码通路。
+
+    性质与责任边界：
+    - **非本次变更引入**：无 BOM 路径的逻辑（`_CSV_ENCODINGS` 链）在 v1.4.0 与
+      HEAD 逐字相同（实测比对），BOM 嗅探与显式声明只是**新增**分支；
+    - 是否可修：需要编码探测（该方案已由 ADR-0004 决策 4 否证：GBK/Big5 短样本
+      不可分，误判率最高 51.5%）。当前口径 = 用户显式声明 + 文档引导；
+    - 本用例是**报警钉子而非规格**：若将来引入编码探测并修好，此处会失败，
+      提醒同步更新本用例与 ADR-0004。
+    """
+    import io
+
+    p = "料号,数量\nAB1,235\nAC2,240\n"
+    df = read_csv_with_encoding(io.BytesIO(p.encode("utf-16-le")))
+    # 当前（错误）行为：不报错，列名乱码
+    assert list(df.columns) == ["檈鱏", "Unnamed: 1"], (
+        "此处不再乱码 → 无 BOM UTF-16 的静默误解码已修复，请同步更新 ADR-0004 与手册"
+    )
