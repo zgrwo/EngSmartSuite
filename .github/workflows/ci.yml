@@ -118,7 +118,29 @@ jobs:
           echo "✅ 全部 $count 个提交符合规范"
 
       - name: 模块导入验证
-        run: uv run python -c "from smartsuite.engine import __all__ as eng; from smartsuite.services.orchestrator import TASK_REGISTRY; print(f'{len(eng)} engine exports, {len(TASK_REGISTRY)} tasks registered')"
+        # 审查 2026-09-21 G-8：原先只 print 计数、无断言——导入失败当然会红，
+        # 但「导出数/任务数与预期不符」这类漂移会静默通过（真断言此前只在
+        # consistency job）。现就地加上与 verify_consistency 同源的两条关系断言：
+        #   ① 任务数 > 0（注册表可加载且非空）；
+        #   ② engine 导出 ⊇ 任务实现函数的名称集（注册链不断裂）。
+        run: |
+          uv run python - <<'PY'
+          import sys
+          from smartsuite.engine import __all__ as eng
+          from smartsuite.services.orchestrator import TASK_REGISTRY
+
+          n_eng, n_task = len(eng), len(TASK_REGISTRY)
+          print(f"{n_eng} engine exports, {n_task} tasks registered")
+          problems = []
+          if n_task == 0:
+              problems.append("TASK_REGISTRY 为空")
+          missing = {f.__name__ for f in TASK_REGISTRY.values()} - set(eng)
+          if missing:
+              problems.append(f"engine 未导出已注册任务实现: {sorted(missing)}")
+          if problems:
+              print("[FAIL] " + "; ".join(problems), file=sys.stderr)
+              sys.exit(1)
+          PY
 
       - name: Ruff Lint
         run: uv run ruff check src/smartsuite/ scripts/ tests/ benchmarks/
