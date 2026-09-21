@@ -544,3 +544,50 @@ def test_ttest_effect_size_ci_unchanged():
     assert ci is not None, "Hedges g 的 CI 不应被移除"
     lo, hi = ci
     assert np.isfinite(lo) and np.isfinite(hi) and lo < hi
+
+
+# ── A-1（2026-09-21 审查）：两处 IQR 掩码实现的一致性 ────────────────────────
+def test_iqr_outlier_mask_consistent_between_tasks():
+    """`anomaly_detect(method='iqr')` 与 `outlier_consensus` 的 IQR 判据必须一致。
+
+    审查 2026-09-21 A-1：两处各自复制了一份 IQR 掩码（含 IQR==0 拒绝逻辑）。
+    本用例是**抽取共享助手的安全网**（也长期作为「两处判据不得漂移」的守卫）：
+    同一数据下 outlier_consensus 的 IQR 投票数须等于解析解
+    `count(y < Q1-1.5IQR | y > Q3+1.5IQR)`，且 anomaly_detect 的检出数与之相同。
+    """
+    from smartsuite.engine.detection.anomaly import anomaly_detect
+    from smartsuite.engine.detection.outlier import outlier_consensus
+
+    rng = np.random.default_rng(5)
+    cases = [
+        np.r_[rng.normal(0, 1, 80), [7.0, -7.0]],  # 正常 + 强异常
+        rng.normal(0, 1, 60),  # 无强异常
+        np.r_[rng.normal(0, 1, 50), [4.0]],  # 边界型异常
+    ]
+    for idx, values in enumerate(cases):
+        df = pd.DataFrame({"y": values})
+        r_a = anomaly_detect(_mk("anomaly_detect", df, "y", [], {"method": "iqr"}))
+        r_o = outlier_consensus(_mk("outlier_consensus", df, "y", [], {}))
+        assert r_a.status == "ok" and r_o.status == "ok", (idx, r_a.messages, r_o.messages)
+
+        q1, q3 = df["y"].quantile(0.25), df["y"].quantile(0.75)
+        iqr = q3 - q1
+        expected = int(((df["y"] < q1 - 1.5 * iqr) | (df["y"] > q3 + 1.5 * iqr)).sum())
+
+        assert r_o.metadata["iqr_count"] == expected, f"case {idx}: IQR 投票数应等于解析解"
+        assert r_a.metadata["anomaly_count"] == r_o.metadata["iqr_count"], (
+            f"case {idx}: 两任务的 IQR 判据不一致（"
+            f"{r_a.metadata['anomaly_count']} vs {r_o.metadata['iqr_count']}）"
+        )
+
+
+def test_iqr_zero_constant_column_both_reject():
+    """常量列（IQR=0）两任务都必须显式报错（不得一路静默、一路报错）。"""
+    from smartsuite.engine.detection.anomaly import anomaly_detect
+    from smartsuite.engine.detection.outlier import outlier_consensus
+
+    df = pd.DataFrame({"y": np.full(30, 5.0)})
+    r_a = anomaly_detect(_mk("anomaly_detect", df, "y", [], {"method": "iqr"}))
+    r_o = outlier_consensus(_mk("outlier_consensus", df, "y", [], {}))
+    assert r_a.status == "error" and "IQR=0" in " ".join(r_a.messages)
+    assert r_o.status == "error" and "IQR=0" in " ".join(r_o.messages)

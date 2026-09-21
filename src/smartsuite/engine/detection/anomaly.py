@@ -15,6 +15,7 @@ from smartsuite.engine._constants import (
 )
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
+from smartsuite.engine.detection._shared import iqr_outlier_mask
 
 logger = logging.getLogger(__name__)
 
@@ -247,17 +248,16 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             else:
                 break
     elif method == "iqr":
-        Q1, Q3 = data.quantile(0.25), data.quantile(0.75)
-        IQR = Q3 - Q1
-        if IQR == 0:
+        # 审查 2026-09-21 A-1：IQR 判据与 outlier_consensus 共用 _shared 单一实现
+        # （含 IQR==0 拒绝政策与倍率常量来源）；边界一次算出，供掩码与下方可视化共用。
+        _iqr = iqr_outlier_mask(data, IQR_OUTLIER_MULTIPLIER)
+        if _iqr is None:
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
                 messages=["数据无变化(IQR=0)，无法检测异常"],
             )
-        mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (
-            data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR
-        )
+        mask, iqr_lower, iqr_upper = _iqr
     else:
         # 审查 2026-09-16 D-1：原 `data_std < EPSILON`（绝对 1e-10）显式拒绝微尺度
         # 数据；改精确零判据——只有真常量列才无法做 z 分数（z 本身量纲无关）
@@ -300,8 +300,9 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             label=f"异常({mask.sum()}个)",
         )
         if method == "iqr":
-            lower_bound = Q1 - IQR_OUTLIER_MULTIPLIER * IQR
-            upper_bound = Q3 + IQR_OUTLIER_MULTIPLIER * IQR
+            # 与判定掩码同源（_shared.iqr_outlier_mask 返回的边界），不另行重算
+            lower_bound = iqr_lower
+            upper_bound = iqr_upper
             ax.axhline(
                 lower_bound,
                 color=PALETTE["spec"]["secondary"],

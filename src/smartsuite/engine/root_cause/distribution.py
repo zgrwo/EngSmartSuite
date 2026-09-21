@@ -61,6 +61,11 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-09-16 C-2：原 `if sw_p` 把合法的 p=0.0 与"未计算(None)"混同 → is not None
     desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"
 
+    # 审查 2026-09-21 A-1：三分布（Normal/Lognormal/Weibull）的 fit+kstest 与
+    # `spc_charts/nonparametric.py` 的同名段落重复。**未合并**的原因：两处产出结构不同
+    # （此处为展示用 params 字符串 + 四位小数 p；彼处需保留 dist/args 以推算控制限），
+    # 强行统一会改造调用方。**改动其中一处请同步另一处**，并注意已知不对称：
+    # 此处 lognorm 无 try/except（拟合失败会向上抛），彼处有（静默降级）。
     # 分布拟合
     fits: dict[str, dict[str, Any]] = {}
     # Normal

@@ -13,6 +13,7 @@ from smartsuite.engine._constants import (
 )
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
+from smartsuite.engine.detection._shared import iqr_outlier_mask
 
 logger = logging.getLogger(__name__)
 
@@ -32,21 +33,22 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # ── 方法 1: IQR ──
-    Q1, Q3 = data.quantile(0.25), data.quantile(0.75)
-    IQR = Q3 - Q1
-    if IQR == 0:
+    # 审查 2026-09-21 A-1：与 anomaly_detect 共用 _shared 单一实现
+    _iqr = iqr_outlier_mask(data, IQR_OUTLIER_MULTIPLIER)
+    if _iqr is None:
         return AnalysisResult(
             task="outlier_consensus",
             status="error",
             messages=["数据无变化(IQR=0)，无法检测异常"],
         )
-    iqr_mask = (data < Q1 - IQR_OUTLIER_MULTIPLIER * IQR) | (
-        data > Q3 + IQR_OUTLIER_MULTIPLIER * IQR
-    )
+    iqr_mask, _, _ = _iqr
 
     # ── 方法 2: Z-score ──
     # 审查 2026-09-16 D-1：原分母 `std+EPSILON` 在微尺度下把 z 整体压低 ~1000×
     # → 静默漏检；此处 std=0 已在 IQR==0 分支提前返回，直接相除（z 量纲无关）
+    # 审查 2026-09-21 A-1：Z 分数判据与 anomaly_detect 的 z 分支重复（同为 ddof=1、
+    # 同一 ZSCORE_OUTLIER_THRESHOLD）。未合并的原因：本处需把 Z 值写入结果表，
+    # 而 anomaly_detect 只用掩码——两处改动请同步（本题不引入绝对阈值，见陷阱 9）。
     z_scores = np.abs((data - data.mean()) / data.std(ddof=1))
     z_mask = z_scores > ZSCORE_OUTLIER_THRESHOLD
 

@@ -78,6 +78,7 @@ EngSmartSuite/
 │       │   ├── capability.py       #   过程能力 (Cp/Cpk, Sigma Level, 统计容许区间)
 │       │   ├── detection/          #   异常检测子包（2026-09-21 由 detection.py 拆分，公开 API 不变）
 │       │   │   ├── __init__.py     #     4 个公开函数 re-export（+ 3 个守护测试依赖的私有助手）
+│       │   │   ├── _shared.py      #     IQR 异常判据单一实现（anomaly/outlier 共用，A-1）
 │       │   │   ├── trend.py        #     trend_forecast（含 ACF/Ljung-Box/DW 私助）
 │       │   │   ├── change_point.py #     change_point_detect
 │       │   │   ├── outlier.py      #     outlier_consensus
