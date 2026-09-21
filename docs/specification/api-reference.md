@@ -119,6 +119,12 @@ class AnalysisResult:
 - **描述**: Cohen's Kappa — 两个评定者之间的一致性评估
 - **params**: 无 (使用 `feature_cols[0]` 和 `feature_cols[1]` 作为评定者)
 - **返回**: `agreement_matrix`, `kappa_result`
+- **口径说明**: 检验 H₀: κ=0 的 z 使用 **Fleiss ASE0**（H₀ 下标准误）
+  `SE₀ = √[p_o(1−p_o) / (n(1−p_e)²)]`，z = κ/SE₀。这是 Fleiss–Cohen–Everitt (1969)
+  针对「检验 κ=0」的经典口径，**不是** ASE1（后者用于置信区间）。
+  2026-09-21 审查曾报本处“SE 不对”，经 18 张随机表手算对账最大偏差 1.8e-08 → 该结论
+  为**假阳性**；回归防线为 `tests/guards/test_capability_spc_guards.py` 中的
+  `test_cohens_kappa_z_matches_fleiss_ase0`。
 
 ### cronbach_alpha
 - **Task Key**: `cronbach_alpha`

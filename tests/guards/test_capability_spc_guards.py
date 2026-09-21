@@ -8,6 +8,7 @@ M-4(n_runs falsy), B3(微尺度阈值), E1(verify_docs tag 校验)。
 """
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
@@ -453,3 +454,47 @@ def test_wilcoxon_effect_size_is_not_p_backderived():
     for n, r in zip((100, 400, 1000), rs, strict=True):
         assert abs(r - expected) < 0.05, f"n={n}: 最大效应下 r 应≈{expected:.4f}，实测 {r:.4f}"
     assert max(rs) - min(rs) < 0.05, f"r 不应随样本量变化（p 反推封顶的典型症状）: {rs}"
+
+
+# ── B-2（2026-09-21 审查）：kappa z 口径的假阳性防护 ──────────────────────────
+def test_cohens_kappa_z_matches_fleiss_ase0():
+    """Kappa 的 z 必须等于手算 Fleiss ASE0（H0 下标准误），勿按"更精确 SE"改坏。
+
+    2026-09-21 审查 B-2 报「kappa 用简化 H0 标准误，与 statsmodels/Fleiss ASE0
+    不同，z 为 9.802 vs 4.000」。父会话对账：18 张 2×2/3×3/4×4 随机表的引擎 z 与
+    手算 ASE0 = κ/√[p_o(1-p_o)/(n(1-p_e)²)] 最大偏差 **1.76e-08**（浮点噪声），
+    且经典 [[35,15],[15,35]] 表为 4.3644（与手算 4.3644 一致）。
+    → **该 finding 是假阳性**：实现本就是 Fleiss ASE0，无需修改。
+    本用例把正确口径钉住，防止后续按误报「修正」引入真实缺陷。
+    """
+    from smartsuite.engine.root_cause.association import cohens_kappa
+    from smartsuite.engine.root_cause.hypothesis import hypothesis_test  # noqa: F401
+
+    tables = [
+        pd.DataFrame([[35, 15], [15, 35]]),  # 经典 2×2（审查反例）
+        pd.DataFrame([[50, 5], [8, 37]]),
+        pd.DataFrame([[20, 4, 1], [3, 25, 2], [1, 2, 30]]),
+        pd.DataFrame([[10, 6, 2, 1], [4, 18, 3, 2], [2, 3, 22, 4], [1, 2, 5, 15]]),
+    ]
+    for ct in tables:
+        rows = []
+        for i, rlab in enumerate(ct.index):
+            for j, clab in enumerate(ct.columns):
+                rows += [(rlab, clab)] * int(ct.iloc[i, j])
+        df = pd.DataFrame(rows, columns=["a", "b"])
+        r = cohens_kappa(_mk("cohens_kappa", df, "", ["a", "b"], {}))
+        assert r.status == "ok", (ct.values.tolist(), r.messages)
+
+        n = int(ct.values.sum())
+        p_o = np.trace(ct.values) / n
+        row = ct.sum(axis=1).values.astype(float)
+        col = ct.sum(axis=0).values.astype(float)
+        p_e = float((row * col).sum() / n**2)
+        kappa = (p_o - p_e) / (1 - p_e)
+        se0 = np.sqrt(p_o * (1 - p_o) / (n * (1 - p_e) ** 2))
+        z_expected = kappa / se0
+
+        z_engine = float(r.metadata["z"])
+        assert z_engine == pytest.approx(z_expected, rel=1e-6), (
+            f"kappa z 偏离 Fleiss ASE0：引擎 {z_engine:.6f} vs 手算 {z_expected:.6f}"
+        )
