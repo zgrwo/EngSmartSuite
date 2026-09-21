@@ -82,7 +82,9 @@ def test_vif_claim_tolerance_is_tighter_than_old_hardcoded_window():
     """
     from claims_gate import VIF_CLAIM_TOLERANCE, VIF_MANUAL_CLAIMS
 
-    assert 0 < VIF_CLAIM_TOLERANCE <= 0.001, f"容差应 ≤ 0.001（旧窗口 0.005），实际 {VIF_CLAIM_TOLERANCE}"
+    assert 0 < VIF_CLAIM_TOLERANCE <= 0.001, (
+        f"容差应 ≤ 0.001（旧窗口 0.005），实际 {VIF_CLAIM_TOLERANCE}"
+    )
     old_lo, old_hi = 1.0, 1.005
     drifted = 1.0045
     manual = VIF_MANUAL_CLAIMS["模具温度"]

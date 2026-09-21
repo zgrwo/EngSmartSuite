@@ -148,3 +148,57 @@ def test_registered_compound_default_is_exempt(monkeypatch, tmp_path):
     )
     problems = vfp.check(js_path=js)
     assert not any("复合默认值" in p for p in problems), problems
+
+
+# ── E1-2/E1-3（2026-09-21 审查）：hypothesis_test 的参数可达性 ──────────────────
+# 审查 §6.2「参数可达性」双向核对：引擎支持的取值必须能在前端选中，
+# 且引擎读取的参数必须能在前端输入——否则用户在 Web 端拿不到该功能。
+def _app_js_source() -> str:
+    return vfp.APP_JS.read_text(encoding="utf-8")
+
+
+def _meta_options(source: str, key: str) -> set[str]:
+    """提取 PARAM_META[key].options 的取值集合（`['val', '标签']` 列表）。"""
+    import re
+
+    block = re.search(rf"\n  {key}: \{{\n.*?\n  \}},", source, re.S)
+    assert block, f"app.js 应存在 PARAM_META.{key} 定义"
+    return set(re.findall(r"\[['\"]([a-z_0-9]+)['\"],\s*['\"]", block.group(0)))
+
+
+def test_hypothesis_test_options_cover_engine_supported_types():
+    """UI 的 test 下拉必须覆盖引擎 `_HYPOTHESIS_TEST_TYPES` 全集（审查 E1-2 P2）。
+
+    手册 §4.3 明文承诺「17 种检验方法（与引擎 `_HYPOTHESIS_TEST_TYPES` 一致）」，
+    而 UI 下拉仅 5 项 → ttest_paired / friedman / mcnemar 等 12 种在 Web 端不可达。
+    """
+    from smartsuite.engine.root_cause.hypothesis import _HYPOTHESIS_TEST_TYPES
+
+    ui = _meta_options(_app_js_source(), "test")
+    missing = set(_HYPOTHESIS_TEST_TYPES) - ui
+    assert not missing, f"引擎支持但 Web UI 不可达的检验方法: {sorted(missing)}"
+
+
+def test_hypothesis_test_options_do_not_exceed_engine():
+    """反向：UI 不得提供引擎不支持的取值（否则选中即报错）。"""
+    from smartsuite.engine.root_cause.hypothesis import _HYPOTHESIS_TEST_TYPES
+
+    ui = _meta_options(_app_js_source(), "test")
+    extra = ui - set(_HYPOTHESIS_TEST_TYPES)
+    assert not extra, f"Web UI 提供但引擎不支持的检验方法: {sorted(extra)}"
+
+
+def test_single_sample_center_params_reachable_in_ui():
+    """单样本检验的中心参数必须前端可达（审查 E1-3 P2）。
+
+    `ttest_1samp` 读 `popmean`、`wilcoxon_1samp` 读 `popmedian`；两者缺失时引擎
+    静默按 0 检验（summary 会写 H0: mu=0.0，但 Web 用户无从设置基准值）。
+    """
+    from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+    source = _app_js_source()
+    frontend = vfp.extract_task_params(source).get("hypothesis_test", set())
+    backend = set(DEFAULT_PARAMS.get("hypothesis_test", {}))
+    for key in ("popmean", "popmedian"):
+        assert key in frontend, f"前端 TASK_PARAMS[hypothesis_test] 缺少 {key}（Web 不可达）"
+        assert key in backend, f"DEFAULT_PARAMS[hypothesis_test] 缺少 {key}"

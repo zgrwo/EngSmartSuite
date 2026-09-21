@@ -181,7 +181,7 @@ function clearAll() { selectedY.clear(); selectedX.clear(); selectedCat.clear();
 const TASK_PARAMS = {
   grid_search:       { ranges: '', direction: 'maximize', n_points: 10 },
   process_capability:{ usl: '', lsl: '', target: '' },
-  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05, group_col: '' },
+  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05, group_col: '', popmean: 0, popmedian: 0 },
   trend_forecast:    { forecast_steps: 5 },
   anomaly_detect:    { method: 'iqr', alpha: 0.05, max_outliers: 5 },
   response_surface:  { direction: 'maximize' },
@@ -232,10 +232,27 @@ const PARAM_META = {
   },
   test: {
     type: 'select', label: '检验方法',
+    // 审查 2026-09-21 E1-2：必须覆盖引擎 _HYPOTHESIS_TEST_TYPES 全集（17 项）。
+    // 原仅 5 项 → 手册 §4.3 承诺的 17 种方法中 12 种在 Web 端不可达
+    // （含手册推荐的 ttest_paired）。一致性由 tests/scripts/test_verify_frontend_params.py 守护。
     options: [
-      ['ttest_ind', '独立样本 t 检验'], ['mannwhitney', 'Mann-Whitney U 检验'],
-      ['wilcoxon_paired', 'Wilcoxon 配对检验'], ['kruskal', 'Kruskal-Wallis 检验'],
+      ['ttest_ind', '独立样本 t 检验'],
+      ['ttest_paired', '配对样本 t 检验'],
       ['ttest_1samp', '单样本 t 检验'],
+      ['mannwhitney', 'Mann-Whitney U 检验（非参数）'],
+      ['wilcoxon_paired', 'Wilcoxon 配对检验'],
+      ['wilcoxon_1samp', 'Wilcoxon 单样本检验'],
+      ['kruskal_wallis', 'Kruskal-Wallis H 检验'],
+      ['kruskal', 'Kruskal-Wallis（旧名 kruskal）'],
+      ['friedman', 'Friedman 检验'],
+      ['mcnemar', 'McNemar 检验'],
+      ['cochran_q', 'Cochran Q 检验'],
+      ['ks', 'KS 双样本检验'],
+      ['mann_kendall', 'Mann-Kendall 趋势检验'],
+      ['jonckheere', 'Jonckheere-Terpstra 趋势检验'],
+      ['cohens_d', "Cohen's d 效应量"],
+      ['correlation', '相关系数检验'],
+      ['auto', '自动选择'],
     ]
   },
   method: {
@@ -370,6 +387,8 @@ const PARAM_LABELS = {
   ranges: '搜索范围', objectives: '目标定义', direction: '优化方向',
   n_points: '网格点数', usl: '规格上限 (USL)', lsl: '规格下限 (LSL)',
   test: '检验方法', alpha: '显著性水平 α', interactions: '含两两交互 (0/1)',
+  // 审查 2026-09-21 E1-3：单样本检验的中心参数（ttest_1samp / wilcoxon_1samp）
+  popmean: '检验均值 μ0 (仅单样本 t)', popmedian: '检验中位数 M0 (仅单样本 Wilcoxon)',
   forecast_steps: '预测步数', method: '异常检测方法', side: '检验侧',
   k: 'K 值 (松弛因子)', h: 'H 值 (决策区间)', lam: 'λ (平滑系数)',
   L: 'L (控制限宽度)', chart_type: '控制图类型', mode: '模式',

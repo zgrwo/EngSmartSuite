@@ -72,7 +72,16 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.root_cause.hypothesis:hypothesis_test",
         label="假设检验",
         group="要因筛选",
-        default_params={"alpha": 0.05, "test": "ttest_ind", "group_col": None},
+        default_params={
+            "alpha": 0.05,
+            "test": "ttest_ind",
+            "group_col": None,
+            # 审查 2026-09-21 E1-3：单样本检验的中心参数（ttest_1samp 用 popmean、
+            # wilcoxon_1samp 用 popmedian）此前未登记也不在前端，Web 用户无从设置
+            # 基准值，只能静默按 0 检验。默认 0 与引擎 `params.get(..., 0)` 一致。
+            "popmean": 0,
+            "popmedian": 0,
+        },
         raw_cat=True,
     ),
     TaskSpec(
