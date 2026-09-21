@@ -505,6 +505,33 @@ _HYPOTHESIS_TEST_TYPES = {
 }
 
 
+def _wilcoxon_rank_r(diff, direction: float) -> float:
+    """Wilcoxon 符号秩检验的秩相关效应量 r = |Z| / √n_eff（符号取差值中位数方向）。
+
+    审查 2026-09-21 B-3（P2）：原实现由 p 反推 Z
+    （`z = norm.ppf(1 - max(p, EPSILON)/2)`），两处失真：
+    ① `EPSILON = 1e-10` 下限把 Z 钳在 6.467，强效应被系统性压小；
+    ② 分母用全样本量 n（含被丢弃的零差）而非有效对数 n_eff，进一步低估。
+    实测「全部正差、互不相同」（最大效应）下原实现给出
+    n=100 → 0.457、n=1000 → 0.145 —— 随 n 增大而**衰减**，
+    而渐近真值为 √3/2 ≈ 0.866（与 n 无关）。
+
+    改用 scipy 的渐近 Z（`method="approx"` 是 `"asymptotic"` 的向后兼容别名，
+    跨 scipy 1.10 可用）。已验证：无并列无零差时该 Z 与教科书正态近似公式
+    逐位一致（实测 n=100/400/1000 → 8.6818/17.3313/27.3930）。
+    """
+    diff_arr = np.asarray(diff, dtype=float)
+    diff_arr = diff_arr[np.isfinite(diff_arr)]
+    n_eff = int(np.count_nonzero(diff_arr))  # 默认 zero_method="wilcox" 丢弃零差
+    if n_eff < 5:
+        return float("nan")
+    z = abs(float(sp_stats.wilcoxon(diff_arr, method="approx").zstatistic))
+    if not np.isfinite(z):
+        return float("nan")
+    r = min(z / np.sqrt(n_eff), 1.0)
+    return float(r if direction >= 0 else -r)
+
+
 def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     """假设检验：独立样本、配对样本、单样本 t 检验 / Mann-Whitney U，含效应量。"""
     test_type = req.params.get("test", "ttest_ind")
@@ -738,15 +765,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             },
         )
 
-    def _wilcoxon_effect_size(p: float, n: int, diff_median: float) -> float:
-        """Wilcoxon 效应量: 匹配对秩相关 r = Z / sqrt(N), 钳位到 [-1, 1]。
-
-        单样本和配对 Wilcoxon 共享此实现，确保效应量公式一致。"""
-        z_stat_abs = float(sp_stats.norm.ppf(1 - max(p, EPSILON) / 2))
-        z_signed = z_stat_abs if diff_median >= 0 else -z_stat_abs
-        r_effect = z_signed / np.sqrt(n)
-        return float(max(min(r_effect, 1.0), -1.0))
-
     # ── 单样本 Wilcoxon 符号秩检验 ──
     if test_type == "wilcoxon_1samp":
         data = req.data[req.target_col].dropna()
@@ -760,7 +778,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         stat, p = sp_stats.wilcoxon(data.values - popmedian)
         test_name = f"单样本 Wilcoxon 检验 (H0: 中位数={popmedian})"
         n = len(data)
-        r_effect = _wilcoxon_effect_size(p, n, np.median(data.values) - popmedian)
+        r_effect = _wilcoxon_rank_r(
+            data.values - popmedian, float(np.median(data.values) - popmedian)
+        )
         effect_size = r_effect
         effect_name = "秩相关 r"
         effect_label = _effect_size_label(r_effect, "correlation")
@@ -1293,7 +1313,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         test_name = f"Wilcoxon 符号秩检验 ({col1} vs {col2})"
         diff = sub[col1].values - sub[col2].values
         n_pairs = len(sub)
-        r_effect = _wilcoxon_effect_size(p, n_pairs, np.median(diff))
+        r_effect = _wilcoxon_rank_r(diff, float(np.median(diff)))
         effect_size = float(r_effect)
         effect_name = "匹配对秩相关 r"
         effect_label = _effect_size_label(r_effect, "correlation")

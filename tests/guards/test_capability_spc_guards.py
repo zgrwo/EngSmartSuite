@@ -420,3 +420,36 @@ def test_mcnemar_odds_ratio_exact_without_epsilon_residue():
         f"b/c=10/2 应精确为 5.0，实际 {r.metadata['odds_ratio']}"
     )
     assert "4.9999" not in r.summary, f"summary 不得带 EPSILON 残差: {r.summary}"
+
+
+# ── B-3（2026-09-21 审查）：Wilcoxon 效应量不得由 p 反推 ──────────────────────
+def test_wilcoxon_effect_size_is_not_p_backderived():
+    """Wilcoxon 秩相关 r 须由实际 Z 得出，不得由 p 反推（审查 B-3 P2）。
+
+    原实现 `z = norm.ppf(1 - max(p, EPSILON)/2)`：`EPSILON=1e-10` 把 Z 钳在
+    6.467，于是**强效应被系统性压小且随 n 增大而衰减**——实测「全部差值为正」
+    （最大效应）时：n=100 → r=0.647、n=400 → 0.323、n=1000 → 0.205、
+    n=4000 → 0.102，而该情形的渐近真值是 **r = √3/2 ≈ 0.866**（与 n 无关）。
+
+    判据用可推导的渐近真值 + 单调性不变量，不复制实现本身。
+    """
+    import math
+
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    # 全部为正差且**互不相同**（无并列、无零差）——此时 scipy 渐近 Z 与教科书
+    # 正态近似公式逐位一致（本审查实测 8.6818/17.3313/27.3930），
+    # 故渐近真值 r → √3/2 ≈ 0.866 无歧义。
+    rs = []
+    for n in (100, 400, 1000):
+        df = pd.DataFrame({"y": np.arange(1.0, n + 1)})
+        r = hypothesis_test(
+            _mk("hypothesis_test", df, "y", [], {"test": "wilcoxon_1samp", "popmedian": 0.0})
+        )
+        assert r.status == "ok", r.messages
+        rs.append(float(r.metadata["effect_size"]))
+
+    expected = math.sqrt(3) / 2  # ≈ 0.866：最大效应的渐近 r
+    for n, r in zip((100, 400, 1000), rs, strict=True):
+        assert abs(r - expected) < 0.05, f"n={n}: 最大效应下 r 应≈{expected:.4f}，实测 {r:.4f}"
+    assert max(rs) - min(rs) < 0.05, f"r 不应随样本量变化（p 反推封顶的典型症状）: {rs}"
