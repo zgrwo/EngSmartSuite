@@ -9,7 +9,7 @@ verify_docs.py — 文档一致性验证（源自 VibeCodingTemplate verify-docs
   4. AGENTS.md 与 project-structure.md 的目录树顶层条目集合一致（双目录树防漂移）
   5. 语义交叉检查：裸 except 捕获 / 文档 TODO/FIXME 残留 / verify_* 脚本裸 input 调用
   6. 版本一致性门禁：.release-please-manifest.json == pyproject.toml == CHANGELOG 最新发布
-  7. （--strict）根级未声明文件/目录 + docs/、skills/、tests/、scripts/、templates/
+  7. （--strict）根级未声明文件/目录 + docs/、skills/、tests/、scripts/、templates/、
      子目录直接文件未登记（.gitignore 忽略的本地生成产物豁免）
 
 规则：
@@ -62,7 +62,7 @@ EXCLUDED_DIRS = {
 
 # 需核对"目录内文件已登记"的关键子目录（目录树即契约）
 # 审查 2026-08-19 第二轮 #5：从 docs/skills 扩展至 tests/、scripts/、templates/
-_SUBDIR_CHECK = ("docs", "skills", "tests", "scripts", "templates")
+_SUBDIR_CHECK = ("docs", "skills", "tests", "scripts", "templates", ".github", "benchmarks")
 
 # 反引号路径检查：仅检查以已知根目录前缀开头的引用（语义明确指向仓库内路径）
 _KNOWN_ROOT_PREFIXES = (
@@ -117,12 +117,20 @@ def _parse_top_entries(root: Path, doc: str) -> list[str]:
     return entries
 
 
-def _parse_nested_files(root: Path) -> dict[str, set[str]]:
-    """解析目录树中顶层目录下的直接文件条目（供子目录未登记检查）。"""
+def _parse_tree_paths(root: Path) -> tuple[set[str], set[str]]:
+    """解析目录树的**任意深度**条目 → (已声明文件相对路径集, 已声明目录相对路径集)。
+
+    审查 2026-09-21 F4-1：原 `_parse_nested_files` 只解析「顶层目录 → 直接文件」
+    一层，而目录树本身逐项列出了两层文件（`.github/ISSUE_TEMPLATE/*.md`、
+    `docs/governance/*.md`）——两层以上完全不校验，实测漏登记 16 个文件
+    （含 `docs/adr/0004-*.md`、`.github/workflows/{benchmarks,docs}.yml`、
+    `tests/scripts/test_common.py` 等）而 `--strict` 仍退出 0。现按缩进栈解析任意深度。
+    """
     path = root / "docs" / "governance" / "project-structure.md"
-    result: dict[str, set[str]] = {}
-    current: str | None = None
+    declared: set[str] = set()
+    dirs: set[str] = set()
     in_block = False
+    stack: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         s = line.rstrip()
         if s.strip().startswith("```"):
@@ -130,18 +138,29 @@ def _parse_nested_files(root: Path) -> dict[str, set[str]]:
             continue
         if not in_block:
             continue
-        m = re.match(r"^[├└]──\s+([^/#\s]+)/", s)
-        if m:
-            current = m.group(1)
-            result.setdefault(current, set())
+        m = re.match(r"^((?:│   |    )*)(?:├──|└──)\s+(.*)$", s)
+        if not m:
             continue
-        if current is not None and "│" in s:
-            m2 = re.match(r"^│\s*[├└]──\s+([^#\s]+)", s)
-            if m2:
-                entry = m2.group(1).rstrip("/")
-                if "/" not in entry and entry not in ("...",):
-                    result[current].add(entry)
-    return result
+        depth = len(m.group(1)) // 4
+        raw = m.group(2).strip()
+        is_dir = raw.split("#")[0].strip().endswith("/")
+        name = raw.split("#")[0].strip().rstrip("/")
+        if not name or name == "...":
+            stack = stack[:depth]
+            continue
+        stack = stack[:depth] + [name]
+        entry = "/".join(stack)
+        (dirs if is_dir else declared).add(entry)
+    return declared, dirs
+
+
+def _recursive_dirs(dirs: set[str], declared: set[str]) -> set[str]:
+    """返回「已声明至少一个子项」的目录集——只有这些目录才要求全部文件登记。
+
+    汇总性目录（如 `docs/user-manual/images/`：树里只写目录本身、不逐项列图）
+    的内容豁免登记，否则递归检查会对配图等资产产生大量假阳性。
+    """
+    return {d for d in dirs if any(x.startswith(d + "/") for x in declared)}
 
 
 # ── 向量 1：markdown 相对链接 ────────────────────────────────
@@ -511,30 +530,32 @@ def _git_ignored_files(root: Path, paths: list[Path]) -> set[str]:
 
 
 def check_subdir_undeclared(root: Path, strict: bool) -> list[str]:
+    """子目录未声明检查（**递归**，审查 2026-09-21 F4-1 起）。
+
+    规则：文件所在目录若在目录树中被**逐项列出**（声明了至少一个子项），则该文件
+    必须登记；汇总性目录（如 `images/`）的内容豁免。`__pycache__` 与 .gitignore
+    忽略的本地产物同样豁免。
+    """
     if not strict:
         return []
-    problems: list[str] = []
-    nested = _parse_nested_files(root)
+    declared, dirs = _parse_tree_paths(root)
+    recursive = _recursive_dirs(dirs, declared)
     check_files = [
         p
         for sub in _SUBDIR_CHECK
         if (root / sub).is_dir()
-        for p in (root / sub).iterdir()
-        if p.is_file()
+        for p in (root / sub).rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts
     ]
     # .gitignore 忽略的生成产物（如 scripts/verify_manual_claims_output.txt）豁免登记
     ignored = _git_ignored_files(root, check_files)
-    for sub in _SUBDIR_CHECK:
-        base = root / sub
-        if not base.exists():
+    problems: list[str] = []
+    for p in sorted(check_files):
+        rel = p.relative_to(root).as_posix()
+        if p.name == ".gitkeep" or rel in declared or p.name in ignored:
             continue
-        declared = nested.get(sub, set())
-        for p in sorted(base.iterdir()):
-            if p.is_dir() or p.name == ".gitkeep":
-                continue
-            if p.name in declared or p.name in ignored:
-                continue
-            problems.append(f"[未声明文件] {sub}/{p.name}（请同步 project-structure.md 目录树）")
+        if p.parent.relative_to(root).as_posix() in recursive:
+            problems.append(f"[未声明文件] {rel}（请同步 project-structure.md 目录树）")
     return problems
 
 

@@ -22,6 +22,8 @@ EngSmartSuite/
 │   │   └── config.json
 │   └── workflows/
 │       ├── ci.yml
+│       ├── benchmarks.yml        #   性能基准周更（非门禁）
+│       ├── docs.yml              #   文档站构建/部署（mkdocs --strict）
 │       ├── quality.yml
 │       ├── release.yml
 │       ├── security.yml
@@ -137,6 +139,7 @@ EngSmartSuite/
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_property_invariants.py # 属性测试（hypothesis：量纲/不变量/退化）
 │   │   ├── test_fuzz.py            #   模糊测试
+│   │   ├── test_correlation_partial.py # 偏相关（零阶/偏相关对照）
 │   │   ├── test_hypothesis_doe_capability.py # 假设检验/DOE/过程能力 回归
 │   │   ├── test_inverse.py         #   工艺参数反解（角色/建模/求解/可达/端到端）
 │   │   ├── test_inverse_package_parity.py # 工艺参数反解子包拆分组装对照
@@ -149,14 +152,20 @@ EngSmartSuite/
 │   │   ├── test_task_spec_derivation.py
 │   │   ├── test_data_io.py
 │   │   ├── test_audit.py
+│   │   ├── test_audit_truncation.py # audit 导出截断（长文本/长表显式标注）
 │   │   ├── test_reporter.py
 │   │   ├── test_cli_web_parity.py  #   引擎直调 vs Web API 差分（全 42 任务真实数据）
 │   │   ├── test_service_guards.py  #   服务层防护（CLI/API/审计/报告/日志）
+│   │   ├── test_config_limits.py   #   应用限制常量集中化（config.py 单一来源）
+│   │   ├── test_error_messages.py  #   异常→中文消息映射与统一错误结果
+│   │   ├── test_lazy_exports.py    #   services/orchestrator 按需加载契约
+│   │   ├── test_numeric_scalar_types.py # numpy 标量类型判据（numbers.Real）
 │   │   ├── test_upload_limits.py   #   Web 上传限制校验
 │   │   ├── test_manual_parity.py   #   Web/CLI/Python/手册 四路一致性
 │   │   ├── test_web_app_routes.py  #   Web 路由直测（app.py 分支/安全/清理）
 │   │   ├── test_web_api.py         #   Web API 内部机制（序列化/合并矩阵/兜底）
-│   │   └── test_cli_paths.py       #   CLI 分支补测（模板/输入/校验/输出）
+│   │   ├── test_cli_paths.py       #   CLI 分支补测（模板/输入/校验/输出）
+│   │   └── test_manual_usage_pitfalls.py # 手册「常见参数误用」双向契约
 │   ├── integration/                #   跨层集成 / E2E（服务+引擎+Web 端到端）
 │   │   ├── test_integration.py
 │   │   ├── test_integration_chemical.py
@@ -174,13 +183,19 @@ EngSmartSuite/
 │   │   ├── test_lazy_imports.py           # 按需加载契约（子进程断言 sys.modules 内容）
 │   │   ├── test_matplotlib_backend_order.py # Agg 后端时序 + 全仓不得模块级导入 pyplot
 │   │   ├── test_figure_cleanup.py         # 图窗释放（close_figures 单一实现）
+│   │   ├── test_lint_budget.py            # per-file-ignore 预算守卫（收敛趋势不反弹）
+│   │   ├── test_web_ui_guards.py          # 前端一致性（三集合/参数可达性/编码下拉）
 │   │   └── test_cross_layer_guards.py     # 跨层防护（序列化/预处理/Web API 校验）
 │   ├── security/                   #   Web 安全回归（按攻击面组织：CSRF/CSP/上传/不泄漏）
+│   │   ├── __init__.py
+│   │   ├── conftest.py             #   Flask test client + CSRF token 夹具
 │   │   └── test_web_security.py    #   跨端点不变量：POST 端点自动发现 + CSRF 全覆盖
 │   ├── crossval/                   #   关键方法交叉验证（手工公式/已知性质）
 │   │   └── test_method_crossval.py
 │   └── scripts/                    #   治理脚本测试
 │       ├── test_retry.py
+│       ├── test_common.py               #   门禁子进程环境助手（BLAS 线程限制/UTF-8）
+│       ├── test_demo.py                 #   60 秒演示脚本
 │       ├── test_run_affected_tests.py
 │       ├── test_validate_commit_msg.py
 │       ├── test_verify_docs.py
@@ -227,7 +242,8 @@ EngSmartSuite/
 │       ├── adr-template.md         #   ADR 模板
 │       ├── 0001-three-layer-architecture.md   #   ADR-001 三层架构
 │       ├── 0002-web-ui-replaces-excel-layer.md # ADR-002 Web UI 替代 Excel
-│       └── 0003-deployment-scope-single-user.md # ADR-003 部署形态（单机单用户）
+│       ├── 0003-deployment-scope-single-user.md # ADR-003 部署形态（单机单用户）
+│       └── 0004-csv-encoding-strategy.md # ADR-004 CSV 编码策略（显式声明 + BOM）
 │
 ├── logs/                           # 审查报告/运行产物（本地保留，不入库）
 │

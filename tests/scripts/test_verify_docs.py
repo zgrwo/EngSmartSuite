@@ -288,3 +288,64 @@ def test_git_tag_version_skips_without_git(monkeypatch):
 
     monkeypatch.setattr(verify_docs.subprocess, "run", _boom)
     assert verify_docs.check_git_tag_version(Path("x"), "1.2.2") == []
+
+
+# ── F4-1（2026-09-21 审查）：嵌套目录未登记检查的递归盲区 ──────────────────
+def test_nested_declared_dir_flags_undeclared_file(tmp_path):
+    """被**逐项列出**的嵌套目录里，未声明的文件必须被拦截（审查 F4-1 P3）。
+
+    原实现只解析/比对顶层目录下的**直接**文件（`_SUBDIR_CHECK` + 一层 `│ ├──`），
+    故 `docs/adr/0004-*.md`、`.github/workflows/benchmarks.yml`、
+    `tests/scripts/test_common.py` 这类两层文件完全不校验——实测漏登记 16 个文件
+    而 `--strict` 仍退出 0。
+    """
+    root = build_repo(tmp_path)
+    (root / "docs" / "specification" / "ghost.md").write_text("x", encoding="utf-8")
+    problems = verify_docs.check_subdir_undeclared(root, strict=True)
+    assert any("docs/specification/ghost.md" in p for p in problems), (
+        f"嵌套目录内未声明文件未被拦截: {problems}"
+    )
+
+
+def test_nested_declared_file_passes(tmp_path):
+    """已声明的嵌套文件不得误报（对照）。"""
+    root = build_repo(tmp_path)
+    assert verify_docs.check_subdir_undeclared(root, strict=True) == []
+
+
+def test_summarized_dir_contents_are_exempt(tmp_path):
+    """目录树中**未逐项列出子项**的目录（如 `images/`）→ 内容豁免登记。
+
+    这是递归检查不产生大量假阳性的关键规则：只有「已声明至少一个子项」的目录
+    才要求其全部文件登记；汇总性目录（手册配图等）仅声明目录本身。
+    """
+    root = tmp_path / "repo"
+    (root / "docs").mkdir(parents=True)
+    tree = (
+        "```\nMini/\n"
+        "├── docs/\n"
+        "│   ├── images/          # 汇总目录，不逐项列出\n"
+        "│   └── readme.md\n"
+        "```\n"
+    )
+    (root / "docs" / "governance").mkdir()
+    (root / "docs" / "governance" / "project-structure.md").write_text(tree, encoding="utf-8")
+    (root / "docs" / "readme.md").write_text("x", encoding="utf-8")
+    (root / "docs" / "images").mkdir()
+    (root / "docs" / "images" / "a.png").write_bytes(b"x")
+
+    assert verify_docs.check_subdir_undeclared(root, strict=True) == []
+
+
+def test_dir_with_declared_child_requires_all_children(tmp_path):
+    """反面：一旦目录声明了任一子项，其全部文件都必须登记。"""
+    root = tmp_path / "repo"
+    (root / "docs" / "governance").mkdir(parents=True)
+    tree = "```\nMini/\n├── docs/\n│   ├── adr/\n│   │   └── 0001-a.md\n```\n"
+    (root / "docs" / "governance" / "project-structure.md").write_text(tree, encoding="utf-8")
+    (root / "docs" / "adr").mkdir()
+    (root / "docs" / "adr" / "0001-a.md").write_text("x", encoding="utf-8")
+    (root / "docs" / "adr" / "0002-b.md").write_text("x", encoding="utf-8")
+
+    problems = verify_docs.check_subdir_undeclared(root, strict=True)
+    assert any("docs/adr/0002-b.md" in p for p in problems), problems
