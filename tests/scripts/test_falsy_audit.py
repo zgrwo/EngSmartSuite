@@ -132,3 +132,67 @@ def test_real_repo_scan_zero_high():
     """真实仓库扫描范围（engine+services+web+cli）守卫：零 HIGH（若引入 HIGH 模式应修源码）。"""
     code, _ = _run_main_expect_exit()
     assert code == 0
+
+
+# ── G-1（2026-09-21 审查）：子包盲区 ──────────────────────────────────────────
+# 2026-09-19/21 把巨石模块拆为 5 个子包（root_cause / doe_opt / spc_charts /
+# detection / inverse）后，`path.glob("*.py")` 非递归 → 子包内 37 个 .py
+# 完全不在审计范围，门禁仍打印「零 HIGH 风险」并 exit 0。
+NESTED_CODE = """\
+def demo(threshold):
+    if threshold:
+        pass
+    return threshold
+"""
+
+
+def test_subpackage_file_is_scanned(tmp_path, monkeypatch):
+    """子包内的 HIGH 模式必须被拦截并点名（同一代码放在顶层已由首例覆盖）。"""
+    scan_dir = tmp_path / "scan"
+    pkg = scan_dir / "subpkg"
+    pkg.mkdir(parents=True)
+    (pkg / "inner.py").write_text(NESTED_CODE, encoding="utf-8")
+    monkeypatch.setattr(falsy_audit, "ROOT", tmp_path)
+    monkeypatch.setattr(falsy_audit, "SCAN_PATHS", [scan_dir])
+
+    code, out = _run_main_expect_exit()
+    assert code == 1, "子包内 HIGH 模式未被拦截（非递归 glob 盲区）"
+    assert "inner.py" in out, f"输出应点名子包文件: {out[:400]}"
+
+
+def test_deeply_nested_subpackage_file_is_scanned(tmp_path, monkeypatch):
+    """多级嵌套（如 subpkg/deeper/inner.py）同样必须纳入。"""
+    scan_dir = tmp_path / "scan"
+    deep = scan_dir / "subpkg" / "deeper"
+    deep.mkdir(parents=True)
+    (deep / "inner.py").write_text(NESTED_CODE, encoding="utf-8")
+    monkeypatch.setattr(falsy_audit, "ROOT", tmp_path)
+    monkeypatch.setattr(falsy_audit, "SCAN_PATHS", [scan_dir])
+
+    code, out = _run_main_expect_exit()
+    assert code == 1
+    assert "inner.py" in out
+
+
+def test_real_repo_scan_covers_engine_subpackages():
+    """真实仓库：扫描文件集必须覆盖 engine 全部子包（防日后新增子包重现盲区）。"""
+    engine = Path(falsy_audit.__file__).resolve().parent.parent / "src" / "smartsuite" / "engine"
+    expected = {p for p in engine.rglob("*.py") if "__pycache__" not in p.parts}
+    scanned = set(falsy_audit._iter_scan_files())
+    missing = expected - scanned
+    assert not missing, f"以下 engine 文件未被审计: {sorted(str(p) for p in missing)[:5]}"
+
+
+def test_iter_scan_files_excludes_pycache(tmp_path, monkeypatch):
+    """__pycache__ 下即使出现 .py 也不得纳入（避免扫描生成物）。"""
+    scan_dir = tmp_path / "scan"
+    cache = scan_dir / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "stale.py").write_text(NESTED_CODE, encoding="utf-8")
+    (scan_dir / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(falsy_audit, "ROOT", tmp_path)
+    monkeypatch.setattr(falsy_audit, "SCAN_PATHS", [scan_dir])
+
+    scanned = {p.name for p in falsy_audit._iter_scan_files()}
+    assert "ok.py" in scanned
+    assert "stale.py" not in scanned
