@@ -10,6 +10,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import EPSILON
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import round_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -795,7 +796,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             lr_p = float(2 * sp_stats.norm.sf(abs(z_lr)))
             logrank_result = {
                 "分组": f"{groups[0]} vs {groups[1]}",
-                "Log-rank Z": round(float(z_lr), 3),
+                "Log-rank Z": round_for_display(float(z_lr), 3),
                 "p值": round(lr_p, 4),
                 "显著": "是" if lr_p < 0.05 else "否",
             }

@@ -26,6 +26,7 @@ from smartsuite.engine._constants import (
     INVERSE_RATE_RIDGE_ALPHA_MIN,
     INVERSE_RATE_RIDGE_ALPHA_N,
 )
+from smartsuite.engine._utils import round_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,8 @@ def _fit_forward(history, roles, model="auto", random_state=42):
                     "Output": out_col,
                     "候选": kind,
                     "CV方案": cv_label,
-                    "CV_R2": round(float(r2), 3),
-                    "CV_MAE": round(float(mean_absolute_error(y, pred)), 4),
+                    "CV_R2": round_for_display(float(r2), 3),
+                    "CV_MAE": round_for_display(float(mean_absolute_error(y, pred)), 4),
                     "选用": False,
                 }
             )
@@ -380,8 +381,8 @@ def _fit_rate_forward(history, roles, time_col, random_state=42):
                     "Output": out_col,
                     "候选": name,
                     "CV方案": cv_label,
-                    "CV_R2": round(float(r2), 3),
-                    "CV_MAE": round(float(mean_absolute_error(rate, pred)), 6),
+                    "CV_R2": round_for_display(float(r2), 3),
+                    "CV_MAE": round_for_display(float(mean_absolute_error(rate, pred)), 6),
                     "选用": False,
                 }
             )

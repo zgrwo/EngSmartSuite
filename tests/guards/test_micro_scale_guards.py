@@ -27,11 +27,13 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine import (
     anomaly_detect,
+    box_chart,
     cronbach_alpha,
     cusum_chart,
     distribution_summary,
     ewma_chart,
     gage_rr,
+    grid_search,
     hypothesis_test,
     outlier_consensus,
     regression_analysis,
@@ -656,3 +658,64 @@ def test_we_rules_zero_sigma_no_false_violations():
 
     assert _we_rules_xbar(np.full(20, 5.0), 5.0, 0.0) == {}
     assert _we_rules_xbar(np.full(20, 5.0), 5.0, float("nan")) == {}
+
+
+# ── R1-3（2026-09-21 审查）：box_chart / grid_search 构建期固定位舍入 ──────────
+# 固定位 round(x, 3/4) 在**数据构建期**执行（非展示期），把微尺度有效值直接截为
+# 0.0。修复前实测：box_chart 分组统计整表 0.0；grid_search optimal_params 由真实
+# 500/70 变为 {温度: 0.0, 压力: 0.0}（推荐工艺参数被销毁）。
+def test_box_chart_micro_scale_group_stats_scale_with_magnitude():
+    rng = np.random.default_rng(3)
+    n = 60
+    macro = rng.normal(5.0, 1.0, n)
+    groups = ["A", "B"] * (n // 2)
+
+    def run(values):
+        df = pd.DataFrame({"y": values, "g": groups})
+        return box_chart(
+            AnalysisRequest(
+                task="box_chart", data=df, target_col="y", feature_cols=["g"], params={}
+            )
+        )
+
+    r_macro = run(macro)
+    r_micro = run(macro * 1e-9)
+    assert r_macro.status == "ok" and r_micro.status == "ok", (r_macro.messages, r_micro.messages)
+    t_macro = r_macro.tables["group_statistics"]
+    t_micro = r_micro.tables["group_statistics"]
+    for col in ("均值", "中位数", "标准差", "IQR", "最小值", "最大值"):
+        macro_v = float(t_macro[col].iloc[0])
+        micro_v = float(t_micro[col].iloc[0])
+        assert micro_v != 0.0, f"{col} 在 ×1e-9 下被舍入为 0.0（整表归零）"
+        assert micro_v == pytest.approx(macro_v * 1e-9, rel=0.02), f"{col} 未随量纲同比缩放"
+
+
+def test_grid_search_micro_scale_optimal_params_scale_with_magnitude():
+    rng = np.random.default_rng(3)
+    n = 80
+    factors = ["温度", "压力"]
+
+    def run(scale):
+        x1 = rng.uniform(400, 500, n) * scale
+        x2 = rng.uniform(50, 70, n) * scale
+        y = (200 + 0.05 * (x1 / scale) + 0.3 * (x2 / scale) + rng.normal(0, 0.1, n)) * scale
+        df = pd.DataFrame({"温度": x1, "压力": x2, "强度": y})
+        params = {
+            "ranges": {"温度": [400 * scale, 500 * scale], "压力": [50 * scale, 70 * scale]},
+            "direction": "maximize",
+            "n_points": 10,
+        }
+        return grid_search(
+            AnalysisRequest(
+                task="grid_search", data=df, target_col="强度", feature_cols=factors, params=params
+            )
+        )
+
+    r_macro = run(1.0)
+    r_micro = run(1e-9)
+    assert r_macro.status == "ok" and r_micro.status == "ok", (r_macro.messages, r_micro.messages)
+    for key in factors:
+        macro_v = float(r_macro.metadata["optimal_params"][key])
+        micro_v = float(r_micro.metadata["optimal_params"][key])
+        assert micro_v != 0.0, f"推荐参数 {key} 在 ×1e-9 下被舍入为 0.0（可执行结论被销毁）"
+        assert micro_v == pytest.approx(macro_v * 1e-9, rel=0.05), f"推荐参数 {key} 未随量纲缩放"

@@ -13,7 +13,7 @@ from smartsuite.engine._constants import (
     INVERSE_MIN_HISTORY,
     INVERSE_REG_LAMBDA,
 )
-from smartsuite.engine._utils import safe_float
+from smartsuite.engine._utils import round_for_display, safe_float
 from smartsuite.engine.inverse._bounds import (
     _as_bool,
     _resolve_bounds,
@@ -394,9 +394,11 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
             for out_col, value in zip(roles.output, pred, strict=True):
                 pred_row[f"预测{out_col}"] = float(value)
             for out_col, dev in zip(roles.output, resid_sigmas, strict=True):
-                pred_row[f"偏差{out_col}"] = round(float(dev), 3)
+                pred_row[f"偏差{out_col}"] = round_for_display(float(dev), 3)
                 sigma_by_output[out_col].append(abs(float(dev)))
-            pred_row["总残差σ"] = round(float(np.sqrt(np.mean(np.square(resid_sigmas)))), 3)
+            pred_row["总残差σ"] = round_for_display(
+                float(np.sqrt(np.mean(np.square(resid_sigmas)))), 3
+            )
             for out_col, dev in zip(roles.output, resid_sigmas, strict=True):
                 pred_row[f"可达{out_col}"] = "否" if abs(dev) > attain_tol else "是"
             prediction_rows.append(pred_row)
@@ -527,8 +529,12 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                     "n_solved": n_solved,
                     "n_reachable": n_reachable,
                     "n_at_bound": at_bound_total,
-                    "mean_abs_sigma": round(float(np.mean(all_sigmas)), 4) if all_sigmas else None,
-                    "max_abs_sigma": round(float(np.max(all_sigmas)), 4) if all_sigmas else None,
+                    "mean_abs_sigma": round_for_display(float(np.mean(all_sigmas)), 4)
+                    if all_sigmas
+                    else None,
+                    "max_abs_sigma": round_for_display(float(np.max(all_sigmas)), 4)
+                    if all_sigmas
+                    else None,
                     "bottleneck_output": bottleneck,
                 },
                 "seed": seed,

@@ -10,8 +10,8 @@ from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import round_for_display, shapiro_p
 from smartsuite.engine._utils import safe_float as _safe_float
-from smartsuite.engine._utils import shapiro_p
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
         "P99": float(data.quantile(0.99)),
         "IQR": float(data.quantile(0.75) - data.quantile(0.25)),
         "CV(%)": (
-            round(float(data.std(ddof=1) / abs(data.mean()) * 100), 2)
+            round_for_display(float(data.std(ddof=1) / abs(data.mean()) * 100), 2)
             if float(data.mean()) != 0
             else float("nan")
         ),  # 审查 2026-09-16 D-2：原 +EPSILON 使均值≈0 时 CV 爆表；均值精确 0 → 无定义 NaN

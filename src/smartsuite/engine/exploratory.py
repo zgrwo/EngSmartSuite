@@ -13,7 +13,7 @@ from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import _adjust_xlabels, safe_float
+from smartsuite.engine._utils import _adjust_xlabels, round_for_display, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -409,12 +409,15 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             {
                 "分组": str(g),
                 "样本量": len(gdata),
-                "均值": round(float(gdata.mean()), 3),
-                "中位数": round(float(gdata.median()), 3),
-                "标准差": round(float(gdata.std(ddof=1)), 3),
-                "IQR": round(float(gdata.quantile(0.75) - gdata.quantile(0.25)), 3),
-                "最小值": round(float(gdata.min()), 3),
-                "最大值": round(float(gdata.max()), 3),
+                # 审查 2026-09-21 R1-3：原为固定位 round(x, 3)，微尺度（×1e-9）下
+                # 整表归零；改走共享 round_for_display（低于 0.5×10^-decimals 时
+                # 自动改按有效数字），与 detection/capability 展示口径一致。
+                "均值": round_for_display(float(gdata.mean()), 3),
+                "中位数": round_for_display(float(gdata.median()), 3),
+                "标准差": round_for_display(float(gdata.std(ddof=1)), 3),
+                "IQR": round_for_display(float(gdata.quantile(0.75) - gdata.quantile(0.25)), 3),
+                "最小值": round_for_display(float(gdata.min()), 3),
+                "最大值": round_for_display(float(gdata.max()), 3),
             }
         )
 

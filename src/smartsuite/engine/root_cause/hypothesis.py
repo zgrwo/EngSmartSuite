@@ -13,8 +13,8 @@ from smartsuite.engine._constants import (
     EPSILON,
 )
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import round_for_display, shapiro_p
 from smartsuite.engine._utils import safe_float as _safe_float
-from smartsuite.engine._utils import shapiro_p
 from smartsuite.engine.root_cause._shared import (
     _correlation_ci,
     _effect_interpretation,
@@ -945,9 +945,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 dunn_rows.append(
                     {
                         "对比": f"{g1} vs {g2}",
-                        "Z值": round(float(z_stat_dunn), 3),
-                        "原始p值": round(float(p_dunn), 4),
-                        "校正p值": round(float(p_adj), 4),
+                        "Z值": round_for_display(float(z_stat_dunn), 3),
+                        "原始p值": round_for_display(float(p_dunn), 4),
+                        "校正p值": round_for_display(float(p_adj), 4),
                         "显著": "是" if p_adj < alpha else "否",
                     }
                 )

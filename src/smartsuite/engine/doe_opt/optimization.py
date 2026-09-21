@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import is_positive_finite
+from smartsuite.engine._utils import is_positive_finite, round_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,10 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
 
         best_idx = np.argmax(predictions) if direction == "maximize" else np.argmin(predictions)
         pred_best = float(predictions[best_idx])
-        best = {col_names[i]: round(float(points[best_idx, i]), 3) for i in range(len(col_names))}
+        best = {
+            col_names[i]: round_for_display(float(points[best_idx, i]), 3)
+            for i in range(len(col_names))
+        }
 
         # Top-N 候选
         top_n = min(5, len(predictions))
@@ -142,8 +145,11 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         else:
             top_indices = np.argsort(predictions)[:top_n]
         top_candidates = [
-            {col_names[i]: round(float(points[idx, i]), 3) for i in range(len(col_names))}
-            | {"预测值": round(float(predictions[idx]), 4)}
+            {
+                col_names[i]: round_for_display(float(points[idx, i]), 3)
+                for i in range(len(col_names))
+            }
+            | {"预测值": round_for_display(float(predictions[idx]), 4)}
             for idx in top_indices
         ]
 
@@ -377,9 +383,9 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             {
                 "目标列": col,
                 "方向": "最大化" if direction == "maximize" else "最小化",
-                "权重": round(float(weights[objectives.index(obj)]), 3),
+                "权重": round_for_display(float(weights[objectives.index(obj)]), 3),
                 "最优期望值": round(best_d, 4),
-                "均值期望值": round(float(np.mean(d_i)), 4),
+                "均值期望值": round_for_display(float(np.mean(d_i)), 4),
             }
         )
     desirability_df = pd.DataFrame(desirability_rows)

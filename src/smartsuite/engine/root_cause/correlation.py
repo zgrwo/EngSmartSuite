@@ -18,6 +18,7 @@ from smartsuite.engine._constants import (
     SIG_MODERATE,
 )
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.root_cause._shared import _correlation_ci, _effect_size_label
 
 logger = logging.getLogger(__name__)
@@ -373,9 +374,11 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             partial_results.append(
                 {
                     "因子": fc,
-                    "零阶相关(r)": round(float(r_zero), 4) if not np.isnan(r_zero) else None,
-                    "偏相关(r_partial)": round(float(r_partial), 4),
-                    "p值": round(float(p_partial), 4),
+                    "零阶相关(r)": round_for_display(float(r_zero), 4)
+                    if not np.isnan(r_zero)
+                    else None,
+                    "偏相关(r_partial)": round_for_display(float(r_partial), 4),
+                    "p值": round_for_display(float(p_partial), 4),
                     "变化": (
                         "抑制"
                         if not np.isnan(r_zero) and abs(r_partial) > abs(r_zero) + 0.05
