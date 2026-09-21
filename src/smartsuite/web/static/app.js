@@ -102,6 +102,11 @@ async function uploadFile(f) {
 
 document.getElementById('file-input').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
+  // 审查 2026-09-21 R1-1：选择**新文件**时把编码复位为「自动识别」。
+  // 否则上一次为某文件选定的编码会跨上传粘滞，把新文件静默读错（实测残留
+  // Big5 声明读 GBK 文件 → 列名 ['蠶瘍','恲僅']、HTTP 200、status=ok）。
+  // 同一文件切换下拉框仍按当前值重传（由下方 encoding 监听承担）。
+  document.getElementById('encoding').value = '';
   uploadFile(f);
 });
 

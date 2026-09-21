@@ -763,3 +763,55 @@ def test_flask_import_error_prints_guidance_and_exits(monkeypatch, capsys):
     assert "需要 Flask" in out and "pip install smartsuite[web]" in out
     monkeypatch.undo()
     importlib.reload(app_module)  # 恢复正常模块状态
+
+
+# ── R1-1 / R1-7（2026-09-21 审查）：编码下拉框的前端安全 ──────────────────────
+def _encoding_select_block() -> str:
+    import re
+
+    html = (pathlib.Path(app_module.__file__).parent / "templates" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    m = re.search(r'<select id="encoding".*?</select>', html, re.S)
+    assert m, "index.html 应存在 id=encoding 的下拉框"
+    return m.group(0)
+
+
+def test_frontend_encoding_options_cover_gb18030():
+    """下拉框必须提供 GB18030（审查 R1-7 P3）。
+
+    后端白名单 `SUPPORTED_CSV_ENCODINGS` 含 `gb18030`（GBK 的超集，覆盖更多汉字），
+    但 UI 曾缺失该项 → 该类文件在 Web 端**无出路**：自动链只试到 gbk 即失败，
+    报错文案还指向「自动识别」，而自动模式同样读不了（实测）。
+    """
+    assert 'value="gb18030"' in _encoding_select_block(), (
+        "编码下拉框缺少 GB18030 选项（白名单已支持 → 引擎能力前端不可达）"
+    )
+
+
+def test_new_file_selection_resets_encoding_selector():
+    """选择**新文件**时必须把编码下拉框复位为「自动识别」（审查 R1-1 P2）。
+
+    否则上一次为某文件选定的编码会跨上传粘滞，把新文件静默读错——实测残留
+    Big5 声明读 GBK 文件：列名 `['蠶瘍', '恲僅']`（应 `['批号','温度']`）、
+    HTTP 200、`status=ok`，无任何提示。
+
+    无浏览器环境，故做静态判读（与 `verify_frontend_params.py` 同类手法）：
+    `file-input` 的 change 处理器体内必须出现对 `#encoding` 的复位赋值。
+    同一文件**切换下拉框**仍按当前值重传（由 R1-1 引入的 change 监听承担）。
+    """
+    import re
+
+    js = (pathlib.Path(app_module.__file__).parent / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    m = re.search(
+        r"getElementById\('file-input'\)\.addEventListener\('change',\s*e\s*=>\s*\{(.*?)\n\}\);",
+        js,
+        re.S,
+    )
+    assert m, "app.js 应存在 file-input 的 change 处理器"
+    body = m.group(1)
+    assert re.search(r"getElementById\('encoding'\)\.value\s*=\s*''", body), (
+        "选择新文件时未复位编码下拉框 → 编码声明会跨文件粘滞并静默读错（R1-1）"
+    )
