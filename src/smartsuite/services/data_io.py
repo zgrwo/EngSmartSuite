@@ -22,6 +22,16 @@ _CSV_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "gbk")
 _CSV_ENCODING_MSG = "无法识别 CSV 文件编码，请转换为 UTF-8 后重试"
 _CSV_PARSE_MSG = "无法解析 CSV 文件，请确认文件格式正确"
 
+# 用户可显式声明的编码白名单（ADR-0004 决策 2）：CLI --encoding 与 Web 下拉框的唯一来源。
+# 有意不含 "utf-8"：utf-8-sig 对无 BOM 文件等价于 utf-8，对含 BOM 文件能剥掉 BOM，
+# 传 "utf-8" 反而会把 BOM 读进首列名（\ufeff批号）。
+SUPPORTED_CSV_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "gbk", "gb18030", "big5", "utf-16")
+
+_UNSUPPORTED_ENCODING_MSG = "不支持的编码「{}」，可选: {}"
+_EXPLICIT_ENCODING_FAILED_MSG = (
+    "无法用指定编码「{}」读取 CSV，请确认文件实际编码，或将编码改选为「自动识别」"
+)
+
 # BOM 检测表（ADR-0004 决策 1）：BOM 是文件自描述，判定确定、无启发式。
 # 顺序不可调换——UTF-32LE 的 BOM 前两字节与 UTF-16LE 相同，长 BOM 必须优先比较，
 # 否则 UTF-32 文件会被当成 UTF-16 解出乱码。
@@ -54,9 +64,12 @@ def _read_head(source: str | Path | IO[bytes], size: int = 4) -> bytes:
 
 
 def read_csv_with_encoding(
-    source: str | Path | IO[bytes], *, nrows: int | None = None
+    source: str | Path | IO[bytes],
+    *,
+    nrows: int | None = None,
+    encoding: str | None = None,
 ) -> pd.DataFrame:
-    """按受支持编码逐个尝试读取 CSV；全部失败或结构非法时抛中文异常。
+    """按受支持编码读取 CSV；全部失败或结构非法时抛中文异常。
 
     Web（`web/app.py`）与 CLI（`cli.py`）共用此函数，保证两条入口的编码策略、
     行数探测与错误文案完全一致。
@@ -65,9 +78,12 @@ def read_csv_with_encoding(
         source: 文件路径或二进制流（如 `BytesIO`）。流式源在每次尝试前 `seek(0)`，
             否则上一次尝试已消耗流位置，后续编码必然误报解码失败。
         nrows: 仅读前 n 行（Web 行数探测用），`None` 表示全量。
+        encoding: 显式指定的编码，取值见 `SUPPORTED_CSV_ENCODINGS`。`None`（默认）为
+            自动模式：先按 BOM 判定（UTF-8/UTF-16/UTF-32 的 BOM 是文件自描述，判定确定），
+            无 BOM 时按 `utf-8-sig → utf-8 → gbk` 依次尝试。
 
     异常:
-        CsvEncodingError: 全部编码均解码失败（文件是 UTF-16/Big5 等）。
+        CsvEncodingError: 编码不在白名单、显式编码解码失败，或自动模式下全部编码均失败。
         CsvParseError: 编码可解码但结构非法（列数不一致、空文件）。
 
     设计要点（为何非 UnicodeError 也继续尝试）:
@@ -75,12 +91,24 @@ def read_csv_with_encoding(
         （典型场景：GBK 字节恰好构成合法 utf-8 序列 → 乱码文本 → 列数错乱），
         因此记录首个解析异常后继续扫完回退链；最终优先报结构错误
         （比「无法识别编码」更贴近真实原因）。
+
+    设计要点（为何无 BOM 时不猜 UTF-16）:
+        GBK 字节数为偶数时可被 `utf-16` 静默解码成乱码，把它放进回退链等于用一类
+        静默错误换另一类（ADR-0004）。
     """
+    if encoding is not None and encoding not in SUPPORTED_CSV_ENCODINGS:
+        raise CsvEncodingError(
+            _UNSUPPORTED_ENCODING_MSG.format(encoding, " / ".join(SUPPORTED_CSV_ENCODINGS))
+        )
+
     parse_error: Exception | None = None
-    # 有 BOM 时只认 BOM 指定的编码，不回退——UTF-16 文件被 GBK 兜底读取只会产出
-    # 乱码，报错比猜测有用（ADR-0004 决策 1）；无 BOM 时维持既有回退链。
-    bom = _bom_encoding(_read_head(source))
-    chain: tuple[str, ...] = (bom,) if bom is not None else _CSV_ENCODINGS
+    # 显式声明优先；否则有 BOM 时只认 BOM 指定的编码（不回退——UTF-16 文件被 GBK
+    # 兜底读取只会产出乱码，报错比猜测有用）；无 BOM 时维持既有回退链。
+    if encoding is not None:
+        chain: tuple[str, ...] = (encoding,)
+    else:
+        bom = _bom_encoding(_read_head(source))
+        chain = (bom,) if bom is not None else _CSV_ENCODINGS
     for enc in chain:
         if not isinstance(source, (str, Path)):
             source.seek(0)
@@ -95,6 +123,8 @@ def read_csv_with_encoding(
 
     if parse_error is not None:
         raise CsvParseError(_CSV_PARSE_MSG) from parse_error
+    if encoding is not None:
+        raise CsvEncodingError(_EXPLICIT_ENCODING_FAILED_MSG.format(encoding))
     raise CsvEncodingError(_CSV_ENCODING_MSG)
 
 

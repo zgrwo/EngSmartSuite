@@ -504,3 +504,68 @@ def test_fallback_chain_excludes_utf16_and_utf32():
     from smartsuite.services import data_io
 
     assert data_io._CSV_ENCODINGS == ("utf-8-sig", "utf-8", "gbk")
+
+
+# ── 显式声明编码（ADR-0004 决策 2）──
+
+
+def test_explicit_big5_decodes_traditional_header(tmp_path):
+    """显式 big5：繁体表头正确解码——报警钉子的正面出路（ADR-0004）。
+
+    对照 test_big5_short_header_is_silently_misdecoded_as_gbk_known_gap：
+    不声明编码时仍会静默误解码，声明后结果正确。
+    """
+    p = tmp_path / "big5.csv"
+    p.write_bytes("批號,溫度\nB2301,235\n".encode("big5"))
+    df = read_csv_with_encoding(p, encoding="big5")
+    assert list(df.columns) == ["批號", "溫度"]
+    assert df["溫度"].tolist() == [235]
+
+
+def test_explicit_encoding_superset_covers_auto_chain():
+    """显式白名单必须能表达自动链的每种编码，否则「自动能读、显式不能读」。
+
+    自动链含 "utf-8"，白名单有意用 utf-8-sig 承担该角色（无 BOM 时两者等价，
+    含 BOM 时 utf-8-sig 才正确），故按「除 utf-8 外全部逐名覆盖 + utf-8-sig 在位」判定。
+    """
+    from smartsuite.services import data_io
+
+    assert set(data_io._CSV_ENCODINGS) - {"utf-8"} <= set(data_io.SUPPORTED_CSV_ENCODINGS)
+    assert "utf-8-sig" in data_io.SUPPORTED_CSV_ENCODINGS
+
+
+def test_explicit_unsupported_encoding_rejected_with_options(tmp_path):
+    """白名单外编码：中文报错并列出可选项，不得透传 pandas 英文异常。"""
+    p = tmp_path / "gbk.csv"
+    p.write_bytes("批号,温度\nB1,235\n".encode("gbk"))
+    with pytest.raises(CsvEncodingError, match="不支持的编码"):
+        read_csv_with_encoding(p, encoding="latin-1")
+
+
+def test_explicit_encoding_mismatch_reports_chinese_error(tmp_path):
+    """声明的编码与实际不符：报错文案需点明「指定编码」并提示改选自动。
+
+    用 utf-8-sig 而非 utf-16 构造不匹配：utf-16 对偶数字节的非 UTF-16 内容
+    可静默解码（用户显式声明的取舍），不会抛错，无法用于本用例。
+    """
+    p = tmp_path / "big5.csv"
+    p.write_bytes("批號,溫度\nB2301,235\n".encode("big5"))
+    with pytest.raises(CsvEncodingError, match="指定编码"):
+        read_csv_with_encoding(p, encoding="utf-8-sig")
+
+
+def test_explicit_encoding_parse_error_is_parse_not_encoding(tmp_path):
+    """显式编码下结构非法：仍抛 CsvParseError（区别于编码错误），与自动路径语义一致。"""
+    p = tmp_path / "bad.csv"
+    p.write_bytes(b"a,b\n1,2\n1,2,3\n")
+    with pytest.raises(CsvParseError):
+        read_csv_with_encoding(p, encoding="gbk")
+
+
+def test_explicit_encoding_applies_to_bytesio_nrows():
+    """BytesIO + nrows：显式编码与行数探测组合可用（Web 探测路径）。"""
+    body = b"".join(b"B%d,235\n" % i for i in range(20))
+    buf = io.BytesIO("批號,溫度\n".encode("big5") + body)
+    df = read_csv_with_encoding(buf, nrows=5, encoding="big5")
+    assert list(df.columns) == ["批號", "溫度"]
+    assert len(df) == 5
