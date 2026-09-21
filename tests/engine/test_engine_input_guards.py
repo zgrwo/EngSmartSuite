@@ -514,3 +514,16 @@ def test_doe_design_full_factorial_combinatorial_limit_clear_error():
     )
     assert r.status == "error", "组合数超限应显式拒绝"
     assert any("上限" in m for m in r.messages), r.messages
+
+
+def test_is_positive_finite_predicate():
+    """共用参数守卫谓词：NaN/±Inf/0/负数 → False，正有限数 → True。
+
+    审查 2026-09-21 D-1 抽出；本测试是质量守卫「新增公共函数必须配测试」的直接引用。
+    """
+    from smartsuite.engine._utils import is_positive_finite
+
+    for bad in (float("nan"), float("inf"), float("-inf"), 0, 0.0, -1, -1e-9):
+        assert is_positive_finite(bad) is False, f"{bad!r} 应判为非法"
+    for good in (1e-12, 0.5, 5.0, 1e12):
+        assert is_positive_finite(good) is True, f"{good!r} 应判为合法"
