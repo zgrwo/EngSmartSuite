@@ -1543,6 +1543,31 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     else:
         summary_parts.append("统计功效 N/A")
 
+    # 审查 2026-09-21 B-1：Cliff's δ 是有界统计量（∈[-1,1]），而原实现无条件套用
+    # Cohen's d 的标准误公式（_cohens_d_ci）→ 实测 CI 越出定义域：
+    #   n=8 → δ=-0.9062 CI=(-1.9353, +0.1228)；n=20 → (-1.3912, -0.1088)。
+    # δ 的 CI 需要其自身（支配矩阵）的方差分量，本仓无可核验的闭式公式，故**不猜测**：
+    # 仅对 d 族（Hedges g，定义域无界）输出 CI；δ 显式标注为不可用。
+    if test_type == "mannwhitney":
+        effect_ci: tuple[float, float] | None = None
+        effect_ci_note = "Cliff's δ 的置信区间不适用 Cohen's d 的标准误公式，本工具不输出该区间"
+    else:
+        effect_ci = _cohens_d_ci(effect_size, n1, n2)
+        effect_ci_note = ""
+
+    metadata: dict[str, object] = {
+        "test": test_name,
+        "statistic": float(stat),
+        "p_value": float(p),
+        "alpha": alpha,
+        "effect_size": effect_size,
+        "effect_name": effect_name,
+        "effect_label": effect_label,
+        "power": power,
+        "effect_size_ci": effect_ci,
+    }
+    if effect_ci_note:
+        metadata["effect_ci_note"] = effect_ci_note
     return AnalysisResult(
         task="hypothesis_test",
         tables={
@@ -1551,16 +1576,6 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary="；".join(summary_parts),
-        metadata={
-            "test": test_name,
-            "statistic": float(stat),
-            "p_value": float(p),
-            "alpha": alpha,
-            "effect_size": effect_size,
-            "effect_name": effect_name,
-            "effect_label": effect_label,
-            "power": power,
-            "effect_size_ci": _cohens_d_ci(effect_size, n1, n2),
-        },
+        metadata=metadata,
         messages=norm_warn,
     )

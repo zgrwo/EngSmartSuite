@@ -78,7 +78,9 @@ class AnalysisResult:
 - `ttest_ind` / `cohens_d` 的效应量为 **Hedges g**（合并标准差 d 乘小样本校正因子）；
 - `ttest_paired` 的效应量 d_z = mean(col1−col2)/sd(col1−col2)，**符号与统计量方向一致**；
 - `jonckheere` 报告**双侧** p 值（有序备择如需单侧请自行折半判读）；
-- `mcnemar` 采用混合策略：不一致对 b+c<25 时用 Yates 校正 χ²（并输出精确二项复核提示），否则用未校正 χ²。
+- `mcnemar` 采用混合策略：不一致对 b+c<25 时用 Yates 校正 χ²（并输出精确二项复核提示），否则用未校正 χ²；优势比 OR=b/c 按定义处理——`c=0` 时为∞、`b=c=0` 时未定义，两者均给 `None` 并在结果中显式说明（2026-09-21，审查 B-5）；
+- **效应量置信区间 `effect_size_ci`**：仅对定义域无界的 d 族输出（`ttest_ind`/`cohens_d` 的 Hedges g、`ttest_paired` 的 d_z）。`mannwhitney` 的 **Cliff's δ ∈ [-1,1]** 需要其自身（支配矩阵）的方差分量，本工具无可核验的闭式公式，故**不输出**该区间（值为 `None`，并附 `effect_ci_note`）——原实现套用 Cohen's d 的标准误导致 CI 越出定义域（如 n=8 → δ=−0.906 却给 (−1.94, 0.12)），2026-09-21 审查 B-1；
+- **Wilcoxon 效应量** r = |Z|/√n_eff，Z 取 scipy 渐近正态近似的实际统计量（非由 p 反推）；n_eff 为丢弃零差后的有效对数（2026-09-21，审查 B-3）。
 
 ### decision_tree_analysis
 - **Task Key**: `decision_tree`

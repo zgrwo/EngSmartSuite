@@ -498,3 +498,49 @@ def test_cohens_kappa_z_matches_fleiss_ase0():
         assert z_engine == pytest.approx(z_expected, rel=1e-6), (
             f"kappa z 偏离 Fleiss ASE0：引擎 {z_engine:.6f} vs 手算 {z_expected:.6f}"
         )
+
+
+# ── B-1（2026-09-21 审查）：Cliff's δ 的 CI 越界 ──────────────────────────────
+def test_mannwhitney_effect_size_ci_stays_within_bounds():
+    """有界效应量（Cliff's δ ∈ [-1,1]）的置信区间不得越出定义域（审查 B-1 P2）。
+
+    原实现无条件套用 Cohen's d 的标准误公式 `_cohens_d_ci`，实测：
+      n=8  → δ=-0.9062 CI=(-1.9353, +0.1228)
+      n=10 → δ=-0.8600 CI=(-1.7761, +0.0561)
+      n=20 → δ=-0.7500 CI=(-1.3912, -0.1088)
+    全部越出 [-1,1]。δ 的 CI 需要其自身（支配矩阵）的方差分量，本仓无可核验的
+    闭式公式，故口径定为：**不猜测**——δ 不输出 CI（None）并给出说明；
+    本用例断言「要么 None，要么落在 [-1,1] 内」，两种合规实现都能通过。
+    """
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    rng = np.random.default_rng(7)
+    for n in (8, 10, 20, 50):
+        g1 = rng.normal(0, 1, n)
+        g2 = rng.normal(1.5, 1, n)
+        df = pd.DataFrame({"y": np.r_[g1, g2], "g": ["A"] * n + ["B"] * n})
+        r = hypothesis_test(_mk("hypothesis_test", df, "y", ["g"], {"test": "mannwhitney"}))
+        assert r.status == "ok", r.messages
+        ci = r.metadata.get("effect_size_ci")
+        if ci is None:
+            assert "effect_ci_note" in r.metadata, "不输出 CI 时必须给出原因说明"
+            continue
+        lo, hi = ci
+        assert -1 <= lo <= 1 and -1 <= hi <= 1, f"n={n}: Cliff's δ 的 CI 越界: ({lo}, {hi})"
+        assert lo <= hi, f"n={n}: CI 下界应不大于上界: ({lo}, {hi})"
+
+
+def test_ttest_effect_size_ci_unchanged():
+    """对照：Hedges g（d 族，定义域无界）必须仍有 CI（防把守卫改成一律 None）。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    rng = np.random.default_rng(3)
+    g1 = rng.normal(0, 1, 30)
+    g2 = rng.normal(0.6, 1, 30)
+    df = pd.DataFrame({"y": np.r_[g1, g2], "g": ["A"] * 30 + ["B"] * 30})
+    r = hypothesis_test(_mk("hypothesis_test", df, "y", ["g"], {"test": "ttest_ind"}))
+    assert r.status == "ok", r.messages
+    ci = r.metadata.get("effect_size_ci")
+    assert ci is not None, "Hedges g 的 CI 不应被移除"
+    lo, hi = ci
+    assert np.isfinite(lo) and np.isfinite(hi) and lo < hi
