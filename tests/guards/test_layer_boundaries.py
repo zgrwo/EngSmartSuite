@@ -164,7 +164,7 @@ def test_web_reads_display_rounding_from_bridge():
 
 def test_bridge_module_is_the_sole_engine_capability_outlet():
     """`services/bridge.py` 必须真实导出引擎对象（同一对象，非副本/包装）。"""
-    from smartsuite.engine._utils import round_for_display as engine_impl
+    from smartsuite.engine import round_for_display as engine_impl
     from smartsuite.services.bridge import round_for_display as bridged
 
     assert bridged is engine_impl, "桥接必须是同一函数对象，否则展示口径会漂移"
@@ -179,4 +179,26 @@ def test_bridge_module_does_not_become_a_dumping_ground():
     }
     assert exported == {"round_for_display"}, (
         f"bridge 只应导出 round_for_display，实际：{sorted(exported)}"
+    )
+
+
+def test_upper_layers_do_not_import_engine_private_modules():
+    """services/ web/ cli 不得从 engine 的**私有子模块**取用能力（审查 R1-10）。
+
+    engine 的 `_utils` / `_palette` / `_constants` 等是内部实现；上层直连会让
+    「公开 API」形同虚设——符号改名或搬移会静默破坏分层契约，且调用方看不出
+    该名字归属谁。需要的能力应由 `engine/__init__.py` 公开导出
+    （`PALETTE` / `GROUP_COLORS` / `round_for_display` 均已如此），再经
+    `services/bridge.py` 桥接给 web。
+    """
+    offenders: list[str] = []
+    targets = [_iter_py(_SRC / pkg) for pkg in ("services", "web")]
+    targets.append(iter([_SRC / "cli.py"]))
+    for files in targets:
+        for f in files:
+            for mod in sorted(_imported_modules(f)):
+                if mod.startswith("smartsuite.engine._"):
+                    offenders.append(f"{f.relative_to(_SRC).as_posix()} → {mod}")
+    assert not offenders, (
+        f"上层不得直连 engine 私有模块（应经 engine 公开导出 + services/bridge）: {offenders}"
     )

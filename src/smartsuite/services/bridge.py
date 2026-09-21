@@ -17,6 +17,6 @@
 本模块，那会白付绘图栈开销（见 `tests/guards/test_lazy_imports.py`）。
 """
 
-from smartsuite.engine._utils import round_for_display
+from smartsuite.engine import round_for_display
 
 __all__ = ["round_for_display"]

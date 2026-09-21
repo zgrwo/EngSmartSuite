@@ -159,6 +159,10 @@ from smartsuite.engine._constants import (
 )
 from smartsuite.engine._constants import CPK_GOOD, CPK_MINIMUM, DW_SAFE_LOWER, DW_SAFE_UPPER  # noqa: F401 — 公开导出
 from smartsuite.engine._palette import get_palette_style
+# 审查 2026-09-21 R1-10：展示含入口径是 Web/HTML/CLI 共用的引擎能力，属**公开面**。
+# 此前 services/bridge.py 直连私有模块 engine._utils 取用，使上层依赖内部实现
+# （符号改名/搬移会静默破坏分层契约）；改为从包名公开导出，bridge 再桥接。
+from smartsuite.engine._utils import round_for_display  # noqa: F401 — 公开导出，供 services 层桥接
 
 _palette_style = get_palette_style()
 for key, val in _palette_style.items():
@@ -202,6 +206,7 @@ __all__ = [
     "DW_SAFE_UPPER",  # 公开统计常量
     "GROUP_COLORS",
     "PALETTE",  # 公开配色常量/工具，供 services/web 层使用
+    "round_for_display",  # 公开展示含入口径（量纲感知），供 services 层桥接
     "correlation_analysis",
     "anova_analysis",
     "contingency_analysis",

@@ -41,6 +41,13 @@ def _read_data_file(filepath: str, sheet=0, encoding: str | None = None) -> pd.D
     ext = os.path.splitext(filepath)[1].lower()
     if ext == ".csv":
         return read_csv_with_encoding(filepath, encoding=encoding)
+    if encoding is not None:
+        # 审查 2026-09-21 R1-10：Excel 由 openpyxl 自行处理编码，--encoding 对非 CSV
+        # 输入天然无意义。静默忽略会让用户以为编码已生效，故显式提示（不改变读取行为）。
+        print(
+            f"提示: --encoding 仅对 CSV 生效，已忽略（当前输入为 {ext or '无扩展名'} 文件）",
+            file=sys.stderr,
+        )
     return pd.read_excel(filepath, sheet_name=sheet, engine="openpyxl")
 
 
