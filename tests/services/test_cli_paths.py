@@ -154,6 +154,29 @@ def test_cli_csv_utf16_bom_now_readable(monkeypatch, capsys, tmp_path):
     assert "相关" in out, f"UTF-16 文件应能正常分析: {out[:300]}"
 
 
+def test_cli_csv_explicit_big5_encoding(monkeypatch, capsys, tmp_path):
+    """--encoding big5：繁体表头正确解析（ADR-0004 决策 2），列名不再是乱码。"""
+    data = _write_csv(tmp_path, "big5.csv", "強度,溫度\n45.1,180\n46.3,182\n".encode("big5"))
+    tpl = _write_yaml(tmp_path, "task: correlation\ntarget_col: 強度\nfeature_cols: [溫度]\n")
+    out, _ = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data, "--encoding", "big5"])
+    assert "相关" in out, f"显式 big5 应能正常分析: {out[:300]}"
+
+
+def test_cli_encoding_choice_rejects_unsupported(monkeypatch, capsys, tmp_path):
+    """--encoding 白名单外取值：由 `choices` 直接拒绝（退出码 2），不进入读取逻辑。
+
+    必须断言 `invalid choice`——否则「参数不存在」也会退出码 2，用例会在实现前
+    假通过（TDD 红线：测试不能因错误原因通过）。
+    """
+    data = _write_csv(tmp_path, "gbk.csv", "强度,温度\n45.1,180\n".encode("gbk"))
+    tpl = _write_yaml(tmp_path, _CORR_TPL)
+    with pytest.raises(SystemExit) as ei:
+        _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data, "--encoding", "latin-1"])
+    assert ei.value.code == 2
+    err = capsys.readouterr().err
+    assert "invalid choice" in err, f"应由 choices 白名单拒绝而非「未知参数」: {err!r}"
+
+
 def test_cli_csv_parser_error_friendly(monkeypatch, capsys, tmp_path):
     """CSV 解析异常（ParserError ⊂ ValueError）必须走「无法解析文件」友好文案。
 

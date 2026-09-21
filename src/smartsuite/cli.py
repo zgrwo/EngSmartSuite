@@ -12,6 +12,7 @@ import yaml
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import CsvEncodingError, CsvParseError, SmartSuiteError
 from smartsuite.services.data_io import (
+    SUPPORTED_CSV_ENCODINGS,
     infer_hypothesis_group_col,
     prepare_spc_subgroup_col,
     preprocess_for_task,
@@ -29,16 +30,17 @@ from smartsuite.services.orchestrator import (
 logger = logging.getLogger(__name__)
 
 
-def _read_data_file(filepath: str, sheet=0) -> pd.DataFrame:
+def _read_data_file(filepath: str, sheet=0, encoding: str | None = None) -> pd.DataFrame:
     """根据文件扩展名自动选择读取方式。支持 .csv / .xlsx / .xlsm。
 
     CSV 走 `services.data_io.read_csv_with_encoding`（与 Web 上传共用同一套
     编码策略与错误语义）——审查 2026-09-19 E5：不再用 latin-1 兜底，
     否则 UTF-16/Big5 中文表头会被静默读成乱码。
+    `encoding` 仅对 CSV 生效（ADR-0004 决策 2），Excel 由 openpyxl 自行处理编码。
     """
     ext = os.path.splitext(filepath)[1].lower()
     if ext == ".csv":
-        return read_csv_with_encoding(filepath)
+        return read_csv_with_encoding(filepath, encoding=encoding)
     return pd.read_excel(filepath, sheet_name=sheet, engine="openpyxl")
 
 
@@ -82,6 +84,16 @@ def main():
         "--outdir",
         default=None,
         help="图表输出目录（可选）。提供后会把本次分析的图表保存为 PNG，否则图表仅在内存中生成",
+    )
+    run_parser.add_argument(
+        "--encoding",
+        "-e",
+        default=None,
+        choices=SUPPORTED_CSV_ENCODINGS,
+        help=(
+            "CSV 文件编码。默认自动：先看 BOM，再依次尝试 utf-8-sig/utf-8/gbk。"
+            "繁体文件用 big5；仅对 CSV 生效"
+        ),
     )
 
     subparsers.add_parser("list", help="列出支持的分析方法")
@@ -132,7 +144,9 @@ def main():
             sys.exit(1)
 
         try:
-            raw = _read_data_file(args.input, sheet=_parse_sheet(args.sheet))
+            raw = _read_data_file(
+                args.input, sheet=_parse_sheet(args.sheet), encoding=args.encoding
+            )
         except FileNotFoundError:
             print(f"错误: 找不到输入文件「{args.input}」，请检查文件路径是否正确", file=sys.stderr)
             sys.exit(1)
