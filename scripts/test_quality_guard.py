@@ -22,6 +22,7 @@ import ast
 import contextlib
 import re
 import sys
+import textwrap
 from pathlib import Path
 
 with contextlib.suppress(AttributeError, ValueError):
@@ -208,6 +209,40 @@ def _has_guarded_assert(src: str) -> bool:
     return False
 
 
+def _asserting_helpers(path: Path) -> set[str]:
+    """返回文件中**自身含 assert 的非测试函数**名（审查 2026-09-21 FP-1）。
+
+    不变量测试常把数值断言收敛到同文件助手（如 `test_invariants.py` 的
+    `_assert_table_finite_ordered`，内含 6 处真断言）——判据若只统计测试体内的
+    断言行，就会把这类用例误报为「仅状态/弱断言」（实测 7 处同类 WARN）。
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return set()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name.startswith("test_"):
+            continue
+        if any(isinstance(n, ast.Assert) for n in ast.walk(node)):
+            names.add(node.name)
+    return names
+
+
+def _calls_any(src: str, names: set[str]) -> bool:
+    """方法体是否调用了给定名字中的任一个（AST 判据，非字符串匹配）。"""
+    if not names:
+        return False
+    try:
+        tree = ast.parse(textwrap.dedent(src))
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in names
+        for n in ast.walk(tree)
+    )
+
+
 def check_status_only_asserts(tests_dir: Path) -> list[str]:
     """检测三类隐蔽弱断言（审查 2026-08-19 #3.5，第二轮 #4 消减误报，WARN 不阻断）：
     1) assert x.status == "ok" 仅状态断言（== 'error'/'warning' 是有效断言，不判）
@@ -220,6 +255,7 @@ def check_status_only_asserts(tests_dir: Path) -> list[str]:
     for p in sorted(tests_dir.rglob("test_*.py")):
         if p.name in SELF_TEST_FILES:
             continue
+        asserting_helpers = _asserting_helpers(p)
         for name, src in _extract_test_methods(p):
             code_lines = [line.split("#", 1)[0] for line in src.splitlines()]
             code = "\n".join(code_lines)
@@ -241,7 +277,12 @@ def check_status_only_asserts(tests_dir: Path) -> list[str]:
                 _WEAK_ASSERT_RE.search(stripped) or _WEAK_STATUS_ASSERT_RE.search(stripped)
                 for stripped, _ in asserts
             )
-            if asserts and not _method_has_strong_assert(src) and only_status:
+            if (
+                asserts
+                and not _method_has_strong_assert(src)
+                and not _calls_any(src, asserting_helpers)
+                and only_status
+            ):
                 problems.append(
                     f"[WARN] {rel}:{name} 仅状态/弱断言（status=='ok' 或 is not None）——"
                     "不验证具体值，请补真实断言"

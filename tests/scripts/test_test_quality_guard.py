@@ -457,3 +457,58 @@ def test_class_method_false_negative_pinned_for_generic_name(tmp_path):
     )
     problems = guard.check_missing_tests(src, tests)
     assert not any("mod.py:get" in p for p in problems)
+
+
+# ── FP-1（2026-09-21 审查）：status-only 判据对「断言助手」的误报 ──────────
+HELPER_WITH_ASSERT = (
+    "def _assert_invariants(result):\n"
+    "    assert result is not None\n"
+    "    assert 0 <= result.value <= 1\n"
+    "\n"
+    "\n"
+    "def test_invariant():\n"
+    "    r = compute()\n"
+    '    assert r.status == "ok"\n'
+    "    _assert_invariants(r)\n"
+)
+
+HELPER_WITHOUT_ASSERT = (
+    "def _helper(result):\n"
+    "    return result.value\n"
+    "\n"
+    "\n"
+    "def test_invariant():\n"
+    "    r = compute()\n"
+    '    assert r.status == "ok"\n'
+    "    _helper(r)\n"
+)
+
+STATUS_ONLY_NO_HELPER = 'def test_invariant():\n    r = compute()\n    assert r.status == "ok"\n'
+
+
+def _run_status_check(tmp_path, content: str) -> list[str]:
+    root = tmp_path / "repo"
+    _write(root, "tests/test_demo.py", content)
+    return guard.check_status_only_asserts(root / "tests")
+
+
+def test_status_only_with_asserting_helper_not_flagged(tmp_path):
+    """状态断言 + 调用**同文件内含 assert 的助手** → 不得判为弱断言（审查 FP-1 P3）。
+
+    实测被误报的用例：`tests/engine/test_invariants.py::test_spc_cusum_no_nan_limits`
+    —— 其数值断言收敛在同文件助手 `_assert_table_finite_ordered` 内（含 6 处真断言），
+    而判据只统计**测试体内**的断言行 → 误报（实测 7 处同类 WARN）。
+    """
+    assert _run_status_check(tmp_path, HELPER_WITH_ASSERT) == []
+
+
+def test_status_only_without_asserting_helper_still_flagged(tmp_path):
+    """反面守卫：调用的助手**自身无断言** → 仍须报（防止判据被放宽成永不报）。"""
+    problems = _run_status_check(tmp_path, HELPER_WITHOUT_ASSERT)
+    assert any("test_invariant" in p for p in problems), problems
+
+
+def test_status_only_bare_still_flagged(tmp_path):
+    """对照：无助手调用的纯状态断言仍须报。"""
+    problems = _run_status_check(tmp_path, STATUS_ONLY_NO_HELPER)
+    assert any("test_invariant" in p for p in problems), problems
