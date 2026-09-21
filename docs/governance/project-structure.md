@@ -187,6 +187,7 @@ EngSmartSuite/
 │       ├── test_test_quality_guard.py
 │       ├── test_falsy_audit.py          #   2026-09-06 G3 负向注入转正
 │       ├── test_manual_claims_freshness.py # 2026-09-06 F-D1 手册新鲜度校验自测
+│       ├── test_claims_gate.py          #   2026-09-21 G-2 手册 CLAIM 缺失判据自测
 │       └── test_verify_frontend_params.py # 2026-09-06 E4/G4 前后端键集自测
 │
 ├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）
@@ -305,6 +306,7 @@ EngSmartSuite/
 │   ├── verify_cross_consistency.py #   Web/CLI 交叉一致性
 │   ├── verify_frontend_params.py   #   前后端参数键集静态一致性
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
+│   ├── claims_gate.py              #   手册 CLAIM 缺失判据（纯函数，可直测）
 │   ├── manual_claims_freshness.py  #   手册 CLAIM 新鲜度校验（F-D1：手册↔快照↔引擎）
 │   ├── falsy_audit.py              #   Falsy 模式审计
 │   ├── gen_requirements.py         #   依赖清单生成

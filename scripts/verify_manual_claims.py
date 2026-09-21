@@ -16,6 +16,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 手册新鲜度模块（F-D1）
 
+from claims_gate import VIF_CLAIM_TOLERANCE, VIF_MANUAL_CLAIMS, classify_missing  # noqa: E402
+
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.services.data_io import preprocess_data
 from smartsuite.services.orchestrator import orchestrate
@@ -494,7 +496,10 @@ def rpt(analysis, value_name, manual, actual=None, tolerance=0.001, ok=None):
         match = "OK" if ok else "DIFF"
         disp = f"{float(actual):.4f}" if isinstance(actual, (int, float)) else str(actual)
     elif actual is None:
-        disp, match = "N/A", "N/A"
+        # 审查 2026-09-21 G-2：原为固定 ("N/A", "N/A")——而失败判定是
+        # `match not in ("OK", "N/A")`，于是「手册侧有 CLAIM 值、但引擎不再
+        # 产出该值」被静默放过（门禁照常 exit 0）。改由 claims_gate 区分两种缺失。
+        disp, match = classify_missing(manual)
     elif isinstance(manual, str):
         match = "OK" if str(actual) == str(manual) else "DIFF"
         disp = str(actual)
@@ -563,9 +568,13 @@ for factor, short in [
     (C_COOL, "VIF 冷却时间"),
 ]:
     actual = vif_vals.get(factor)
-    if actual is not None:
-        ok = 1.0 <= actual <= 1.005
-        rpt("vif", short, "~1.002-1.004", actual, 0.01, ok=ok)
+    # 审查 2026-09-21 E1-1：原为单条泛化字符串 CLAIM "~1.002-1.004" + 硬编码窗口
+    # [1.0, 1.005]（宽 0.005，比手册 3 位小数精度宽 5 倍），且字符串**不进 CLAIM_LOG**
+    # （rpt 仅登记 int/float）→ 手册新鲜度门禁对这 4 条完全失明。
+    # 现改为逐因子数值 CLAIM（与手册 §4.5 表逐行一致）+ 容差 0.001。
+    manual_vif = VIF_MANUAL_CLAIMS.get(factor)
+    if actual is not None and manual_vif is not None:
+        rpt("vif", short, manual_vif, actual, VIF_CLAIM_TOLERANCE)
 
 p()
 p("--- 4.6 CONTINGENCY ---")

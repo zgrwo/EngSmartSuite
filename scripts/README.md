@@ -35,6 +35,7 @@
 | `verify_consistency.py` | 全任务冒烟门禁（status=ok，任务数随 TASK_REGISTRY） | ✅ quick |
 | `verify_cross_consistency.py` | Web/CLI 分析一致性交叉验证（纯 Python 直接调用，无需服务器） | ✅ CI |
 | `verify_manual_claims.py` | 手册数值实跑验证（CLAIM 标记 → 实际输出） | 发布前 |
+| `claims_gate.py` | 手册 CLAIM 缺失判据：手册侧有值而引擎未产出 → 计失败（MISSING） | 库 |
 | `verify_docs.py` | 文档一致性：断链/目录树/裸异常/版本漂移（`--strict` 含未声明文件） | ✅ quality |
 | `falsy_audit.py` | Falsy 模式静态审计（0/空/False 误判风险） | ✅ quality |
 | `test_quality_guard.py` | 测试质量守卫：弱断言（WARN）/缺测/无意义命名（FAIL） | ✅ quality |
