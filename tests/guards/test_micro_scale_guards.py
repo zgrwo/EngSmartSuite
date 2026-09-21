@@ -719,3 +719,60 @@ def test_grid_search_micro_scale_optimal_params_scale_with_magnitude():
         micro_v = float(r_micro.metadata["optimal_params"][key])
         assert micro_v != 0.0, f"推荐参数 {key} 在 ×1e-9 下被舍入为 0.0（可执行结论被销毁）"
         assert micro_v == pytest.approx(macro_v * 1e-9, rel=0.05), f"推荐参数 {key} 未随量纲缩放"
+
+
+# ── D-4（2026-09-21 审查）：IsolationForest 量纲敏感 → 微尺度静默零检出 ────────
+def test_anomaly_detect_isolation_forest_scale_invariant():
+    """多变量异常检出数必须与量纲无关（×1e-9 不得静默归零）。
+
+    修复前实测：同一数据 scale 1e0…1e-7 恒检出 6 个，1e-9/1e-12 骤降为 0，
+    且 status=ok 无任何提示。根因是 IsolationForest 直接吃原始特征值，
+    未做标准化。修复=入模型前 StandardScaler。
+    """
+    rng = np.random.default_rng(1)
+    base = np.concatenate([rng.normal(0, 1, 100), [8.0, -8.0]])
+    noise = rng.normal(0, 0.1, 102)
+
+    def run(scale):
+        df = pd.DataFrame({"x": base * scale, "y": (base * 2 + noise) * scale})
+        return anomaly_detect(
+            AnalysisRequest(
+                task="anomaly_detect",
+                data=df,
+                target_col="",
+                feature_cols=["x", "y"],
+                params={"method": "isolation_forest"},
+            )
+        )
+
+    counts = {}
+    for scale in (1.0, 1e-7, 1e-9, 1e-12, 1e12):
+        r = run(scale)
+        assert r.status == "ok", (scale, r.messages)
+        counts[scale] = r.metadata["anomaly_count"]
+    assert counts[1.0] > 0, "宏观量级应检出强异常点（±8σ）"
+    assert len(set(counts.values())) == 1, f"检出数随量纲变化（微尺度静默归零）: {counts}"
+
+
+def test_outlier_consensus_isolation_vote_scale_invariant():
+    """outlier_consensus 的 IsolationForest 投票同样必须量纲无关。"""
+    rng = np.random.default_rng(1)
+    base = np.concatenate([rng.normal(0, 1, 100), [8.0, -8.0]])
+
+    def run(scale):
+        df = pd.DataFrame({"y": base * scale})
+        return outlier_consensus(
+            AnalysisRequest(
+                task="outlier_consensus",
+                data=df,
+                target_col="y",
+                feature_cols=[],
+                params={},
+            )
+        )
+
+    r_macro, r_micro = run(1.0), run(1e-9)
+    assert r_macro.status == "ok" and r_micro.status == "ok", (r_macro.messages, r_micro.messages)
+    t_macro = r_macro.tables.get("consensus") or next(iter(r_macro.tables.values()))
+    t_micro = r_micro.tables.get("consensus") or next(iter(r_micro.tables.values()))
+    assert len(t_macro) == len(t_micro), "异常共识条数随量纲变化"

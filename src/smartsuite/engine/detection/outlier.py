@@ -53,18 +53,23 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     # ── 方法 3: Isolation Forest ──
     try:
         from sklearn.ensemble import IsolationForest
+        from sklearn.preprocessing import StandardScaler
 
         iso = IsolationForest(contamination=0.05, random_state=42, n_estimators=100)
+        # 审查 2026-09-21 D-4：同 anomaly_detect——不标准化的 IsolationForest
+        # 在微尺度（×1e-9）下静默退化为零检出，使本方法投票缺失、共识条数变化。
+        _scale = StandardScaler().fit_transform
         if len(req.feature_cols) > 0:
             feature_cols = [c for c in req.feature_cols if c in req.data.columns]
             sub = req.data[feature_cols + [req.target_col]].dropna()
             common_idx = data.index.intersection(sub.index)
-            iso_preds = iso.fit_predict(sub.loc[common_idx, feature_cols + [req.target_col]].values)
+            X = _scale(sub.loc[common_idx, feature_cols + [req.target_col]].values)
+            iso_preds = iso.fit_predict(X)
             iso_mask = pd.Series(False, index=data.index)
             for i, idx in enumerate(common_idx):
                 iso_mask[idx] = iso_preds[i] == -1
         else:
-            X = data.values.reshape(-1, 1)
+            X = _scale(data.values.reshape(-1, 1))
             iso_preds = iso.fit_predict(X)
             iso_mask = pd.Series(iso_preds == -1, index=data.index)
     except (ValueError, RuntimeError, ImportError):

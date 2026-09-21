@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 from scipy import stats as sp_stats
+from sklearn.preprocessing import StandardScaler
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import (
@@ -69,13 +70,17 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             )
         contamination_disp = "auto" if contamination == "auto" else f"{contamination:.1%}"
         try:
+            # 审查 2026-09-21 D-4（P1）：IsolationForest 直接吃原始特征值时对量纲敏感——
+            # 实测同一数据 ×1e-9/×1e-12 时检出数由 6 静默降为 0（status 仍为 ok）。
+            # 入模型前标准化，使检出结果与单位选择无关。
             iso = IsolationForest(
                 contamination=contamination,
                 random_state=42,
                 n_estimators=100,
             )
-            preds = iso.fit_predict(sub.values)
-            scores = iso.decision_function(sub.values)
+            scaled = StandardScaler().fit_transform(sub.values)
+            preds = iso.fit_predict(scaled)
+            scores = iso.decision_function(scaled)
             # preds: 1=正常, -1=异常
             mask = preds == -1
         except Exception as e:
