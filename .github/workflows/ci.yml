@@ -94,13 +94,14 @@ jobs:
         # 背景：release-please 只 bump pyproject/CHANGELOG/manifest，不动 uv.lock；
         # 而 `uv sync --frozen` 在锁过期时仍退出 0（根包版本不参与依赖图求解），
         # 故本仓已三次手工补齐（148052a 1.3.1 / 8e30d99 ruff 0.16.6 / eeef512 1.4.0）。
-        # --offline：无漂移时零网络开销（实测 1ms），避免索引拖慢或抖动。
-        # 文案说明（审查 2026-09-21 G-3）：若**缓存未命中且同时存在漂移**，本步会以
-        # "Packages were unavailable because the network was disabled …" 报错而非
-        # "lockfile needs to be updated"——退出码仍为 1（门禁有效），但文案指向缓存。
-        # 多数情况不会命中该分支：漂移来自 release-please 改 pyproject（uv.lock 未变），
-        # setup-uv 缓存键依赖 uv.lock → 缓存命中、文案正确。
-        run: uv lock --offline --check
+        # --offline：无漂移且缓存命中时零网络开销（实测 1ms），避免索引拖慢或抖动。
+        # 文案说明（审查 2026-09-21 G-3）：缓存未命中时离线解析会以
+        # "Packages were unavailable because the network was disabled …" /
+        # "ruff was not found in the cache" 退出 1，而非 "lockfile needs to be updated"。
+        # 2026-09-22 PR #43 实测：dependabot 改 pyproject → setup-uv 缓存键必变 →
+        # 离线检查必然误红。故离线失败后回退在线复检：真漂移仍以
+        # "lockfile needs to be updated" 红，仅缓存未命中场景被放行。
+        run: uv lock --offline --check || uv lock --check
 
       - name: 安装依赖（冻结锁文件）
         # --all-extras 含 dev/report/web/docs（统一安装模板，避免逐 job 漂移）

@@ -43,9 +43,9 @@ repos:
         files: '\.(md|ya?ml|json)$'
         exclude: '\.github/ISSUE_TEMPLATE/.*\.yml$'
 
-  # --- Python lint（ruff v0.16.6，与 pyproject.toml / quality.yml 一致；审查 2026-09-21 G-5 同步）---
+  # --- Python lint（ruff v0.16.8，与 pyproject.toml / quality.yml 一致；审查 2026-09-21 G-5 同步）---
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
+    rev: v0.16.8
     hooks:
       - id: ruff                       # lint 检查
         args: ['--fix']                # 自动修复可修复的问题
