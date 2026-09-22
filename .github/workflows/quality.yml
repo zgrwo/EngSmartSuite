@@ -43,8 +43,8 @@ jobs:
       - name: 安装依赖（冻结锁文件）
         run: uv sync --frozen --all-extras
       - name: Run test quality guard
-        # WARN 基线 29（审查 #P1-7）：新增弱断言/恒真断言即 FAIL
-        run: uv run python scripts/test_quality_guard.py --max-warn 14
+        # WARN 基线 10（2026-09-22 审查发现 6：4 条弱断言改量纲不变量后由 14 收紧）
+        run: uv run python scripts/test_quality_guard.py --max-warn 10
 
   docs-consistency:
     name: 文档一致性（断链/目录树/裸异常/版本漂移）

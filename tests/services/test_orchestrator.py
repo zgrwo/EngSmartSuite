@@ -379,7 +379,7 @@ def test_orchestrate_known_exception_detail_map(monkeypatch):
     monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ValueError("bad data")))
     r1 = orchestrate(req)
     assert r1.status == "error"
-    assert "数据格式不符合分析要求" in r1.messages[0]
+    assert "数据格式或数值范围不符合分析要求" in r1.messages[0]
     assert "bad data" not in r1.messages[0], "不得泄漏异常原文"
 
     monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(KeyError("内部键")))
@@ -427,8 +427,8 @@ def test_error_id_in_log_and_messages(monkeypatch, caplog):
     assert len(ids) == 1, f"应恰有一条错误编号消息: {result.messages}"
     assert len(ids[0]) == 8, f"错误编号应为 8 位 hex: {ids[0]!r}"
     assert ids[0] in caplog.text, f"日志应含同一 error_id={ids[0]}，实际日志: {caplog.text}"
-    # 既有文案与顺序不变（error_id 追加在末尾）
-    assert "数据格式不符合分析要求" in result.messages[0]
+    # 既有文案与顺序不变（error_id 追加在末尾；2026-09-22 起文案含数值范围提示）
+    assert "数据格式或数值范围不符合分析要求" in result.messages[0]
 
 
 def test_error_id_present_for_smartsuite_error(monkeypatch, caplog):

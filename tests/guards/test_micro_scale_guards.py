@@ -283,32 +283,61 @@ def test_shapiro_p_constant_column_returns_one_without_warning():
 
 # ── B-4: 微尺度常量判据 ────────────────────────────────────────────────────
 def test_trend_forecast_pico_scale_not_constant():
-    rng = np.random.default_rng(2)
-    df = pd.DataFrame({"y": 5e-13 + 1e-13 * rng.standard_normal(50)})
-    r = trend_forecast(
-        AnalysisRequest(task="trend_forecast", data=df, target_col="y", feature_cols=[], params={})
+    """pico 级波动不得被误判常量，且统计量随量纲同比缩放（审查 2026-09-22 发现 6）。"""
+
+    def run(scale):
+        rng = np.random.default_rng(2)
+        df = pd.DataFrame({"y": (5.0 + 1.0 * rng.standard_normal(50)) * scale})
+        return trend_forecast(
+            AnalysisRequest(
+                task="trend_forecast", data=df, target_col="y", feature_cols=[], params={}
+            )
+        )
+
+    macro, micro = run(1.0), run(1e-13)
+    assert micro.status == "ok", f"pico 级真实波动被误判常量: {micro.messages}"
+    assert micro.metadata["slope"] == pytest.approx(macro.metadata["slope"] * 1e-13, rel=1e-6)
+    assert micro.metadata["intercept"] == pytest.approx(
+        macro.metadata["intercept"] * 1e-13, rel=1e-6
     )
-    assert r.status == "ok", f"pico 级真实波动被误判常量: {r.messages}"
 
 
 def test_spc_xbar_pico_scale_not_constant():
-    rng = np.random.default_rng(2)
-    df = pd.DataFrame({"y": 5e-13 + 1e-13 * rng.standard_normal(50)})
-    r = xbar_r_chart(
-        AnalysisRequest(task="spc_xbar", data=df, target_col="y", feature_cols=[], params={})
+    """控制限随量纲同比缩放（旧实现绝对阈值下 pico 级被整列跳过）。"""
+
+    def run(scale):
+        rng = np.random.default_rng(2)
+        df = pd.DataFrame({"y": (5.0 + 1.0 * rng.standard_normal(50)) * scale})
+        return xbar_r_chart(
+            AnalysisRequest(task="spc_xbar", data=df, target_col="y", feature_cols=[], params={})
+        )
+
+    macro, micro = run(1.0), run(1e-13)
+    assert micro.status == "ok", f"pico 级真实波动被误判常量: {micro.messages}"
+    assert micro.metadata["ucl_x"] == pytest.approx(macro.metadata["ucl_x"] * 1e-13, rel=1e-6)
+    assert micro.metadata["lcl_x"] == pytest.approx(macro.metadata["lcl_x"] * 1e-13, rel=1e-6)
+    assert micro.metadata["xbar_mean"] == pytest.approx(
+        macro.metadata["xbar_mean"] * 1e-13, rel=1e-6
     )
-    assert r.status == "ok", f"pico 级真实波动被误判常量: {r.messages}"
 
 
 def test_spc_nonparametric_pico_scale_not_constant():
-    rng = np.random.default_rng(2)
-    df = pd.DataFrame({"y": 5e-13 + 1e-13 * rng.standard_normal(50)})
-    r = spc_nonparametric(
-        AnalysisRequest(
-            task="spc_nonparametric", data=df, target_col="y", feature_cols=[], params={}
+    """非参数控制限同样必须随量纲缩放，不得被常量判据吞掉。"""
+
+    def run(scale):
+        rng = np.random.default_rng(2)
+        df = pd.DataFrame({"y": (5.0 + 1.0 * rng.standard_normal(50)) * scale})
+        return spc_nonparametric(
+            AnalysisRequest(
+                task="spc_nonparametric", data=df, target_col="y", feature_cols=[], params={}
+            )
         )
-    )
-    assert r.status == "ok", f"pico 级真实波动被误判常量: {r.messages}"
+
+    macro, micro = run(1.0), run(1e-13)
+    assert micro.status == "ok", f"pico 级真实波动被误判常量: {micro.messages}"
+    assert micro.metadata["ucl"] == pytest.approx(macro.metadata["ucl"] * 1e-13, rel=1e-6)
+    assert micro.metadata["lcl"] == pytest.approx(macro.metadata["lcl"] * 1e-13, rel=1e-6)
+    assert micro.metadata["cl"] == pytest.approx(macro.metadata["cl"] * 1e-13, rel=1e-6)
 
 
 # ── B-5: 展示层 ────────────────────────────────────────────────────────────
@@ -501,11 +530,32 @@ def test_tolerance_interval_micro_scale_bounds_scale():
 
 
 def test_cusum_ewma_micro_scale_not_skipped():
+    """微尺度不得被误判零方差：EWMA 控制限同比缩放、CUSUM 报警数不变。"""
     rng = np.random.default_rng(4)
-    df = pd.DataFrame({"y": 10 + 1e-13 * rng.standard_normal(50)})
-    for task, func in (("spc_cusum", cusum_chart), ("spc_ewma", ewma_chart)):
-        r = func(AnalysisRequest(task=task, data=df, target_col="y", feature_cols=[], params={}))
-        assert r.status == "ok", f"{task} 微尺度分组被误判零方差: {r.messages}"
+    base = np.concatenate([rng.normal(0, 1, 25), rng.normal(3, 1, 25)])
+
+    def run(scale):
+        df = pd.DataFrame({"y": base * scale})
+        c = cusum_chart(
+            AnalysisRequest(task="spc_cusum", data=df, target_col="y", feature_cols=[], params={})
+        )
+        e = ewma_chart(
+            AnalysisRequest(task="spc_ewma", data=df, target_col="y", feature_cols=[], params={})
+        )
+        return c, e
+
+    c_macro, e_macro = run(1.0)
+    c_micro, e_micro = run(1e-13)
+    assert c_micro.status == "ok" and e_micro.status == "ok", (
+        f"微尺度分组被误判零方差: cusum={c_micro.messages}, ewma={e_micro.messages}"
+    )
+    assert c_micro.metadata["total_alarms"] == c_macro.metadata["total_alarms"]
+    assert e_micro.metadata["ucl_asym"] == pytest.approx(
+        e_macro.metadata["ucl_asym"] * 1e-13, rel=1e-6
+    )
+    assert e_micro.metadata["lcl_asym"] == pytest.approx(
+        e_macro.metadata["lcl_asym"] * 1e-13, rel=1e-6
+    )
 
 
 # ── D-2: 除法防护的同族点 ─────────────────────────────────────────────────
@@ -690,11 +740,11 @@ def test_box_chart_micro_scale_group_stats_scale_with_magnitude():
         assert micro_v == pytest.approx(macro_v * 1e-9, rel=0.02), f"{col} 未随量纲同比缩放"
 
 
-def test_box_chart_annotations_match_table_at_micro_scale():
-    """box_chart 箱体下方标注必须与 group_statistics 表逐位一致（微尺度不归零）。
+def test_box_chart_stats_table_match_group_statistics_at_micro_scale():
+    """box_chart 统计表必须与 group_statistics 表逐位一致（微尺度不归零）。
 
-    对应陷阱 9「展示层二次舍入」：标注若用固定 `:g`，对 1e6 量级只留 6 位有效数字，
-    微尺度靠科学计数；修复后走与表格同口径的展示格式化。
+    对应陷阱 9「展示层二次舍入」：表格若用固定 `:g`，对 1e6 量级只留 6 位有效数字，
+    微尺度靠科学计数；实现走与结果表同口径的展示格式化。
     """
     rng = np.random.default_rng(11)
     n = 40
@@ -703,17 +753,21 @@ def test_box_chart_annotations_match_table_at_micro_scale():
         AnalysisRequest(task="box_chart", data=df, target_col="y", feature_cols=["g"], params={})
     )
     assert r.status == "ok", r.messages
-    texts = [t.get_text() for t in r.figures[0].axes[0].texts if t.get_text()]
+    ax = r.figures[0].axes[0]
+    assert len(ax.tables) == 1, "统计值应汇总为一张表"
+    table = ax.tables[0]
     stats = r.tables["group_statistics"]
+    row_keys = ["样本量", "均值", "标准差", "最大值", "最小值"]
     for i, (_, row) in enumerate(stats.iterrows()):
-        lines = texts[i * 5 : i * 5 + 5]  # 每组 5 行，顺序固定：n/均值/标准差/最大/最小
-        assert len(lines) == 5, f"第 {i + 1} 组标注行数异常: {lines}"
-        for line, col in zip(lines[1:], ("均值", "标准差", "最大值", "最小值"), strict=True):
-            shown = float(line.split(" ", 1)[1])
+        for r_idx, col in enumerate(row_keys):
+            shown = float(table[(r_idx, i + 1)].get_text().get_text())
             expected = float(row[col])
-            assert shown != 0.0, f"第 {i + 1} 组「{col}」标注在微尺度下归零: {lines}"
+            if col == "样本量":
+                assert shown == expected, f"第 {i + 1} 列 n 与统计表不一致: {shown} != {expected}"
+                continue
+            assert shown != 0.0, f"第 {i + 1} 列「{col}」在微尺度下归零"
             assert shown == pytest.approx(expected, rel=1e-6), (
-                f"第 {i + 1} 组「{col}」标注 {shown} 与表格 {expected} 不一致"
+                f"第 {i + 1} 列「{col}」表格值 {shown} 与统计表 {expected} 不一致"
             )
 
 

@@ -729,7 +729,8 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
                 n_runs = 2 ** len(factors)
             try:
                 n_runs = int(n_runs)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
+                # OverflowError（审查 2026-09-22 发现 5）：int(float('inf')) 穿透守卫
                 return AnalysisResult(
                     task="doe_design", status="error", messages=[f"n_runs 值无效: {n_runs}"]
                 )
@@ -761,7 +762,7 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
                 if n_runs is None:  # 无支持的默认运行数
                     raise TypeError("n_runs 无默认值")
                 n_runs = int(n_runs)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 return AnalysisResult(
                     task="doe_design", status="error", messages=[f"n_runs 值无效: {n_runs}"]
                 )

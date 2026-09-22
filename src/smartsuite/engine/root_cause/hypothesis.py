@@ -13,7 +13,13 @@ from smartsuite.engine._constants import (
     EPSILON,
 )
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import round_for_display, shapiro_p
+from smartsuite.engine._utils import (
+    drop_non_finite,
+    drop_non_finite_rows,
+    non_finite_note,
+    round_for_display,
+    shapiro_p,
+)
 from smartsuite.engine._utils import safe_float as _safe_float
 from smartsuite.engine.root_cause._shared import (
     _correlation_ci,
@@ -221,11 +227,14 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
         )
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
+    g1, n_inf1 = drop_non_finite(g1)
+    g2, n_inf2 = drop_non_finite(g2)
+    inf_msgs = [non_finite_note(n, req.target_col) for n in (n_inf1, n_inf2) if n]
     if len(g1) < 3 or len(g2) < 3:
         return AnalysisResult(
             task="hypothesis_test",
             status="error",
-            messages=["KS 检验每组至少需要 3 个有效观测（某组目标列可能全为 NaN）"],
+            messages=["KS 检验每组至少需要 3 个有效观测（某组目标列可能全为 NaN/Inf）"],
         )
     stat, p = sp_stats.ks_2samp(g1, g2)
     test_name = f"Kolmogorov-Smirnov 检验 ({groups[0]} vs {groups[1]})"
@@ -264,6 +273,7 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
         figures=[fig],
         summary=f"KS 检验: {conclusion} (D={stat:.3f}, p={p:.4f})",
         metadata={"test": test_name, "statistic": float(stat), "p_value": float(p), "alpha": alpha},
+        messages=inf_msgs,
     )
 
 
@@ -273,6 +283,8 @@ def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
     if len(measure_cols) < 2:
         measure_cols = [req.target_col] + [c for c in req.feature_cols[:2] if c in req.data.columns]
     sub = req.data[measure_cols].dropna()
+    sub, n_inf = drop_non_finite_rows(sub, measure_cols)
+    inf_msgs = [non_finite_note(n_inf)] if n_inf else []
     if len(sub) < 3 or len(measure_cols) < 2:
         return AnalysisResult(
             task="hypothesis_test",
@@ -328,6 +340,7 @@ def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
             "n": n,
             "k": k,
         },
+        messages=inf_msgs,
     )
 
 
@@ -345,6 +358,8 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
         )
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
+    g1, n_inf1 = drop_non_finite(g1)
+    g2, n_inf2 = drop_non_finite(g2)
     if len(g1) < 3 or len(g2) < 3:
         return AnalysisResult(
             task="hypothesis_test",
@@ -352,6 +367,7 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"每组至少需要 3 个有效数据，当前 g1={len(g1)}, g2={len(g2)}"],
         )
     warn_list: list[str] = []
+    warn_list.extend(non_finite_note(n, req.target_col) for n in (n_inf1, n_inf2) if n)
     d = _cohens_d(g1.values, g2.values, warn_list)
     ci = _cohens_d_ci(d, len(g1), len(g2))
     label = _effect_size_label(abs(d), "cohens_d")
@@ -414,6 +430,8 @@ def _ht_correlation(req: AnalysisRequest) -> AnalysisResult:
         )
     x_col = feat_cols[0]
     sub = req.data[[req.target_col, x_col]].dropna()
+    sub, n_inf = drop_non_finite_rows(sub, [req.target_col, x_col])
+    inf_msgs = [non_finite_note(n_inf)] if n_inf else []
     if len(sub) < 3:
         return AnalysisResult(
             task="hypothesis_test",
@@ -471,6 +489,7 @@ def _ht_correlation(req: AnalysisRequest) -> AnalysisResult:
             "effect_size_ci": (float(ci[0]), float(ci[1])),
             "n": len(sub),
         },
+        messages=inf_msgs,
     )
 
 
@@ -562,6 +581,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── 单样本检验 ──
     if test_type == "ttest_1samp":
         data = req.data[req.target_col].dropna()
+        data, n_inf = drop_non_finite(data)
+        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
         popmean = _safe_float(req.params.get("popmean", 0), 0.0)
         if len(data) < 3:
             return AnalysisResult(
@@ -651,6 +672,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 "effect_label": effect_label,
                 "effect_size_ci": _cohens_d_ci(effect_size, len(data), len(data), paired=True),
             },
+            messages=inf_msgs,
         )
 
     # ── 配对检验 ──
@@ -664,6 +686,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             )
         col1, col2 = req.feature_cols[0], req.feature_cols[1]
         sub = req.data[[col1, col2]].dropna()
+        sub, n_inf = drop_non_finite_rows(sub, [col1, col2])
+        inf_msgs = [non_finite_note(n_inf)] if n_inf else []
         if len(sub) < 3:
             return AnalysisResult(
                 task="hypothesis_test", status="error", messages=["有效配对数据不足(至少3对)"]
@@ -763,11 +787,14 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 "effect_label": effect_label,
                 "effect_size_ci": _cohens_d_ci(effect_size, len(sub), len(sub), paired=True),
             },
+            messages=inf_msgs,
         )
 
     # ── 单样本 Wilcoxon 符号秩检验 ──
     if test_type == "wilcoxon_1samp":
         data = req.data[req.target_col].dropna()
+        data, n_inf = drop_non_finite(data)
+        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
         popmedian = _safe_float(req.params.get("popmedian", 0), 0.0)
         if len(data) < 5:
             return AnalysisResult(
@@ -854,6 +881,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 "effect_size": effect_size,
                 "popmedian": popmedian,
             },
+            messages=inf_msgs,
         )
 
     # ── Kruskal-Wallis H 检验 (非参数 ANOVA) ──
@@ -862,6 +890,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if group_err is not None:
             return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
+        sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
+        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
         groups = sub[group_col].unique()
         # Round-2 #A2e：无分组列时回退到连续特征列 → 每观测一组、η²_H=1.000 误导
         if len(groups) > 20:
@@ -986,6 +1016,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 "effect_size": effect_size,
                 "n_groups": len(groups),
             },
+            messages=inf_msgs,
         )
 
     # ── McNemar 检验 (配对二分类数据) ──
@@ -1127,6 +1158,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── Mann-Kendall 趋势检验 ──
     if test_type == "mann_kendall":
         data = req.data[req.target_col].dropna()
+        data, n_inf = drop_non_finite(data)
+        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
         n = len(data)
         if n < 4:
             return AnalysisResult(
@@ -1198,6 +1231,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 "tau": float(tau_mk),
                 "alpha": alpha,
             },
+            messages=inf_msgs,
         )
 
     # ── Jonckheere-Terpstra 趋势检验 ──
@@ -1206,6 +1240,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if group_err is not None:
             return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
+        sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
+        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
         groups = sub[group_col].unique()
         # Round-2 #A2e：同 kruskal——连续列回退产生伪分组
         if len(groups) > 20:
@@ -1293,6 +1329,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 "effect_size": effect_size,
                 "z": float(z_JT),
             },
+            messages=inf_msgs,
         )
 
     # ── 配对 Wilcoxon 符号秩检验 ──
@@ -1303,6 +1340,8 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             )
         col1, col2 = req.feature_cols[0], req.feature_cols[1]
         sub = req.data[[col1, col2]].dropna()
+        sub, n_inf = drop_non_finite_rows(sub, [col1, col2])
+        inf_msgs = [non_finite_note(n_inf)] if n_inf else []
         if len(sub) < 5:
             return AnalysisResult(
                 task="hypothesis_test", status="error", messages=["有效配对数据不足(至少5对)"]
@@ -1391,6 +1430,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
                 "effect_size": effect_size,
                 "n_pairs": n_pairs,
             },
+            messages=inf_msgs,
         )
 
     # ── 独立双样本检验 ──
@@ -1409,6 +1449,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
 
+    # 审查 2026-09-22 发现 2：±Inf 既非 NaN 也未被 dropna 剔除，scipy 对含 Inf
+    # 数组返回 NaN p 值，而 `p < alpha` 对 NaN 恒 False → 被表述为「未发现显著差异」。
+    # 入口按缺失处理剔除并显式提示（同一缺陷族：paired/mannwhitney/wilcoxon 已同修）。
+    g1, n_inf1 = drop_non_finite(g1)
+    g2, n_inf2 = drop_non_finite(g2)
+
     # 最小样本量检查 — 与其他分支保持一致 (P2-3 fix)
     min_n = 3
     if len(g1) < min_n or len(g2) < min_n:
@@ -1420,6 +1466,7 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 自动选择参数/非参数检验 ──
     norm_warn: list[str] = []
+    norm_warn.extend(non_finite_note(n, req.target_col) for n in (n_inf1, n_inf2) if n)
     sw1 = sw2 = 1.0  # 初始化为正态（用于 auto 分支中条件不满足时的回退）
     norm_already_checked = False
     if test_type == "auto":

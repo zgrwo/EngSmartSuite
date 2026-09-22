@@ -137,6 +137,52 @@ def test_bare_except_detected(tmp_path):
     assert any("bad.py" in p for p in problems)
 
 
+def test_except_exception_without_log_detected(tmp_path):
+    """审查 2026-09-22 发现 10：`except Exception` 无日志必须被 AST 检查拦截。"""
+    root = build_repo(tmp_path)
+    (root / "src" / "bad.py").write_text(
+        "try:\n    f()\nexcept Exception:\n    pass\n", encoding="utf-8"
+    )
+    problems = verify_docs.check_semantic_consistency(root, [])
+    assert any("bad.py" in p and "日志" in p for p in problems), problems
+
+
+def test_except_exception_with_log_passes(tmp_path):
+    """对照：带 logging 调用的处理器不得误报（含 as e 与 logger.debug 变体）。"""
+    root = build_repo(tmp_path)
+    (root / "src" / "good.py").write_text(
+        "import logging\n"
+        "logger = logging.getLogger(__name__)\n\n"
+        "def f():\n"
+        "    try:\n"
+        "        g()\n"
+        "    except Exception as e:\n"
+        "        logger.debug('x', exc_info=True)\n"
+        "        return fallback(e)\n",
+        encoding="utf-8",
+    )
+    problems = verify_docs.check_semantic_consistency(root, [])
+    assert not any("good.py" in p for p in problems), problems
+
+
+def test_heading_merged_into_line_detected(tmp_path):
+    """审查 2026-09-22 发现 7：标题漏换行并入上一行必须被拦截。"""
+    root = build_repo(tmp_path)
+    (root / "README.md").write_text("- 说明文字。### 7.11 标题\n", encoding="utf-8")
+    problems = verify_docs.check_semantic_consistency(root, ["README.md"])
+    assert any("README.md" in p and "行首" in p for p in problems), problems
+
+
+def test_heading_at_line_start_passes(tmp_path):
+    """对照：独占行首的标题与代码围栏内的 ### 文本不得误报。"""
+    root = build_repo(tmp_path)
+    (root / "README.md").write_text(
+        "### 7.11 正常标题\n\n```\n示例 ### 不是标题\n```\n", encoding="utf-8"
+    )
+    problems = verify_docs.check_semantic_consistency(root, ["README.md"])
+    assert not any("README.md" in p for p in problems), problems
+
+
 def test_todo_in_doc_detected(tmp_path):
     root = build_repo(tmp_path)
     (root / "README.md").write_text("- TODO: 待补充\n", encoding="utf-8")
@@ -349,3 +395,25 @@ def test_dir_with_declared_child_requires_all_children(tmp_path):
 
     problems = verify_docs.check_subdir_undeclared(root, strict=True)
     assert any("docs/adr/0002-b.md" in p for p in problems), problems
+
+
+# ── 发现 9（2026-09-22 审查）：src/ 未纳入未声明文件检查 ──────────────────
+def test_src_undeclared_file_detected(tmp_path):
+    """实验组注入：目录树已列出 src/ 子项时，新增未登记源码文件必须被拦截。
+
+    修复前 `_SUBDIR_CHECK` 不含 "src" → 注入 src/smartsuite/.../zz_*.py 退出 0。
+    """
+    root = build_repo(tmp_path)
+    tree = TREE_OK.replace("├── src/", "├── src/\n│   └── ok.py")
+    (root / "docs" / "governance" / "project-structure.md").write_text(tree, encoding="utf-8")
+    (root / "src" / "ghost.py").write_text("x", encoding="utf-8")
+    problems = verify_docs.check_subdir_undeclared(root, strict=True)
+    assert any("src/ghost.py" in p for p in problems), problems
+    assert not any("src/ok.py" in p for p in problems), "已声明文件不得误报"
+
+
+def test_src_summarized_dir_contents_are_exempt(tmp_path):
+    """对照：目录树只声明 src/ 本身（未逐项列出）时，内容豁免登记（不产生噪音）。"""
+    root = build_repo(tmp_path)
+    problems = verify_docs.check_subdir_undeclared(root, strict=True)
+    assert not any("src/ok.py" in p for p in problems), problems

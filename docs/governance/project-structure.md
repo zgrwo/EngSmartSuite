@@ -113,6 +113,7 @@ EngSmartSuite/
 │           ├── templates/index.html#   主页面
 │           └── static/
 │               ├── app.js          #   前端逻辑：列标记、参数面板、结果渲染
+│               ├── favicon.svg     #   浏览器页签图标（index.html link rel=icon）
 │               └── style.css       #   前端样式
 │
 ├── tests/                          # 测试（2026-09-19 5S：范围分目录，目录名不带 test_ 前缀）

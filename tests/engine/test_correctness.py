@@ -1402,15 +1402,26 @@ def test_box_chart_group_statistics():
     assert result.metadata["n_groups"] == 2
 
 
-def test_box_chart_stats_annotations_under_each_box():
-    """分组箱线图: 每个类别正下方应标注 n/均值/标准差/最大值/最小值，
-    且箱体被压缩在图内（整体尺寸不变）。
+def _box_stats_table(ax):
+    """返回分组统计表（box_chart 统计值表格），无则返回 None。"""
+    return ax.tables[0] if ax.tables else None
 
-    断言口径来自 review 2026-09-21 之后的箱线图标注需求：
-      ① 刻度标签只留类别名（n 统一进标注块，不重复）
-      ② 每组 5 行标注文本，数值与 group_statistics 表逐项一致
-      ③ 标注文本 x 位置与箱体 x 位置一致（共用一套 key）
-      ④ y 轴下界被压低到数据最小值以下（为标注腾出空间，箱体自动压缩）
+
+def _draw_for_geometry(fig):
+    """渲染一次以获得表格单元格几何（Cell 坐标在 draw 时才计算）。"""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    canvas = FigureCanvasAgg(fig)
+    canvas.draw()
+    return canvas, canvas.get_renderer()
+
+
+def test_box_chart_stats_table_under_axis_aligned_with_boxes():
+    """统计值汇总为**一张表**（列=分组、行=n/均值/标准差/最大值/最小值）：
+    ① 恰好一张表，数值与 group_statistics 逐项一致
+    ② 表格数据列中心与箱体 x 位置一一对齐
+    ③ 表格顶边位于数据最小值下方（坐标区下沿预留带，箱体压缩）
+    ④ 图形尺寸与 show_stats=False 时一致（图不变大）
     """
     from smartsuite.engine.exploratory import box_chart
 
@@ -1430,39 +1441,114 @@ def test_box_chart_stats_annotations_under_each_box():
     ax = fig.axes[0]
     stats = result.tables["group_statistics"]
 
-    # ① 刻度标签不再重复 n
-    labels = [t.get_text() for t in ax.get_xticklabels()]
-    assert labels == ["A", "B"], f"刻度标签应为纯类别名，实际: {labels}"
-
-    # ② 每组 5 行标注，数值与统计表一致
-    texts = [t for t in ax.texts if t.get_text()]
+    # ① 单张表 + 逐项一致（行序：n/均值/标准差/最大值/最小值）
+    assert len(ax.tables) == 1, f"统计值应汇总为一张表，实际 {len(ax.tables)} 张"
+    table = ax.tables[0]
+    row_keys = ["样本量", "均值", "标准差", "最大值", "最小值"]
+    assert table[(0, 0)].get_text().get_text() == "n"
     for i, (_, row) in enumerate(stats.iterrows()):
-        block = [t.get_text() for t in texts if abs(t.get_position()[0] - (i + 1)) < 1e-6]
-        assert len(block) == 5, f"第 {i + 1} 组应有 5 行标注，实际: {block}"
-        keys = ["n=", "均值 ", "标准差 ", "最大 ", "最小 "]
-        cols = ["样本量", "均值", "标准差", "最大值", "最小值"]
-        for line, key, col in zip(block, keys, cols, strict=True):
-            assert line.startswith(key), f"第 {i + 1} 组标注顺序/标签错: {block}"
-            assert float(line[len(key) :]) == pytest.approx(float(row[col])), (
-                f"第 {i + 1} 组「{col}」={row[col]} 与标注「{line}」不一致"
+        assert table[(0, i + 1)].get_text().get_text() == str(row["样本量"]), (
+            f"第 {i + 1} 列 n 与统计表不一致"
+        )
+        for r, key in enumerate(row_keys[1:], start=1):
+            cell_val = float(table[(r, i + 1)].get_text().get_text())
+            assert cell_val == pytest.approx(float(row[key])), (
+                f"第 {i + 1} 列「{key}」={row[key]} 与表格 {cell_val} 不一致"
             )
 
-    # ③ 标注 x 位置与箱体 x 位置一致（共用一套 key）
-    box_x = [np.mean(p.get_path().vertices[:, 0]) for p in ax.patches]
+    # ② 数据列中心与箱体 x 位置对齐（同一套 x 位置）
+    _draw_for_geometry(fig)
+    xmin, xmax = ax.get_xlim()
+    box_x = [
+        (p.get_path().vertices[:, 0].min() + p.get_path().vertices[:, 0].max()) / 2
+        for p in ax.patches
+    ]
     for i, bx in enumerate(box_x):
-        assert any(abs(t.get_position()[0] - bx) < 0.3 for t in texts), (
-            f"第 {i + 1} 个箱体 (x={bx}) 下方无对齐标注"
+        frac = (bx - xmin) / (xmax - xmin)
+        cell = table[(0, i + 1)]
+        center = cell.get_x() + cell.get_width() / 2
+        assert center == pytest.approx(frac, abs=1e-6), (
+            f"第 {i + 1} 个箱体 (x={bx}) 未与表格数据列对齐: {center:.4f} != {frac:.4f}"
         )
 
-    # ④ y 轴下界低于数据最小值（标注带在同一坐标区内）
-    assert ax.get_ylim()[0] < df["val"].min(), "y 轴下界未下压，标注会压住箱体"
+    # ③ 表格顶边低于数据最小值
+    table_top_disp = ax.transAxes.transform((0.0, 0.02 + 0.24))[1]
+    data_bottom_disp = ax.transData.transform((0.0, float(df["val"].min())))[1]
+    assert table_top_disp < data_bottom_disp, "表格压住箱体区（未在数据下方预留带内）"
+
+    # ④ 图形尺寸不变（压缩箱体而非放大图）
+    r_off = box_chart(
+        AnalysisRequest(
+            task="box_chart",
+            data=df,
+            target_col="val",
+            feature_cols=["group"],
+            params={"show_stats": False},
+        )
+    )
+    assert fig.get_size_inches().tolist() == r_off.figures[0].get_size_inches().tolist()
+
+    # 刻度标签只留类别名（n 已进表格，不重复）
+    assert [t.get_text() for t in ax.get_xticklabels()] == ["A", "B"]
 
 
-def test_box_chart_stats_band_clear_of_boxes_even_with_far_ref_line():
-    """即使 USL 远离数据（1000 vs 1~8），标注仍必须全部落在数据下方的预留带内。
+def test_box_chart_stats_table_actually_rendered_visible():
+    """渲染级回归（2026-09-22 视觉复核）：表格文字必须真的在像素中可见。
 
-    回归点：标注带宽度若改按「数据跨度」而非「数据 ∪ 参考线」，则参考线远离数据时
-    标注会浮到箱体中间（review 过程中的一次错误尝试）。
+    事故背景：原逐箱标注用 `PALETTE["misc"]["edge"]`（#ffffff）→ 白底白字，
+    对象/位置/数值断言全过但渲染后整块消失。本测试渲染像素缓冲，逐单元格检查
+    文字 bbox 区域存在深色像素，且文字颜色不与背景同色。
+    """
+    from matplotlib.colors import to_rgb
+
+    from smartsuite.engine.exploratory import box_chart
+
+    np.random.seed(7)
+    n = 30
+    df = pd.DataFrame(
+        {
+            "group": ["A"] * n + ["B"] * n,
+            "val": np.concatenate([np.random.normal(100, 10, n), np.random.normal(115, 8, n)]),
+        }
+    )
+    result = box_chart(
+        AnalysisRequest(task="box_chart", data=df, target_col="val", feature_cols=["group"])
+    )
+    assert result.status == "ok", f"box_chart 失败: {result.messages}"
+    fig = result.figures[0]
+    ax = fig.axes[0]
+    table = _box_stats_table(ax)
+    assert table is not None, "统计表缺失"
+    canvas, renderer = _draw_for_geometry(fig)
+    buf = np.asarray(canvas.buffer_rgba())
+    height, width = buf.shape[0], buf.shape[1]
+    bg_rgb = to_rgb(ax.get_facecolor() if ax.get_facecolor()[3] > 0 else fig.get_facecolor())
+
+    checked = 0
+    for cell in table.get_celld().values():
+        text = cell.get_text()
+        if not text.get_text():
+            continue
+        assert to_rgb(text.get_color()) != bg_rgb, (
+            f"表格文字「{text.get_text()}」与背景同色（{text.get_color()}）→ 不可见"
+        )
+        bbox = text.get_window_extent(renderer=renderer)
+        x0, x1 = max(int(bbox.x0) - 1, 0), min(int(np.ceil(bbox.x1)) + 1, width)
+        y0, y1 = max(int(bbox.y0) - 1, 0), min(int(np.ceil(bbox.y1)) + 1, height)
+        patch = buf[height - y1 : height - y0, x0:x1, :3]
+        assert patch.size > 0, f"表格文字「{text.get_text()}」bbox 超出画布"
+        assert int(patch.min()) < 200, (
+            f"表格文字「{text.get_text()}」渲染区域全为浅色（min={int(patch.min())}）→ 不可见"
+        )
+        checked += 1
+    assert checked >= 10, f"应检查到统计表全部单元格文字，实际 {checked}"
+
+
+def test_box_chart_stats_table_clear_of_boxes_even_with_far_ref_line():
+    """即使 USL 远离数据（1000 vs 1~8），表格仍必须落在数据下方的预留带内。
+
+    回归点：预留带宽度若改按「数据跨度」而非「数据 ∪ 参考线」，则参考线远离数据时
+    表格会浮到箱体中间。
     """
     from smartsuite.engine.exploratory import box_chart
 
@@ -1479,15 +1565,17 @@ def test_box_chart_stats_band_clear_of_boxes_even_with_far_ref_line():
     )
     assert result.status == "ok", f"box_chart 失败: {result.messages}"
     ax = result.figures[0].axes[0]
+    assert _box_stats_table(ax) is not None, "统计表缺失"
+    table_top_disp = ax.transAxes.transform((0.0, 0.02 + 0.24))[1]
     data_bottom_disp = ax.transData.transform((0.0, float(df["val"].min())))[1]
-    for t in ax.texts:
-        assert t.get_text(), "空文本不应出现"
-        y_disp = ax.transAxes.transform((0.0, t.get_position()[1]))[1]
-        assert y_disp < data_bottom_disp, f"标注「{t.get_text()}」压住箱体区"
+    assert table_top_disp < data_bottom_disp, "表格压住箱体区"
 
 
-def test_box_chart_stats_annotation_toggle_and_facet():
-    """show_stats=False 关闭标注；分面模式（次分类分面）不添加标注。"""
+def test_box_chart_stats_table_toggle_and_facet():
+    """show_stats=False 无表（刻度恢复带 n）；分面模式每面板一张表。
+
+    分面表格按面板内各组重算，数值须与面板内箱体一致（不是全局统计的复用）。
+    """
     from smartsuite.engine.exploratory import box_chart
 
     np.random.seed(8)
@@ -1499,7 +1587,7 @@ def test_box_chart_stats_annotation_toggle_and_facet():
             "val": np.random.normal(100, 10, 2 * n),
         }
     )
-    # 关闭标注
+    # 关闭统计表
     r_off = box_chart(
         AnalysisRequest(
             task="box_chart",
@@ -1510,13 +1598,11 @@ def test_box_chart_stats_annotation_toggle_and_facet():
         )
     )
     assert r_off.status == "ok", f"show_stats=false 失败: {r_off.messages}"
-    assert not [t for t in r_off.figures[0].axes[0].texts if t.get_text()], (
-        "show_stats=false 不应出现统计标注"
-    )
+    assert _box_stats_table(r_off.figures[0].axes[0]) is None, "show_stats=false 不应出现统计表"
     # 关闭后刻度标签恢复带 n 的旧样式
     assert any("n=" in t.get_text() for t in r_off.figures[0].axes[0].get_xticklabels())
 
-    # 分面模式：多面板均不加标注
+    # 分面模式：每个面板一张表，数值按该面板内数据重算
     r_facet = box_chart(
         AnalysisRequest(
             task="box_chart",
@@ -1528,8 +1614,25 @@ def test_box_chart_stats_annotation_toggle_and_facet():
     )
     assert r_facet.status == "ok", f"分面模式失败: {r_facet.messages}"
     assert r_facet.metadata["has_sub"] is True, "应走分面分支"
-    for ax in r_facet.figures[0].axes:
-        assert not [t for t in ax.texts if t.get_text()], "分面模式不应添加统计标注"
+    panels = r_facet.figures[0].axes
+    assert len(panels) == 2, f"应有 2 张分面，实际 {len(panels)}"
+    sg_data = df[df["sub"] == "x"]
+    for panel_idx, ax in enumerate(panels):
+        table = _box_stats_table(ax)
+        assert table is not None, f"分面 {panel_idx + 1} 缺少统计表"
+        assert table[(0, 0)].get_text().get_text() == "n"
+        if panel_idx != 0:
+            continue
+        # 抽查第一个面板（sub=x）：A/B 两组数值与面板内数据一致
+        for gi, g in enumerate(["A", "B"], 1):
+            gdata = sg_data[sg_data["group"] == g]["val"]
+            assert table[(0, gi)].get_text().get_text() == str(len(gdata)), (
+                f"分面表格 n 与面板内数据不符: {table[(0, gi)].get_text().get_text()}"
+            )
+            shown_mean = float(table[(1, gi)].get_text().get_text())
+            assert shown_mean == pytest.approx(float(gdata.mean()), abs=1e-3), (
+                f"分面表格均值应取自面板内数据: {shown_mean} vs {gdata.mean()}"
+            )
 
 
 # ── 散点图正确性 ──

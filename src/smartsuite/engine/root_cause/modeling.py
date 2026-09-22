@@ -16,6 +16,7 @@ from smartsuite.engine._constants import (
     VIF_THRESHOLD,
 )
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import drop_non_finite_rows, non_finite_note
 from smartsuite.engine._utils import safe_float as _safe_float
 from smartsuite.engine.root_cause._shared import _safe_int
 
@@ -43,6 +44,16 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
             task="decision_tree",
             status="error",
             messages=[f"以下列包含非数值数据，请先进行 One-Hot 编码: {non_num}"],
+        )
+    # 审查 2026-09-22 发现 3：sklearn `tree.fit` 对 ±Inf 抛
+    # ValueError('Input y contains infinity...')；入口按缺失剔除
+    _numeric_cols = [c for c in [req.target_col] + cols if pd.api.types.is_numeric_dtype(df[c])]
+    df, n_inf = drop_non_finite_rows(df, _numeric_cols)
+    if len(df) < 5:
+        return AnalysisResult(
+            task="decision_tree",
+            status="error",
+            messages=[f"剔除 {n_inf} 个非有限值后有效样本({len(df)})不足"],
         )
     X = df[cols]
     y = df[req.target_col]
@@ -113,6 +124,8 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     from sklearn.model_selection import cross_val_score
 
     warn_msgs: list[str] = []
+    if n_inf:
+        warn_msgs.append(non_finite_note(n_inf, req.target_col))
     cv_scores = []
     if len(df) >= 10:
         try:

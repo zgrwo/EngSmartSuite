@@ -107,7 +107,7 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 
 - 数据流转含 `services/data_io.preprocess_data`（**返回多个值的元组解包——历史的 4+ 解包错误**，改动必须核对全部调用方）。
 - ①②③ 层由 hypothesis 属性测试加固（`tests/engine/test_property_invariants.py`：量纲缩放不变量 / falsy 0 / 退化输入随机搜索，2026-09-19 起）。
-- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率以当轮实测为准（2026-09-19 实测 89.67%；门禁 `--cov-fail-under=85`，quality.yml 已于 2026-09-19 前置到 PR）；测试质量守卫基线 WARN ≤ 29（quality.yml `--max-warn 29`）。
+- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率以当轮实测为准（2026-09-19 实测 89.67%；门禁 `--cov-fail-under=85`，quality.yml 已于 2026-09-19 前置到 PR）；测试质量守卫基线 WARN ≤ 10（quality.yml `--max-warn 10`，2026-09-22 由 14 收紧）。
 
 ### 3.6 治理红线与历史陷阱速查
 
@@ -119,7 +119,7 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 | 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.6，经 uv.lock 锁定）；CI 矩阵 3.10–3.14 × 3 OS（3.12/3.13 排除 macOS） |
 
 **高频复发模式**（逐条做被动排查，历史见 [AGENTS.md](../../AGENTS.md) 历史经验表）：
-① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）。
+① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）；⑫ **数据列 ±Inf 未清洗**（穿透 `dropna()`：scipy 返回 NaN p 值被表述为「未发现显著差异」/ matplotlib·sklearn 抛未捕获异常，2026-09-22 发现 2/3，入口统一走 `_utils.drop_non_finite[_rows]`）。
 
 **smartsuite-dev 技能 7 大陷阱速查**（详见 [smartsuite-dev.md](../../skills/smartsuite-dev.md)）：
 1. PALETTE 嵌套键错误（`anomaly` 无 `secondary`；访问即 KeyError 被 orchestrator 误翻译成"缺列"）
@@ -331,7 +331,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | 5. 独立参考 | scipy/statsmodels/numpy 独立实现（或手算）与引擎输出并排，权重 1e-9 | 回归 / 统计 |
 | 6. 性能/概率复刻 | 性能声称用与生产相同路径测量；bootstrap/随机类重复采样报告分布 | 性能 / 概率 |
 | 7. 元批判 | reaudit 场景**强制**：对上一轮每条 P0/P1 独立复现并**重算方向与量级**（方法 5 切入），先判定旧结论真伪再谈修复与否；已否证项按「3.7」登记。禁用"旧报告说严重就按严重修"的默认继承 | reaudit / 任何对旧结论的引用 |
-| 8. 同族扫描 | 找到缺陷后 grep **同模式兄弟点**逐个核验：`1e-12` 绝对阈值族、`float()` 无 `isfinite` 族、`params.get(x) or default` falsy 族、orchestrator KeyError 翻译族、固定位 `round()` 舍入族——只修报告反例、同取值域复发即"修复不完整"（历史：spc_xbar 相对阈值已修但 detection/spc_nonparametric 未同步，2026-09-05 B1） | 任何缺陷修复的完整性 |
+| 8. 同族扫描 | 找到缺陷后 grep **同模式兄弟点**逐个核验：`1e-12` 绝对阈值族、`float()` 无 `isfinite` 族、`params.get(x) or default` falsy 族、orchestrator KeyError 翻译族、固定位 `round()` 舍入族、数据列 ±Inf 未清洗族（`dropna()` 后直接入 scipy/matplotlib/sklearn）、`int()` 参数转换缺 `OverflowError` 族——只修报告反例、同取值域复发即"修复不完整"（历史：spc_xbar 相对阈值已修但 detection/spc_nonparametric 未同步，2026-09-05 B1；`_safe_int` 捕获元组缺 `OverflowError`，2026-09-22 发现 5） | 任何缺陷修复的完整性 |
 
 **判定规则**：无法给出任何一项对抗验证的 finding 视为"待确认"或放弃；验证失败（输入不能复现所述问题）的 finding 必须删除或降级为 P3 观察项，并说明为什么误报（防止下一个审查者复检踩坑）。**证据双向强制**：`✅ 已修复 / 保持项 / 健康声明` 等**正向结论同样必须附 ≥1 项本轮回测证据**，无证据的正向断言标注"未经检验"（2026-09-05 教训：capability 的正面断言被下一统计量实跑打脸，见「3.7」同批）。
 

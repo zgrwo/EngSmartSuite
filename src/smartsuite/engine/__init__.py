@@ -76,7 +76,10 @@ if _env_font and os.path.exists(_env_font):
         # "DejaVu Sans"），文件名 stem 与注册族名常不一致会导致 findfont 静默回退默认字体
         try:
             _env_family = _fm.FontProperties(fname=_env_font).get_name()
-        except Exception:
+        except Exception as e:
+            # 审查 2026-09-22 发现 10：except Exception 必须记录日志（红线），
+            # 行为安全（确定性回退文件名 stem），按 debug 记录
+            _logger.debug("字体族名解析失败，回退文件名: %s", e)
             _env_family = os.path.splitext(os.path.basename(_env_font))[0]
         # 仅当用户未自定义 font.family 时才覆盖（保护用户配置）
         if "font.family" not in matplotlib.rcParams or matplotlib.rcParams["font.family"] == [

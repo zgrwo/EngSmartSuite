@@ -10,7 +10,7 @@ from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import round_for_display, shapiro_p
+from smartsuite.engine._utils import drop_non_finite, non_finite_note, round_for_display, shapiro_p
 from smartsuite.engine._utils import safe_float as _safe_float
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,8 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     提供全面的单变量分布描述和拟合诊断。
     """
     data = req.data[req.target_col].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 使 hist/set_xlim 抛 ValueError；入口按缺失剔除
+    data, n_inf = drop_non_finite(data)
     n = len(data)
     if n < 3:
         return AnalysisResult(
@@ -182,6 +184,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             f"最佳拟合: {best_fit} (KS p={fits[best_fit]['KS p']:.3f})"
         ),
         metadata={"descriptive": desc, "fits": fits, "best_fit": best_fit},
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 

@@ -102,7 +102,12 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             if req.data[c1].nunique(dropna=True) <= 1 or req.data[c2].nunique(dropna=True) <= 1:
                 pmat.loc[c1, c2] = np.nan
                 continue
-            mask = req.data[c1].notna() & req.data[c2].notna()
+            # 审查 2026-09-22 发现 4：pandas `.corr()` 对 ±Inf 按缺失成对剔除，
+            # 原 mask 只查 notna → r 有限而 p 为 NaN（同一表内自相矛盾）。
+            # 统一 isfinite 口径：带 Inf 的行不参与 p 值计算，与 r 矩阵一致。
+            _v1 = req.data[c1].to_numpy(dtype=float, na_value=np.nan)
+            _v2 = req.data[c2].to_numpy(dtype=float, na_value=np.nan)
+            mask = np.isfinite(_v1) & np.isfinite(_v2)
             if mask.sum() >= 3:
                 if method == "spearman":
                     _, p = sp_stats.spearmanr(req.data.loc[mask, c1], req.data.loc[mask, c2])

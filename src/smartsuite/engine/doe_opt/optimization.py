@@ -43,7 +43,8 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     n_points = req.params.get("n_points", 10)
     try:
         n_points = int(n_points)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
+        # OverflowError（审查 2026-09-22 发现 5 同族）：int(float('inf')) 穿透守卫
         n_points = 10
     # 防止内存耗尽：限制搜索点数
     n_points = max(2, min(n_points, 30))

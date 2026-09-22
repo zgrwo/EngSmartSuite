@@ -7,10 +7,12 @@ verify_docs.py — 文档一致性验证（源自 VibeCodingTemplate verify-docs
   2. 反引号内以已知根目录前缀开头的相对路径引用是否存在（`scripts/xxx.py` 类）
   3. project-structure.md 目录树声明的顶层目录是否真实存在
   4. AGENTS.md 与 project-structure.md 的目录树顶层条目集合一致（双目录树防漂移）
-  5. 语义交叉检查：裸 except 捕获 / 文档 TODO/FIXME 残留 / verify_* 脚本裸 input 调用
+  5. 语义交叉检查：裸 except 捕获 / `except Exception` 无日志（src/ 生产代码）/
+     标题未独占行首 / 文档 TODO/FIXME 残留 / verify_* 脚本裸 input 调用
   6. 版本一致性门禁：.release-please-manifest.json == pyproject.toml == CHANGELOG 最新发布
-  7. （--strict）根级未声明文件/目录 + docs/、skills/、tests/、scripts/、templates/、
-     子目录直接文件未登记（.gitignore 忽略的本地生成产物豁免）
+  7. （--strict）根级未声明文件/目录 + src/、docs/、skills/、tests/、scripts/、
+     templates/、.github/、benchmarks/ 子目录直接文件未登记
+     （.gitignore 忽略的本地生成产物豁免）
 
 规则：
   - 含占位符（{{...}} / {Name} / <...>）的引用跳过（模式串而非真实路径）
@@ -25,6 +27,7 @@ verify_docs.py — 文档一致性验证（源自 VibeCodingTemplate verify-docs
 """
 
 import argparse
+import ast
 import contextlib
 import json
 import re
@@ -62,7 +65,9 @@ EXCLUDED_DIRS = {
 
 # 需核对"目录内文件已登记"的关键子目录（目录树即契约）
 # 审查 2026-08-19 第二轮 #5：从 docs/skills 扩展至 tests/、scripts/、templates/
-_SUBDIR_CHECK = ("docs", "skills", "tests", "scripts", "templates", ".github", "benchmarks")
+# 审查 2026-09-22 发现 9：补 src/（目录树已逐项列出 src/smartsuite/**，此前新增
+# 源码文件无门禁——实测注入 src/smartsuite/engine/spc_charts/zz_*.py 退出 0）
+_SUBDIR_CHECK = ("src", "docs", "skills", "tests", "scripts", "templates", ".github", "benchmarks")
 
 # 反引号路径检查：仅检查以已知根目录前缀开头的引用（语义明确指向仓库内路径）
 _KNOWN_ROOT_PREFIXES = (
@@ -297,6 +302,83 @@ def _check_bare_handlers(root: Path) -> list[str]:
     return problems
 
 
+_LOG_METHODS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "fatal"}
+
+
+def _handler_logs(handler: ast.ExceptHandler) -> bool:
+    """处理器体内是否有 logging 调用（按方法名判定，兼容 logger/_logger/log 命名）。"""
+    for node in ast.walk(handler):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _LOG_METHODS
+        ):
+            return True
+    return False
+
+
+def _check_exception_handlers_without_log(root: Path) -> list[str]:
+    """生产代码 `except Exception` 必须记录日志（红线；审查 2026-09-22 发现 10）。
+
+    裸 `except:` 由 `_check_bare_handlers` 行级扫描覆盖（src + scripts）；本检查
+    用 AST 补生产代码（src/）的 `except Exception`（含 `as e`）无任何 logging
+    调用的违例——scripts/ 为治理脚本，其处理器多以返回值/结果记录显式处理，
+    不纳入本检查避免噪音。
+    """
+    problems: list[str] = []
+    base = root / "src"
+    if not base.exists():
+        return problems
+    for p in base.rglob("*.py"):
+        if any(part in EXCLUDED_DIRS for part in p.relative_to(root).parts):
+            continue
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            exc_type = node.type
+            if not (isinstance(exc_type, ast.Name) and exc_type.id == "Exception"):
+                continue
+            if not _handler_logs(node):
+                problems.append(
+                    f"[语义检查] {p.relative_to(root)}:{node.lineno} `except Exception` "
+                    "未记录日志（红线规则：catch 块必须有日志/重抛/返回错误值）"
+                )
+    return problems
+
+
+def _check_heading_line_start(root: Path, doc_files: list[str]) -> list[str]:
+    """`### ` 及以上标题必须独占行首（审查 2026-09-22 发现 7 的防复发检查）。
+
+    标题被误并入上一行 bullet（漏换行）会使导航/锚点/渲染层级静默失效。
+    跳过代码围栏内容；行内正文若出现「文字### 标题」形态即判定结构损坏。
+    """
+    problems: list[str] = []
+    heading_re = re.compile(r"\S#{3,6}\s")
+    for doc in doc_files:
+        path = root / doc
+        if not path.exists():
+            continue
+        in_fence = False
+        for i, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if heading_re.search(line) and not line.startswith("#"):
+                problems.append(
+                    f"[语义检查] {doc}:{i} 标题未独占行首（疑似漏换行并入上一行；"
+                    "请检查渲染层级/锚点）"
+                )
+    return problems
+
+
 def _check_unclosed_todos(root: Path, doc_files: list[str]) -> list[str]:
     problems: list[str] = []
     for doc in doc_files:
@@ -349,6 +431,8 @@ def _check_bare_input_calls(root: Path) -> list[str]:
 def check_semantic_consistency(root: Path, doc_files: list[str]) -> list[str]:
     return (
         _check_bare_handlers(root)
+        + _check_exception_handlers_without_log(root)
+        + _check_heading_line_start(root, doc_files)
         + _check_unclosed_todos(root, doc_files)
         + _check_bare_input_calls(root)
     )

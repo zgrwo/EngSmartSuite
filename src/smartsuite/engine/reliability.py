@@ -10,7 +10,12 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import EPSILON
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import round_for_display
+from smartsuite.engine._utils import (
+    drop_non_finite,
+    drop_non_finite_rows,
+    non_finite_note,
+    round_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +183,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="gage_rr", status="error", messages=["需要提供部件列和操作员列"])
 
     sub = req.data[[req.target_col, part_col, operator_col]].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 使 GRR 分量为 NaN，`int(1.41*pv/grr)` 抛
+    # ValueError: cannot convert float NaN to integer；入口按缺失剔除
+    sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
     if len(sub) < 10:
         return AnalysisResult(task="gage_rr", status="error", messages=["有效数据不足"])
 
@@ -454,6 +462,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
             "n_operators": k,
             "n_replicates": r,
         },
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 
@@ -468,6 +477,8 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
     用于设定合理规格限，不同于置信区间（均值的不确定性）。
     """
     data = req.data[req.target_col].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 使 hist/linspace 抛 ValueError（range not finite）
+    data, n_inf = drop_non_finite(data)
     n = len(data)
     if n < 5:
         return AnalysisResult(
@@ -629,6 +640,7 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
             "confidence": confidence,
             "side": side,
         },
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 

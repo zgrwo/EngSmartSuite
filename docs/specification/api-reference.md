@@ -319,7 +319,7 @@ class AnalysisResult:
 ### box_chart
 - **Task Key**: `box_chart`
 - **描述**: 分组箱线图 — 按类别因子展示数值分布，支持主分类 + 次分类分面，自动附 ANOVA/Kruskal-Wallis 或 t 检验/MWU 统计检验
-- **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签), `show_stats` (默认 true：在每个箱体正下方标注 n/均值/标准差/最大值/最小值，箱体随之压缩、图形整体尺寸不变；false 时改把 n 标在 X 轴刻度标签上。分面模式不标注), `group_col` (分组列), `usl`/`lsl` (规格上/下限, 红色实线), `ucl`/`lcl`/`cl` (控制上/下限/中心线, 黄色虚线), `target` (目标值, 灰色点线)
+- **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签), `show_stats` (默认 true：在坐标区下沿绘制单张统计表，列=分组（与箱体对齐）、行=n/均值/标准差/最大值/最小值，箱体随之压缩、图形整体尺寸不变；分面模式每面板各一张；false 时改把 n 标在 X 轴刻度标签上), `group_col` (分组列), `usl`/`lsl` (规格上/下限, 红色实线), `ucl`/`lcl`/`cl` (控制上/下限/中心线, 黄色虚线), `target` (目标值, 灰色点线)
 - **feature_cols**: `[主分类列]` 或 `[主分类列, 次分类列]`
 - **返回**: `group_statistics` (含各分组均值/中位数/标准差/IQR)；统计检验结果嵌入 summary
 - **图**: 分组箱线图 + 散点叠加；次分类 ≤ 8 水平时分面展示

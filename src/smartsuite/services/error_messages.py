@@ -22,7 +22,10 @@ from smartsuite.core.exceptions import SmartSuiteError
 # 异常类型名 → 面向工艺工程师的中文说明。
 # 文案沿用原 orchestrator 内联表，逐字未改（避免改变既有用户预期与测试契约）。
 ERROR_DETAIL_MAP: dict[str, str] = {
-    "ValueError": "数据格式不符合分析要求，请检查目标列和因子列的数据类型",
+    # 审查 2026-09-22 发现 3：原「数据格式不符合」无法覆盖含 ±Inf 的数值范围
+    # 问题（matplotlib/sklearn 的 ValueError 被泛化翻译为数据类型错误）
+    "ValueError": "数据格式或数值范围不符合分析要求，"
+    "请检查目标列和因子列的数据类型，并确认不含 Inf/NaN 等非有限值",
     "KeyError": "数据处理异常（键不存在）：请检查数据列名与参数配置；若列名无误则可能是引擎内部错误，请反馈日志",
     "TypeError": "数据类型不匹配，请确保所有因子列为数值型或类别型",
     "IndexError": "数据索引异常，请检查数据是否包含空行或异常索引",

@@ -30,7 +30,7 @@ _SERVICES = Path(__file__).resolve().parents[2] / "src" / "smartsuite" / "servic
 
 # (异常类型名, 中文说明应含的关键词) —— 12 类全覆盖
 _MAPPED_CASES = [
-    ("ValueError", "数据格式不符合分析要求"),
+    ("ValueError", "数据格式或数值范围不符合分析要求"),
     ("KeyError", "键不存在"),
     ("TypeError", "数据类型不匹配"),
     ("IndexError", "数据索引异常"),

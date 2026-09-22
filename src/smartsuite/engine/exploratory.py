@@ -13,7 +13,14 @@ from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import _adjust_xlabels, round_for_display, safe_float
+from smartsuite.engine._utils import (
+    _adjust_xlabels,
+    drop_non_finite,
+    drop_non_finite_rows,
+    non_finite_note,
+    round_for_display,
+    safe_float,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +31,8 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
     不依赖任何分布假设，适用于偏态或未知分布数据。
     """
     data = req.data[req.target_col].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 穿透 dropna 使 hist/set_xlim 抛 ValueError
+    data, n_inf = drop_non_finite(data)
     n = len(data)
     if n < 5:
         return AnalysisResult(
@@ -103,6 +112,7 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
             "ci_level": ci_level,
             "n": n,
         },
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 
@@ -117,6 +127,7 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     返回百分位法（Percentile）Bootstrap 置信区间。
     """
     data = req.data[req.target_col].dropna()
+    data, n_inf = drop_non_finite(data)
     n = len(data)
     if n < 5:
         return AnalysisResult(
@@ -135,7 +146,9 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     n_boot_raw = req.params.get("n_bootstrap", 2000)
     try:
         n_boot = max(100, min(int(n_boot_raw), 10000))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
+        # OverflowError（审查 2026-09-22 发现 5 同族）：int(float('inf')) 不抛
+        # ValueError，此前穿透参数守卫（doe_design/power_analysis 同族）
         n_boot = 2000
     ci_level = safe_float(req.params.get("ci_level", 0.95), 0.95)
     if not 0 < ci_level < 1:
@@ -266,35 +279,47 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
             "n_bootstrap": n_boot,
             "n": n,
         },
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 
-def _annotate_group_stats(
+def _draw_group_stats_table(
     ax,
     groups: list,
     group_data: list,
     stat_rows: list[dict[str, Any]],
     ref_lines: list[tuple[float, str, str, str]],
 ) -> None:
-    """在每个箱体正下方标注 n/均值/标准差/最大值/最小值。
+    """在坐标区下沿预留带内绘制单张统计表（列=分组、行=统计量）。
 
-    不改变图形尺寸：把 y 轴下界下压约数据跨度的 1/3，箱体被压缩到坐标区上部，
-    下沿留出的空白带承载标注；标注用 get_xaxis_transform（x 数据坐标 + y 轴比例
-    坐标）绘制，因此与箱体共用同一套 x 位置（同一套类别 key），无需新增坐标轴。
+    2026-09-22 用户复核：逐箱重复 5 行标注信息冗余，改为**一张表**；表格数据列
+    与箱体共用同一套 x 位置（行标签列占左侧固定宽，其余数据列与坐标轴等宽），
+    坐标区下界按表格高度下压、箱体压缩到上部，**图形整体尺寸不变**。
     """
+    n_groups = len(groups)
+    fig = ax.get_figure()
+    # 行标签列按英寸折算轴宽比例：组数变化导致图宽变化时，标签列物理宽度稳定
+    fig_width = fig.get_figwidth() if fig is not None else 6.0
+    axes_width_in = max(ax.get_position().width * fig_width, 1e-6)
+    label_w = min(max(0.62 / axes_width_in, 0.04), 0.14)
+    data_w = (1.0 - label_w) / n_groups
+    # 数据列中心必须与箱体 x 位置（1..n）一一对应：联立解得 xlim 左界
+    ax.set_xlim(0.5 - label_w / data_w, 0.5 - label_w / data_w + 1.0 / data_w)
+
     d_lo = min(float(np.min(d)) for d in group_data if len(d))
     d_hi = max(float(np.max(d)) for d in group_data if len(d))
-    # 跨度取「数据 ∪ 参考线」——保证标注带始终占坐标区下沿约 1/4，
-    # 文字与箱体不可能重叠（即使 USL 远离数据）；箱体被压缩是必然代价
+    # 跨度取「数据 ∪ 参考线」——保证表格带始终占据坐标区下沿固定比例
     lo = min([d_lo] + [val for val, _c, _s, _lab in ref_lines])
     hi = max([d_hi] + [val for val, _c, _s, _lab in ref_lines])
     span = hi - lo
     if not np.isfinite(span) or span <= 0:  # 常量数据：给一个可用的相对跨度
         span = max(abs(hi), 1.0)
-    ax.set_ylim(lo - 0.34 * span, hi + 0.06 * span)
-
-    n_groups = len(groups)
-    fontsize = 8.5 if n_groups <= 10 else 7.5 if n_groups <= 20 else 6.5
+    band_bottom, band_height = 0.02, 0.24
+    # 让数据最小值落在表格顶边下方 gap 处，反解下界外扩量 L：
+    # f = L / (span + L + 0.06·span)，取 f = band_top + gap
+    f = min(band_bottom + band_height + 0.02, 0.9)
+    lower_pad = f * 1.06 * span / (1.0 - f)
+    ax.set_ylim(lo - lower_pad, hi + 0.06 * span)
 
     def _fmt_ann(v) -> str:
         """标注数值格式：与 group_statistics 表逐位一致。
@@ -304,39 +329,54 @@ def _annotate_group_stats(
         有效数字二次舍入），否则（微尺度）用 :g 保持紧凑可读。
         """
         try:
-            f = float(v)
+            fv = float(v)
         except (TypeError, ValueError):
             return str(v)
-        if not np.isfinite(f):
-            return str(f)
-        if np.round(f, 3) == f:
-            return f"{f:.3f}".rstrip("0").rstrip(".") or "0"
-        return f"{f:g}"
+        if not np.isfinite(fv):
+            return str(fv)
+        if np.round(fv, 3) == fv:
+            return f"{fv:.3f}".rstrip("0").rstrip(".") or "0"
+        return f"{fv:g}"
 
-    # 图宽随组数增长（每组固定约 1.2in），注解无需旋转即可横向放下；
-    # 旋转会让 5 行文字斜插进相邻行，反而重叠
-    y_positions = (0.215, 0.170, 0.125, 0.080, 0.035)
-    transform = ax.get_xaxis_transform()
-    for idx, row in enumerate(stat_rows, 1):
-        lines = (
-            f"n={row['样本量']}",
-            f"均值 {_fmt_ann(row['均值'])}",
-            f"标准差 {_fmt_ann(row['标准差'])}",
-            f"最大 {_fmt_ann(row['最大值'])}",
-            f"最小 {_fmt_ann(row['最小值'])}",
-        )
-        for y, text in zip(y_positions, lines, strict=True):
-            ax.text(
-                idx,
-                y,
-                text,
-                transform=transform,
-                ha="center",
-                va="center",
-                fontsize=fontsize,
-                color=PALETTE["misc"]["edge"],
-                clip_on=False,
-            )
+    cell_text = [
+        ["n"] + [str(row["样本量"]) for row in stat_rows],
+        ["均值"] + [_fmt_ann(row["均值"]) for row in stat_rows],
+        ["标准差"] + [_fmt_ann(row["标准差"]) for row in stat_rows],
+        ["最大值"] + [_fmt_ann(row["最大值"]) for row in stat_rows],
+        ["最小值"] + [_fmt_ann(row["最小值"]) for row in stat_rows],
+    ]
+    fontsize = 8.0 if n_groups <= 8 else 7.0 if n_groups <= 15 else 6.0
+    table = ax.table(
+        cellText=cell_text,
+        colWidths=[label_w] + [data_w] * n_groups,
+        bbox=[0.0, band_bottom, 1.0, band_height],
+        cellLoc="center",
+        zorder=6,
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(fontsize)
+    for cell in table.get_celld().values():
+        cell.set_edgecolor(PALETTE["misc"]["grid"])
+        cell.set_linewidth(0.6)
+
+
+def _build_stat_row(group_label: str, gdata) -> dict[str, Any]:
+    """单组描述统计行（group_statistics 表与箱体标注共用同一构造，保证逐位一致）。
+
+    审查 2026-09-21 R1-3：原为固定位 round(x, 3)，微尺度（×1e-9）下整表归零；
+    改走共享 round_for_display（低于 0.5×10^-decimals 时自动改按有效数字），
+    与 detection/capability 展示口径一致。
+    """
+    return {
+        "分组": group_label,
+        "样本量": len(gdata),
+        "均值": round_for_display(float(gdata.mean()), 3),
+        "中位数": round_for_display(float(gdata.median()), 3),
+        "标准差": round_for_display(float(gdata.std(ddof=1)), 3),
+        "IQR": round_for_display(float(gdata.quantile(0.75) - gdata.quantile(0.25)), 3),
+        "最小值": round_for_display(float(gdata.min()), 3),
+        "最大值": round_for_display(float(gdata.max()), 3),
+    }
 
 
 def box_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -435,13 +475,15 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             )
         _ref_lines.append((target_f, PALETTE["direction"]["zero"], ":", "Target"))
 
-    # show_stats：在非分面单图模式下，把 n/均值/标准差/最大值/最小值标注到每个箱体正下方
-    # （标注带占用坐标区下沿，箱体自动压缩，图形整体尺寸不变；分面模式不标注）
+    # show_stats：把 n/均值/标准差/最大值/最小值标注到每个箱体正下方
+    # （标注带占用坐标区下沿，箱体自动压缩，图形整体尺寸不变；分面模式逐面板标注）
     show_stats = req.params.get("show_stats", True)
     if isinstance(show_stats, str):
         show_stats = show_stats.lower() not in ("false", "0", "no", "")
 
     sub = req.data[_cols_needed].dropna()
+    # 审查 2026-09-22 发现 3：目标列 ±Inf 使 boxplot/set_ylim 抛 ValueError
+    sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
     if len(sub) < 5:
         return AnalysisResult(
             task="box_chart", status="error", messages=["有效数据不足(至少5个点)"]
@@ -478,24 +520,9 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             groups = all_groups  # 全空则回退
 
     # ── 描述统计 ──
-    stat_rows: list[dict[str, Any]] = []
-    for g in groups:
-        gdata = sub[sub[group_col] == g][req.target_col]
-        stat_rows.append(
-            {
-                "分组": str(g),
-                "样本量": len(gdata),
-                # 审查 2026-09-21 R1-3：原为固定位 round(x, 3)，微尺度（×1e-9）下
-                # 整表归零；改走共享 round_for_display（低于 0.5×10^-decimals 时
-                # 自动改按有效数字），与 detection/capability 展示口径一致。
-                "均值": round_for_display(float(gdata.mean()), 3),
-                "中位数": round_for_display(float(gdata.median()), 3),
-                "标准差": round_for_display(float(gdata.std(ddof=1)), 3),
-                "IQR": round_for_display(float(gdata.quantile(0.75) - gdata.quantile(0.25)), 3),
-                "最小值": round_for_display(float(gdata.min()), 3),
-                "最大值": round_for_display(float(gdata.max()), 3),
-            }
-        )
+    stat_rows: list[dict[str, Any]] = [
+        _build_stat_row(str(g), sub[sub[group_col] == g][req.target_col]) for g in groups
+    ]
 
     # ── ANOVA + Kruskal-Wallis (3+组) / t检验 + MWU (2组) ──
     group_data = [sub[sub[group_col] == g][req.target_col].values for g in groups]
@@ -555,6 +582,14 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             ax.set_xlabel(group_col, fontsize=8)
             ax.set_ylabel(req.target_col, fontsize=8)
             n_valid = len(valid_groups)
+            # 分面同样逐面板标注（2026-09-22 视觉复核：面板尺寸足够，统一体验；
+            # 每面板的统计值按该面板内各组重算，与箱体一一对应）
+            if show_stats and len(valid_groups) >= 2:
+                facet_rows = [
+                    _build_stat_row(str(g), sg_data[sg_data[group_col] == g][req.target_col])
+                    for g in valid_groups
+                ]
+                _draw_group_stats_table(ax, valid_groups, sg_groups, facet_rows, _ref_lines)
             _adjust_xlabels(ax, n_valid, fig)
             _draw_ref_lines(ax)
     else:
@@ -594,7 +629,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         _adjust_xlabels(ax, len(groups), fig)
         _draw_ref_lines(ax)
         if show_stats:
-            _annotate_group_stats(ax, groups, group_data, stat_rows, _ref_lines)
+            _draw_group_stats_table(ax, groups, group_data, stat_rows, _ref_lines)
     fig.tight_layout()
 
     n_total = sum(s["样本量"] for s in stat_rows)  # 按实际显示的分组汇总
@@ -629,6 +664,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             "nested_label": nested_label,
             "groups": [str(g) for g in all_groups],
         },
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 

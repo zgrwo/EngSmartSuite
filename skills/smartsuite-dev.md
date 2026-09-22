@@ -54,7 +54,7 @@ judge:      good, warn, bad
 contrast:   a, b, c, d
 direction:  positive, negative, zero
 cmap:       correlation, response, sequential, heatmap
-misc:       grid, background, edge
+misc:       grid, background, edge, text   ← text=深灰辅助标注文字（勿用 edge：白底不可见）
 ```
 
 **修复模板**：
@@ -457,6 +457,7 @@ result_b = results_b[0]
 | Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
 | 微尺度(ppb/pico)数据结论翻转 / Web 整列 0.0000 | 绝对 `EPSILON` 判决或展示层固定舍入 | 见陷阱 9：守卫改精确零、判决相对化、展示走 `round_for_display` |
 | 测试报 `DID NOT WARN` / `divide by zero encountered` / 「VIF 计算失败」，同输入脚本却 `status=ok` | 第三方库告警在 `filterwarnings=error` 下升为异常，被 `except Exception` 吞成业务错误（数值表全丢）；同一输入在不同依赖分支发不同告警（statsmodels ≥0.15 条件数 UserWarning / 0.14 FP 除零） | 见陷阱 10：先 `warnings.catch_warnings(record=True)` 定位 `w.filename/w.lineno`，再按消息窄静默 + `np.errstate`；**两个依赖分支都要跑** |
+| 数据列含 ±Inf：p 值为 NaN 却显示「未发现显著差异」/ 任务抛 `supplied range ... is not finite`、`Input y contains infinity` | `dropna()` 不剔除 ±Inf（Inf 非 NaN），scipy 返回 NaN p、matplotlib/sklearn 直接抛错 | 入口调 `_utils.drop_non_finite(data)`（单列）或 `drop_non_finite_rows(frame, cols)`（多列配对），把 `non_finite_note(n, col)` 追加进 `messages`；回归防线 `tests/engine/test_engine_input_guards.py` 第 12/13 节 |
 
 ---
 
