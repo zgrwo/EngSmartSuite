@@ -15,10 +15,17 @@ import json
 import re
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    # Python 3.10：stdlib tomllib 仅 3.11+（requires-python >= 3.10），
+    # 而 pytest 在 <3.11 依赖 tomli（uv.lock 已锁），故回退导入保证
+    # full 矩阵 3.10 也能执行本守卫（2026-09-22 main 矩阵实测修复）。
+    import tomli as tomllib
 
 _ROOT = Path(__file__).resolve().parents[2]
 _PYPROJECT = _ROOT / "pyproject.toml"
