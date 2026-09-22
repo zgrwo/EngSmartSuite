@@ -16,10 +16,17 @@
 """
 
 import argparse
+import contextlib
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Windows 控制台/管道默认 cp1252：中文与 ✓ 会 UnicodeEncodeError（CI windows 矩阵实测）。
+# 统一 UTF-8 输出，保证「新用户第一条命令」在任何平台可读、可管道重定向。
+for _stream in (sys.stdout, sys.stderr):
+    with contextlib.suppress(AttributeError, ValueError):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     import pandas as pd
