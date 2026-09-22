@@ -13,7 +13,6 @@
 import io
 import os
 import pathlib
-import tempfile
 
 import pytest
 
@@ -135,7 +134,13 @@ def test_path_traversal_filename_cannot_escape_temp_dir(client, csrf):
     assert pathlib.Path(stored).parent == app_module._upload_dir(), (
         f"上传文件落到服务端指定目录之外：{stored}"
     )
-    assert os.path.realpath(stored).startswith(os.path.realpath(tempfile.gettempdir()) + os.sep)
+    # 不变量：落盘路径必须位于**服务端选定的上传目录**内（realpath 解符号链接）。
+    # 不能用 tempfile.gettempdir() 作基准：conftest 会把 SMARTSUITE_UPLOAD_DIR
+    # 隔离到 tmp_path，而 full job 的 --basetemp 又在系统临时目录之外
+    # （2026-09-22 main full 矩阵 13/13 因此误红）。
+    assert os.path.realpath(stored).startswith(
+        os.path.realpath(str(app_module._upload_dir())) + os.sep
+    ), f"上传文件不在服务端指定上传目录内：{stored}"
 
 
 # ── 错误响应不泄漏内部信息 ──
