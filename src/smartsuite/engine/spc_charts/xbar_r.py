@@ -480,10 +480,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 g_vio_idx = sorted(g_vio_set)
                 # 审查 #2.3：I 图（全 n=1）gdata["multi"] 恒 False → 标记全丢；
                 # 此时违规索引直接对应组内行
-                if chart_subtype == "i_chart":
-                    g_multi_sorted = gdata
-                else:
-                    g_multi_sorted = gdata[gdata["multi"]]
+                g_multi_sorted = gdata if chart_subtype == "i_chart" else gdata[gdata["multi"]]
                 viol_data = g_multi_sorted.iloc[[i for i in g_vio_idx if i < len(g_multi_sorted)]]
                 if len(viol_data) > 0:
                     ax1.scatter(
@@ -521,10 +518,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     def _fmt_labels(vals):
         labels = []
         for v in vals:
-            if hasattr(v, "strftime"):
-                s = v.strftime("%m-%d")
-            else:
-                s = str(v)
+            s = v.strftime("%m-%d") if hasattr(v, "strftime") else str(v)
             if len(s) > 15:
                 s = s[:14] + "…"
             labels.append(s)

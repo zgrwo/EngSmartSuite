@@ -35,21 +35,24 @@ pip install -e ".[dev,report,web]"
 pytest tests/ -q
 ```
 
-## 新增分析方法流程（11 步注册链）
+## 新增分析方法流程（8 步注册链）
 
 ```
 □ 1. src/smartsuite/engine/xxx.py — 实现 (AnalysisRequest) -> AnalysisResult
 □ 2. src/smartsuite/engine/__init__.py — 导出函数名
-□ 3. services/orchestrator.py — TASK_REGISTRY 注册
-□ 4. services/orchestrator.py — DEFAULT_PARAMS 添加默认值
-□ 5. services/orchestrator.py — TASK_LABELS + TASK_GROUPS 添加条目
-□ 6. web/static/app.js — TASK_PARAMS 添加参数默认值
-□ 7. templates/ — 创建 YAML 模板
-□ 8. tests/ — 至少覆盖 correctness + invariants 两层
-□ 9. docs/specification/api-reference.md — 更新 API 参考
-□ 10. docs/user-manual/ — 更新用户手册（五段式；方法章节位于 04–08）
-□ 11. skills/analysis-decision-tree.md — 更新决策树（如引入新场景）
+□ 3. src/smartsuite/services/task_spec.py — 在 TASK_SPECS 追加**一条** TaskSpec
+     （key/func_path/label/group/default_params/raw_cat/no_target/no_data）：
+     TASK_REGISTRY / DEFAULT_PARAMS / TASK_LABELS / TASK_GROUPS / RAW_CAT_TASKS /
+     NO_TARGET_TASKS / NO_DATA_TASKS 共 7 个结构全部由 `derive()` 自动派生
+     （审查 2026-09-19 B1 之前，这 7 处需手工同步且含 3 处 append/add 补丁）
+□ 4. web/static/app.js — TASK_PARAMS 添加参数默认值
+□ 5. templates/ — 创建 YAML 模板
+□ 6. tests/ — 至少覆盖 correctness + invariants 两层
+□ 7. docs/specification/api-reference.md — 更新 API 参考
+□ 8. docs/user-manual/ + skills/analysis-decision-tree.md — 手册（五段式，方法章位于 04–08）与决策树（如引入新场景）
 ```
+
+> 第 3 步是唯一一处「注册」：不要再去改 `orchestrator.py` 里的集合——它们已无字面量。
 
 ## 代码规范
 
@@ -87,7 +90,7 @@ pytest tests/ -x -q
 1. 每个 PR 自包含、可追溯
 2. commit message 格式：`type(scope): 简述`（如 `fix(engine): 修复 anova 效应量计算`）
 3. 涉及数值变更的 PR 必须附测试输出对比
-4. 新增方法必须完成 11 步注册链
+4. 新增方法必须完成 8 步注册链
 
 ## Issue 规范
 

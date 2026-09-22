@@ -4,10 +4,17 @@
 
 ```bash
 cd EngSmartSuite
-python run_server.py
+python run_server.py       # 源码检出：自动打开浏览器
+
+# 或使用安装好的控制台命令（等价，支持 --host / --port / --debug）
+smartsuite-web
 ```
 
 浏览器打开 `http://127.0.0.1:5050`。
+
+> **部署边界**：本工具设计用于**本机单用户**，默认只监听 `127.0.0.1` 且无用户认证。
+> 不建议用 `--host 0.0.0.0` 直接暴露到网络；需要内网共享时请自行加反向代理与鉴权
+> （决策与最小示例见 [ADR-003](../adr/0003-deployment-scope-single-user.md)）。
 
 ### 三步完成分析
 

@@ -78,7 +78,9 @@ class AnalysisResult:
 - `ttest_ind` / `cohens_d` 的效应量为 **Hedges g**（合并标准差 d 乘小样本校正因子）；
 - `ttest_paired` 的效应量 d_z = mean(col1−col2)/sd(col1−col2)，**符号与统计量方向一致**；
 - `jonckheere` 报告**双侧** p 值（有序备择如需单侧请自行折半判读）；
-- `mcnemar` 采用混合策略：不一致对 b+c<25 时用 Yates 校正 χ²（并输出精确二项复核提示），否则用未校正 χ²。
+- `mcnemar` 采用混合策略：不一致对 b+c<25 时用 Yates 校正 χ²（并输出精确二项复核提示），否则用未校正 χ²；优势比 OR=b/c 按定义处理——`c=0` 时为∞、`b=c=0` 时未定义，两者均给 `None` 并在结果中显式说明（2026-09-21，审查 B-5）；
+- **效应量置信区间 `effect_size_ci`**：仅对定义域无界的 d 族输出（`ttest_ind`/`cohens_d` 的 Hedges g、`ttest_paired` 的 d_z）。`mannwhitney` 的 **Cliff's δ ∈ [-1,1]** 需要其自身（支配矩阵）的方差分量，本工具无可核验的闭式公式，故**不输出**该区间（值为 `None`，并附 `effect_ci_note`）——原实现套用 Cohen's d 的标准误导致 CI 越出定义域（如 n=8 → δ=−0.906 却给 (−1.94, 0.12)），2026-09-21 审查 B-1；
+- **Wilcoxon 效应量** r = |Z|/√n_eff，Z 取 scipy 渐近正态近似的实际统计量（非由 p 反推）；n_eff 为丢弃零差后的有效对数（2026-09-21，审查 B-3）。
 
 ### decision_tree_analysis
 - **Task Key**: `decision_tree`
@@ -119,6 +121,12 @@ class AnalysisResult:
 - **描述**: Cohen's Kappa — 两个评定者之间的一致性评估
 - **params**: 无 (使用 `feature_cols[0]` 和 `feature_cols[1]` 作为评定者)
 - **返回**: `agreement_matrix`, `kappa_result`
+- **口径说明**: 检验 H₀: κ=0 的 z 使用 **Fleiss ASE0**（H₀ 下标准误）
+  `SE₀ = √[p_o(1−p_o) / (n(1−p_e)²)]`，z = κ/SE₀。这是 Fleiss–Cohen–Everitt (1969)
+  针对「检验 κ=0」的经典口径，**不是** ASE1（后者用于置信区间）。
+  2026-09-21 审查曾报本处“SE 不对”，经 18 张随机表手算对账最大偏差 1.8e-08 → 该结论
+  为**假阳性**；回归防线为 `tests/guards/test_capability_spc_guards.py` 中的
+  `test_cohens_kappa_z_matches_fleiss_ase0`。
 
 ### cronbach_alpha
 - **Task Key**: `cronbach_alpha`
@@ -311,7 +319,7 @@ class AnalysisResult:
 ### box_chart
 - **Task Key**: `box_chart`
 - **描述**: 分组箱线图 — 按类别因子展示数值分布，支持主分类 + 次分类分面，自动附 ANOVA/Kruskal-Wallis 或 t 检验/MWU 统计检验
-- **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签), `group_col` (分组列), `usl`/`lsl` (规格上/下限, 红色实线), `ucl`/`lcl`/`cl` (控制上/下限/中心线, 黄色虚线), `target` (目标值, 灰色点线)
+- **params**: `mode` ("facet" 分面 | "nested" 嵌套组合标签), `show_stats` (默认 true：在坐标区下沿绘制单张统计表，列=分组（与箱体对齐）、行=n/均值/标准差/最大值/最小值，箱体随之压缩、图形整体尺寸不变；分面模式每面板各一张；false 时改把 n 标在 X 轴刻度标签上), `group_col` (分组列), `usl`/`lsl` (规格上/下限, 红色实线), `ucl`/`lcl`/`cl` (控制上/下限/中心线, 黄色虚线), `target` (目标值, 灰色点线)
 - **feature_cols**: `[主分类列]` 或 `[主分类列, 次分类列]`
 - **返回**: `group_statistics` (含各分组均值/中位数/标准差/IQR)；统计检验结果嵌入 summary
 - **图**: 分组箱线图 + 散点叠加；次分类 ≤ 8 水平时分面展示
@@ -373,11 +381,25 @@ class AnalysisResult:
 ### orchestrate(req: AnalysisRequest) -> AnalysisResult
 路由分析请求到对应引擎函数，注入默认参数，统一异常处理。
 
-### TASK_REGISTRY: dict[str, Callable]
-全部 task key → 引擎函数的映射表。Task key 按业务场景分为 5 组（定义在 `smartsuite/services/orchestrator.py` 的 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
+### TaskSpec / TASK_SPECS（任务注册唯一事实源）
+`services/task_spec.py` 的 `TASK_SPECS: tuple[TaskSpec, ...]` 是任务元数据的**唯一来源**。
+`TaskSpec(key, func_path, label, group, default_params={}, raw_cat=False, no_target=False, no_data=False)`；
+`func_path` 为 `"模块:函数名"` 字符串，首次访问时按需 import（不在此展开引擎依赖）。
+
+### derive(specs) -> DerivedRegistry
+由 `TASK_SPECS` 派生全部注册结构：`registry`（LazyTaskRegistry）、`labels`、`groups`、
+`default_params`、`raw_cat`、`no_target`、`no_data`。重复 key 直接 `ValueError`。
+审查 2026-09-19 B1 之前，这 7 个结构需手工同步（且含 3 处 `append`/`add` 补丁）。
+
+### TASK_REGISTRY: MutableMapping[str, Callable]
+全部 task key → 引擎函数的注册表，由 `task_spec.derive()` 派生。支持
+按下标取函数后调用（如 `TASK_REGISTRY[task]` 再 `(req)`）/ `keys()` / `values()` / `items()` / `in` / `len()` /
+`set(...)` / `sorted(...)` 与 `monkeypatch.setitem` 覆盖（覆盖仅改解析缓存，可逆）。
+Task key 按业务场景分为 5 组（定义在 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
 
 ### DEFAULT_PARAMS: dict[str, dict]
-各 task key 的默认参数。编排器会自动合并用户参数到默认参数之上。
+各 task key 的默认参数（源自 `TaskSpec.default_params`）。编排器会自动合并用户参数到默认参数之上；
+空字符串参数视为“未提供”而回退到默认值（见 `_normalize_empty_params`）。
 
 ---
 
@@ -397,6 +419,8 @@ class AnalysisResult:
 | 函数 | 用途 |
 |------|------|
 | `validate_data(df, target_col, feature_cols)` | 校验列存在性、类型、缺失值 |
+| `read_csv_with_encoding(source, *, nrows=None, encoding=None)` | 多编码读取 CSV。`encoding=None`：先按 BOM 判定（UTF-8/UTF-16/UTF-32），无 BOM 再走 UTF-8 BOM → UTF-8 → GBK；显式 `encoding` 取值见 `SUPPORTED_CSV_ENCODINGS`（`utf-8-sig`/`gbk`/`gb18030`/`big5`/`utf-16`）。解码失败抛 `CsvEncodingError`，结构非法抛 `CsvParseError`（Web/CLI 共用；不含 latin-1 兜底；ADR-0004） |
+| `SUPPORTED_CSV_ENCODINGS` | 可显式声明的 CSV 编码白名单（唯一来源：CLI `--encoding` 与 Web 上传面板下拉框；ADR-0004） |
 | `preprocess_data(df, features, categorical_cols=None)` | One-Hot 编码 + 中位数插补 |
 | `missing_pattern_analysis(df)` | 缺失模式诊断 + 高基数检测 |
 | `recommend_analysis(df, target_col=None)` | 基于数据结构智能推荐分析方法 |

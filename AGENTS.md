@@ -37,14 +37,14 @@
 
 | 而不是 | 而是 |
 |--------|------|
-| "添加分析方法" | "新方法通过 11 步注册 + 4 层测试防线。去验证。" |
+| "添加分析方法" | "新方法通过 8 步注册 + 4 层测试防线。去验证。" |
 | "修复 Bug" | "复现测试 FAILS → 修复后 PASSES + 无回归。去验证。" |
 
 ## 技能加载
 
 | 范围 | Skill 文件 | 内容 |
 | :--- | :--- | :--- |
-| 修改任何源码前 | `skills/smartsuite-dev.md` | 7 大高发陷阱 + 5 套修复模板 |
+| 修改任何源码前 | `skills/smartsuite-dev.md` | 10 大高发陷阱 + 5 套修复模板 |
 | 为用户推荐分析方法 | `skills/analysis-decision-tree.md` | 决策树 → 选分析方法 |
 | 创造性工作前 | `skills/brainstorming/` | 探索意图/需求/设计后再实现 |
 | 多步任务动代码前 | `skills/writing-plans/` | 写执行计划 |
@@ -122,8 +122,10 @@ EngSmartSuite/
 ### 1. 架构隔离
 
 - engine/ 零业务框架依赖（纯 Python + numpy/scipy/pandas + matplotlib/sklearn/statsmodels 统计栈；禁止 xlwings/flask）
-- web/ 通过 orchestrator 间接调用 engine/
-- 新增分析函数必须走 11 步注册清单
+- web/ 通过 services/ 间接调用 engine/：编排走 `orchestrator.py`，引擎能力出口走 `bridge.py`（借道导出不得挂在无关模块上）
+- cli.py 只依赖 services/（第五入口，不直接依赖 engine/）
+- 新增分析函数必须走 8 步注册清单（注册只有 1 处：`services/task_spec.py` 的 `TASK_SPECS`）
+- 以上分层方向由 `tests/guards/test_layer_boundaries.py` 强制（引擎零框架依赖 / web 与 cli 不直取 engine / core 不反向依赖 / services 无 F401 借道豁免）
 
 ### 2. 防错原则
 

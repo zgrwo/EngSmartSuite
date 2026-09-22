@@ -41,10 +41,47 @@ pip install -e ".[dev]"
 # 命令行验证（列出全部支持的分析方法）
 python -m smartsuite.cli list
 
-# 或启动 Web UI（源码检出可改用 python run_server.py）
+# 或启动 Web UI（三选一，等价）
 python -m smartsuite.web.app
+smartsuite-web                  # 安装后提供的控制台命令，支持 --host/--port/--debug
+python run_server.py            # 源码检出：读环境变量并自动打开浏览器
 # → 浏览器打开 http://localhost:5050
 ```
+
+### 60 秒看到产出
+
+不想先读手册？用仓库内置演示数据一条命令跑出报告（自包含 HTML，图表已内嵌）：
+
+```bash
+python scripts/demo.py          # → ./demo_output/{correlation,process_capability,regression}.html
+```
+
+跑的是三条分析主线（要因筛选 / 过程监控 / 建模优化），详见[示例集](docs/gallery.md#60-秒复跑)。
+
+---
+
+## 部署与安全边界
+
+> 决策记录见 [ADR-003 部署形态](docs/adr/0003-deployment-scope-single-user.md)。
+
+**SmartSuite 设计用于本机单用户**：服务默认只监听 `127.0.0.1`，没有用户认证与权限控制。
+
+- **不建议**用 `smartsuite-web --host 0.0.0.0` 直接暴露到网络——那等于让内网任何人都能进入分析界面，
+  上传的数据也会以明文临时文件落在本机（默认 24 小时后清理）。
+- 需要内网共享时，请在你的运维体系里自行加一层反向代理并启用鉴权：
+
+```bash
+# Windows 友好的 WSGI 服务器示例（端口只对本机开放，由 nginx 对外）
+pip install waitress
+waitress-serve --listen=127.0.0.1:5050 smartsuite.web.app:app
+
+# nginx 反代 + basic auth（要点两行）
+# location / { auth_basic "SmartSuite"; auth_basic_user_file /etc/nginx/.htpasswd;
+#              proxy_pass http://127.0.0.1:5050; }
+```
+
+- 分析引擎与单机使用路径是稳定的；「生产就绪」**不包含**“公网服务”承诺——`Development Status: 5`
+  描述的是项目成熟度，不是部署拓扑。
 
 ---
 

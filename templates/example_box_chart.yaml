@@ -6,3 +6,4 @@ feature_cols:
   - "车间"
 params:
   mode: "facet"
+  show_stats: true   # true=坐标区下沿统计表（列=分组）；false 时改把 n 标在 X 轴刻度标签上

@@ -7,6 +7,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import is_positive_finite
 from smartsuite.engine.spc_charts._shared import _resolve_groups
 
 
@@ -33,17 +34,17 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=[f"参数 k/h 值无效: k={k}, h={h}，请输入数值"],
         )
-    if k <= 0:
+    if not is_positive_finite(k):
         return AnalysisResult(
             task="spc_cusum",
             status="error",
-            messages=[f"参数 k ({k}) 无效：参考值必须为正数，建议 k=0.5"],
+            messages=[f"参数 k ({k}) 无效：参考值必须为正的有限数，建议 k=0.5"],
         )
-    if h <= 0:
+    if not is_positive_finite(h):
         return AnalysisResult(
             task="spc_cusum",
             status="error",
-            messages=[f"参数 h ({h}) 无效：决策区间必须为正数，建议 h=4~5"],
+            messages=[f"参数 h ({h}) 无效：决策区间必须为正的有限数，建议 h=4~5"],
         )
 
     user_mu = req.params.get("mu")

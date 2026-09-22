@@ -6,205 +6,42 @@ from typing import Any
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.exceptions import SmartSuiteError
-from smartsuite.engine import GROUP_COLORS  # noqa: F401 — re-export for web layer
-from smartsuite.engine import (
-    anomaly_detect,
-    anova_analysis,
-    attribute_chart,
-    bootstrap_ci,
-    box_chart,
-    change_point_detect,
-    cohens_kappa,
-    contingency_analysis,
-    correlation_analysis,
-    cronbach_alpha,
-    cusum_chart,
-    decision_tree_analysis,
-    distribution_summary,
-    doe_analysis,
-    doe_design,
-    ewma_chart,
-    gage_rr,
-    grid_search,
-    hypothesis_test,
-    inverse_parameter_solve,
-    lasso_regression,
-    logistic_regression,
-    median_ci,
-    multi_objective_opt,
-    normality_check,
-    outlier_consensus,
-    power_analysis,
-    process_capability_analysis,
-    proportion_ci,
-    spc_nonparametric,
-    quantile_regression,
-    regression_analysis,
-    response_surface_analysis,
-    robust_regression,
-    roc_analysis,
-    scatter_plot,
-    survival_analysis,
-    tolerance_interval,
-    trend_forecast,
-    variance_test,
-    vif_analysis,
-    xbar_r_chart,
-)
-from smartsuite.engine._utils import round_for_display  # noqa: F401 — re-export for web layer
+from smartsuite.services.error_messages import build_error_result, new_error_id
+from smartsuite.services.task_spec import TASK_SPECS, derive
 
 logger = logging.getLogger(__name__)
 
-TASK_REGISTRY = {
-    "correlation": correlation_analysis,
-    "anova": anova_analysis,
-    "hypothesis_test": hypothesis_test,
-    "decision_tree": decision_tree_analysis,
-    "vif": vif_analysis,
-    "regression": regression_analysis,
-    "response_surface": response_surface_analysis,
-    "grid_search": grid_search,
-    "multi_objective": multi_objective_opt,
-    "inverse_solve": inverse_parameter_solve,
-    "doe_analysis": doe_analysis,
-    "doe_design": doe_design,
-    "spc_xbar": xbar_r_chart,
-    "spc_cusum": cusum_chart,
-    "spc_ewma": ewma_chart,
-    "spc_nonparametric": spc_nonparametric,
-    "process_capability": process_capability_analysis,
-    "trend_forecast": trend_forecast,
-    "anomaly_detect": anomaly_detect,
-    "change_point": change_point_detect,
-    "spc_attribute": attribute_chart,
-    "power_analysis": power_analysis,
-    "normality_check": normality_check,
-    "outlier_consensus": outlier_consensus,
-    "bootstrap_ci": bootstrap_ci,
-    "box_chart": box_chart,
-    "contingency": contingency_analysis,
-    "proportion_ci": proportion_ci,
-    "variance_test": variance_test,
-    "roc_analysis": roc_analysis,
-    "distribution_summary": distribution_summary,
-    "gage_rr": gage_rr,
-    "tolerance_interval": tolerance_interval,
-    "cohens_kappa": cohens_kappa,
-    "survival_analysis": survival_analysis,
-    "median_ci": median_ci,
-    "cronbach_alpha": cronbach_alpha,
-    "logistic_regression": logistic_regression,
-    "lasso_regression": lasso_regression,
-    "robust_regression": robust_regression,
-    "quantile_regression": quantile_regression,
-    "scatter_plot": scatter_plot,
-}
+# ── 任务注册结构：全部由 services/task_spec.py 的 TaskSpec 派生 ──
+# 审查 2026-09-19 B1：此处原为 7 组并列集合（含 3 处 append/add 补丁），
+# 新增方法要改 7 处且易漏。现「新增任务只需在 TASK_SPECS 追加一条」。
+# 名称与类型保持不变：多处门禁脚本、Web 层与测试直接依赖这些模块级名字。
+_derived = derive(TASK_SPECS)
 
-DEFAULT_PARAMS: dict[str, dict[str, Any]] = {
-    # 要因分析
-    "correlation": {"method": "pearson", "control_vars": []},
-    "anova": {"alpha": 0.05, "interactions": 0},
-    "hypothesis_test": {"alpha": 0.05, "test": "ttest_ind", "group_col": None},
-    "decision_tree": {"max_depth": 5, "random_state": 42},
-    "vif": {"threshold": 5},
-    "contingency": {"alpha": 0.05},
-    "proportion_ci": {"ci_level": 0.95, "success_value": None},
-    "variance_test": {"group_col": None, "alpha": 0.05},
-    "cohens_kappa": {},
-    "cronbach_alpha": {},
-    "distribution_summary": {"bins": 15},
-    "normality_check": {"alpha": 0.05},
-    "power_analysis": {
-        "mode": "required_n",
-        "test_type": "ttest",
-        "effect_size": 0.5,
-        "alpha": 0.05,
-        "target_power": 0.80,
-        "current_n": 30,
-        "n_groups": 3,
-        "p0": 0.5,
-        "p1": 0.6,
-    },
-    # DOE / 优化
-    "regression": {"model_type": "linear"},
-    "response_surface": {"direction": "maximize"},
-    "grid_search": {"ranges": None, "direction": "maximize", "n_points": 10},
-    "multi_objective": {"objectives": None, "weights": None},
-    "inverse_solve": {
-        "model": "auto",
-        "incoming_cols": "",
-        "variable_cols": "",
-        "fixed_cols": "",
-        "output_cols": "",
-        "target_cols": "",
-        "time_col": "",
-        "time_adjustable": "false",
-        "time_min": "",
-        "time_max": "",
-        "variable_bounds": "",
-        "output_weights": "",
-        "weight_mode": "std",
-        "reg_lambda": 0.02,
-        "attain_tol": 0.5,
-        "max_starts": 10,
-        "random_state": 42,
-        "request_rows": None,
-    },
-    "doe_analysis": {"alpha": 0.05},
-    "doe_design": {
-        "factors": None,
-        "method": "full_factorial",
-        "replicates": 1,
-        "randomize": True,
-        "seed": 42,
-        "center_points": 3,
-        "alpha": "rotatable",
-        "n_runs": None,
-    },
-    "roc_analysis": {},
-    "logistic_regression": {"threshold": 0.5},
-    "lasso_regression": {"alpha_lasso": None, "l1_ratio": 1.0},
-    "robust_regression": {},
-    "quantile_regression": {"quantile": 0.5},
-    # 过程监控
-    "spc_xbar": {"group_col": None, "usl": None, "lsl": None, "target": None},
-    "spc_attribute": {"chart_type": "p", "group_col": None},
-    "spc_cusum": {"k": 0.5, "h": 5.0, "group_col": None},
-    "spc_ewma": {"lam": 0.2, "L": 2.7, "group_col": None},
-    "spc_nonparametric": {"side": "two-sided"},
-    "process_capability": {"usl": None, "lsl": None, "target": None},
-    "trend_forecast": {"forecast_steps": 5},
-    "anomaly_detect": {"method": "iqr", "alpha": 0.05, "max_outliers": 5},
-    # min_segment 不注入默认值：引擎侧自适应默认 max(10, n//20)（审查 2026-08-19 #2.20）
-    "change_point": {"n_changepoints": 5},
-    "outlier_consensus": {},
-    "box_chart": {
-        "mode": "facet",
-        "group_col": None,
-        "usl": None,
-        "lsl": None,
-        "ucl": None,
-        "lcl": None,
-        "cl": None,
-        "target": None,
-    },
-    "scatter_plot": {"fit": "none", "show_ci": "true", "group_col": None},
-    "bootstrap_ci": {
-        "statistic": "mean",
-        "n_bootstrap": 2000,
-        "ci_level": 0.95,
-        "random_state": 42,
-    },
-    "median_ci": {"ci_level": 0.95},
-    "gage_rr": {
-        "tolerance": None,
-        "sigma_multiplier": 5.15,
-        "part_col": None,
-        "operator_col": None,
-    },
-    "tolerance_interval": {"coverage": 0.99, "confidence": 0.95, "side": "two-sided"},
-    "survival_analysis": {},
-}
+# 键 → 引擎函数（惰性解析：首次访问才 import 对应引擎模块）
+TASK_REGISTRY = _derived.registry
+DEFAULT_PARAMS: dict[str, dict[str, Any]] = _derived.default_params
+TASK_LABELS = _derived.labels
+TASK_GROUPS = _derived.groups
+RAW_CAT_TASKS = _derived.raw_cat
+NO_TARGET_TASKS = _derived.no_target
+NO_DATA_TASKS = _derived.no_data
+
+
+def _normalize_empty_params(params: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    """把表单/JS 清空后的空字符串归一为「未提供」：'' → 该参数的默认值。
+
+    审查 2026-09-19 E11：旧实现仅当 `defaults.get(k) is None` 时把 '' 转为 None：
+
+    - 默认值非 None 的枚举参数（如 power_analysis 的 test_type='ttest'、mode='required_n'）
+      收到 '' 会直达引擎并报「不支持的检验类型: 」/「未知模式: 」；
+    - 未知键因 `defaults.get(k) is None` 恒真而被静默改成 None（吞用户输入）。
+
+    新语义：
+      - `k in defaults` → 用默认值替换（含默认值为 None 的情形，即 '' → None）；
+      - 否则（未知键）→ 原样保留。
+    显式传入的非空值不受影响。
+    """
+    return {k: (defaults[k] if v == "" and k in defaults else v) for k, v in params.items()}
 
 
 def orchestrate(req: AnalysisRequest) -> AnalysisResult:
@@ -254,10 +91,7 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         )
 
     defaults = DEFAULT_PARAMS.get(req.task, {})
-    merged = {**defaults, **req.params}
-    # 规范化: JS 端空字符串 '' → Python None (修复 Web/CLI 参数桥接)
-    # 仅对默认值为 None 的参数做此转换，保留 explicit '' 的语义
-    merged = {k: (None if v == "" and defaults.get(k) is None else v) for k, v in merged.items()}
+    merged = _normalize_empty_params({**defaults, **req.params}, defaults)
     req = req.model_copy(update={"params": merged})
 
     try:
@@ -272,182 +106,26 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         return result
     except SmartSuiteError as e:
         elapsed = time.monotonic() - t0
+        # 审查 2026-09-19 E9：异常路径生成 error_id，让用户凭编号定位日志现场
+        error_id = new_error_id()
         logger.warning(
-            "分析任务 SmartSuite异常: task=%s, elapsed=%.2fs, error=%s",
+            "分析任务 SmartSuite异常 [error_id=%s]: task=%s, elapsed=%.2fs, error=%s",
+            error_id,
             req.task,
             elapsed,
             str(e)[:200],
         )
-        return AnalysisResult(
-            task=req.task,
-            status="error",
-            messages=[f"分析执行失败: {str(e)}", "如问题持续出现，请联系开发者"],
-        )
+        return build_error_result(req.task, e, error_id)
     except Exception as e:
         elapsed = time.monotonic() - t0
+        error_id = new_error_id()
         logger.exception(
-            "分析任务执行失败: task=%s, elapsed=%.2fs, error_type=%s, error=%s",
+            "分析任务执行失败 [error_id=%s]: task=%s, elapsed=%.2fs, error_type=%s, error=%s",
+            error_id,
             req.task,
             elapsed,
             type(e).__name__,
             str(e)[:200],
         )
-        # 将异常转为中文工艺术语，不暴露原始 traceback
-        err_cls = type(e).__name__
-        detail_map = {
-            "ValueError": "数据格式不符合分析要求，请检查目标列和因子列的数据类型",
-            "KeyError": "数据处理异常（键不存在）：请检查数据列名与参数配置；若列名无误则可能是引擎内部错误，请反馈日志",
-            "TypeError": "数据类型不匹配，请确保所有因子列为数值型或类别型",
-            "IndexError": "数据索引异常，请检查数据是否包含空行或异常索引",
-            "MemoryError": "数据量过大超出内存限制，请减少数据行数或列数",
-            "LinAlgError": "矩阵运算失败，数据可能存在严重共线性或数值异常",
-            "OverflowError": "数值溢出，数据中可能存在极端值，请检查数据范围",
-            "RuntimeError": "计算过程出现运行时错误，请检查参数设置是否合适",
-            "AttributeError": "数据结构异常，请确认数据列名和格式正确",
-            "FileNotFoundError": "找不到指定的文件，请检查文件路径",
-            "ZeroDivisionError": "计算中遇到除零错误，数据可能存在常数列或标准差为零",
-            "ImportError": "缺少必要的依赖库，请确认已安装完整的 smartsuite[all]",
-        }
-        detail = detail_map.get(err_cls, "分析计算过程中出现异常，请检查数据完整性")
-        return AnalysisResult(
-            task=req.task,
-            status="error",
-            messages=[
-                f"分析执行失败: {detail}",
-                "如问题持续出现，请联系开发者并提供数据样本",
-            ],
-        )
-
-
-# ── 任务标签和分组（Web/CLI 共享）──
-TASK_LABELS = {
-    # 要因分析
-    "correlation": "相关性分析",
-    "anova": "ANOVA方差分析",
-    "hypothesis_test": "假设检验",
-    "decision_tree": "决策树重要性",
-    "vif": "VIF共线性",
-    "contingency": "列联表分析",
-    "proportion_ci": "比例置信区间",
-    "variance_test": "方差齐性检验",
-    "cohens_kappa": "评定者一致性",
-    "cronbach_alpha": "信度分析(Cronbach α)",
-    "distribution_summary": "分布特征摘要",
-    "normality_check": "正态性评估",
-    "power_analysis": "统计功效分析",
-    # DOE/优化
-    "regression": "回归建模(OLS)",
-    "response_surface": "响应面分析",
-    "grid_search": "网格搜索寻优",
-    "multi_objective": "多目标优化",
-    "inverse_solve": "工艺参数反解",
-    "doe_analysis": "DOE效应估计",
-    "doe_design": "DOE实验设计",
-    "roc_analysis": "ROC/AUC分析",
-    "logistic_regression": "Logistic回归",
-    "lasso_regression": "Lasso回归",
-    "robust_regression": "稳健回归(Huber)",
-    "quantile_regression": "分位数回归",
-    # 过程监控
-    "spc_xbar": "X-bar/R控制图",
-    "spc_attribute": "计数型控制图(p/np/c/u)",
-    "spc_cusum": "CUSUM控制图",
-    "spc_ewma": "EWMA控制图",
-    "process_capability": "过程能力Cp/Cpk",
-    "trend_forecast": "趋势预测",
-    "anomaly_detect": "异常检测",
-    "change_point": "变点检测",
-    "outlier_consensus": "异常共识(3方法投票)",
-    "bootstrap_ci": "Bootstrap置信区间",
-    "median_ci": "中位数置信区间",
-    "gage_rr": "量具R&R分析",
-    "tolerance_interval": "统计容许区间",
-    "survival_analysis": "生存分析(Kaplan-Meier)",
-    "box_chart": "分组箱线图",
-    "scatter_plot": "散点图(含拟合)",
-    "spc_nonparametric": "非参数控制图(分布拟合法)",
-}
-
-TASK_GROUPS = {
-    "要因筛选": [
-        "correlation",
-        "anova",
-        "hypothesis_test",
-        "decision_tree",
-        "vif",
-        "contingency",
-        "proportion_ci",
-        "variance_test",
-    ],
-    "信度诊断": [
-        "cohens_kappa",
-        "cronbach_alpha",
-        "distribution_summary",
-        "normality_check",
-        "power_analysis",
-    ],
-    "建模优化": [
-        "doe_design",
-        "regression",
-        "response_surface",
-        "grid_search",
-        "multi_objective",
-        "doe_analysis",
-        "roc_analysis",
-        "logistic_regression",
-        "lasso_regression",
-        "robust_regression",
-        "quantile_regression",
-    ],
-    "过程监控": [
-        "spc_xbar",
-        "spc_attribute",
-        "spc_cusum",
-        "spc_ewma",
-        "process_capability",
-        "trend_forecast",
-        "anomaly_detect",
-        "change_point",
-        "outlier_consensus",
-        "box_chart",
-        "scatter_plot",
-        "spc_nonparametric",
-    ],
-    "高级分析": ["bootstrap_ci", "median_ci", "gage_rr", "tolerance_interval", "survival_analysis"],
-}
-TASK_GROUPS["建模优化"].append("inverse_solve")
-
-# ── 需要保留原始类别列的任务（不做 One-Hot 编码）──
-# 这些引擎函数自行处理因子水平，Web 层通过此常量判断是否跳过预处理
-RAW_CAT_TASKS: set[str] = {
-    "box_chart",
-    "anova",
-    "variance_test",
-    "contingency",
-    "cohens_kappa",
-    "hypothesis_test",
-    "survival_analysis",
-    "spc_xbar",
-    "spc_attribute",
-    "scatter_plot",
-}
-RAW_CAT_TASKS.add("inverse_solve")
-
-# ── 不需要目标列 (Y 列) 的任务 ──
-# 这些引擎函数不使用 req.target_col，Web 层通过此常量判断是否允许不选 Y 列
-NO_TARGET_TASKS: set[str] = {
-    "vif",
-    "cohens_kappa",
-    "cronbach_alpha",
-    "power_analysis",
-    "multi_objective",
-    "doe_design",
-}
-NO_TARGET_TASKS.add("inverse_solve")
-
-# ── 完全无需输入数据的任务（纯参数计算，不读 req.data）──
-# Web 层通过此常量跳过「请先上传数据文件」的拦截，并传入空 DataFrame。
-NO_DATA_TASKS: set[str] = {
-    "power_analysis",
-    "doe_design",
-}
+        # 异常→工艺术语的映射与消息组装集中于 services/error_messages.py（审查 B5）
+        return build_error_result(req.task, e, error_id)

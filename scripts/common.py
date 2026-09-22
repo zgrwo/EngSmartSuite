@@ -64,7 +64,32 @@ def web_url() -> str:
 
 def run(cmd, cwd=None) -> int:
     """运行子进程并继承标准输入输出（日志与 Ctrl+C 自然生效）。"""
-    return subprocess.run([str(a) for a in cmd], cwd=str(cwd) if cwd else None).returncode
+    return subprocess.run(
+        [str(a) for a in cmd], cwd=str(cwd) if cwd else None, env=child_env()
+    ).returncode
+
+
+# 子进程内存硬化（2026-09-19 根因诊断）：门禁脚本会以子进程跑 pytest / CLI 探针。
+# 子进程 import numpy 时 OpenBLAS 按 CPU 核数建线程池，而父进程已持有全套引擎依赖，
+# 内存紧张时子进程会直接以 “OpenBLAS error: Memory allocation still failed after
+# 10 retries, giving up.” 退出（非零退出码、stdout 为空），使门禁出现**间歇性假红**
+# （曾误判为“未解释现象”）。门禁子进程不需要 BLAS 并行，故统一限制线程数；
+# 用 setdefault 保留用户显式设置。
+_THREAD_LIMIT_VARS = (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+
+
+def child_env(**overrides: object) -> dict[str, str]:
+    """门禁子进程环境：UTF-8 输出 + 限制 BLAS 线程（防内存不足导致的假红）。"""
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    for var in _THREAD_LIMIT_VARS:
+        env.setdefault(var, "1")
+    env.update({k: str(v) for k, v in overrides.items()})
+    return env
 
 
 def run_quiet(cmd, cwd=None, timeout=30) -> bool:

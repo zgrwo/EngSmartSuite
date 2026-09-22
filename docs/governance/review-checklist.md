@@ -9,7 +9,7 @@
 - [ ] 引擎公开函数签名仍为 `(AnalysisRequest) -> AnalysisResult`（`rg "def .*\(req: AnalysisRequest\)" src/smartsuite/engine/`，命中行须与新增/改动函数对应）
 - [ ] `engine/` 未新增 flask/xlwings 导入（`rg "flask|xlwings" src/smartsuite/engine/` 无输出）
 - [ ] `web/`、`cli.py` 未直接导入 `engine`，仅经 `services/orchestrator.py` 桥接（`rg "from \.\.engine|import \.\.engine|from smartsuite\.engine|import smartsuite\.engine" src/smartsuite/web/ src/smartsuite/cli.py` 无输出）
-- [ ] 新任务已完成 11 步注册链：`engine/` 实现与导出 → TASK_REGISTRY → DEFAULT_PARAMS → TASK_LABELS/TASK_GROUPS → `web/static/app.js` TASK_PARAMS → `templates/` YAML → 测试 → [api-reference.md](../specification/api-reference.md) → 手册 → 决策树。静态核对：`python scripts/verify_frontend_params.py`
+- [ ] 新任务已完成 8 步注册链：`engine/` 实现与导出 → `services/task_spec.py` 的 `TASK_SPECS` 一条 TaskSpec（派生 7 组结构）→ `web/static/app.js` TASK_PARAMS → `templates/` YAML → 测试 → [api-reference.md](../specification/api-reference.md) → 手册与决策树。静态核对：`python scripts/verify_frontend_params.py`
 - [ ] `python scripts/verify_consistency.py --skip-pytest` 通过（注册集合/engine 导出/api-reference Task Key 对齐，退出码 0）
 
 ## B. 数值正确性与边界（6 项）

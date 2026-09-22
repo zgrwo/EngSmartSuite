@@ -95,7 +95,8 @@ smartsuite/
 │   └── exploratory.py  # 探索性分析
 │
 ├── services/      # ② 应用服务层：唯一桥接层
-│   ├── orchestrator.py # TASK_REGISTRY + DEFAULT_PARAMS
+│   ├── task_spec.py    # TASK_SPECS（任务注册唯一事实源）
+│   ├── orchestrator.py # 编排 + 7 组注册结构（派生自 task_spec）
 │   ├── data_io.py      # 数据读写 + 预处理（支持 Excel/CSV）
 │   ├── reporter.py     # 多格式输出
 │   └── audit.py        # 综合审计
@@ -121,7 +122,7 @@ smartsuite/
 |---|---|---|---|
 | ① 数值正确性 | test_correctness.py + test_doe_design.py | 已知答案 + 手工公式交叉验证 | 全量 (100%) |
 | ② 数学不变量 | test_invariants.py | p∈[0,1]、Cpk≤Cp、R²≥0 | 关键函数 |
-| ③ 边界模糊 | test_fuzz.py | 空数据/单行/全NaN/常量列 | 全部 |
+| ③ 边界模糊 | test_edge_cases.py（人工边界用例）+ test_fuzz.py（随机/极端输入搜索）+ test_property_invariants.py（hypothesis 属性测试） | 空数据/单行/全NaN/常量列/共线/n>5000；量纲缩放不变量、falsy 0、退化输入随机搜索 | 全部 |
 | ④ 差分测试 | test_cli_web_parity.py | 引擎直调 vs Web API 数值一致 | 全部 (42 任务) |
 
 ### 4.2 已知限制

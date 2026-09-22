@@ -1164,7 +1164,12 @@ def test_anomaly_contamination_invalid_rejected():
 
 
 def test_survival_event_column_validation():
-    """Round-2 #A3e：事件列编码 1/2（非 {0,1}）不得静默输出恒 1.0 的 KM 曲线。"""
+    """Round-2 #A3e：事件列编码 1/2（非 {0,1}）不得静默输出恒 1.0 的 KM 曲线。
+
+    2026-09-21 D-2 起规格收紧：1/2 等非 {0,1} 数值编码一律报错，故本用例
+    固定走 error 分支（原先的 `if r.status == "ok"` 弱断言会放过 median/事件数
+    静默出错的情况，见 test_survival_non_binary_numeric_event_column_rejected）。
+    """
     from smartsuite.engine.reliability import survival_analysis
 
     np.random.seed(3)
@@ -1172,13 +1177,65 @@ def test_survival_event_column_validation():
     r = survival_analysis(
         AnalysisRequest(task="survival_analysis", data=df, target_col="t", feature_cols=["e"])
     )
-    if r.status == "ok":
-        tbl = r.tables.get("km_table")
-        if tbl is not None and "生存概率" in tbl.columns:
-            surv = tbl["生存概率"].astype(float)
-            assert surv.iloc[-1] < 1.0, "KM 曲线不应恒为 1.0（存在失效事件但被静默忽略）"
-    else:
-        assert any("事件" in m for m in r.messages)
+    assert r.status == "error"
+    assert any("事件" in m for m in r.messages)
+
+
+def test_survival_non_binary_numeric_event_column_rejected():
+    """非 {0,1} 的数值事件列必须报错，绝不得静默乱算。
+
+    2026-09-21 审查 D-2（P0）：`astype(int)` 对任意数值列恒成功，使
+    「恰好 2 个不同值」校验永不进入；事件语义又被硬编码为 `== 1`。实测同一
+    数据仅换编码：0/1 → median 9.0/n_events 6；1/2 → 10.0/**18**；
+    10/20 → **None**/**180**（n_total 仅 12），全部 status=ok。
+
+    1/2 与 10/20 的「哪一值是事件」无法从数值推断（max 不一定代表事件），
+    故规格收紧为：数值事件列必须恰为 {0,1}（1=失效，0=删失），其余报中文错误。
+    """
+    from smartsuite.engine.reliability import survival_analysis
+
+    times = list(range(1, 13))
+    base = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    cases = {
+        "1/2": [x + 1 for x in base],
+        "10/20": [10 if x else 20 for x in base],
+        "1/2 反向": [1 if x else 2 for x in base],
+        "三值 0/1/2": [0, 1, 2] * 4,
+    }
+    for label, events in cases.items():
+        r = survival_analysis(
+            AnalysisRequest(
+                task="survival_analysis",
+                data=pd.DataFrame({"t": times, "e": events}),
+                target_col="t",
+                feature_cols=["e"],
+            )
+        )
+        assert r.status == "error", f"{label} 应报错而非静默出结果（实际 median={r.metadata})"
+        assert any("事件" in m for m in r.messages), f"{label} 错误文案应点明事件列: {r.messages}"
+
+
+def test_survival_zero_one_encoding_invariants():
+    """标准 0/1 编码：行为不变 + 事件数不得超过总样本数（等价编码不变量已由
+    test_survival_non_binary_numeric_event_column_rejected 钉在「拒绝」侧）。
+    """
+    from smartsuite.engine.reliability import survival_analysis
+
+    times = list(range(1, 13))
+    events = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+    r = survival_analysis(
+        AnalysisRequest(
+            task="survival_analysis",
+            data=pd.DataFrame({"t": times, "e": events}),
+            target_col="t",
+            feature_cols=["e"],
+        )
+    )
+    assert r.status == "ok", r.messages
+    assert r.metadata["n_events"] == 6, "事件数应等于 1 的个数"
+    assert r.metadata["n_total"] == 12
+    assert r.metadata["n_events"] <= r.metadata["n_total"], "事件数不可能超过总样本数"
+    assert r.metadata["median_survival"] == 9.0, "已知手算值：KM 首次 S<=0.5 在 t=9"
 
 
 def test_survival_group_col_param_priority():
@@ -1233,7 +1290,7 @@ def test_ljung_box_q_matches_statsmodels():
     """Round-2 #A3a：Ljung-Box Q 与 statsmodels 参考一致（旧 np.corrcoef 偏大）。"""
     import statsmodels.stats.diagnostic as sm_diag
 
-    from smartsuite.engine.detection import _ljung_box
+    from smartsuite.engine.detection.trend import _ljung_box
 
     np.random.seed(7)
     x = np.random.normal(0, 1, 200)
@@ -1252,7 +1309,7 @@ def test_acf_values_match_statsmodels():
     """
     import statsmodels.tsa.stattools as sm_ts
 
-    from smartsuite.engine.detection import _acf_values
+    from smartsuite.engine.detection.trend import _acf_values
 
     np.random.seed(7)
     x = np.random.normal(0, 1, 200)

@@ -1,6 +1,7 @@
 """网格搜索与多目标优化。"""
 
 import logging
+import numbers
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import is_positive_finite, round_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,9 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     for _col, _r in ranges.items():
         if not isinstance(_r, (tuple, list)) or len(_r) != 2:
             _invalid_ranges.append(f"「{_col}」应为 (下限, 上限) 格式")
-        elif not all(isinstance(v, (int, float)) for v in _r):
+        elif not all(isinstance(v, numbers.Real) and not isinstance(v, bool) for v in _r):
+            # numbers.Real（审查 2026-09-19 E12）：numpy 数值上下限不得被误拒；
+            # bool 排除，否则 (True, False) 会被当作合法区间
             _invalid_ranges.append(f"「{_col}」的上下限必须为数值")
         elif _r[0] >= _r[1]:
             _invalid_ranges.append(f"「{_col}」下限 ({_r[0]}) 必须小于上限 ({_r[1]})")
@@ -39,7 +43,8 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     n_points = req.params.get("n_points", 10)
     try:
         n_points = int(n_points)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
+        # OverflowError（审查 2026-09-22 发现 5 同族）：int(float('inf')) 穿透守卫
         n_points = 10
     # 防止内存耗尽：限制搜索点数
     n_points = max(2, min(n_points, 30))
@@ -129,7 +134,10 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
 
         best_idx = np.argmax(predictions) if direction == "maximize" else np.argmin(predictions)
         pred_best = float(predictions[best_idx])
-        best = {col_names[i]: round(float(points[best_idx, i]), 3) for i in range(len(col_names))}
+        best = {
+            col_names[i]: round_for_display(float(points[best_idx, i]), 3)
+            for i in range(len(col_names))
+        }
 
         # Top-N 候选
         top_n = min(5, len(predictions))
@@ -138,8 +146,11 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         else:
             top_indices = np.argsort(predictions)[:top_n]
         top_candidates = [
-            {col_names[i]: round(float(points[idx, i]), 3) for i in range(len(col_names))}
-            | {"预测值": round(float(predictions[idx]), 4)}
+            {
+                col_names[i]: round_for_display(float(points[idx, i]), 3)
+                for i in range(len(col_names))
+            }
+            | {"预测值": round_for_display(float(predictions[idx]), 4)}
             for idx in top_indices
         ]
 
@@ -301,9 +312,14 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             messages=["权重列表必须全部为数值"],
         )
     weight_sum = np.sum(weights)
-    if weight_sum <= 0:
+    # 审查 2026-09-21 D-1（同族）：float("nan")/float("inf") 不抛异常，而
+    # `weight_sum <= 0` 对 NaN 恒 False、对 +Inf 亦为 False → 权重和静默通过守卫，
+    # 随后归一化除零 → 实测 status=ok 且 summary 输出「得分: nan」。
+    if not all(np.isfinite(w) for w in weights) or not is_positive_finite(float(weight_sum)):
         return AnalysisResult(
-            task="multi_objective", status="error", messages=["权重之和必须大于零"]
+            task="multi_objective",
+            status="error",
+            messages=[f"权重必须为有限数值且总和大于零，当前: {weights}"],
         )
     weights = np.array(weights) / weight_sum
 
@@ -368,9 +384,9 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             {
                 "目标列": col,
                 "方向": "最大化" if direction == "maximize" else "最小化",
-                "权重": round(float(weights[objectives.index(obj)]), 3),
+                "权重": round_for_display(float(weights[objectives.index(obj)]), 3),
                 "最优期望值": round(best_d, 4),
-                "均值期望值": round(float(np.mean(d_i)), 4),
+                "均值期望值": round_for_display(float(np.mean(d_i)), 4),
             }
         )
     desirability_df = pd.DataFrame(desirability_rows)

@@ -57,8 +57,10 @@ const catKw = ['日期','班次','车间','机台','模具','编号','操作','�
 const yKw = ['不良','强度','伸长','冲击','粗糙','偏差','波动','效率'];
 
 // File upload
-document.getElementById('file-input').addEventListener('change', async e => {
-  const f = e.target.files[0]; if (!f) return;
+let lastFile = null;
+
+async function uploadFile(f) {
+  lastFile = f;
   document.getElementById('filename').textContent = f.name;
   document.getElementById('shape').textContent = '上传中...';
   // 审查 2026-08-19 M3：前端预检 50MB，避免 413 HTML 响应导致"网络错误"误报
@@ -66,10 +68,14 @@ document.getElementById('file-input').addEventListener('change', async e => {
     showToast('文件超过 50MB 限制，请减少数据量后重试');
     document.getElementById('filename').textContent = '未选择文件';
     document.getElementById('shape').textContent = '';
-    e.target.value = '';
+    document.getElementById('file-input').value = '';
+    lastFile = null;
     return;
   }
   const fd = new FormData(); fd.append('file', f);
+  // ADR-0004：可选显式编码；空值 = 后端自动（BOM → utf-8-sig → utf-8 → gbk）
+  const enc = document.getElementById('encoding').value;
+  if (enc) fd.append('encoding', enc);
   try {
     const r = await fetchWithCsrf('/api/upload', { method: 'POST', body: fd });
     let d = {};
@@ -92,6 +98,21 @@ document.getElementById('file-input').addEventListener('change', async e => {
     document.getElementById('filename').textContent = '未选择文件';
     document.getElementById('shape').textContent = '';
   }
+}
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  // 审查 2026-09-21 R1-1：选择**新文件**时把编码复位为「自动识别」。
+  // 否则上一次为某文件选定的编码会跨上传粘滞，把新文件静默读错（实测残留
+  // Big5 声明读 GBK 文件 → 列名 ['蠶瘍','恲僅']、HTTP 200、status=ok）。
+  // 同一文件切换下拉框仍按当前值重传（由下方 encoding 监听承担）。
+  document.getElementById('encoding').value = '';
+  uploadFile(f);
+});
+
+// 切换编码后用同一文件立即重传：否则用户看到乱码列名后必须重新选一次文件
+document.getElementById('encoding').addEventListener('change', () => {
+  if (lastFile) uploadFile(lastFile);
 });
 
 // Column rendering — uses data-* attributes + addEventListener (no inline handlers)
@@ -165,7 +186,7 @@ function clearAll() { selectedY.clear(); selectedX.clear(); selectedCat.clear();
 const TASK_PARAMS = {
   grid_search:       { ranges: '', direction: 'maximize', n_points: 10 },
   process_capability:{ usl: '', lsl: '', target: '' },
-  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05, group_col: '' },
+  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05, group_col: '', popmean: 0, popmedian: 0 },
   trend_forecast:    { forecast_steps: 5 },
   anomaly_detect:    { method: 'iqr', alpha: 0.05, max_outliers: 5 },
   response_surface:  { direction: 'maximize' },
@@ -192,7 +213,7 @@ const TASK_PARAMS = {
   doe_analysis:      { alpha: 0.05 },
   doe_design:        { method: 'full_factorial', factors: '', replicates: 1, randomize: 'true', seed: 42, center_points: 3, alpha: 'rotatable', n_runs: '' },
   variance_test:     { group_col: '', alpha: 0.05 },
-  box_chart:         { mode: 'facet', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
+  box_chart:         { mode: 'facet', show_stats: 'true', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
   scatter_plot:      { fit: 'none', show_ci: 'true', group_col: '' },
   correlation:       { method: 'pearson', control_vars: '' },
   contingency:       { alpha: 0.05 },
@@ -216,10 +237,27 @@ const PARAM_META = {
   },
   test: {
     type: 'select', label: '检验方法',
+    // 审查 2026-09-21 E1-2：必须覆盖引擎 _HYPOTHESIS_TEST_TYPES 全集（17 项）。
+    // 原仅 5 项 → 手册 §4.3 承诺的 17 种方法中 12 种在 Web 端不可达
+    // （含手册推荐的 ttest_paired）。一致性由 tests/scripts/test_verify_frontend_params.py 守护。
     options: [
-      ['ttest_ind', '独立样本 t 检验'], ['mannwhitney', 'Mann-Whitney U 检验'],
-      ['wilcoxon_paired', 'Wilcoxon 配对检验'], ['kruskal', 'Kruskal-Wallis 检验'],
+      ['ttest_ind', '独立样本 t 检验'],
+      ['ttest_paired', '配对样本 t 检验'],
       ['ttest_1samp', '单样本 t 检验'],
+      ['mannwhitney', 'Mann-Whitney U 检验（非参数）'],
+      ['wilcoxon_paired', 'Wilcoxon 配对检验'],
+      ['wilcoxon_1samp', 'Wilcoxon 单样本检验'],
+      ['kruskal_wallis', 'Kruskal-Wallis H 检验'],
+      ['kruskal', 'Kruskal-Wallis（旧名 kruskal）'],
+      ['friedman', 'Friedman 检验'],
+      ['mcnemar', 'McNemar 检验'],
+      ['cochran_q', 'Cochran Q 检验'],
+      ['ks', 'KS 双样本检验'],
+      ['mann_kendall', 'Mann-Kendall 趋势检验'],
+      ['jonckheere', 'Jonckheere-Terpstra 趋势检验'],
+      ['cohens_d', "Cohen's d 效应量"],
+      ['correlation', '相关系数检验'],
+      ['auto', '自动选择'],
     ]
   },
   method: {
@@ -309,6 +347,10 @@ const PARAM_META = {
     type: 'select', label: '置信带',
     options: [['true', '显示 95% 置信带'], ['false', '隐藏']]
   },
+  show_stats: {
+    type: 'select', label: '箱体统计标注',
+    options: [['true', '显示 n/均值/标准差/最大/最小'], ['false', '隐藏 (刻度标签显示 n)']]
+  },
   'method@doe_design': {
     type: 'select', label: '设计方法',
     options: [
@@ -354,6 +396,8 @@ const PARAM_LABELS = {
   ranges: '搜索范围', objectives: '目标定义', direction: '优化方向',
   n_points: '网格点数', usl: '规格上限 (USL)', lsl: '规格下限 (LSL)',
   test: '检验方法', alpha: '显著性水平 α', interactions: '含两两交互 (0/1)',
+  // 审查 2026-09-21 E1-3：单样本检验的中心参数（ttest_1samp / wilcoxon_1samp）
+  popmean: '检验均值 μ0 (仅单样本 t)', popmedian: '检验中位数 M0 (仅单样本 Wilcoxon)',
   forecast_steps: '预测步数', method: '异常检测方法', side: '检验侧',
   k: 'K 值 (松弛因子)', h: 'H 值 (决策区间)', lam: 'λ (平滑系数)',
   L: 'L (控制限宽度)', chart_type: '控制图类型', mode: '模式',
@@ -368,7 +412,7 @@ const PARAM_LABELS = {
   target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
   target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
   current_n: '当前样本量 n (achieved 模式)', n_groups: '组数 k (anova)', p0: '基准比例 (proportion)', p1: '目标比例 (proportion)',
-  fit: '拟合类型', show_ci: '显示置信带', threshold: '分类阈值',
+  fit: '拟合类型', show_ci: '显示置信带', show_stats: '箱体统计标注', threshold: '分类阈值',
   'threshold@vif': 'VIF 阈值',
   factors: '因子定义', replicates: '重复次数', randomize: '随机化',
   seed: '随机种子', center_points: '中心点重复数', n_runs: '运行数',

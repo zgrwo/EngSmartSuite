@@ -28,3 +28,4 @@ SmartSuite 需要在用户界面和 Python 分析引擎之间建立清晰边界�
 
 - **2026-06-28**: 初始版本，定义 Excel 交互层（xlwings）
 - **2026-07-04**: 移除 Excel 交互层（物理删除 `smartsuite/excel/`），Web UI 和 CLI 成为用户界面入口。详见 ADR-002
+- **2026-09-19**: 约束「Web/CLI 经 `orchestrator.py` 间接调用引擎」中的**引擎能力出口**部分独立为 `services/bridge.py`（`round_for_display` 等上层确实需要的引擎公开能力），使借道关系显式化；编排职责仍属 `orchestrator.py`（原文保留不改）。分层方向与「services 层无 `noqa: F401` 借道豁免」由 `tests/guards/test_layer_boundaries.py` 强制

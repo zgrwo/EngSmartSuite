@@ -15,8 +15,14 @@ test_micro_scale_guards.py 的 pico 用例（xbar/nonparametric/trend）钉住�
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
+
+# 审查 2026-09-21 E5-3：hypothesis 是 dev extra 的可选依赖，缺它时【]收集期】
+# 会抛 ImportError 而不是 skip —— 整个 pytest 会话直接中断（实测系统解释器 3.14
+# 无 hypothesis 时：1272 passed + 1 collection error；venv 有则 1282 passed）。
+# 与同目录 test_doe_pydoe3_parity.py 的「无 pyDOE3 自动跳过」保持一致。
+hypothesis = pytest.importorskip("hypothesis", reason="可选依赖 hypothesis 未安装")
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine import (

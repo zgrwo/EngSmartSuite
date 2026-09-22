@@ -6,10 +6,18 @@ safe_float / threshold_label / durbin_watson / get_palette_style
 """
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from smartsuite.engine._palette import get_palette_style
-from smartsuite.engine._utils import durbin_watson, safe_float, threshold_label
+from smartsuite.engine._utils import (
+    drop_non_finite,
+    drop_non_finite_rows,
+    durbin_watson,
+    non_finite_note,
+    safe_float,
+    threshold_label,
+)
 
 
 # ── safe_float（falsy 陷阱防护核心）──
@@ -81,6 +89,43 @@ def test_durbin_watson_positive_autocorrelation_less_than_2():
 def test_durbin_watson_too_few_residuals_raises():
     with pytest.raises(ValueError):
         durbin_watson([1.0])
+
+
+# ── drop_non_finite / drop_non_finite_rows / non_finite_note（审查 2026-09-22 发现 2/3）──
+
+
+def test_drop_non_finite_removes_inf_keeps_finite():
+    s = pd.Series([1.0, np.inf, -np.inf, 2.0, np.nan])
+    cleaned, n_dropped = drop_non_finite(s)  # NaN 由调用方先 dropna，此处一并剔除非有限
+    assert n_dropped == 3
+    assert cleaned.tolist() == [1.0, 2.0]
+
+
+def test_drop_non_finite_no_change_returns_same_series():
+    s = pd.Series([1.0, 2.0, 3.0])
+    cleaned, n_dropped = drop_non_finite(s)
+    assert n_dropped == 0
+    assert cleaned is s
+
+
+def test_drop_non_finite_rows_filters_any_column_inf():
+    df = pd.DataFrame({"x": [1.0, np.inf, 3.0], "y": [1.0, 2.0, -np.inf]})
+    cleaned, n_dropped = drop_non_finite_rows(df, ["x", "y"])
+    assert n_dropped == 2
+    assert cleaned.index.tolist() == [0]
+
+
+def test_drop_non_finite_rows_no_change_returns_same_frame():
+    df = pd.DataFrame({"x": [1.0], "y": [2.0]})
+    cleaned, n_dropped = drop_non_finite_rows(df, ["x", "y"])
+    assert n_dropped == 0
+    assert cleaned is df
+
+
+def test_non_finite_note_mentions_column_and_count():
+    note = non_finite_note(3, "温度")
+    assert "温度" in note and "3" in note and "非有限" in note
+    assert "数据" in non_finite_note(1)
 
 
 # ── get_palette_style（matplotlib rcParams 样式）──

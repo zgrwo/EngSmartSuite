@@ -27,11 +27,13 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine import (
     anomaly_detect,
+    box_chart,
     cronbach_alpha,
     cusum_chart,
     distribution_summary,
     ewma_chart,
     gage_rr,
+    grid_search,
     hypothesis_test,
     outlier_consensus,
     regression_analysis,
@@ -281,32 +283,61 @@ def test_shapiro_p_constant_column_returns_one_without_warning():
 
 # ── B-4: 微尺度常量判据 ────────────────────────────────────────────────────
 def test_trend_forecast_pico_scale_not_constant():
-    rng = np.random.default_rng(2)
-    df = pd.DataFrame({"y": 5e-13 + 1e-13 * rng.standard_normal(50)})
-    r = trend_forecast(
-        AnalysisRequest(task="trend_forecast", data=df, target_col="y", feature_cols=[], params={})
+    """pico 级波动不得被误判常量，且统计量随量纲同比缩放（审查 2026-09-22 发现 6）。"""
+
+    def run(scale):
+        rng = np.random.default_rng(2)
+        df = pd.DataFrame({"y": (5.0 + 1.0 * rng.standard_normal(50)) * scale})
+        return trend_forecast(
+            AnalysisRequest(
+                task="trend_forecast", data=df, target_col="y", feature_cols=[], params={}
+            )
+        )
+
+    macro, micro = run(1.0), run(1e-13)
+    assert micro.status == "ok", f"pico 级真实波动被误判常量: {micro.messages}"
+    assert micro.metadata["slope"] == pytest.approx(macro.metadata["slope"] * 1e-13, rel=1e-6)
+    assert micro.metadata["intercept"] == pytest.approx(
+        macro.metadata["intercept"] * 1e-13, rel=1e-6
     )
-    assert r.status == "ok", f"pico 级真实波动被误判常量: {r.messages}"
 
 
 def test_spc_xbar_pico_scale_not_constant():
-    rng = np.random.default_rng(2)
-    df = pd.DataFrame({"y": 5e-13 + 1e-13 * rng.standard_normal(50)})
-    r = xbar_r_chart(
-        AnalysisRequest(task="spc_xbar", data=df, target_col="y", feature_cols=[], params={})
+    """控制限随量纲同比缩放（旧实现绝对阈值下 pico 级被整列跳过）。"""
+
+    def run(scale):
+        rng = np.random.default_rng(2)
+        df = pd.DataFrame({"y": (5.0 + 1.0 * rng.standard_normal(50)) * scale})
+        return xbar_r_chart(
+            AnalysisRequest(task="spc_xbar", data=df, target_col="y", feature_cols=[], params={})
+        )
+
+    macro, micro = run(1.0), run(1e-13)
+    assert micro.status == "ok", f"pico 级真实波动被误判常量: {micro.messages}"
+    assert micro.metadata["ucl_x"] == pytest.approx(macro.metadata["ucl_x"] * 1e-13, rel=1e-6)
+    assert micro.metadata["lcl_x"] == pytest.approx(macro.metadata["lcl_x"] * 1e-13, rel=1e-6)
+    assert micro.metadata["xbar_mean"] == pytest.approx(
+        macro.metadata["xbar_mean"] * 1e-13, rel=1e-6
     )
-    assert r.status == "ok", f"pico 级真实波动被误判常量: {r.messages}"
 
 
 def test_spc_nonparametric_pico_scale_not_constant():
-    rng = np.random.default_rng(2)
-    df = pd.DataFrame({"y": 5e-13 + 1e-13 * rng.standard_normal(50)})
-    r = spc_nonparametric(
-        AnalysisRequest(
-            task="spc_nonparametric", data=df, target_col="y", feature_cols=[], params={}
+    """非参数控制限同样必须随量纲缩放，不得被常量判据吞掉。"""
+
+    def run(scale):
+        rng = np.random.default_rng(2)
+        df = pd.DataFrame({"y": (5.0 + 1.0 * rng.standard_normal(50)) * scale})
+        return spc_nonparametric(
+            AnalysisRequest(
+                task="spc_nonparametric", data=df, target_col="y", feature_cols=[], params={}
+            )
         )
-    )
-    assert r.status == "ok", f"pico 级真实波动被误判常量: {r.messages}"
+
+    macro, micro = run(1.0), run(1e-13)
+    assert micro.status == "ok", f"pico 级真实波动被误判常量: {micro.messages}"
+    assert micro.metadata["ucl"] == pytest.approx(macro.metadata["ucl"] * 1e-13, rel=1e-6)
+    assert micro.metadata["lcl"] == pytest.approx(macro.metadata["lcl"] * 1e-13, rel=1e-6)
+    assert micro.metadata["cl"] == pytest.approx(macro.metadata["cl"] * 1e-13, rel=1e-6)
 
 
 # ── B-5: 展示层 ────────────────────────────────────────────────────────────
@@ -499,11 +530,32 @@ def test_tolerance_interval_micro_scale_bounds_scale():
 
 
 def test_cusum_ewma_micro_scale_not_skipped():
+    """微尺度不得被误判零方差：EWMA 控制限同比缩放、CUSUM 报警数不变。"""
     rng = np.random.default_rng(4)
-    df = pd.DataFrame({"y": 10 + 1e-13 * rng.standard_normal(50)})
-    for task, func in (("spc_cusum", cusum_chart), ("spc_ewma", ewma_chart)):
-        r = func(AnalysisRequest(task=task, data=df, target_col="y", feature_cols=[], params={}))
-        assert r.status == "ok", f"{task} 微尺度分组被误判零方差: {r.messages}"
+    base = np.concatenate([rng.normal(0, 1, 25), rng.normal(3, 1, 25)])
+
+    def run(scale):
+        df = pd.DataFrame({"y": base * scale})
+        c = cusum_chart(
+            AnalysisRequest(task="spc_cusum", data=df, target_col="y", feature_cols=[], params={})
+        )
+        e = ewma_chart(
+            AnalysisRequest(task="spc_ewma", data=df, target_col="y", feature_cols=[], params={})
+        )
+        return c, e
+
+    c_macro, e_macro = run(1.0)
+    c_micro, e_micro = run(1e-13)
+    assert c_micro.status == "ok" and e_micro.status == "ok", (
+        f"微尺度分组被误判零方差: cusum={c_micro.messages}, ewma={e_micro.messages}"
+    )
+    assert c_micro.metadata["total_alarms"] == c_macro.metadata["total_alarms"]
+    assert e_micro.metadata["ucl_asym"] == pytest.approx(
+        e_macro.metadata["ucl_asym"] * 1e-13, rel=1e-6
+    )
+    assert e_micro.metadata["lcl_asym"] == pytest.approx(
+        e_macro.metadata["lcl_asym"] * 1e-13, rel=1e-6
+    )
 
 
 # ── D-2: 除法防护的同族点 ─────────────────────────────────────────────────
@@ -656,3 +708,152 @@ def test_we_rules_zero_sigma_no_false_violations():
 
     assert _we_rules_xbar(np.full(20, 5.0), 5.0, 0.0) == {}
     assert _we_rules_xbar(np.full(20, 5.0), 5.0, float("nan")) == {}
+
+
+# ── R1-3（2026-09-21 审查）：box_chart / grid_search 构建期固定位舍入 ──────────
+# 固定位 round(x, 3/4) 在**数据构建期**执行（非展示期），把微尺度有效值直接截为
+# 0.0。修复前实测：box_chart 分组统计整表 0.0；grid_search optimal_params 由真实
+# 500/70 变为 {温度: 0.0, 压力: 0.0}（推荐工艺参数被销毁）。
+def test_box_chart_micro_scale_group_stats_scale_with_magnitude():
+    rng = np.random.default_rng(3)
+    n = 60
+    macro = rng.normal(5.0, 1.0, n)
+    groups = ["A", "B"] * (n // 2)
+
+    def run(values):
+        df = pd.DataFrame({"y": values, "g": groups})
+        return box_chart(
+            AnalysisRequest(
+                task="box_chart", data=df, target_col="y", feature_cols=["g"], params={}
+            )
+        )
+
+    r_macro = run(macro)
+    r_micro = run(macro * 1e-9)
+    assert r_macro.status == "ok" and r_micro.status == "ok", (r_macro.messages, r_micro.messages)
+    t_macro = r_macro.tables["group_statistics"]
+    t_micro = r_micro.tables["group_statistics"]
+    for col in ("均值", "中位数", "标准差", "IQR", "最小值", "最大值"):
+        macro_v = float(t_macro[col].iloc[0])
+        micro_v = float(t_micro[col].iloc[0])
+        assert micro_v != 0.0, f"{col} 在 ×1e-9 下被舍入为 0.0（整表归零）"
+        assert micro_v == pytest.approx(macro_v * 1e-9, rel=0.02), f"{col} 未随量纲同比缩放"
+
+
+def test_box_chart_stats_table_match_group_statistics_at_micro_scale():
+    """box_chart 统计表必须与 group_statistics 表逐位一致（微尺度不归零）。
+
+    对应陷阱 9「展示层二次舍入」：表格若用固定 `:g`，对 1e6 量级只留 6 位有效数字，
+    微尺度靠科学计数；实现走与结果表同口径的展示格式化。
+    """
+    rng = np.random.default_rng(11)
+    n = 40
+    df = pd.DataFrame({"y": rng.normal(5.0, 1.0, n) * 1e-9, "g": ["A", "B"] * (n // 2)})
+    r = box_chart(
+        AnalysisRequest(task="box_chart", data=df, target_col="y", feature_cols=["g"], params={})
+    )
+    assert r.status == "ok", r.messages
+    ax = r.figures[0].axes[0]
+    assert len(ax.tables) == 1, "统计值应汇总为一张表"
+    table = ax.tables[0]
+    stats = r.tables["group_statistics"]
+    row_keys = ["样本量", "均值", "标准差", "最大值", "最小值"]
+    for i, (_, row) in enumerate(stats.iterrows()):
+        for r_idx, col in enumerate(row_keys):
+            shown = float(table[(r_idx, i + 1)].get_text().get_text())
+            expected = float(row[col])
+            if col == "样本量":
+                assert shown == expected, f"第 {i + 1} 列 n 与统计表不一致: {shown} != {expected}"
+                continue
+            assert shown != 0.0, f"第 {i + 1} 列「{col}」在微尺度下归零"
+            assert shown == pytest.approx(expected, rel=1e-6), (
+                f"第 {i + 1} 列「{col}」表格值 {shown} 与统计表 {expected} 不一致"
+            )
+
+
+def test_grid_search_micro_scale_optimal_params_scale_with_magnitude():
+    rng = np.random.default_rng(3)
+    n = 80
+    factors = ["温度", "压力"]
+
+    def run(scale):
+        x1 = rng.uniform(400, 500, n) * scale
+        x2 = rng.uniform(50, 70, n) * scale
+        y = (200 + 0.05 * (x1 / scale) + 0.3 * (x2 / scale) + rng.normal(0, 0.1, n)) * scale
+        df = pd.DataFrame({"温度": x1, "压力": x2, "强度": y})
+        params = {
+            "ranges": {"温度": [400 * scale, 500 * scale], "压力": [50 * scale, 70 * scale]},
+            "direction": "maximize",
+            "n_points": 10,
+        }
+        return grid_search(
+            AnalysisRequest(
+                task="grid_search", data=df, target_col="强度", feature_cols=factors, params=params
+            )
+        )
+
+    r_macro = run(1.0)
+    r_micro = run(1e-9)
+    assert r_macro.status == "ok" and r_micro.status == "ok", (r_macro.messages, r_micro.messages)
+    for key in factors:
+        macro_v = float(r_macro.metadata["optimal_params"][key])
+        micro_v = float(r_micro.metadata["optimal_params"][key])
+        assert micro_v != 0.0, f"推荐参数 {key} 在 ×1e-9 下被舍入为 0.0（可执行结论被销毁）"
+        assert micro_v == pytest.approx(macro_v * 1e-9, rel=0.05), f"推荐参数 {key} 未随量纲缩放"
+
+
+# ── D-4（2026-09-21 审查）：IsolationForest 量纲敏感 → 微尺度静默零检出 ────────
+def test_anomaly_detect_isolation_forest_scale_invariant():
+    """多变量异常检出数必须与量纲无关（×1e-9 不得静默归零）。
+
+    修复前实测：同一数据 scale 1e0…1e-7 恒检出 6 个，1e-9/1e-12 骤降为 0，
+    且 status=ok 无任何提示。根因是 IsolationForest 直接吃原始特征值，
+    未做标准化。修复=入模型前 StandardScaler。
+    """
+    rng = np.random.default_rng(1)
+    base = np.concatenate([rng.normal(0, 1, 100), [8.0, -8.0]])
+    noise = rng.normal(0, 0.1, 102)
+
+    def run(scale):
+        df = pd.DataFrame({"x": base * scale, "y": (base * 2 + noise) * scale})
+        return anomaly_detect(
+            AnalysisRequest(
+                task="anomaly_detect",
+                data=df,
+                target_col="",
+                feature_cols=["x", "y"],
+                params={"method": "isolation_forest"},
+            )
+        )
+
+    counts = {}
+    for scale in (1.0, 1e-7, 1e-9, 1e-12, 1e12):
+        r = run(scale)
+        assert r.status == "ok", (scale, r.messages)
+        counts[scale] = r.metadata["anomaly_count"]
+    assert counts[1.0] > 0, "宏观量级应检出强异常点（±8σ）"
+    assert len(set(counts.values())) == 1, f"检出数随量纲变化（微尺度静默归零）: {counts}"
+
+
+def test_outlier_consensus_isolation_vote_scale_invariant():
+    """outlier_consensus 的 IsolationForest 投票同样必须量纲无关。"""
+    rng = np.random.default_rng(1)
+    base = np.concatenate([rng.normal(0, 1, 100), [8.0, -8.0]])
+
+    def run(scale):
+        df = pd.DataFrame({"y": base * scale})
+        return outlier_consensus(
+            AnalysisRequest(
+                task="outlier_consensus",
+                data=df,
+                target_col="y",
+                feature_cols=[],
+                params={},
+            )
+        )
+
+    r_macro, r_micro = run(1.0), run(1e-9)
+    assert r_macro.status == "ok" and r_micro.status == "ok", (r_macro.messages, r_micro.messages)
+    t_macro = r_macro.tables.get("consensus") or next(iter(r_macro.tables.values()))
+    t_micro = r_micro.tables.get("consensus") or next(iter(r_micro.tables.values()))
+    assert len(t_macro) == len(t_micro), "异常共识条数随量纲变化"

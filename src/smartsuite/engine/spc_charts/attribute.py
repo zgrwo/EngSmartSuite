@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import _adjust_xlabels
+from smartsuite.engine._utils import _adjust_xlabels, round_for_display
 from smartsuite.engine.spc_charts._shared import _natural_sort_key
 
 
@@ -329,10 +329,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     def _fmt_attr_labels(vals):
         labels = []
         for v in vals:
-            if hasattr(v, "strftime"):
-                s = v.strftime("%m-%d")
-            else:
-                s = str(v)
+            s = v.strftime("%m-%d") if hasattr(v, "strftime") else str(v)
             if len(s) > 15:
                 s = s[:14] + "…"
             labels.append(s)
@@ -377,9 +374,9 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
             {
                 "X": row["x_val"],
                 "分组": row["group_val"] if has_groups else "—",
-                stat_name: round(float(row["stat"]), 4),
-                "UCL": round(float(row["ucl"]), 4),
-                "LCL": round(float(row["lcl"]), 4),
+                stat_name: round_for_display(float(row["stat"]), 4),
+                "UCL": round_for_display(float(row["ucl"]), 4),
+                "LCL": round_for_display(float(row["lcl"]), 4),
             }
         )
 

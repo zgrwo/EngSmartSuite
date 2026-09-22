@@ -1,21 +1,23 @@
-"""REST API — 将分析引擎能力暴露为 HTTP 端点。"""
+"""REST API — 将分析引擎能力暴露为 HTTP 端点。
+
+审查 2026-09-19 B3：本模块**不得**在模块级导入 `matplotlib.pyplot`，也不得自行设置
+matplotlib 后端——pyplot 一旦导入后端即锁定，而 Agg 由 `engine/__init__.py` 唯一配置；
+web 按分层红线不能直接 import engine，只能依赖「经 services → engine 已配置」的既定顺序。
+图窗释放改走 `services.reporter.close_figures`（唯一实现）。守卫见
+`tests/guards/test_matplotlib_backend_order.py`。
+"""
 
 import base64
 import io
 import logging
 import math
 
-# 审查 2026-09-01 A-2：matplotlib.use() 必须在 pyplot 首次导入之前调用，
-# 否则 engine/__init__.py 中同样调用将因 pyplot 已锁定后端而失效（时序脆弱）
-import matplotlib as _mpl
-
-_mpl.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402 — Agg 后端已在上一行设置
 import numpy as np
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.core.exceptions import ValidationError
+from smartsuite.services.bridge import round_for_display
 from smartsuite.services.data_io import (
     infer_hypothesis_group_col,
     prepare_spc_subgroup_col,
@@ -26,8 +28,8 @@ from smartsuite.services.orchestrator import (
     NO_TARGET_TASKS,
     RAW_CAT_TASKS,
     orchestrate,
-    round_for_display,
 )
+from smartsuite.services.reporter import close_figures
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +234,8 @@ def run_analysis(
                 fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
                 buf.seek(0)
                 charts.append(base64.b64encode(buf.read()).decode())
-                plt.close(fig)
+            # 图窗释放走唯一实现（含惰性 pyplot）：本模块不导入 pyplot
+            close_figures(result.figures)
 
             # 序列化 metadata（模块级 _serialize_meta：DataFrame/Series/ndarray → list）
             meta = {str(k): _serialize_meta(v) for k, v in result.metadata.items()}

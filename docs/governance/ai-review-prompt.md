@@ -48,7 +48,7 @@
 ```
 web/  (Flask: app.py / api.py / static/app.js)   ← 依赖 services/，禁止直接 import engine/
   ↓
-services/  (orchestrator / data_io / reporter / audit)   ← 唯一桥接层
+services/  (task_spec / config / orchestrator / error_messages / bridge / data_io / reporter / audit)   ← 唯一桥接层
   ↓
 engine/  (纯 Python：root_cause/ doe_opt/ spc_charts/ 子包（2026-09-19 拆分）+
           capability / detection / reliability / exploratory / inverse +
@@ -61,7 +61,7 @@ core/   (contracts.py：AnalysisRequest / AnalysisResult；exceptions.py)   ← 
 - `AnalysisResult` 必须含 `summary`（中文工艺语言）、`tables`（dict[str, DataFrame]）、`figures`（list[Figure]）。
 - 违例红线：`engine/` 任何 flask/xlwings 导入、`web/` 任何 `import smartsuite.engine`、裸 `except:` / `except Exception` 不记录日志、错误消息泄露 Python traceback。
 
-### 3.3 数据契约与任务注册（11 步注册链）
+### 3.3 数据契约与任务注册（8 步注册链）
 
 **AnalysisRequest**：`task / data: pd.DataFrame / target_col / feature_cols: list[str] / params: dict[str, Any]`（Pydantic v2）。
 **AnalysisResult**：`task / tables / figures / summary / metadata / status("ok"|"error") / messages`。
@@ -69,10 +69,15 @@ core/   (contracts.py：AnalysisRequest / AnalysisResult；exceptions.py)   ← 
 新增分析函数必须走完整注册链，审查时逐环节核对（见 [documentation.md](documentation.md) "同步更新链"）：
 
 ```
-engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → DEFAULT_PARAMS
-→ TASK_LABELS + TASK_GROUPS → web/static/app.js TASK_PARAMS → templates/ YAML
-→ 测试（correctness+invariants）→ api-reference.md → user-manual/（五段式）→ 决策树
+engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_SPECS 追加一条 TaskSpec
+→ web/static/app.js TASK_PARAMS → templates/ YAML → 测试（correctness+invariants）
+→ api-reference.md → user-manual/（五段式）+ 决策树
 ```
+
+**注册只有 1 处**（审查 2026-09-19 B1）：`services/task_spec.py` 的 `TASK_SPECS`；
+`orchestrator.py` 的 `TASK_REGISTRY` / `DEFAULT_PARAMS` / `TASK_LABELS` / `TASK_GROUPS` /
+`RAW_CAT_TASKS` / `NO_TARGET_TASKS` / `NO_DATA_TASKS` 共 7 个名字全部由 `derive()` 派生。
+审查时若发现 `orchestrator.py` 里出现任务字面量集合，即为回退。
 
 **前端列约束三集合**（`web/static/app.js` 的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 常量——行号易漂移，按常量名定位；引擎函数每次改动后必核对，陷阱 2）：
 - `_noTargetNeeded`：完全无需 Y 列（vif/cohens_kappa/cronbach_alpha/power_analysis/multi_objective/doe_design…）
@@ -102,19 +107,19 @@ engine/ 实现 → engine/__init__.py 导出 → orchestrator TASK_REGISTRY → 
 
 - 数据流转含 `services/data_io.preprocess_data`（**返回多个值的元组解包——历史的 4+ 解包错误**，改动必须核对全部调用方）。
 - ①②③ 层由 hypothesis 属性测试加固（`tests/engine/test_property_invariants.py`：量纲缩放不变量 / falsy 0 / 退化输入随机搜索，2026-09-19 起）。
-- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率以当轮实测为准（2026-09-19 实测 89.67%；门禁 `--cov-fail-under=85`，quality.yml 已于 2026-09-19 前置到 PR）；测试质量守卫基线 WARN ≤ 29（quality.yml `--max-warn 29`）。
+- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率以当轮实测为准（2026-09-19 实测 89.67%；门禁 `--cov-fail-under=85`，quality.yml 已于 2026-09-19 前置到 PR）；测试质量守卫基线 WARN ≤ 10（quality.yml `--max-warn 10`，2026-09-22 由 14 收紧）。
 
 ### 3.6 治理红线与历史陷阱速查
 
 | 红线 | 要求 |
 | :--- | :--- |
-| 注册完整性 | 新增分析函数必须 11 步注册链全走（见 3.3） |
+| 注册完整性 | 新增分析函数必须 8 步注册链全走（见 3.3） |
 | 文档同步 | api-reference 签名唯一信源；user-manual/（五段式：参数选择→示例图片→数值结果→解读→补充）（承诺内存要求：**手册数值与引擎实测一致**，不得"声称未兑现"） |
 | 版本一致性 | `pyproject.toml version` == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 引用行，2026-09-06 F1）== `.release-please-manifest.json` == 最新 `v*` tag（verify_docs 版本向量强制） |
-| 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.5，经 uv.lock 锁定）；CI 矩阵 3.10–3.13 × 3 OS |
+| 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.6，经 uv.lock 锁定）；CI 矩阵 3.10–3.14 × 3 OS（3.12/3.13 排除 macOS） |
 
 **高频复发模式**（逐条做被动排查，历史见 [AGENTS.md](../../AGENTS.md) 历史经验表）：
-① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）。
+① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）；⑫ **数据列 ±Inf 未清洗**（穿透 `dropna()`：scipy 返回 NaN p 值被表述为「未发现显著差异」/ matplotlib·sklearn 抛未捕获异常，2026-09-22 发现 2/3，入口统一走 `_utils.drop_non_finite[_rows]`）。
 
 **smartsuite-dev 技能 7 大陷阱速查**（详见 [smartsuite-dev.md](../../skills/smartsuite-dev.md)）：
 1. PALETTE 嵌套键错误（`anomaly` 无 `secondary`；访问即 KeyError 被 orchestrator 误翻译成"缺列"）
@@ -189,7 +194,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | [ci.yml `full`](../../.github/workflows/ci.yml) | main push / dispatch | 矩阵 3 OS × Python 3.10/3.11/3.12/3.13（部分排除），`pytest tests/ -q` + `verify_consistency`（完整嵌套 pytest）。核对 Windows junction `--basetemp` 处理。 |
 | [ci.yml `quality`](../../.github/workflows/ci.yml) | main push / dispatch | 覆盖率 fail-under=85（2026-09-19 起）、vulture（过滤 Pydantic `cls` 误报）、pip-audit。 |
 | [ci.yml `consistency`](../../.github/workflows/ci.yml) | 任意分支 | 5 路注册断言（REGISTRY=PARAMS=LABELS=GROUPS）+ `engine` 全部导出 + `verify_frontend_params`（静态键集比对，2026-09-06 E4/G4 起）+ `verify_cross_consistency`（运行时，`set -o pipefail`）。 |
-| [quality.yml](../../.github/workflows/quality.yml) | PR 涉及 src/scripts/tests/benchmarks/user-manual/api-reference/uv.lock | dependency-review（PR 依赖变更）、test-quality-guard（WARN ≤ 29）、docs-consistency（verify_docs --strict，3.10 兜底）、manual-parity（verify_cross_consistency，需 report extras 读 xlsx）、falsy-audit、py310-engine（3.10 锁文件分叉路径回归，2026-09-19 起）、architecture-check（verify_consistency --skip-pytest + 覆盖率门禁 fail-under=85）、ruff-check/type-check（ruff 版本经 uv.lock 锁定，pyproject 0.16.5；mypy 类型检查）。 |
+| [quality.yml](../../.github/workflows/quality.yml) | PR 涉及 src/scripts/tests/benchmarks/user-manual/api-reference/uv.lock | dependency-review（PR 依赖变更）、test-quality-guard（WARN ≤ 29）、docs-consistency（verify_docs --strict，3.10 兜底）、manual-parity（verify_cross_consistency，需 report extras 读 xlsx）、falsy-audit、py310-engine（3.10 锁文件分叉路径回归，2026-09-19 起）、architecture-check（verify_consistency --skip-pytest + 覆盖率门禁 fail-under=85）、ruff-check/type-check（ruff 版本经 uv.lock 锁定，pyproject 0.16.6；mypy 类型检查）。 |
 | [release.yml](../../.github/workflows/release.yml) | main push / release published | main：release-please 开 release PR，合并后发布 Release 并**在同一 run 内**构建 wheel/sdist（构建前端锁定 `build==1.6.1`，2026-09-19 F-1）并 attach（2026-09-06 R4-3 起——release-please 以 GITHUB_TOKEN 发布，其 release 事件不级联触发 workflow，实证 v1.2.5/v1.2.6 空发）；release published 触发的 build-artifacts job 仅覆盖**手工**发布；tag == pyproject version == manifest == CHANGELOG。 |
 | [security.yml](../../.github/workflows/security.yml) | push / PR / 定时 | CodeQL + pip-audit；依赖改动核对版本上限。 |
 | [benchmarks.yml](../../.github/workflows/benchmarks.yml) | main push（src/benchmarks/依赖）/ 每周一 cron / dispatch | **非门禁**性能基线：`pytest benchmarks/ --benchmark-only`（3 代表任务 × 1e3/1e4/1e5），构件归档 90 天；核对数值路径变更是否实测性能退化（2026-09-19 新增）。 |
@@ -246,7 +251,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 ### 维度 F：文档一致性（Docs）
 
 - F1 数字基准：签名总数以 [api-reference.md](../specification/api-reference.md) 为唯一信源；42 任务文字在任何文档中不得硬编码成别的数（**审查者当轮重测数量，模板中的 42 为 2026-09-19 快照**）。
-- F2 注册链：新增/修改分析函数必须走 11 步同步（见 3.3），前端三集合与引擎实际使用一致。
+- F2 注册链：新增/修改分析函数必须走 8 步同步（见 3.3），注册集中在 `task_spec.py`，前端三集合与引擎实际使用一致。
 - F3 手册准确性：user-manual/（五段式）的"数值结果"段必须与引擎实跑一致（历史 10+ 次"声称未兑现"）；示例图片在 `docs/user-manual/images/`。
 - F4 目录树与术语：文件增删移同步 [project-structure.md](project-structure.md) 目录树；新概念登记 [context.md](context.md)，禁止 SSOT 违约重复定义；**`skills/*.md` 陷阱清单与源码同步**（历史：smartsuite-dev.md `_yOnlyTasks` 缺 `doe_design` 而 app.js 已含，2026-09-05 F-drift）。
 - F5 版本链：pyproject version == CHANGELOG 最新 `## [X]` 标题（release-please inline 链接风格，无 `[X]:` 行，2026-09-06 F1）== manifest == **远端** latest tag（本地 tag 与 `origin/*` 引用会过期，发版前全量按「4.2 附注」核远端）。
@@ -326,7 +331,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 | 5. 独立参考 | scipy/statsmodels/numpy 独立实现（或手算）与引擎输出并排，权重 1e-9 | 回归 / 统计 |
 | 6. 性能/概率复刻 | 性能声称用与生产相同路径测量；bootstrap/随机类重复采样报告分布 | 性能 / 概率 |
 | 7. 元批判 | reaudit 场景**强制**：对上一轮每条 P0/P1 独立复现并**重算方向与量级**（方法 5 切入），先判定旧结论真伪再谈修复与否；已否证项按「3.7」登记。禁用"旧报告说严重就按严重修"的默认继承 | reaudit / 任何对旧结论的引用 |
-| 8. 同族扫描 | 找到缺陷后 grep **同模式兄弟点**逐个核验：`1e-12` 绝对阈值族、`float()` 无 `isfinite` 族、`params.get(x) or default` falsy 族、orchestrator KeyError 翻译族、固定位 `round()` 舍入族——只修报告反例、同取值域复发即"修复不完整"（历史：spc_xbar 相对阈值已修但 detection/spc_nonparametric 未同步，2026-09-05 B1） | 任何缺陷修复的完整性 |
+| 8. 同族扫描 | 找到缺陷后 grep **同模式兄弟点**逐个核验：`1e-12` 绝对阈值族、`float()` 无 `isfinite` 族、`params.get(x) or default` falsy 族、orchestrator KeyError 翻译族、固定位 `round()` 舍入族、数据列 ±Inf 未清洗族（`dropna()` 后直接入 scipy/matplotlib/sklearn）、`int()` 参数转换缺 `OverflowError` 族——只修报告反例、同取值域复发即"修复不完整"（历史：spc_xbar 相对阈值已修但 detection/spc_nonparametric 未同步，2026-09-05 B1；`_safe_int` 捕获元组缺 `OverflowError`，2026-09-22 发现 5） | 任何缺陷修复的完整性 |
 
 **判定规则**：无法给出任何一项对抗验证的 finding 视为"待确认"或放弃；验证失败（输入不能复现所述问题）的 finding 必须删除或降级为 P3 观察项，并说明为什么误报（防止下一个审查者复检踩坑）。**证据双向强制**：`✅ 已修复 / 保持项 / 健康声明` 等**正向结论同样必须附 ≥1 项本轮回测证据**，无证据的正向断言标注"未经检验"（2026-09-05 教训：capability 的正面断言被下一统计量实跑打脸，见「3.7」同批）。
 
@@ -347,7 +352,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 ```
 
 分级定级参考（与 [AGENTS.md](../../AGENTS.md) 历史 P0 对齐）：
-- P0：静默错误数值结果（如相关系数、Cpk、Kaplan-Meier 算错却不报错）；验证体系假绿（改错引擎侧仍全绿）；falsy 陷阱引入 0/False 误分支导致静默错结果；11 步注册链断裂导致 Web UI 功能缺失。
+- P0：静默错误数值结果（如相关系数、Cpk、Kaplan-Meier 算错却不报错）；验证体系假绿（改错引擎侧仍全绿）；falsy 陷阱引入 0/False 误分支导致静默错结果；8 步注册链断裂（尤其 `TASK_SPECS` 漏登记）导致 Web UI 功能缺失。
 - P1：n·p 组合爆炸无界、守卫缺一路（修 NaN 不修 Inf）、手册数值与实际漂移、测试期望自产、差分测试宣称失真。
 - P2：绝对阈值残留、参数共享语义错配、弱断言、三集合未同步、文档硬编码 42 以外的数字。
 - P3：归档/文档化建议、门禁增强、重构友好性。

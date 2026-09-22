@@ -3,10 +3,9 @@
 import io
 import logging
 import math
+import numbers
 import os
 import warnings
-
-import matplotlib.pyplot as plt
 
 from smartsuite.core.contracts import AnalysisResult
 from smartsuite.core.exceptions import OutputError
@@ -31,14 +30,50 @@ def _validate_output_path(output_path: str) -> str:
     return abs_path
 
 
+def close_figures(figs=None) -> None:
+    """关闭 matplotlib 图窗，释放绘图后端引用（全仓唯一实现）。
+
+    审查 2026-09-19 E19 / 5.5：`cli.py` 与 `services/audit.py` 此前各写一份
+    「惰性 import pyplot + 逐个 close」逻辑，现统一到本函数，避免两处漂移。
+    放在 `services/` 而非 `engine/_utils.py`：AGENTS.md 规定 cli.py 只依赖
+    services/、不得直接依赖 engine/。
+
+    参数:
+        figs: 待关闭的 Figure 列表；传 `None` 表示关闭**全部**图窗
+            （`plt.close("all")` 语义）；空列表为无操作。
+
+    注意: `Figure` 无 `close()` 方法（matplotlib API），必须经 pyplot 关闭；
+    2026-09-01 C-7 教训：`fig.clear()` 不释放绘图后端引用。
+    """
+    # 函数内导入（审查 2026-09-19 B2）：模块级导入 pyplot 会让
+    # `import smartsuite.services.reporter` 在 engine 配置 Agg 之前锁定后端
+    # （本机默认为 tkagg），也使只需表格输出的调用方白付绘图栈成本。
+    import matplotlib.pyplot as plt
+
+    if figs is None:
+        plt.close("all")
+        return
+    for fig in figs:
+        plt.close(fig)
+
+
 def _fmt_html_cell(x) -> str:
     """HTML 表格数值格式：常规量级保留 4 位小数，微尺度改用 4 位有效数字科学计数。
 
     审查 2026-09-16 B-5：原 `float_format` 固定 `.4f` 把微尺度列（<5e-5）全部渲染为
     0.0000，抵消引擎 round_for_display → 与 Web/CLI 一致改为尺度感知（≥1e6 维持原 .2e）。
+
+    审查 2026-09-19 E12：判据改用 `numbers.Real` —— `df.to_html(float_format=…)`
+    实测把 numpy 标量（如 np.float32）直接传入，而 numpy 2.x 起 np.float32 不再是
+    float 子类，旧判据会落入 `str(x)` 分支，把 float32 列渲染成 0.12345679（Web/CLI
+    显示 0.1235）→ HTML 报告与其余入口不一致。bool 仍须显式排除（bool ⊂ numbers.Real）。
     """
-    if isinstance(x, bool) or not isinstance(x, (int, float)):
+    if isinstance(x, bool) or not isinstance(x, numbers.Real):
         return str(x)
+    # numpy 标量先归一为 Python float：否则 float16 与 1e6 比较会 cast 溢出
+    # （RuntimeWarning:“overflow encountered in cast”；本项目 filterwarnings=error
+    # 把警告当失败，等同真实缺陷）。归一后下面均只涉及 Python float 运算。
+    x = float(x)
     if not math.isfinite(x):
         return f"{x}"
     ax = abs(x)
@@ -84,7 +119,7 @@ def to_excel(result: AnalysisResult, workbook, sheet_name: str = "分析结果")
             pic.pictures.add(
                 buf, left=pic.range("A1").left, top=pic.range("A1").top, width=600, height=450
             )
-            plt.close(fig)
+            close_figures([fig])
         return sheet_name
     except Exception as e:
         logger.exception("Excel 输出失败")
@@ -163,7 +198,7 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
                 c.drawImage(ImageReader(buf), 50, y - 300, width=450, height=300)
             finally:
                 # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
-                plt.close(fig)
+                close_figures([fig])
             y -= 320
 
         c.save()
@@ -202,7 +237,7 @@ def to_ppt(result: AnalysisResult, output_path: str, template_path: str | None =
                 slide.shapes.add_picture(buf, Inches(0.5), Inches(0.5), Inches(12), Inches(6.5))
             finally:
                 # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
-                plt.close(fig)
+                close_figures([fig])
 
         prs.save(output_path)
         return output_path
@@ -302,7 +337,7 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
                 )
             finally:
                 # 审查 2026-09-01 C-6：异常路径也关闭 Figure，防止泄漏
-                plt.close(fig)
+                close_figures([fig])
 
         # 元数据
         if result.metadata:

@@ -14,7 +14,7 @@ from smartsuite.engine._constants import (
     CPK_MINIMUM,
 )
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import shapiro_p
+from smartsuite.engine._utils import drop_non_finite, non_finite_note, shapiro_p
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,9 @@ def _normality_warning(data):
 def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     """过程能力分析：Cp/Cpk/Pp/Ppk/Cpm，含置信区间、DPMO 和 Sigma Level。"""
     data = req.data[req.target_col].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 穿透 dropna 后使 matplotlib hist/set_xlim 抛
+    # ValueError（被 orchestrator 泛化翻译为「数据格式不符合要求」）；入口按缺失剔除
+    data, n_inf = drop_non_finite(data)
     if len(data) < 3:
         return AnalysisResult(
             task="process_capability",
@@ -175,6 +178,8 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     n = len(data)
 
     warn_msgs: list[str] = []
+    if n_inf:
+        warn_msgs.append(non_finite_note(n_inf, req.target_col))
     boxcox_lambda: float | None = None
 
     # ── Box-Cox 变换（非正态数据处理）──

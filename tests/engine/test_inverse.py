@@ -9,20 +9,18 @@ from scipy.stats import qmc  # noqa: F401  (仅注释性引用，实际使用在
 
 from smartsuite.core.contracts import AnalysisRequest
 from smartsuite.engine._constants import INVERSE_LAM_TIME
-from smartsuite.engine.inverse import (
-    _build_model_equations,
-    _raw_linear_coefficients,
+from smartsuite.engine.inverse._bounds import _resolve_bounds
+from smartsuite.engine.inverse._models import (
+    _auto_candidates,
+    _cv_split,
     _fit_forward,
     _fit_rate_forward,
-    inverse_parameter_solve,
-    _optimal_time,
     _pair_incoming_output,
-    _reachable_range,
-    _resolve_bounds,
-    _resolve_roles,
-    _solve_one,
-    _split_rows,
 )
+from smartsuite.engine.inverse._report import _build_model_equations, _raw_linear_coefficients
+from smartsuite.engine.inverse._roles import _resolve_roles, _split_rows
+from smartsuite.engine.inverse._solver import _optimal_time, _reachable_range, _solve_one
+from smartsuite.engine.inverse.solve import inverse_parameter_solve
 
 # pandas 2.3（Python 3.10 分叉）对含全 NA 列的 concat 发 FutureWarning；
 # _e2e_frame 刻意构造 target-only 全 NA 行，pandas 3.0 已移除该警告（3.11+ 无）
@@ -974,7 +972,7 @@ def test_build_model_equations_keeps_small_coefficient_with_large_scale():
 
 def test_parse_request_rows_truncates_and_returns_count():
     """F3：解析阶段按上限截断并返回截断条数（追加物化前完成）。"""
-    from smartsuite.engine.inverse import _parse_request_rows
+    from smartsuite.engine.inverse._params import _parse_request_rows
 
     rows, truncated = _parse_request_rows([{"a": i} for i in range(5)], 2)
     assert len(rows) == 2 and truncated == 3
@@ -1014,9 +1012,11 @@ def test_inverse_solve_request_rows_variable_values_ignored():
 
 def test_inverse_solve_request_rows_truncated_before_materialize(monkeypatch):
     """F3：request_rows 超过上限时先截断，再进入行分类与求解。"""
-    from smartsuite.engine import inverse as inverse_module
+    # 2026-09-21 拆子包：常量定义在各消费模块内，monkeypatch 必须打到消费模块，
+    # 否则只改到包属性、改不动实际读取的全局（假修补）。
+    from smartsuite.engine.inverse import solve as solve_module
 
-    monkeypatch.setattr(inverse_module, "INVERSE_MAX_REQUESTS", 2)
+    monkeypatch.setattr(solve_module, "INVERSE_MAX_REQUESTS", 2)
     hist = _linear_history()
     rows = [{"IncomingA": 1.15, "OutputY1": 1.0, "OutputY2": 0.8} for _ in range(5)]
     result = inverse_parameter_solve(
@@ -1035,10 +1035,10 @@ def test_inverse_solve_request_rows_truncated_before_materialize(monkeypatch):
 
 def test_fit_forward_auto_caps_candidates_for_large_n(monkeypatch):
     """R-1：auto 超行数上限时跳过 GPR/GBM 并给出中文说明（保持 LOO）。"""
-    from smartsuite.engine import inverse as inverse_module
+    from smartsuite.engine.inverse import _models
 
-    assert inverse_module.INVERSE_AUTO_CANDIDATE_MAX_ROWS == 500  # 默认预算锚点
-    monkeypatch.setattr(inverse_module, "INVERSE_AUTO_CANDIDATE_MAX_ROWS", 50)
+    assert _models.INVERSE_AUTO_CANDIDATE_MAX_ROWS == 500  # 默认预算锚点
+    monkeypatch.setattr(_models, "INVERSE_AUTO_CANDIDATE_MAX_ROWS", 50)
     df = _linear_history(n=60)
     roles = _resolve_roles(df, {})
     forward, quality = _fit_forward(df, roles, model="auto", random_state=42)
@@ -1061,10 +1061,10 @@ def test_fit_forward_auto_caps_candidates_for_large_n(monkeypatch):
 
 def test_fit_forward_large_n_uses_kfold(monkeypatch):
     """R-1：超行数上限时候选筛选由 LOO 切换为 5 折（O(n)→O(5)）。"""
-    from smartsuite.engine import inverse as inverse_module
+    from smartsuite.engine.inverse import _models
 
-    assert inverse_module.INVERSE_CV_LOO_MAX_ROWS == 2000  # 默认预算锚点
-    monkeypatch.setattr(inverse_module, "INVERSE_CV_LOO_MAX_ROWS", 100)
+    assert _models.INVERSE_CV_LOO_MAX_ROWS == 2000  # 默认预算锚点
+    monkeypatch.setattr(_models, "INVERSE_CV_LOO_MAX_ROWS", 100)
     df = _linear_history(n=150)
     roles = _resolve_roles(df, {})
     _, quality = _fit_forward(df, roles, model="linear", random_state=42)
@@ -1081,21 +1081,17 @@ def test_fit_forward_gbm_always_uses_kfold():
 
 def test_cv_split_gbm_boundary_rows_keep_kfold():
     """N-1：GBM 在预算边界行数（500）不回落 LOO。"""
-    from smartsuite.engine import inverse as inverse_module
-
     for n_rows in (10, 499, 500):
-        _, label = inverse_module._cv_split(n_rows, 42, "gbm")
+        _, label = _cv_split(n_rows, 42, "gbm")
         assert label == "5折", f"n={n_rows} 应恒用 5 折"
 
 
 def test_auto_candidates_boundary_at_budget_rows():
     """N-1：auto 候选判据含边界（n=500 即削候选，n=499 保留全候选）。"""
-    from smartsuite.engine import inverse as inverse_module
-
-    cands_at, notes_at = inverse_module._auto_candidates(500, 2)
+    cands_at, notes_at = _auto_candidates(500, 2)
     assert cands_at == ("linear", "poly")
     assert notes_at and "500" in notes_at[0]
-    cands_below, notes_below = inverse_module._auto_candidates(499, 2)
+    cands_below, notes_below = _auto_candidates(499, 2)
     assert cands_below == ("linear", "poly", "gpr", "gbm")
     assert notes_below == []
 
@@ -1213,10 +1209,10 @@ def test_resolve_roles_time_col_zero_not_treated_as_empty():
 
 def test_fit_forward_gpr_large_n_raises_chinese(monkeypatch):
     """R-1：显式 GPR 超过硬上限中文报错，防 O(n³) 假死。"""
-    from smartsuite.engine import inverse as inverse_module
+    from smartsuite.engine.inverse import _models
 
-    assert inverse_module.INVERSE_GPR_MAX_ROWS == 2000  # 默认预算锚点
-    monkeypatch.setattr(inverse_module, "INVERSE_GPR_MAX_ROWS", 100)
+    assert _models.INVERSE_GPR_MAX_ROWS == 2000  # 默认预算锚点
+    monkeypatch.setattr(_models, "INVERSE_GPR_MAX_ROWS", 100)
     df = _linear_history(n=150)
     roles = _resolve_roles(df, {})
     try:
@@ -1229,10 +1225,10 @@ def test_fit_forward_gpr_large_n_raises_chinese(monkeypatch):
 
 def test_fit_forward_auto_skips_poly_for_wide_features(monkeypatch):
     """R-1：poly 展开列数超上限时 auto 跳过 poly 并说明。"""
-    from smartsuite.engine import inverse as inverse_module
+    from smartsuite.engine.inverse import _models
 
-    assert inverse_module.INVERSE_POLY_MAX_TERMS == 100  # 默认预算锚点
-    monkeypatch.setattr(inverse_module, "INVERSE_POLY_MAX_TERMS", 20)
+    assert _models.INVERSE_POLY_MAX_TERMS == 100  # 默认预算锚点
+    monkeypatch.setattr(_models, "INVERSE_POLY_MAX_TERMS", 20)
     rng = np.random.default_rng(0)
     n = 50
     data = {f"VariableU{i}": rng.uniform(4, 8, n) for i in range(1, 7)}  # 6 列 → 27 项

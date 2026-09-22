@@ -77,18 +77,13 @@ PALETTE = {
         "grid": "#e0e0e0",  # 网格线
         "background": "white",  # 背景
         "edge": "#ffffff",  # 边框（直方图等）
+        # 深灰 — 辅助标注文字（箱线图统计块等）。勿用 edge/grid：白色文字在白底上
+        # 不可见（2026-09-22 视觉复核发现箱线图统计标注整块消失的根因）
+        "text": "#4d4d4d",
     },
 }
 
-
 # ── Web UI 分组配色（与 PALETTE 主色系统一）──
-GROUP_COLORS = {
-    "要因筛选": "#e8f5e9",  # 浅绿 — data.primary 淡色
-    "信度诊断": "#fff8e1",  # 浅黄 — judge.warn 淡色
-    "建模优化": "#e3f2fd",  # 浅蓝 — data.primary 淡色
-    "过程监控": "#fce4ec",  # 浅红 — anomaly 淡色
-    "高级分析": "#f3e5f5",  # 浅紫 — contrast.d 淡色
-}
 
 
 def _to_argb(hex_color: str) -> str:

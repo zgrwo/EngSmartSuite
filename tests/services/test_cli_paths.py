@@ -133,13 +133,48 @@ def test_cli_input_not_found(monkeypatch, capsys, tmp_path):
 
 
 def test_cli_csv_gbk_encoding_fallback(monkeypatch, capsys, tmp_path):
-    """GBK 中文 CSV：utf-8 失败 → gbk 成功，分析正常完成（cli.py:35-39）。"""
+    """GBK 中文 CSV：utf-8 失败 → gbk 成功，分析正常完成（read_csv_with_encoding）。"""
     data = _write_csv(
         tmp_path, "gbk.csv", "强度,温度\n45.1,180\n46.3,182\n47.2,185\n".encode("gbk")
     )
     tpl = _write_yaml(tmp_path, _CORR_TPL)
     out, _ = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data])
     assert "相关" in out, f"应输出相关性分析结果: {out[:300]}"
+
+
+def test_cli_csv_utf16_bom_now_readable(monkeypatch, capsys, tmp_path):
+    """UTF-16 BOM 中文 CSV：ADR-0004 后由「明确报错」改为「正确读取」。
+
+    本用例 2026-09-21 由 test_cli_csv_utf16_encoding_rejected 反转而来——
+    E5 时代 utf-16 无支持、必须报错；BOM 是文件自描述，现可确定性识别。
+    """
+    data = _write_csv(tmp_path, "u16.csv", "强度,温度\n45.1,180\n46.3,182\n".encode("utf-16"))
+    tpl = _write_yaml(tmp_path, _CORR_TPL)
+    out, _ = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data])
+    assert "相关" in out, f"UTF-16 文件应能正常分析: {out[:300]}"
+
+
+def test_cli_csv_explicit_big5_encoding(monkeypatch, capsys, tmp_path):
+    """--encoding big5：繁体表头正确解析（ADR-0004 决策 2），列名不再是乱码。"""
+    data = _write_csv(tmp_path, "big5.csv", "強度,溫度\n45.1,180\n46.3,182\n".encode("big5"))
+    tpl = _write_yaml(tmp_path, "task: correlation\ntarget_col: 強度\nfeature_cols: [溫度]\n")
+    out, _ = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data, "--encoding", "big5"])
+    assert "相关" in out, f"显式 big5 应能正常分析: {out[:300]}"
+
+
+def test_cli_encoding_choice_rejects_unsupported(monkeypatch, capsys, tmp_path):
+    """--encoding 白名单外取值：由 `choices` 直接拒绝（退出码 2），不进入读取逻辑。
+
+    必须断言 `invalid choice`——否则「参数不存在」也会退出码 2，用例会在实现前
+    假通过（TDD 红线：测试不能因错误原因通过）。
+    """
+    data = _write_csv(tmp_path, "gbk.csv", "强度,温度\n45.1,180\n".encode("gbk"))
+    tpl = _write_yaml(tmp_path, _CORR_TPL)
+    with pytest.raises(SystemExit) as ei:
+        _run_cli(monkeypatch, capsys, ["run", tpl, "-i", data, "--encoding", "latin-1"])
+    assert ei.value.code == 2
+    err = capsys.readouterr().err
+    assert "invalid choice" in err, f"应由 choices 白名单拒绝而非「未知参数」: {err!r}"
 
 
 def test_cli_csv_parser_error_friendly(monkeypatch, capsys, tmp_path):
@@ -161,7 +196,7 @@ def test_cli_csv_parser_error_friendly(monkeypatch, capsys, tmp_path):
 
 
 def test_cli_csv_empty_file_friendly(monkeypatch, capsys, tmp_path):
-    """空 CSV（EmptyDataError ⊂ ValueError）同样走中文友好文案，不泄漏英文。"""
+    """空 CSV（EmptyDataError → CsvParseError）同样走中文友好文案，不泄漏英文。"""
     data = _write_csv(tmp_path, "empty.csv", b"")
     tpl = _write_yaml(tmp_path, _CORR_TPL)
     with pytest.raises(SystemExit) as ei:
@@ -288,7 +323,7 @@ def test_cli_figure_save_failure_graceful(monkeypatch, capsys, tmp_path):
 
 
 def test_cli_csv_encoding_exhausted_friendly(monkeypatch, capsys, tmp_path):
-    """全部编码均解码失败 → 「无法识别 CSV 编码」中文 ValueError（cli.py:43, 143-145）。"""
+    """全部编码均解码失败 → 「无法识别 CSV 文件编码」中文提示（CsvEncodingError 分支）。"""
 
     def _undecodable(*args, **kwargs):
         raise UnicodeDecodeError("utf-8", b"", 0, 1, "bad")
@@ -330,3 +365,17 @@ def test_cli_dunder_main_guard(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["smartsuite", "list"])
     runpy.run_module("smartsuite.cli", run_name="__main__")
     assert "支持的分析方法" in capsys.readouterr().out
+
+
+def test_cli_encoding_flag_hint_for_excel(monkeypatch, capsys, tmp_path):
+    """`--encoding` 对 Excel 输入必须显式提示被忽略（审查 R1-10）。
+
+    静默忽略会让用户以为编码已生效（Excel 由 openpyxl 自行处理编码，该参数天然
+    无意义）。提示走 stderr，不污染 stdout 的分析结果，也不改变读取行为。
+    """
+    xlsx = tmp_path / "data.xlsx"
+    pd.DataFrame({"强度": [45.1, 46.3, 47.2], "温度": [180, 182, 185]}).to_excel(xlsx, index=False)
+    tpl = _write_yaml(tmp_path, _CORR_TPL)
+    out, err = _run_cli(monkeypatch, capsys, ["run", tpl, "-i", str(xlsx), "--encoding", "big5"])
+    assert "仅对 CSV 生效" in err, f"应显式提示 --encoding 被忽略，实际 stderr={err!r}"
+    assert "相关" in out, f"提示不应影响分析本身: {out[:200]}"

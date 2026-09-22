@@ -21,10 +21,15 @@ from smartsuite.engine._utils import threshold_label
 
 
 def _safe_int(value, default=None):
-    """安全转换整数参数（CLI/YAML 字符串防护），失败返回 default。"""
+    """安全转换整数参数（CLI/YAML 字符串防护），失败返回 default。
+
+    审查 2026-09-22 发现 5：`int(float('inf'))` 抛 OverflowError（不属于
+    ValueError/TypeError），此前穿透参数守卫被 orchestrator 泛化翻译为
+    「数值溢出，数据中可能存在极端值」——与用户参数错误无关。
+    """
     try:
         return int(value)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return default
 
 

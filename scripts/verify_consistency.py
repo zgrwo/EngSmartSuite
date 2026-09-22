@@ -5,9 +5,16 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# 子进程环境硬化（限 BLAS 线程 + UTF-8）：防内存紧张时子进程 OpenBLAS 分配失败
+# 导致的间歇性假红（详见 scripts/common.py 的 child_env 说明）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import child_env  # noqa: E402
+from templates_gate import validate_template_tasks  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -21,12 +28,25 @@ _parser.add_argument(
 )
 _args = _parser.parse_args()
 
-PASS, FAIL = 0, 0
+PASS, FAIL, SKIP = 0, 0, 0
 checks = []
 
 
-def check(name, condition, detail=""):
-    global PASS, FAIL
+def check(name, condition, detail="", *, skip=False):
+    """登记一条检查。
+
+    审查 2026-09-21 G-6：`--skip-pytest` 分支原先调 `check(..., True, ...)`，
+    即把「未执行」记成 **PASS** —— 汇总里那 71/71 含 1 条**合成 PASS**，
+    与它自己的注释「显式登记‘跳过’而非默认 PASS」相矛盾。现引入独立的 SKIP 状态：
+    仅记录不入 PASS/FAIL 计数，汇总行单列。
+    """
+    global PASS, FAIL, SKIP
+    if skip:
+        SKIP += 1
+        checks.append(f"  SKIP  {name}")
+        if detail:
+            checks.append(f"        {detail}")
+        return
     if condition:
         PASS += 1
         checks.append(f"  PASS  {name}")
@@ -487,8 +507,14 @@ section("8. Test Suite (pytest)")
 # ============================================================
 if _args.skip_pytest:
     # CI quick job 已用独立 pytest 步骤跑过引擎层/服务层/集成测试，
-    # 此处显式登记"跳过"而非默认 PASS，避免门禁误以为嵌套 pytest 覆盖过
-    check("pytest all pass", True, "跳过（--skip-pytest，由 CI quick job 独立步骤覆盖）")
+    # 此处记为 SKIP（**不计入 PASS**，审查 2026-09-21 G-6）：原先把「未执行」
+    # 记成 PASS，使汇总的 N/N 含一条合成通过项，掩盖真实覆盖度。
+    check(
+        "pytest all pass",
+        None,
+        "跳过（--skip-pytest，由 CI quick job 独立步骤覆盖）",
+        skip=True,
+    )
 else:
     # --basetemp 固定独立临时目录：避免 Windows 上 pytest-current junction
     # 残留导致 sessionfinish 清理 PermissionError（审查 2026-08-19 #5.2）
@@ -508,6 +534,7 @@ else:
         encoding="utf-8",
         errors="replace",  # 第二轮 #17：子进程输出含无法解码字节时不抛异常
         cwd=ROOT,
+        env=child_env(),
     )
     # 仅检查 returncode，不 grep "failed" 单词 —
     # statsmodels ConvergenceWarning 中含有 "failed to converge" 文字会误判
@@ -530,7 +557,7 @@ r = subprocess.run(
     encoding="utf-8",
     errors="replace",  # 第二轮 #17：同上
     cwd=ROOT,
-    env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    env=child_env(),
 )
 stdout = r.stdout or ""
 check(
@@ -540,10 +567,22 @@ check(
 )
 
 # ============================================================
+section("10. Templates task keys")
+# ============================================================
+# 审查 2026-09-21 G-7：templates/*.yaml 的 task 键原先**无任何门禁**——任务改名/删除后
+# 模板会静默失效（用户跑到「未知的分析任务」才发现）。实测当时 45/45 合法，属潜在盲区。
+_template_problems = validate_template_tasks(Path("templates"), set(TASK_REGISTRY))
+check(
+    "templates/*.yaml 的 task 键均已注册",
+    not _template_problems,
+    "; ".join(_template_problems) if _template_problems else f"{len(TASK_REGISTRY)} 个任务均可达",
+)
+
+# ============================================================
 section("SUMMARY")
 # ============================================================
 total = PASS + FAIL
-checks.append(f"\n  PASS: {PASS}/{total}  FAIL: {FAIL}/{total}")
+checks.append(f"\n  PASS: {PASS}/{total}  FAIL: {FAIL}/{total}  SKIP: {SKIP}")
 checks.append(f"  {'*** ALL CHECKS PASSED ***' if FAIL == 0 else '*** SOME CHECKS FAILED ***'}")
 for line in checks:
     print(line)

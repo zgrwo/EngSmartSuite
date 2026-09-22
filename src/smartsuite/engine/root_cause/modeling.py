@@ -16,6 +16,7 @@ from smartsuite.engine._constants import (
     VIF_THRESHOLD,
 )
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import drop_non_finite_rows, non_finite_note
 from smartsuite.engine._utils import safe_float as _safe_float
 from smartsuite.engine.root_cause._shared import _safe_int
 
@@ -43,6 +44,16 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
             task="decision_tree",
             status="error",
             messages=[f"以下列包含非数值数据，请先进行 One-Hot 编码: {non_num}"],
+        )
+    # 审查 2026-09-22 发现 3：sklearn `tree.fit` 对 ±Inf 抛
+    # ValueError('Input y contains infinity...')；入口按缺失剔除
+    _numeric_cols = [c for c in [req.target_col] + cols if pd.api.types.is_numeric_dtype(df[c])]
+    df, n_inf = drop_non_finite_rows(df, _numeric_cols)
+    if len(df) < 5:
+        return AnalysisResult(
+            task="decision_tree",
+            status="error",
+            messages=[f"剔除 {n_inf} 个非有限值后有效样本({len(df)})不足"],
         )
     X = df[cols]
     y = df[req.target_col]
@@ -113,6 +124,8 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     from sklearn.model_selection import cross_val_score
 
     warn_msgs: list[str] = []
+    if n_inf:
+        warn_msgs.append(non_finite_note(n_inf, req.target_col))
     cv_scores = []
     if len(df) >= 10:
         try:
@@ -248,10 +261,24 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     try:
         X = sm.add_constant(df)
-        # 秩亏由本函数后续条件数告警（poorly conditioned）统一表达，此处静默 statsmodels 英文告警
+        # 共线性由本函数的中文 summary（VIF>阈值 / 无穷大 VIF）统一表达，此处窄静默
+        # statsmodels 的英文告警——跨版本两种形态，均需静默：
+        #   ① statsmodels ≥0.15：variance_inflation_factor 自身对 cond(X)>1e4 发
+        #      UserWarning("The design matrix is poorly conditioned ...")；
+        #   ② statsmodels 0.14：内部 `1/(1-R²)` 在完全共线（R²==1）时除零，发 numpy
+        #      RuntimeWarning。
+        # 两者在项目 pytest 配置 `filterwarnings = error` 下都会升为异常，被外层
+        # except 吞成「VIF 计算失败」，已算出的数值表全部丢失（2026-09-21 复审）。
+        # 按消息窄静默、errstate 只管除零/无效，不吞掉其他告警。
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SingularMatrixWarning)
-            vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+            warnings.filterwarnings(
+                "ignore",
+                message="The design matrix is poorly conditioned",
+                category=UserWarning,
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
         vif_full = pd.DataFrame({"变量": X.columns, "VIF": vif_vals})
         # 排除无意义的 const 列
         vif_data = vif_full[vif_full["变量"] != "const"].copy()
@@ -267,6 +294,9 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
                 f"⚠ {len(invalid_vif)} 个变量 VIF<1 异常（{bad_cols}），"
                 "可能为零方差常量列或数值计算误差，请检查数据"
             )
+        # 审查 2026-09-21 R1-4：inf 意味着**完全共线**（非仅仅「风险」），显式告知
+        if not np.all(np.isfinite(vif_data["VIF"].to_numpy(dtype=float))):
+            vif_warnings.append("⚠ 存在无穷大 VIF（变量完全共线），不可同时入模，请删除冗余变量")
         warning = (
             "; ".join(vif_warnings)
             if vif_warnings
@@ -281,10 +311,21 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
             PALETTE["target"]["primary"] if v > threshold else PALETTE["data"]["primary"]
             for v in vif_plot["VIF"]
         ]
-        ax.barh(vif_plot["变量"], vif_plot["VIF"], color=colors)
         # 自适应轴范围：VIF 远低于阈值时不把阈值线画进来（否则柱子被压缩成一条）
-        vif_max = float(vif_plot["VIF"].max()) if len(vif_plot) else 1.0
+        # 审查 2026-09-21 R1-4：statsmodels 在完全共线时可返回 inf（pyproject 允许
+        # >=0.14）。两个陷阱：① inf*1.08 → set_xlim(0, inf) 让 matplotlib 抛错；
+        # ② 直接把 inf 送入 barh，其内部变换发 RuntimeWarning（warnings-as-errors
+        # 下同样中断）→ 两者都被外层 except Exception 吞成「VIF 计算失败」，
+        # 已算出的 VIF 表全部丢失。处理：轴范围只按有限值定；inf 柱在**图上**
+        # 截断绘制（数值表仍如实给出 inf）。
+        values = vif_plot["VIF"].to_numpy(dtype=float)
+        finite_vals = values[np.isfinite(values)]
+        vif_max = float(finite_vals.max()) if finite_vals.size else 1.0
+        if bool(np.any(~np.isfinite(values))):
+            vif_max = max(vif_max, threshold)
         xmax = vif_max * 1.08 if vif_max >= threshold else max(vif_max * 1.25, 1.05)
+        plot_values = np.where(np.isfinite(values), values, xmax)
+        ax.barh(vif_plot["变量"], plot_values, color=colors)
         ax.set_xlim(0, xmax)
         if threshold <= xmax:
             ax.axvline(

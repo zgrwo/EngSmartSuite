@@ -1,6 +1,7 @@
 """Flask application — SmartSuite Web UI 入口。"""
 
 import atexit
+import contextlib
 import functools
 import logging
 import os
@@ -8,13 +9,14 @@ import pathlib
 import secrets
 import sys
 import tempfile
-import threading
 import time as _time
 
 import pandas as pd
 
-# ── matplotlib 配置由引擎层统一管理（含中文字体 + 配色方案）──
-# orchestrator 导入会级联触发 engine/__init__.py 中的全局 matplotlib 配置
+# ── matplotlib 配置由引擎层统一管理（后端 Agg + 中文字体 + 配色方案）──
+# 下方 services 导入会级联触发 engine/__init__.py 中的全局配置；因此 web/ 下任何
+# 模块都**不得**再自设后端或在模块级导入 pyplot（见 B3 守卫
+# tests/guards/test_matplotlib_backend_order.py）
 
 try:
     from flask import Flask, jsonify, render_template, request, session
@@ -27,9 +29,11 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
-from smartsuite.core.exceptions import ValidationError
+from smartsuite.core.constants import GROUP_COLORS
+from smartsuite.core.exceptions import CsvEncodingError, ValidationError
+from smartsuite.services import config
+from smartsuite.services.data_io import read_csv_with_encoding
 from smartsuite.services.orchestrator import (
-    GROUP_COLORS,
     NO_DATA_TASKS,
     NO_TARGET_TASKS,
     TASK_GROUPS,
@@ -40,64 +44,84 @@ from smartsuite.web.api import column_info, run_analysis
 
 logger = logging.getLogger(__name__)
 
-# 上传文件的临时追踪，确保进程退出时清理
-_UPLOAD_FILES: list[str] = []
-_upload_lock = threading.Lock()
+# ── 上传临时文件：专用目录 + mtime TTL 扫描（审查 2026-09-21 D2）──
+# 原实现用进程级注册表（_UPLOAD_FILES / _upload_lock / _request_counter）追踪临时文件：
+# 多 worker 下各进程只看得见自己创建的文件，别人的过期文件无人清理（泄漏），且
+# 「清理间隔」是按本进程请求数计数的。改为状态落在文件系统上：任何 worker 都能扫全量。
+_last_sweep_at = 0.0
 
-# 审查 2026-09-01 S-4：单次分析的目标列/特征列数量上限（防 DoS 与浏览器卡顿）
-_MAX_TARGETS = 50
-_MAX_FEATURES = 100
+# 单次分析的目标列/特征列数量上限见 services/config.py（审查 2026-09-19 B7 集中）
+
+
+def _upload_dir() -> pathlib.Path:
+    """上传数据专用目录（按需创建）；`SMARTSUITE_UPLOAD_DIR` 可覆盖（测试/运维）。"""
+    override = os.environ.get(config.UPLOAD_DIR_ENV)
+    directory = (
+        pathlib.Path(override)
+        if override
+        else pathlib.Path(tempfile.gettempdir()) / config.UPLOAD_DIR_NAME
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _is_own_upload(path: pathlib.Path) -> bool:
+    """是否为本应用创建的上传临时文件（命名单一来源，审查 R1-2）。
+
+    上传文件一律由 `NamedTemporaryFile(prefix="ss-", suffix=".parquet")` 创建
+    （见 `/api/upload`），故 `ss-*.parquet` 即本应用所有物。按前缀收窄清理范围后，
+    即使运维把 `SMARTSUITE_UPLOAD_DIR` 指向共享目录，也不会误删他人在同目录内的
+    parquet（原先按 `*.parquet` 全量匹配，实测会删除无关文件）。
+    """
+    return path.name.startswith("ss-") and path.suffix == ".parquet"
+
+
+def _sweep_expired(*, force: bool = False) -> int:
+    """删除本目录内 mtime 超过 TTL 的**本应用** parquet，返回删除数。
+
+    默认按 `CLEANUP_MIN_INTERVAL_SECONDS` 节流（避免每个请求都做目录 I/O）；
+    `force=True` 跳过节流（测试与显式清理入口用）。
+    """
+    global _last_sweep_at
+    now = _time.time()
+    if not force and now - _last_sweep_at < config.CLEANUP_MIN_INTERVAL_SECONDS:
+        return 0
+    _last_sweep_at = now
+    removed = 0
+    for path in _upload_dir().glob("*.parquet"):
+        if not _is_own_upload(path):
+            continue
+        try:
+            if now - path.stat().st_mtime > config.UPLOAD_TTL_SECONDS:
+                path.unlink()
+                removed += 1
+        except OSError:
+            logger.debug("过期上传文件清理失败: %s", path, exc_info=True)
+    return removed
 
 
 def _cleanup_uploads() -> None:
-    with _upload_lock:
-        paths = list(_UPLOAD_FILES)
-    for path in paths:
+    """进程退出兜底：删除本目录内**本应用**的全部临时 parquet。
+
+    会话数据本身是无状态的 parquet，进程退出后不再有任何引用，故无需区分
+    「哪个会话的」；但仍需区分「哪个应用的」——`SMARTSUITE_UPLOAD_DIR`
+    可被运维指向共享位置，此时不得删掉他人文件（审查 R1-2）。
+    """
+    for path in _upload_dir().glob("*.parquet"):
+        if not _is_own_upload(path):
+            continue
         try:
-            if os.path.exists(path):
-                os.unlink(path)
+            path.unlink()
         except OSError:
-            pass
+            logger.debug("退出清理临时文件失败: %s", path, exc_info=True)
 
 
 atexit.register(_cleanup_uploads)
 
-# ── 定期清理过期临时文件（每 N 次请求触发一次）──
-_request_counter = 0
-_CLEANUP_INTERVAL = 50  # 每 50 次上传/分析请求尝试清理
-
 
 def _periodic_cleanup() -> None:
-    """清理不存在对应 session 的过期临时文件。"""
-    global _request_counter
-    should_cleanup = False
-    with _upload_lock:
-        _request_counter += 1
-        if _request_counter % _CLEANUP_INTERVAL == 0:
-            should_cleanup = True
-
-    if not should_cleanup:
-        return
-
-    # 文件 I/O 在锁外执行，避免阻塞上传请求
-    now = _time.time()
-    with _upload_lock:
-        paths_snapshot = list(_UPLOAD_FILES)
-    for path in paths_snapshot:
-        try:
-            if os.path.exists(path):
-                mtime = os.path.getmtime(path)
-                if now - mtime > 86400:  # 24 hours
-                    os.unlink(path)
-                    with _upload_lock:
-                        if path in _UPLOAD_FILES:
-                            _UPLOAD_FILES.remove(path)
-            else:
-                with _upload_lock:
-                    if path in _UPLOAD_FILES:
-                        _UPLOAD_FILES.remove(path)
-        except OSError:
-            pass
+    """请求路径上的过期清理（节流由 `_sweep_expired` 承担）。"""
+    _sweep_expired()
 
 
 # ── CSRF 防护 ──
@@ -143,22 +167,22 @@ else:
             _fallback_key = secrets.token_hex(32)
             _secret_file.write_text(_fallback_key)
             app.config["SECRET_KEY"] = _fallback_key
-        # 限制密钥文件权限（仅 owner 可读写）
-        try:
+        # 限制密钥文件权限（仅 owner 可读写）；chmod 失败（如 Windows/只读卷）不阻断启动
+        with contextlib.suppress(OSError):
             os.chmod(_secret_file, 0o600)
-        except OSError:
-            pass
     except OSError:
         _fallback_key = secrets.token_hex(32)
         app.config["SECRET_KEY"] = _fallback_key
         logger.warning("无法持久化密钥到 %s，使用临时密钥", _secret_file)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = config.UPLOAD_MAX_BYTES
 # Session 安全配置
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # 审查 2026-09-01 S-3：本地 HTTP 默认 False；公网 HTTPS 部署可设环境变量开启
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SMARTSUITE_COOKIE_SECURE") == "1"
-app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 小时后过期，限制 CSRF token 重用窗口
+app.config["PERMANENT_SESSION_LIFETIME"] = (
+    config.SESSION_LIFETIME_SECONDS
+)  # 1 小时；限制 CSRF token 重用窗口
 
 
 @app.after_request
@@ -228,34 +252,38 @@ def upload():
     f_bytes = f.read()
 
     if ext == ".csv":
-        # CSV 文件：多编码尝试 (UTF-8 BOM → UTF-8 → GBK → Latin-1 兜底)
-        df = None
-        for encoding in ["utf-8-sig", "utf-8", "gbk", "latin-1"]:
-            try:
-                # Round-2 P3：先探测行数（只读 max_rows+1 行），超限直接拒绝，
-                # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒。
-                # 审查 #P2：探测 nrows=100_001 未超限 ⟺ 文件行数 ≤ 100_000，
-                # probe 已是完整数据——直接复用，避免同一文件全量重读两次。
-                probe = pd.read_csv(io.BytesIO(f_bytes), encoding=encoding, nrows=100_001)
-                if len(probe) > 100_000:
-                    return jsonify({"error": "数据行数超过限制 (100000行)，请减少数据量"}), 400
-                df = probe
-                break
-            except UnicodeError:
-                continue
-            except Exception:
-                logger.exception("CSV 文件解析失败 (encoding=%s)", encoding)
-                return jsonify({"error": "无法解析 CSV 文件，请确认文件格式正确"}), 400
-        if df is None:
-            return jsonify({"error": "无法识别 CSV 文件编码，请转换为 UTF-8 后重试"}), 400
+        # CSV 文件：多编码尝试（UTF-8 BOM → UTF-8 → GBK）。审查 2026-09-19 E5：
+        # 移除 latin-1 兜底——latin-1 对任意字节序列恒可解码，会把 UTF-16/Big5
+        # 中文表头静默读成乱码（'ÿþyb!k'），用户据此得到错误的 Cp/Cpk 结论。
+        # ADR-0004：BOM（UTF-8/16/32）确定性判定；表单可选 encoding 字段供用户
+        # 显式声明编码（繁体 Big5 等），空串/缺省 = 自动。
+        try:
+            # Round-2 P3：先探测行数（只读 max_rows+1 行），超限直接拒绝，
+            # 避免 49MB CSV 全量解析产生数百 MB 内存峰值后被拒。
+            # 审查 #P2：探测 nrows=100_001 未超限 ⟺ 文件行数 ≤ 100_000，
+            # probe 已是完整数据——直接复用，避免同一文件全量重读两次。
+            df = read_csv_with_encoding(
+                io.BytesIO(f_bytes),
+                nrows=config.CSV_PROBE_ROWS,
+                encoding=(request.form.get("encoding") or "").strip() or None,
+            )
+        except CsvEncodingError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception:
+            # CsvParseError（结构非法/空文件）与其余意外解析异常统一为中文 400，
+            # 与改造前行为一致；traceback 只进日志，不曝给用户
+            logger.exception("CSV 文件解析失败")
+            return jsonify({"error": "无法解析 CSV 文件，请确认文件格式正确"}), 400
+        if len(df) > config.MAX_DATA_ROWS:
+            return jsonify({"error": "数据行数超过限制 (100000行)，请减少数据量"}), 400
     else:
         # Excel 文件：Zip bomb 防护
         try:
             with zipfile.ZipFile(io.BytesIO(f_bytes)) as zf:
                 total_size = sum(info.file_size for info in zf.infolist())
-                if total_size > 200 * 1024 * 1024:
+                if total_size > config.MAX_ZIP_UNCOMPRESSED_BYTES:
                     return jsonify({"error": "文件解压后过大（限制200MB），请减少数据量"}), 400
-                if len(zf.infolist()) > 1000:
+                if len(zf.infolist()) > config.MAX_ZIP_ENTRIES:
                     return jsonify({"error": "文件包含过多条目，可能不是有效的 Excel 文件"}), 400
         except zipfile.BadZipFile:
             return jsonify({"error": "不是有效的 Excel 文件，请确认文件格式正确"}), 400
@@ -270,8 +298,8 @@ def upload():
         return jsonify({"error": "文件为空或无法读取数据"}), 400
 
     # ── 大数据防护：限制行数和列数，防止 OOM ──
-    max_rows = 100_000
-    max_cols = 500
+    max_rows = config.MAX_DATA_ROWS
+    max_cols = config.MAX_DATA_COLS
     if df.shape[0] > max_rows:
         return jsonify(
             {"error": f"数据行数 ({df.shape[0]}) 超过限制 ({max_rows}行)，请减少数据量"}
@@ -283,33 +311,27 @@ def upload():
 
     # 大文件内存警告（当前实现将整个文件读入内存）
     _mem_mb = len(f_bytes) / (1024 * 1024)
-    if _mem_mb > 20:
+    if len(f_bytes) > config.LARGE_FILE_WARN_BYTES:
         logger.warning("上传文件较大 (%.0f MB)，内存占用可能较高", _mem_mb)
 
     # 先写新文件再清理旧文件（避免写失败时丢失已有数据）
-    with _upload_lock:
-        tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-        tmp.close()
-        try:
-            df.to_parquet(tmp.name)
-        except Exception as exc:
-            logger.error("上传数据 parquet 保存失败: %s (%s)", tmp.name, exc, exc_info=True)
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
-            return jsonify({"error": "数据保存失败，请重试"}), 500
-        # 新文件写入成功，更新 session 并清理旧文件
-        old_path = session.get("_data_path")
-        session["_data_path"] = tmp.name
-        _UPLOAD_FILES.append(tmp.name)
-        if old_path and os.path.exists(old_path):
-            try:
-                os.unlink(old_path)
-                if old_path in _UPLOAD_FILES:
-                    _UPLOAD_FILES.remove(old_path)
-            except OSError:
-                pass
+    tmp = tempfile.NamedTemporaryFile(
+        dir=_upload_dir(), prefix="ss-", suffix=".parquet", delete=False
+    )
+    tmp.close()
+    try:
+        df.to_parquet(tmp.name)
+    except Exception as exc:
+        logger.error("上传数据 parquet 保存失败: %s (%s)", tmp.name, exc, exc_info=True)
+        with contextlib.suppress(OSError):
+            os.unlink(tmp.name)
+        return jsonify({"error": "数据保存失败，请重试"}), 500
+    # 新文件写入成功，更新 session 并清理上一份（本 session 自己的旧文件）
+    old_path = session.get("_data_path")
+    session["_data_path"] = tmp.name
+    if old_path and old_path != tmp.name and os.path.exists(old_path):
+        with contextlib.suppress(OSError):
+            os.unlink(old_path)
     return jsonify({"columns": column_info(df), "shape": list(df.shape)})
 
 
@@ -342,10 +364,10 @@ def analyze():
         if not isinstance(params, dict):
             return jsonify({"error": "params 必须是字典"}), 400
         # 审查 2026-09-01 S-4：目标列/特征列数量上限 → 400
-        if len(targets) > _MAX_TARGETS:
-            return jsonify({"error": f"目标列数量不能超过 {_MAX_TARGETS}"}), 400
-        if len(features) > _MAX_FEATURES:
-            return jsonify({"error": f"特征列数量不能超过 {_MAX_FEATURES}"}), 400
+        if len(targets) > config.MAX_TARGETS:
+            return jsonify({"error": f"目标列数量不能超过 {config.MAX_TARGETS}"}), 400
+        if len(features) > config.MAX_FEATURES:
+            return jsonify({"error": f"特征列数量不能超过 {config.MAX_FEATURES}"}), 400
         if task not in TASK_REGISTRY:
             return jsonify(
                 {"error": f"未知的分析任务「{task}」，支持: {list(TASK_REGISTRY.keys())}"}
@@ -398,18 +420,34 @@ def main(host="127.0.0.1", port=5050, debug=False):
     app.run(host=host, port=port, debug=debug)
 
 
-if __name__ == "__main__":
+def cli(argv: list[str] | None = None) -> int:
+    """控制台入口（`smartsuite-web` / `python -m smartsuite.web.app`）。
+
+    审查 2026-09-19 E14a：此前仅在 `__main__` 守卫内解析参数，导致 console
+    script 若指向 `main()` 则无法传参（总是默认 host/port）。现抽为可复用
+    入口，供 console script、模块执行与 run_server.py 三方共用。
+
+    参数:
+        argv: 参数列表；`None` 表示读 `sys.argv`（便于测试注入）。
+    """
     import argparse
 
-    _parser = argparse.ArgumentParser(description="SmartSuite Web UI")
-    _parser.add_argument("--host", default=None, help="监听地址 (默认: 127.0.0.1)")
-    _parser.add_argument("--port", type=int, default=None, help="监听端口 (默认: 5050)")
-    _parser.add_argument("--debug", action="store_true", help="启用 Flask debug 模式")
-    _args = _parser.parse_args()
+    parser = argparse.ArgumentParser(description="SmartSuite Web UI")
+    parser.add_argument("--host", default=None, help="监听地址 (默认: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=None, help="监听端口 (默认: 5050)")
+    parser.add_argument("--debug", action="store_true", help="启用 Flask debug 模式")
+    args = parser.parse_args(argv)
     main(
-        host=_args.host or "127.0.0.1",
-        port=_args.port
-        if _args.port is not None
+        host=args.host or "127.0.0.1",
+        port=args.port
+        if args.port is not None
         else 5050,  # --port 0 是 Flask 合法值（随机端口），勿用 or 吞掉
-        debug=bool(_args.debug or os.environ.get("SMARTSUITE_DEBUG", "0") == "1"),
+        debug=bool(args.debug or os.environ.get("SMARTSUITE_DEBUG", "0") == "1"),
     )
+    return 0
+
+
+if __name__ == "__main__":
+    # 不 sys.exit：runpy 入口（python app.py）须正常返回，退出码由 cli() 返回值
+    # 经 console script 包装层承担（smartsuite-web = smartsuite.web.app:cli）
+    cli()

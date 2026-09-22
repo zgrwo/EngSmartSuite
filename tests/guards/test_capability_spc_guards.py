@@ -8,6 +8,7 @@ M-4(n_runs falsy), B3(微尺度阈值), E1(verify_docs tag 校验)。
 """
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
@@ -364,3 +365,254 @@ def test_mcnemar_small_discordant_warms_exact_binomial():
     df2 = pd.DataFrame({"pre": col1b, "post": col2b})
     r2 = hypothesis_test(_mk("hypothesis_test", df2, "post", ["pre", "post"], {"test": "mcnemar"}))
     assert r2.status == "ok" and not r2.messages
+
+
+# ── B-5（2026-09-21 审查）：McNemar OR 的未定义/伪有限值 ──────────────────────
+def _mcnemar_df(b: int, c: int, a: int = 30, d: int = 30):
+    """2×2 配对表：a=一致(1,1)、b=(1→0)、c=(0→1)、d=一致(0,0)。"""
+    pre = [1] * a + [1] * b + [0] * c + [0] * d
+    post = [1] * a + [0] * b + [1] * c + [0] * d
+    return pd.DataFrame({"pre": pre, "post": post})
+
+
+def test_mcnemar_odds_ratio_c_zero_is_not_fake_finite():
+    """c=0（OR→∞）不得输出伪有限值 3e11 并写进 summary（审查 B-5 P2）。
+
+    修复前实测 b=30,c=0 → `odds_ratio=300000000000.0`，
+    summary 显示「OR=b/c=300000000000.00」；且 metadata 的
+    `float(or_val) if not np.isinf(or_val) else None` 因伪有限值而成为死代码。
+    """
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _mk("hypothesis_test", _mcnemar_df(30, 0), "pre", ["pre", "post"], {"test": "mcnemar"})
+    )
+    assert r.status == "ok", r.messages
+    assert r.metadata["odds_ratio"] is None, (
+        f"c=0 时 OR 无有限值，应为 None，实际 {r.metadata['odds_ratio']}"
+    )
+    assert "300000000000" not in r.summary, f"summary 不得显示伪有限 OR: {r.summary}"
+    assert "∞" in r.summary or "无法计算" in r.summary, f"应显式说明 OR 不可用: {r.summary}"
+
+
+def test_mcnemar_odds_ratio_zero_zero_is_undefined():
+    """b=c=0（0/0 未定义）不得伪装成「OR=0.00 / 无关联」（审查 B-5）。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _mk("hypothesis_test", _mcnemar_df(0, 0), "pre", ["pre", "post"], {"test": "mcnemar"})
+    )
+    assert r.status == "ok", r.messages
+    assert r.metadata["odds_ratio"] is None, (
+        f"0/0 未定义，应为 None，实际 {r.metadata['odds_ratio']}"
+    )
+    assert "无法计算" in r.summary or "未定义" in r.summary, f"应显式说明: {r.summary}"
+
+
+def test_mcnemar_odds_ratio_exact_without_epsilon_residue():
+    """c>0 时 OR 应为精确 b/c（EPSILON 引入 1e-10 级假精度，审查 B-5）。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _mk("hypothesis_test", _mcnemar_df(10, 2), "pre", ["pre", "post"], {"test": "mcnemar"})
+    )
+    assert r.status == "ok", r.messages
+    assert r.metadata["odds_ratio"] == 5.0, (
+        f"b/c=10/2 应精确为 5.0，实际 {r.metadata['odds_ratio']}"
+    )
+    assert "4.9999" not in r.summary, f"summary 不得带 EPSILON 残差: {r.summary}"
+
+
+# ── B-3（2026-09-21 审查）：Wilcoxon 效应量不得由 p 反推 ──────────────────────
+def test_wilcoxon_effect_size_is_not_p_backderived():
+    """Wilcoxon 秩相关 r 须由实际 Z 得出，不得由 p 反推（审查 B-3 P2）。
+
+    原实现 `z = norm.ppf(1 - max(p, EPSILON)/2)`：`EPSILON=1e-10` 把 Z 钳在
+    6.467，于是**强效应被系统性压小且随 n 增大而衰减**——实测「全部差值为正」
+    （最大效应）时：n=100 → r=0.647、n=400 → 0.323、n=1000 → 0.205、
+    n=4000 → 0.102，而该情形的渐近真值是 **r = √3/2 ≈ 0.866**（与 n 无关）。
+
+    判据用可推导的渐近真值 + 单调性不变量，不复制实现本身。
+    """
+    import math
+
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    # 全部为正差且**互不相同**（无并列、无零差）——此时 scipy 渐近 Z 与教科书
+    # 正态近似公式逐位一致（本审查实测 8.6818/17.3313/27.3930），
+    # 故渐近真值 r → √3/2 ≈ 0.866 无歧义。
+    rs = []
+    for n in (100, 400, 1000):
+        df = pd.DataFrame({"y": np.arange(1.0, n + 1)})
+        r = hypothesis_test(
+            _mk("hypothesis_test", df, "y", [], {"test": "wilcoxon_1samp", "popmedian": 0.0})
+        )
+        assert r.status == "ok", r.messages
+        rs.append(float(r.metadata["effect_size"]))
+
+    expected = math.sqrt(3) / 2  # ≈ 0.866：最大效应的渐近 r
+    for n, r in zip((100, 400, 1000), rs, strict=True):
+        assert abs(r - expected) < 0.05, f"n={n}: 最大效应下 r 应≈{expected:.4f}，实测 {r:.4f}"
+    assert max(rs) - min(rs) < 0.05, f"r 不应随样本量变化（p 反推封顶的典型症状）: {rs}"
+
+
+# ── B-2（2026-09-21 审查）：kappa z 口径的假阳性防护 ──────────────────────────
+def test_cohens_kappa_z_matches_fleiss_ase0():
+    """Kappa 的 z 必须等于手算 Fleiss ASE0（H0 下标准误），勿按"更精确 SE"改坏。
+
+    2026-09-21 审查 B-2 报「kappa 用简化 H0 标准误，与 statsmodels/Fleiss ASE0
+    不同，z 为 9.802 vs 4.000」。父会话对账：18 张 2×2/3×3/4×4 随机表的引擎 z 与
+    手算 ASE0 = κ/√[p_o(1-p_o)/(n(1-p_e)²)] 最大偏差 **1.76e-08**（浮点噪声），
+    且经典 [[35,15],[15,35]] 表为 4.3644（与手算 4.3644 一致）。
+    → **该 finding 是假阳性**：实现本就是 Fleiss ASE0，无需修改。
+    本用例把正确口径钉住，防止后续按误报「修正」引入真实缺陷。
+    """
+    from smartsuite.engine.root_cause.association import cohens_kappa
+    from smartsuite.engine.root_cause.hypothesis import hypothesis_test  # noqa: F401
+
+    tables = [
+        pd.DataFrame([[35, 15], [15, 35]]),  # 经典 2×2（审查反例）
+        pd.DataFrame([[50, 5], [8, 37]]),
+        pd.DataFrame([[20, 4, 1], [3, 25, 2], [1, 2, 30]]),
+        pd.DataFrame([[10, 6, 2, 1], [4, 18, 3, 2], [2, 3, 22, 4], [1, 2, 5, 15]]),
+    ]
+    for ct in tables:
+        rows = []
+        for i, rlab in enumerate(ct.index):
+            for j, clab in enumerate(ct.columns):
+                rows += [(rlab, clab)] * int(ct.iloc[i, j])
+        df = pd.DataFrame(rows, columns=["a", "b"])
+        r = cohens_kappa(_mk("cohens_kappa", df, "", ["a", "b"], {}))
+        assert r.status == "ok", (ct.values.tolist(), r.messages)
+
+        n = int(ct.values.sum())
+        p_o = np.trace(ct.values) / n
+        row = ct.sum(axis=1).values.astype(float)
+        col = ct.sum(axis=0).values.astype(float)
+        p_e = float((row * col).sum() / n**2)
+        kappa = (p_o - p_e) / (1 - p_e)
+        se0 = np.sqrt(p_o * (1 - p_o) / (n * (1 - p_e) ** 2))
+        z_expected = kappa / se0
+
+        z_engine = float(r.metadata["z"])
+        assert z_engine == pytest.approx(z_expected, rel=1e-6), (
+            f"kappa z 偏离 Fleiss ASE0：引擎 {z_engine:.6f} vs 手算 {z_expected:.6f}"
+        )
+
+
+# ── B-1（2026-09-21 审查）：Cliff's δ 的 CI 越界 ──────────────────────────────
+def test_mannwhitney_effect_size_ci_stays_within_bounds():
+    """有界效应量（Cliff's δ ∈ [-1,1]）的置信区间不得越出定义域（审查 B-1 P2）。
+
+    原实现无条件套用 Cohen's d 的标准误公式 `_cohens_d_ci`，实测：
+      n=8  → δ=-0.9062 CI=(-1.9353, +0.1228)
+      n=10 → δ=-0.8600 CI=(-1.7761, +0.0561)
+      n=20 → δ=-0.7500 CI=(-1.3912, -0.1088)
+    全部越出 [-1,1]。δ 的 CI 需要其自身（支配矩阵）的方差分量，本仓无可核验的
+    闭式公式，故口径定为：**不猜测**——δ 不输出 CI（None）并给出说明；
+    本用例断言「要么 None，要么落在 [-1,1] 内」，两种合规实现都能通过。
+    """
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    rng = np.random.default_rng(7)
+    for n in (8, 10, 20, 50):
+        g1 = rng.normal(0, 1, n)
+        g2 = rng.normal(1.5, 1, n)
+        df = pd.DataFrame({"y": np.r_[g1, g2], "g": ["A"] * n + ["B"] * n})
+        r = hypothesis_test(_mk("hypothesis_test", df, "y", ["g"], {"test": "mannwhitney"}))
+        assert r.status == "ok", r.messages
+        ci = r.metadata.get("effect_size_ci")
+        if ci is None:
+            assert "effect_ci_note" in r.metadata, "不输出 CI 时必须给出原因说明"
+            continue
+        lo, hi = ci
+        assert -1 <= lo <= 1 and -1 <= hi <= 1, f"n={n}: Cliff's δ 的 CI 越界: ({lo}, {hi})"
+        assert lo <= hi, f"n={n}: CI 下界应不大于上界: ({lo}, {hi})"
+
+
+def test_ttest_effect_size_ci_unchanged():
+    """对照：Hedges g（d 族，定义域无界）必须仍有 CI（防把守卫改成一律 None）。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    rng = np.random.default_rng(3)
+    g1 = rng.normal(0, 1, 30)
+    g2 = rng.normal(0.6, 1, 30)
+    df = pd.DataFrame({"y": np.r_[g1, g2], "g": ["A"] * 30 + ["B"] * 30})
+    r = hypothesis_test(_mk("hypothesis_test", df, "y", ["g"], {"test": "ttest_ind"}))
+    assert r.status == "ok", r.messages
+    ci = r.metadata.get("effect_size_ci")
+    assert ci is not None, "Hedges g 的 CI 不应被移除"
+    lo, hi = ci
+    assert np.isfinite(lo) and np.isfinite(hi) and lo < hi
+
+
+# ── A-1（2026-09-21 审查）：两处 IQR 掩码实现的一致性 ────────────────────────
+def test_iqr_outlier_mask_consistent_between_tasks():
+    """`anomaly_detect(method='iqr')` 与 `outlier_consensus` 的 IQR 判据必须一致。
+
+    审查 2026-09-21 A-1：两处各自复制了一份 IQR 掩码（含 IQR==0 拒绝逻辑）。
+    本用例是**抽取共享助手的安全网**（也长期作为「两处判据不得漂移」的守卫）：
+    同一数据下 outlier_consensus 的 IQR 投票数须等于解析解
+    `count(y < Q1-1.5IQR | y > Q3+1.5IQR)`，且 anomaly_detect 的检出数与之相同。
+    """
+    from smartsuite.engine.detection.anomaly import anomaly_detect
+    from smartsuite.engine.detection.outlier import outlier_consensus
+
+    rng = np.random.default_rng(5)
+    cases = [
+        np.r_[rng.normal(0, 1, 80), [7.0, -7.0]],  # 正常 + 强异常
+        rng.normal(0, 1, 60),  # 无强异常
+        np.r_[rng.normal(0, 1, 50), [4.0]],  # 边界型异常
+    ]
+    for idx, values in enumerate(cases):
+        df = pd.DataFrame({"y": values})
+        r_a = anomaly_detect(_mk("anomaly_detect", df, "y", [], {"method": "iqr"}))
+        r_o = outlier_consensus(_mk("outlier_consensus", df, "y", [], {}))
+        assert r_a.status == "ok" and r_o.status == "ok", (idx, r_a.messages, r_o.messages)
+
+        q1, q3 = df["y"].quantile(0.25), df["y"].quantile(0.75)
+        iqr = q3 - q1
+        expected = int(((df["y"] < q1 - 1.5 * iqr) | (df["y"] > q3 + 1.5 * iqr)).sum())
+
+        assert r_o.metadata["iqr_count"] == expected, f"case {idx}: IQR 投票数应等于解析解"
+        assert r_a.metadata["anomaly_count"] == r_o.metadata["iqr_count"], (
+            f"case {idx}: 两任务的 IQR 判据不一致（"
+            f"{r_a.metadata['anomaly_count']} vs {r_o.metadata['iqr_count']}）"
+        )
+
+
+def test_iqr_zero_constant_column_both_reject():
+    """常量列（IQR=0）两任务都必须显式报错（不得一路静默、一路报错）。"""
+    from smartsuite.engine.detection.anomaly import anomaly_detect
+    from smartsuite.engine.detection.outlier import outlier_consensus
+
+    df = pd.DataFrame({"y": np.full(30, 5.0)})
+    r_a = anomaly_detect(_mk("anomaly_detect", df, "y", [], {"method": "iqr"}))
+    r_o = outlier_consensus(_mk("outlier_consensus", df, "y", [], {}))
+    assert r_a.status == "error" and "IQR=0" in " ".join(r_a.messages)
+    assert r_o.status == "error" and "IQR=0" in " ".join(r_o.messages)
+
+
+def test_iqr_outlier_mask_direct_unit():
+    """`detection._shared.iqr_outlier_mask` 直接单测（质量守卫要求公共函数有直测）。
+
+    三态：正常数据 → 返回 (掩码, 下界, 上界) 且边界与掩码同源；常量列（IQR=0）
+    → 返回 None（由调用方生成任务级中文错误）。
+    """
+    from smartsuite.engine._constants import IQR_OUTLIER_MULTIPLIER
+    from smartsuite.engine.detection._shared import iqr_outlier_mask
+
+    data = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 100.0])
+    result = iqr_outlier_mask(data, IQR_OUTLIER_MULTIPLIER)
+    assert result is not None
+    mask, lower, upper = result
+    q1, q3 = data.quantile(0.25), data.quantile(0.75)
+    iqr = q3 - q1
+    assert lower == pytest.approx(q1 - IQR_OUTLIER_MULTIPLIER * iqr)
+    assert upper == pytest.approx(q3 + IQR_OUTLIER_MULTIPLIER * iqr)
+    assert int(mask.sum()) == 1, "仅 100 应被判为异常"
+    assert bool(mask.iloc[-1]) is True
+
+    assert iqr_outlier_mask(pd.Series([5.0] * 10), IQR_OUTLIER_MULTIPLIER) is None, (
+        "常量列（IQR=0）应返回 None 交由调用方报错"
+    )

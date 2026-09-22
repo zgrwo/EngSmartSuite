@@ -22,7 +22,7 @@ ruff check src/smartsuite/
 
 ## 检查清单
 
-- [ ] 11 步注册链完成（如新增方法）
+- [ ] 8 步注册链完成（如新增方法；注册集中在 `services/task_spec.py`）
 - [ ] 效应量 + 95% CI 已报告（如统计检验）
 - [ ] 中文工艺语言 summary
 - [ ] 无裸 `except:` 或 `except Exception:` 不记录日志

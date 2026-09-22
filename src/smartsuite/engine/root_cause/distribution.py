@@ -10,8 +10,8 @@ from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import drop_non_finite, non_finite_note, round_for_display, shapiro_p
 from smartsuite.engine._utils import safe_float as _safe_float
-from smartsuite.engine._utils import shapiro_p
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,8 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     提供全面的单变量分布描述和拟合诊断。
     """
     data = req.data[req.target_col].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 使 hist/set_xlim 抛 ValueError；入口按缺失剔除
+    data, n_inf = drop_non_finite(data)
     n = len(data)
     if n < 3:
         return AnalysisResult(
@@ -50,7 +52,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
         "P99": float(data.quantile(0.99)),
         "IQR": float(data.quantile(0.75) - data.quantile(0.25)),
         "CV(%)": (
-            round(float(data.std(ddof=1) / abs(data.mean()) * 100), 2)
+            round_for_display(float(data.std(ddof=1) / abs(data.mean()) * 100), 2)
             if float(data.mean()) != 0
             else float("nan")
         ),  # 审查 2026-09-16 D-2：原 +EPSILON 使均值≈0 时 CV 爆表；均值精确 0 → 无定义 NaN
@@ -61,6 +63,11 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-09-16 C-2：原 `if sw_p` 把合法的 p=0.0 与"未计算(None)"混同 → is not None
     desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"
 
+    # 审查 2026-09-21 A-1：三分布（Normal/Lognormal/Weibull）的 fit+kstest 与
+    # `spc_charts/nonparametric.py` 的同名段落重复。**未合并**的原因：两处产出结构不同
+    # （此处为展示用 params 字符串 + 四位小数 p；彼处需保留 dist/args 以推算控制限），
+    # 强行统一会改造调用方。**改动其中一处请同步另一处**，并注意已知不对称：
+    # 此处 lognorm 无 try/except（拟合失败会向上抛），彼处有（静默降级）。
     # 分布拟合
     fits: dict[str, dict[str, Any]] = {}
     # Normal
@@ -177,6 +184,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             f"最佳拟合: {best_fit} (KS p={fits[best_fit]['KS p']:.3f})"
         ),
         metadata={"descriptive": desc, "fits": fits, "best_fit": best_fit},
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 
@@ -241,12 +249,9 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             else:
                 # 旧版 scipy 无 pvalue，用 5% 临界值近似判定
                 ad_p = None
-            if ad_p is not None:
-                ad_normal = ad_p > alpha
-            else:
-                # scipy < 1.16 无 pvalue：临界值近似固定 5% 会让 alpha 参数失效
-                # （Round-2 批次D #2e），A-D 不参与判定，仅展示统计量；SW 已提供 p 值
-                ad_normal = None
+            # scipy < 1.16 无 pvalue：临界值近似固定 5% 会让 alpha 参数失效
+            # （Round-2 批次D #2e），A-D 不参与判定，仅展示统计量；SW 已提供 p 值
+            ad_normal = ad_p > alpha if ad_p is not None else None
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)
             ad_stat, ad_p, ad_normal = None, None, None
@@ -264,22 +269,13 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         else:
             normality = f"非正态 (S-W p={sw_p:.4f})" if sw_p is not None else "—"
             if skew > 1.5:
-                if (d > 0).all():
-                    recommendation = "Box-Cox (右偏严重)"
-                else:
-                    recommendation = "Yeo-Johnson (右偏严重)"
+                recommendation = "Box-Cox (右偏严重)" if (d > 0).all() else "Yeo-Johnson (右偏严重)"
             elif skew > 0.5:
-                if (d > 0).all():
-                    recommendation = "对数变换 log(x)"
-                else:
-                    recommendation = "平方根变换 √(x+const)"
+                recommendation = "对数变换 log(x)" if (d > 0).all() else "平方根变换 √(x+const)"
             elif skew < -1.5:
                 recommendation = "平方变换 x²"
             elif skew < -0.5:
-                if (d > 0).all():
-                    recommendation = "倒数变换 1/x"
-                else:
-                    recommendation = "反射+对数变换"
+                recommendation = "倒数变换 1/x" if (d > 0).all() else "反射+对数变换"
             else:
                 recommendation = "Box-Cox / Yeo-Johnson"
 

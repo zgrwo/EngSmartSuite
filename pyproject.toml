@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
@@ -67,6 +68,7 @@ all = [
 
 [project.scripts]
 smartsuite = "smartsuite.cli:main"
+smartsuite-web = "smartsuite.web.app:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -122,21 +124,18 @@ ignore = ["E501", "N806"]
 # B007 — 已从全局 ignore 移除，仅在 per-file-ignores 中保留必要文件
 
 [tool.ruff.lint.per-file-ignores]
-"src/smartsuite/engine/__init__.py" = ["E402", "I001", "SIM112"]  # matplotlib config + core deps check must precede imports
-"src/smartsuite/engine/doe_opt/regression.py" = ["N803"]  # X 参数名（统计符号约定，非笔误）
-"src/smartsuite/engine/root_cause/distribution.py" = ["SIM108"]  # 三元风格（历史风格，保留豁免）
-"src/smartsuite/engine/spc_monitor.py" = ["N806", "B007", "B905"]  # math vars + zip strict
-"src/smartsuite/engine/spc_charts/attribute.py" = ["SIM108"]  # 三元风格（历史风格，保留豁免）
-"src/smartsuite/engine/spc_charts/xbar_r.py" = ["SIM108"]  # 三元风格（历史风格，保留豁免）
-"src/smartsuite/engine/detection.py" = ["SIM300"]  # yoda condition
-"src/smartsuite/engine/exploratory.py" = ["SIM105"]  # try-except-pass style
-"src/smartsuite/cli.py" = ["E402"]  # matplotlib.use before imports
-"src/smartsuite/web/*" = ["E402", "SIM105", "SIM115"]  # matplotlib config before imports
-"src/smartsuite/services/orchestrator.py" = ["I001"]  # sorted engine imports for readability
-"src/smartsuite/services/reporter.py" = ["N806", "B904"]  # txBox variable + raise from err (Python 3.10)
-"src/smartsuite/services/data_io.py" = ["SIM108", "SIM210"]  # ternary style
-"tests/*" = ["N806", "E501", "F841", "B007", "E701", "E402", "I001"]  # test fixtures + math vars + import order
+# 审查 2026-09-19 B8：18 → 16 → 9 条。两类收敛动作：
+#   ① 用**等价改写**从源头消除违规（contextlib.suppress 替代 try/except/pass、
+#      三元表达式替代 if/else 赋值、`x > 1` 替代 `True if x > 1 else False`）；
+#   ② 删除与 `[tool.ruff.lint] ignore` **重复**的冗余条目（E501 / N806 已全局忽略）。
+# 每条理由见行尾注释；`tests/guards/test_lint_budget.py` 会校验每条豁免**仍然生效**
+# （去掉整段豁免后该规则在该文件里必须仍有违规），防止无用豁免重新堆积。
+"src/smartsuite/engine/__init__.py" = ["E402", "I001", "SIM112"]  # matplotlib 全局配置与依赖自检必须先于 import 执行
+"src/smartsuite/engine/doe_opt/regression.py" = ["N803"]  # X = 设计矩阵（统计符号约定，非命名笔误）
+"src/smartsuite/engine/detection/anomaly.py" = ["SIM300"]  # ruff 假阳性：Grubbs 统计量 G 全大写被启发式误判为常量
+"src/smartsuite/web/*" = ["SIM115"]  # 有意不用 with：NamedTemporaryFile 需在 with 外按文件名使用
+"tests/*" = ["F841", "B007", "E402", "I001"]  # 测试夹具惯例：故意保留的未用变量/数学变量/导入顺序
 "scripts/verify_consistency.py" = ["E402"]  # 顺序式验证脚本：import 与检查交错执行
-"scripts/verify_cross_consistency.py" = ["E402"]  # sys.path 注入后导入 + 顺序式验证
+"scripts/verify_cross_consistency.py" = ["E402"]  # sys.path 注入后导入 + 顺序式执行
 "scripts/verify_frontend_params.py" = ["E402"]  # sys.path 注入后导入 smartsuite（scripts 惯例）
 "scripts/verify_manual_claims.py" = ["E402", "N816"]  # sys.path 注入后导入 + 统计符号 F 值命名

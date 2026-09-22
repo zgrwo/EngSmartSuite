@@ -7,6 +7,7 @@
 import logging
 
 import numpy as np
+import pandas as pd
 from scipy import stats as sp_stats
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,51 @@ def shapiro_p(data) -> float:
         return 1.0
     p = float(sp_stats.shapiro(data)[1])
     return 1.0 if np.isnan(p) else p
+
+
+def drop_non_finite(data: pd.Series) -> tuple[pd.Series, int]:
+    """入口哨兵（单列）：剔除 ±Inf 等非有限值，返回 (过滤后序列, 剔除个数)。
+
+    审查 2026-09-22 发现 2/3：引擎入口仅 `dropna()` 时 ±Inf 会流入 scipy
+    （对含 Inf 数组返回 NaN p 值，被表述为「未发现显著差异」）或
+    matplotlib/sklearn（抛未捕获 ValueError，被 orchestrator 泛化翻译为
+    「数据格式不符合要求」）。语义与 services 预处理层一致：非有限值按缺失处理。
+    """
+    mask = np.isfinite(data.to_numpy(dtype=float, na_value=np.nan))
+    n_dropped = int((~mask).sum())
+    if n_dropped == 0:
+        return data, 0
+    return data[mask], n_dropped
+
+
+def drop_non_finite_rows(frame: pd.DataFrame, cols: list[str]) -> tuple[pd.DataFrame, int]:
+    """入口哨兵（多列）：按行剔除 cols 中任一列为非有限值的行。
+
+    cols 必须为数值列（调用方保证），用于配对/多列数据的行级清洗。
+    """
+    mask = np.isfinite(frame[cols].to_numpy(dtype=float, na_value=np.nan)).all(axis=1)
+    n_dropped = int((~mask).sum())
+    if n_dropped == 0:
+        return frame, 0
+    return frame[mask], n_dropped
+
+
+def non_finite_note(n_dropped: int, column: str = "") -> str:
+    """非有限值剔除提示（统一文案，供各引擎入口追加到 messages）。"""
+    where = f"「{column}」" if column else "数据"
+    return f"⚠ {where}含 {n_dropped} 个非有限值（±Inf 视为缺失），已剔除后分析"
+
+
+def is_positive_finite(value: float) -> bool:
+    """参数守卫谓词：是否为**正的有限数**。
+
+    审查 2026-09-21 D-1（P1）：`x <= 0` 作为「必须为正」的守卫会漏两路——
+    NaN 与任何数比较恒为 False（IEEE-754），`+Inf` 也不满足 `<= 0`。
+    实测 `k/h/L="nan"|"inf"` 绕过守卫后 CUSUM 报警数由 4 静默降为 0。
+
+    用法：`if not is_positive_finite(k): return AnalysisResult(status="error", ...)`
+    """
+    return bool(np.isfinite(value)) and value > 0
 
 
 def safe_float(value, default: float) -> float:

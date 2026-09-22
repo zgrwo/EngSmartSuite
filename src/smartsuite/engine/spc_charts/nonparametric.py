@@ -57,6 +57,9 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             messages=["目标列为常量列（方差为 0），无法进行分布拟合与控制限计算"],
         )
 
+    # 审查 2026-09-21 A-1：与 `root_cause/distribution.py` 的分布拟合段重复，未合并原因
+    # 见该处注释（产出结构不同：此处保留 dist/args 供算控制限）。
+    # 已知不对称：此处 lognorm/Weibull 均有 try/except 降级，彼处 lognorm 无。**两处请同步改**。
     # ── 1. 分布拟合 (Normal / Lognormal / Weibull) ──
     fits = {}
     # Normal

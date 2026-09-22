@@ -215,7 +215,12 @@ def audit_file(filepath: Path) -> list[dict]:
 def _iter_scan_files():
     for path in SCAN_PATHS:
         if path.is_dir():
-            yield from sorted(path.glob("*.py"))
+            # 审查 2026-09-21 G-1（P1）：原为 `glob("*.py")`（**非递归**）——
+            # 2026-09-19/21 把巨石模块拆为 5 个子包（root_cause / doe_opt /
+            # spc_charts / detection / inverse）后，子包内 37 个 .py 完全不在审计
+            # 范围，门禁仍打印「零 HIGH 风险」并 exit 0（实测：同一注入内容放顶层
+            # → exit 1 并点名；放子包 → exit 0）。改 rglob 并排除 __pycache__。
+            yield from sorted(p for p in path.rglob("*.py") if "__pycache__" not in p.parts)
         elif path.is_file() and path.suffix == ".py":
             yield path
 

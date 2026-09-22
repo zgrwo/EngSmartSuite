@@ -10,6 +10,12 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine._constants import EPSILON
 from smartsuite.engine._palette import PALETTE
+from smartsuite.engine._utils import (
+    drop_non_finite,
+    drop_non_finite_rows,
+    non_finite_note,
+    round_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +183,9 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="gage_rr", status="error", messages=["需要提供部件列和操作员列"])
 
     sub = req.data[[req.target_col, part_col, operator_col]].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 使 GRR 分量为 NaN，`int(1.41*pv/grr)` 抛
+    # ValueError: cannot convert float NaN to integer；入口按缺失剔除
+    sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
     if len(sub) < 10:
         return AnalysisResult(task="gage_rr", status="error", messages=["有效数据不足"])
 
@@ -453,6 +462,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
             "n_operators": k,
             "n_replicates": r,
         },
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 
@@ -467,6 +477,8 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
     用于设定合理规格限，不同于置信区间（均值的不确定性）。
     """
     data = req.data[req.target_col].dropna()
+    # 审查 2026-09-22 发现 3：±Inf 使 hist/linspace 抛 ValueError（range not finite）
+    data, n_inf = drop_non_finite(data)
     n = len(data)
     if n < 5:
         return AnalysisResult(
@@ -628,6 +640,7 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
             "confidence": confidence,
             "side": side,
         },
+        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
     )
 
 
@@ -672,21 +685,37 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效数据为空：时间列与事件列无共同有效值，请检查数据完整性。"],
         )
     times = sub[time_col].values
-    # 自动二值化事件列：支持 0/1 数值和 "是"/"否" 等文本
-    try:
-        events = sub[event_col].values.astype(int)
-    except (ValueError, TypeError):
-        unique_vals = sub[event_col].unique()
-        if len(unique_vals) == 2:
-            events = (sub[event_col] == sorted(unique_vals)[-1]).astype(int).values
-        else:
+    # 自动二值化事件列：支持 0/1 数值和 "是"/"否" 等文本。
+    # 审查 2026-09-21 D-2（P0）：原先直接 `astype(int)` 对**任意**数值列恒成功，
+    # 使「恰好 2 个不同值」校验永不进入；而事件语义又硬编码为 `== 1`，于是
+    # 1/2 编码把事件算成 1+2=3 倍、10/20 编码算出 180 个事件（n_total 仅 12），
+    # 全部 status=ok。数值列的「哪一值是事件」无法从数值推断（max 不一定代表
+    # 事件，如 10=失效/20=删失），故收紧为：数值事件列必须恰为 {0,1}。
+    raw_events = sub[event_col]
+    unique_vals = raw_events.unique()
+    if pd.api.types.is_numeric_dtype(raw_events) or pd.api.types.is_bool_dtype(raw_events):
+        vals = set(pd.unique(raw_events.dropna()).tolist())
+        if not vals <= {0, 1}:
             return AnalysisResult(
                 task="survival_analysis",
                 status="error",
                 messages=[
-                    f"事件列「{event_col}」需要恰好2个不同值(0/1 或 是/否)，当前有{len(unique_vals)}个"
+                    f"事件列「{event_col}」的数值编码必须为 0/1（1=失效，0=删失），"
+                    f"当前取值: {sorted(vals)[:10]}。"
+                    "若为其他编码，请先转换为 0/1，或改用「是/否」文本列。"
                 ],
             )
+        events = raw_events.astype(int).values
+    elif len(unique_vals) == 2:
+        events = (raw_events == sorted(unique_vals)[-1]).astype(int).values
+    else:
+        return AnalysisResult(
+            task="survival_analysis",
+            status="error",
+            messages=[
+                f"事件列「{event_col}」需要恰好2个不同值(0/1 或 是/否)，当前有{len(unique_vals)}个"
+            ],
+        )
     # 将二值化结果写回 DataFrame，确保后续 Log-rank 等分组分析使用一致的事件编码
     # (P0 fix: Log-rank 段使用 sub[event_col] 比较 int 1，含文本原始值时永为 False)
     sub[event_col] = events
@@ -779,7 +808,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             lr_p = float(2 * sp_stats.norm.sf(abs(z_lr)))
             logrank_result = {
                 "分组": f"{groups[0]} vs {groups[1]}",
-                "Log-rank Z": round(float(z_lr), 3),
+                "Log-rank Z": round_for_display(float(z_lr), 3),
                 "p值": round(lr_p, 4),
                 "显著": "是" if lr_p < 0.05 else "否",
             }

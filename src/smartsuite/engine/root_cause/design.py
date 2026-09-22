@@ -97,7 +97,8 @@ def power_analysis(req: AnalysisRequest) -> AnalysisResult:
     if current_n is not None:
         try:
             current_n = int(current_n)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
+            # OverflowError（审查 2026-09-22 发现 5 同族）：int(float('inf')) 穿透守卫
             return AnalysisResult(
                 task="power_analysis",
                 status="error",

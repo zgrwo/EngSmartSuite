@@ -6,17 +6,17 @@ import logging
 import os
 import sys
 
-logger = logging.getLogger(__name__)
-
 import pandas as pd
 import yaml
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.core.exceptions import SmartSuiteError
+from smartsuite.core.exceptions import CsvEncodingError, CsvParseError, SmartSuiteError
 from smartsuite.services.data_io import (
+    SUPPORTED_CSV_ENCODINGS,
     infer_hypothesis_group_col,
     prepare_spc_subgroup_col,
     preprocess_for_task,
+    read_csv_with_encoding,
     validate_data,
 )
 from smartsuite.services.orchestrator import (
@@ -27,22 +27,28 @@ from smartsuite.services.orchestrator import (
     orchestrate,
 )
 
+logger = logging.getLogger(__name__)
 
-def _read_data_file(filepath: str, sheet=0) -> pd.DataFrame:
-    """根据文件扩展名自动选择读取方式。支持 .csv / .xlsx / .xlsm。"""
+
+def _read_data_file(filepath: str, sheet=0, encoding: str | None = None) -> pd.DataFrame:
+    """根据文件扩展名自动选择读取方式。支持 .csv / .xlsx / .xlsm。
+
+    CSV 走 `services.data_io.read_csv_with_encoding`（与 Web 上传共用同一套
+    编码策略与错误语义）——审查 2026-09-19 E5：不再用 latin-1 兜底，
+    否则 UTF-16/Big5 中文表头会被静默读成乱码。
+    `encoding` 仅对 CSV 生效（ADR-0004 决策 2），Excel 由 openpyxl 自行处理编码。
+    """
     ext = os.path.splitext(filepath)[1].lower()
     if ext == ".csv":
-        for encoding in ["utf-8-sig", "utf-8", "gbk", "latin-1"]:
-            try:
-                return pd.read_csv(filepath, encoding=encoding)
-            except UnicodeError:
-                continue
-            except Exception:
-                logger.exception("CSV 文件解析失败 (encoding=%s)", encoding)
-                raise
-        raise ValueError("无法识别 CSV 文件编码，请转换为 UTF-8 后重试")
-    else:
-        return pd.read_excel(filepath, sheet_name=sheet, engine="openpyxl")
+        return read_csv_with_encoding(filepath, encoding=encoding)
+    if encoding is not None:
+        # 审查 2026-09-21 R1-10：Excel 由 openpyxl 自行处理编码，--encoding 对非 CSV
+        # 输入天然无意义。静默忽略会让用户以为编码已生效，故显式提示（不改变读取行为）。
+        print(
+            f"提示: --encoding 仅对 CSV 生效，已忽略（当前输入为 {ext or '无扩展名'} 文件）",
+            file=sys.stderr,
+        )
+    return pd.read_excel(filepath, sheet_name=sheet, engine="openpyxl")
 
 
 def _parse_sheet(sheet) -> int | str | None:
@@ -85,6 +91,16 @@ def main():
         "--outdir",
         default=None,
         help="图表输出目录（可选）。提供后会把本次分析的图表保存为 PNG，否则图表仅在内存中生成",
+    )
+    run_parser.add_argument(
+        "--encoding",
+        "-e",
+        default=None,
+        choices=SUPPORTED_CSV_ENCODINGS,
+        help=(
+            "CSV 文件编码。默认自动：先看 BOM，再依次尝试 utf-8-sig/utf-8/gbk。"
+            "繁体文件用 big5；仅对 CSV 生效"
+        ),
     )
 
     subparsers.add_parser("list", help="列出支持的分析方法")
@@ -135,18 +151,23 @@ def main():
             sys.exit(1)
 
         try:
-            raw = _read_data_file(args.input, sheet=_parse_sheet(args.sheet))
+            raw = _read_data_file(
+                args.input, sheet=_parse_sheet(args.sheet), encoding=args.encoding
+            )
         except FileNotFoundError:
             print(f"错误: 找不到输入文件「{args.input}」，请检查文件路径是否正确", file=sys.stderr)
             sys.exit(1)
-        except (pd.errors.ParserError, pd.errors.EmptyDataError):
-            # 二者均为 ValueError 子类，必须先于 ValueError 分支拦截，
-            # 否则英文 pandas 原文（如 "Error tokenizing data"）直接透给 CLI 用户
+        except CsvEncodingError as e:
+            # 全部受支持编码均失败：直接给中文建议，不经 except Exception 兜底文案
+            # （审查 2026-09-19 E5；本分支必须排在 except Exception 之前）
+            print(f"错误: {e}", file=sys.stderr)
+            sys.exit(1)
+        except CsvParseError:
+            # 编码可解码但结构非法（列数不一致/空文件）；与改造前的 ParserError 拦截
+            # 同一文案（原分支已随 E5 下沉至 data_io 而删除），不得把 pandas 英文
+            # 原文（如 "Error tokenizing data"）透给 CLI 用户
             logger.exception("文件解析失败")
             print(f"错误: 无法解析文件「{args.input}」，请确认文件格式正确", file=sys.stderr)
-            sys.exit(1)
-        except ValueError as e:
-            print(f"错误: {e}", file=sys.stderr)
             sys.exit(1)
         except Exception:
             logger.exception("文件解析失败")
@@ -234,11 +255,12 @@ def main():
                 except Exception as e:
                     logger.exception("图表保存失败: %s", out_path)
                     print(f"错误: 图表保存失败: {e}", file=sys.stderr)
-        # Figure 无 close() 方法（matplotlib API），须经 pyplot 关闭（Agg 后端已就绪）
-        import matplotlib.pyplot as _plt
+        # 图窗释放：与审计层共用单一实现（services.reporter.close_figures）。
+        # 函数内导入（审查 2026-09-19 B2）：reporter 模块级导入 matplotlib.pyplot，
+        # 模块级拉入它会让 `smartsuite list`（只需任务清单）付满额绘图栈启动成本。
+        from smartsuite.services.reporter import close_figures
 
-        for fig in result.figures:
-            _plt.close(fig)
+        close_figures(result.figures)
         for msg in result.messages:
             print(f"  [{result.status}] {msg}")
 

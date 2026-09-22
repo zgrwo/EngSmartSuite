@@ -9,20 +9,26 @@
 不覆盖（导入期/环境分支，单测不可达）：app.py:21-28 flask ImportError
 退出分支、129-154 SECRET_KEY 文件/env 分支（模块导入时执行）、402-409
 `__main__` argparse 守卫、275-278（xlsx >100k 行需巨型 fixture，CSV 路径
-已在 test_upload_limits.py 覆盖同判据）、249-250（latin-1 恒可解码，不可达）。
+已在 test_upload_limits.py 覆盖同判据）。
+
+注：审查 2026-09-19 E5 后 CSV 读取下沉至 `services.data_io.read_csv_with_encoding`，
+原先「latin-1 恒可解码→df is None 不可达」已不成立：回退链不再含 latin-1，
+「全部编码失败」分支由 `test_upload_csv_all_encodings_fail` 直接覆盖。
 """
 
 import io
 import logging
 import os
+import pathlib
+import re
 import sys
-import tempfile
 import time
 import zipfile
 
 import pandas as pd
 import pytest
 
+from smartsuite.services import config as config_module
 from smartsuite.services.orchestrator import TASK_REGISTRY
 from smartsuite.web import app as app_module
 from smartsuite.web.app import app as flask_app
@@ -35,28 +41,19 @@ def client():
         yield c
 
 
-@pytest.fixture(autouse=True)
-def _reset_upload_tracking():
-    """隔离模块级临时文件追踪列表：先清理上一测试遗留文件，再清空追踪表。"""
-    app_module._cleanup_uploads()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
-    yield
-    app_module._cleanup_uploads()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
-
-
 def _csrf(client):
     resp = client.get("/api/csrf-token")
     assert resp.status_code == 200
     return resp.get_json()["token"]
 
 
-def _post_csv(client, content: bytes, filename: str = "data.csv"):
+def _post_csv(client, content: bytes, filename: str = "data.csv", encoding: str | None = None):
+    data: dict = {"file": (io.BytesIO(content), filename)}
+    if encoding is not None:
+        data["encoding"] = encoding
     return client.post(
         "/api/upload",
-        data={"file": (io.BytesIO(content), filename)},
+        data=data,
         content_type="multipart/form-data",
         headers={"X-CSRF-Token": _csrf(client)},
     )
@@ -120,7 +117,7 @@ def test_upload_bad_extension_400(client):
 
 
 def test_upload_csv_gbk_decoded(client):
-    """GBK 中文表头 CSV：utf-8 解码失败后回退 gbk 成功（app.py:233-243）。"""
+    """GBK 中文表头 CSV：utf-8 解码失败后回退 gbk 成功（read_csv_with_encoding）。"""
     content = "强度,温度\n45.1,180\n46.3,182\n".encode("gbk")
     resp = _post_csv(client, content)
     assert resp.status_code == 200, resp.get_json()
@@ -129,10 +126,54 @@ def test_upload_csv_gbk_decoded(client):
 
 
 def test_upload_csv_garbage_parse_error_400(client):
-    """字段数不一致的垃圾 CSV：utf-8 可解码但解析异常 → 400（app.py:244-248）。"""
+    """字段数不一致的垃圾 CSV：utf-8 可解码但解析异常 → 400（CsvParseError）。"""
     resp = _post_csv(client, b"a,b\n1,2\n1,2,3\n")
     assert resp.status_code == 400
     assert "无法解析 CSV" in resp.get_json()["error"]
+
+
+def test_upload_csv_utf16_bom_decoded(client):
+    """UTF-16 BOM 中文 CSV：ADR-0004 后由「400 拒绝」改为正确解码。
+
+    本用例 2026-09-21 由 test_upload_csv_utf16_rejected_not_garbled 反转而来；
+    仍守住原意图——列名不得是 'ÿþyb!k' 这类乱码。
+    """
+    content = "强度,温度\n45.1,180\n46.3,182\n".encode("utf-16")
+    resp = _post_csv(client, content)
+    assert resp.status_code == 200, resp.get_json()
+    names = [c["name"] for c in resp.get_json()["columns"]]
+    assert names[:2] == ["强度", "温度"], f"UTF-16 应正确解码: {names[:2]}"
+
+
+def test_upload_csv_explicit_big5_encoding(client):
+    """encoding=big5：繁体表头正确返回（ADR-0004 决策 2）。"""
+    content = "批號,溫度\nB2301,235\n".encode("big5")
+    resp = _post_csv(client, content, encoding="big5")
+    assert resp.status_code == 200, resp.get_json()
+    names = [c["name"] for c in resp.get_json()["columns"]]
+    assert names[:2] == ["批號", "溫度"]
+
+
+def test_upload_csv_unsupported_encoding_400(client):
+    """白名单外编码：400 + 中文错误（不透传 pandas 英文异常）。"""
+    content = "批号,温度\nB1,235\n".encode("gbk")
+    resp = _post_csv(client, content, encoding="latin-1")
+    assert resp.status_code == 400
+    assert "不支持的编码" in resp.get_json()["error"]
+
+
+def test_frontend_encoding_options_within_backend_allowlist():
+    """前端编码下拉框选项 ⊆ 后端白名单（ADR-0004 约束：白名单只定义一处）。"""
+    from smartsuite.services.data_io import SUPPORTED_CSV_ENCODINGS
+
+    html = (pathlib.Path(app_module.__file__).parent / "templates" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    block = re.search(r'<select id="encoding".*?</select>', html, re.S)
+    assert block, "index.html 应存在 id=encoding 的下拉框"
+    values = set(re.findall(r'<option value="([^"]*)"', block.group(0)))
+    values.discard("")  # 空值 = 自动识别
+    assert values <= set(SUPPORTED_CSV_ENCODINGS), f"前端出现后端不支持的编码: {values}"
 
 
 def test_upload_excel_bad_zip_400(client):
@@ -204,45 +245,87 @@ def test_upload_parquet_save_failure_500(client, monkeypatch):
 
 
 def test_upload_replaces_old_session_file(client):
-    """二次上传：旧临时文件被删除并移出追踪表（app.py:303-312）。"""
+    """二次上传：旧临时文件被删除，新文件落在专用目录内。"""
     assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
     with client.session_transaction() as sess:
         old_path = sess["_data_path"]
     assert os.path.exists(old_path)
     assert _post_csv(client, b"a,b\n3,4\n").status_code == 200
+    with client.session_transaction() as sess:
+        new_path = sess["_data_path"]
+    assert new_path != old_path
     assert not os.path.exists(old_path), "旧上传文件应被删除"
-    assert old_path not in app_module._UPLOAD_FILES
+    assert pathlib.Path(new_path).parent == app_module._upload_dir()
 
 
-def test_cleanup_uploads_removes_tracked_files(client):
-    """atexit 兜底清理：_cleanup_uploads 删除全部受追踪临时文件（app.py:52-60）。
+# ── D2：上传目录 + mtime TTL 扫描（无进程级注册表）──
 
-    注：该函数只负责删文件，不摘除追踪表条目（摘除是 _periodic_cleanup 的职责）。
-    """
+
+def test_upload_lands_in_dedicated_dir(client):
+    """D2：上传文件写入专用目录；进程级注册表已移除。"""
+    assert not hasattr(app_module, "_UPLOAD_FILES"), "进程级注册表应已移除"
+    assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
+    with client.session_transaction() as sess:
+        path = pathlib.Path(sess["_data_path"])
+    assert path.parent == app_module._upload_dir(), "上传文件必须落在专用目录内"
+    assert path.exists()
+
+
+def test_sweep_expired_removes_stale_keeps_fresh():
+    """D2：按 mtime 扫描——过期文件删除、未过期文件保留（不依赖任何注册表）。"""
+    upload_dir = app_module._upload_dir()
+    stale = upload_dir / "ss-stale.parquet"
+    fresh = upload_dir / "ss-fresh.parquet"
+    stale.write_bytes(b"x")
+    fresh.write_bytes(b"x")
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    os.utime(stale, (old_t, old_t))
+
+    assert app_module._sweep_expired(force=True) == 1
+    assert not stale.exists(), "过期文件应被删除"
+    assert fresh.exists(), "未过期文件必须保留"
+
+
+def test_cleanup_uploads_clears_upload_dir(client):
+    """atexit 兜底：进程退出清空本目录全部临时文件（不再依赖注册表）。"""
     assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
     with client.session_transaction() as sess:
         path = sess["_data_path"]
-    assert os.path.exists(path)
+    (app_module._upload_dir() / "ss-exit.parquet").write_bytes(b"x")
+
     app_module._cleanup_uploads()
+
     assert not os.path.exists(path)
+    assert list(app_module._upload_dir().glob("*.parquet")) == []
 
 
-def test_periodic_cleanup_purges_stale_and_missing(client, monkeypatch):
-    """定期清理：过期文件（mtime>24h）删除、幽灵路径移出追踪表（app.py:70-100）。"""
-    monkeypatch.setattr(app_module, "_CLEANUP_INTERVAL", 1)  # 每次请求都触发
-    stale = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)  # noqa: SIM115
-    stale.close()
-    old_t = time.time() - 90_000
-    os.utime(stale.name, (old_t, old_t))
-    ghost = stale.name + ".ghost"
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.extend([stale.name, ghost])
+def test_periodic_cleanup_sweeps_stale_via_request(client, monkeypatch):
+    """D2：请求路径触发清理（节流由 CLEANUP_MIN_INTERVAL_SECONDS 控制）。"""
+    monkeypatch.setattr(config_module, "CLEANUP_MIN_INTERVAL_SECONDS", 0)
+    stale = app_module._upload_dir() / "ss-stale.parquet"
+    stale.write_bytes(b"x")
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    os.utime(stale, (old_t, old_t))
+
     assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
-    assert not os.path.exists(stale.name), "过期文件应被定期清理删除"
-    with app_module._upload_lock:
-        assert stale.name not in app_module._UPLOAD_FILES
-        assert ghost not in app_module._UPLOAD_FILES
-        assert len(app_module._UPLOAD_FILES) == 1, "仅剩本次上传的新文件"
+    assert not stale.exists(), "过期文件应由请求路径上的清理删除"
+
+
+def test_sweep_expired_is_throttled(monkeypatch):
+    """节流：距上次扫描不足下限时直接返回 0（避免每请求都做目录 I/O）。"""
+    monkeypatch.setattr(config_module, "CLEANUP_MIN_INTERVAL_SECONDS", 3600)
+    upload_dir = app_module._upload_dir()
+    stale = upload_dir / "ss-throttled.parquet"
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    stale.write_bytes(b"x")
+    os.utime(stale, (old_t, old_t))
+
+    app_module._sweep_expired(force=True)  # 建立时间戳（并清掉当前过期文件）
+    stale.write_bytes(b"x")
+    os.utime(stale, (old_t, old_t))
+
+    assert app_module._sweep_expired() == 0, "节流窗口内不应扫描"
+    assert stale.exists()
 
 
 # ── analyze 校验分支 ──
@@ -387,52 +470,136 @@ def test_main_default_runs_localhost(monkeypatch, capsys):
     monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
     app_module.main()
     assert calls == {"host": "127.0.0.1", "port": 5050, "debug": False}
-    assert "Ctrl+C" in capsys.readouterr().out
+
+
+# ── smartsuite-web 控制台入口（审查 2026-09-19 E14a）──
+
+
+def test_console_script_entry_is_registered_and_callable():
+    """pyproject 的 smartsuite-web 入口必须指向可导入的可调用对象（防注册漂移）。"""
+    import importlib
+    import re
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    # 用正则而非 tomllib：tomllib 仅 3.11+，而 requires-python >= 3.10
+    text = pyproject.read_text(encoding="utf-8")
+    match = re.search(r'^smartsuite-web\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    assert match, "pyproject.toml 缺少 smartsuite-web 控制台入口"
+    module_path, _, attr = match.group(1).partition(":")
+    assert attr, f"入口目标须为 module:callable 形式: {match.group(1)}"
+    assert callable(getattr(importlib.import_module(module_path), attr))
+
+
+def test_cli_help_is_chinese_and_exits_zero(capsys):
+    """`smartsuite-web --help` 输出中文帮助并 exit 0。"""
+    with pytest.raises(SystemExit) as ei:
+        app_module.cli(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    assert "监听地址" in out and "监听端口" in out, f"帮助应含中文参数说明: {out[:200]}"
+
+
+def test_cli_passes_host_and_port(monkeypatch):
+    """--host/--port 透传到 app.run。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+    assert app_module.cli(["--host", "0.0.0.0", "--port", "9999"]) == 0
+    assert calls == {"host": "0.0.0.0", "port": 9999, "debug": False}
+
+
+def test_cli_port_zero_is_not_swallowed(monkeypatch):
+    """--port 0 是 Flask 合法值（随机端口），不得被 `or` 当成假值吞掉。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+    app_module.cli(["--port", "0"])
+    assert calls["port"] == 0, f"--port 0 应原样传递: {calls}"
+
+
+def test_cli_debug_flag_and_env(monkeypatch, capsys):
+    """--debug 与 SMARTSUITE_DEBUG=1 都能开启 debug；两者共存不报错。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+
+    app_module.cli(["--host", "127.0.0.1", "--debug"])
+    assert calls["debug"] is True
+
+    monkeypatch.setenv("SMARTSUITE_DEBUG", "1")
+    app_module.cli([])
+    assert calls["debug"] is True, "环境变量 SMARTSUITE_DEBUG=1 应开启 debug"
+
+    monkeypatch.setenv("SMARTSUITE_DEBUG", "0")
+    app_module.cli([])
+    assert calls["debug"] is False
+
+
+def test_cli_debug_forces_localhost(monkeypatch, capsys):
+    """经 cli 入口传 --debug + 非本机地址 → 仍强制绑定 127.0.0.1。"""
+    _silence_logging(monkeypatch)
+    calls = {}
+    monkeypatch.setattr(flask_app, "run", lambda **kw: calls.update(kw))
+    app_module.cli(["--host", "0.0.0.0", "--debug"])
+    assert calls["host"] == "127.0.0.1", "debug 模式必须强制本机绑定"
+
+
+def test_run_server_delegates_to_cli():
+    """run_server.py 不得再自行调用 main()（消除第三份启动代码）。"""
+    import ast
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "run_server.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "smartsuite.web.app"
+        for alias in node.names
+    }
+    assert "cli" in imported, f"run_server.py 应从 smartsuite.web.app 导入 cli: {imported}"
+    assert "main" not in imported, "run_server.py 不应再直接导入 main"
 
 
 # ── 清理链 OSError 防御分支 ──
 
 
-def test_cleanup_uploads_survives_unlink_oserror(monkeypatch):
-    """unlink 失败（文件被占用等）→ 静默跳过，不中断清理（app.py:56-60）。"""
+def test_cleanup_uploads_survives_unlink_oserror(client, monkeypatch):
+    """unlink 失败（文件被占用等）→ 跳过该文件，不中断清理。"""
+    assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
+    with client.session_transaction() as sess:
+        path = sess["_data_path"]
 
-    def _busy(path, *args, **kwargs):
+    def _busy(self, *args, **kwargs):
         raise OSError("文件被占用")
 
-    monkeypatch.setattr(os, "unlink", _busy)
-    monkeypatch.setattr(os.path, "exists", lambda p: True)  # 强制进入 unlink 分支
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.append("Z:/occupied/dummy.parquet")
+    monkeypatch.setattr(pathlib.Path, "unlink", _busy)
     app_module._cleanup_uploads()  # 不应抛异常
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.clear()
+    assert os.path.exists(path)
 
 
-def test_periodic_cleanup_survives_getmtime_oserror(client, monkeypatch):
-    """getmtime 失败 → 跳过该文件继续清理其余（app.py:87-100）。"""
-    monkeypatch.setattr(app_module, "_CLEANUP_INTERVAL", 1)
+def test_sweep_expired_survives_stat_oserror(monkeypatch):
+    """mtime 读取失败 → 跳过该文件继续清理（防御分支不抛异常）。"""
+    broken = app_module._upload_dir() / "ss-broken.parquet"
+    broken.write_bytes(b"x")
+    real_stat = pathlib.Path.stat
 
-    def _boom(path):
-        if path.endswith(".parquet"):
+    def _boom(self, **kwargs):
+        if self.suffix == ".parquet":
             raise OSError("stat 失败")
-        return time.time()
+        return real_stat(self, **kwargs)
 
-    real_exists = os.path.exists
-    monkeypatch.setattr(os.path, "getmtime", _boom)
-    stale = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)  # noqa: SIM115
-    stale.close()
-    with app_module._upload_lock:
-        app_module._UPLOAD_FILES.append(stale.name)
-    assert _post_csv(client, b"a,b\n1,2\n").status_code == 200
-    # getmtime 抛 OSError → 该路径未被删除也未被移出（防御分支不中断请求）
-    assert os.path.exists(stale.name)
+    monkeypatch.setattr(pathlib.Path, "stat", _boom)
+    assert app_module._sweep_expired(force=True) == 0
+    assert broken in list(app_module._upload_dir().glob("*.parquet"))
 
 
 # ── 上传解析防御分支 ──
 
 
 def test_upload_csv_all_encodings_fail(client, monkeypatch):
-    """全部编码均解码失败 → 「无法识别 CSV 文件编码」（app.py:249-250 防御兜底）。"""
+    """全部编码均解码失败 → 「无法识别 CSV 文件编码」（CsvEncodingError → 400）。"""
 
     def _undecodable(*args, **kwargs):
         raise UnicodeDecodeError("utf-8", b"", 0, 1, "bad")
@@ -596,3 +763,91 @@ def test_flask_import_error_prints_guidance_and_exits(monkeypatch, capsys):
     assert "需要 Flask" in out and "pip install smartsuite[web]" in out
     monkeypatch.undo()
     importlib.reload(app_module)  # 恢复正常模块状态
+
+
+# ── R1-1 / R1-7（2026-09-21 审查）：编码下拉框的前端安全 ──────────────────────
+def _encoding_select_block() -> str:
+    import re
+
+    html = (pathlib.Path(app_module.__file__).parent / "templates" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    m = re.search(r'<select id="encoding".*?</select>', html, re.S)
+    assert m, "index.html 应存在 id=encoding 的下拉框"
+    return m.group(0)
+
+
+def test_frontend_encoding_options_cover_gb18030():
+    """下拉框必须提供 GB18030（审查 R1-7 P3）。
+
+    后端白名单 `SUPPORTED_CSV_ENCODINGS` 含 `gb18030`（GBK 的超集，覆盖更多汉字），
+    但 UI 曾缺失该项 → 该类文件在 Web 端**无出路**：自动链只试到 gbk 即失败，
+    报错文案还指向「自动识别」，而自动模式同样读不了（实测）。
+    """
+    assert 'value="gb18030"' in _encoding_select_block(), (
+        "编码下拉框缺少 GB18030 选项（白名单已支持 → 引擎能力前端不可达）"
+    )
+
+
+def test_new_file_selection_resets_encoding_selector():
+    """选择**新文件**时必须把编码下拉框复位为「自动识别」（审查 R1-1 P2）。
+
+    否则上一次为某文件选定的编码会跨上传粘滞，把新文件静默读错——实测残留
+    Big5 声明读 GBK 文件：列名 `['蠶瘍', '恲僅']`（应 `['批号','温度']`）、
+    HTTP 200、`status=ok`，无任何提示。
+
+    无浏览器环境，故做静态判读（与 `verify_frontend_params.py` 同类手法）：
+    `file-input` 的 change 处理器体内必须出现对 `#encoding` 的复位赋值。
+    同一文件**切换下拉框**仍按当前值重传（由 R1-1 引入的 change 监听承担）。
+    """
+    import re
+
+    js = (pathlib.Path(app_module.__file__).parent / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    m = re.search(
+        r"getElementById\('file-input'\)\.addEventListener\('change',\s*e\s*=>\s*\{(.*?)\n\}\);",
+        js,
+        re.S,
+    )
+    assert m, "app.js 应存在 file-input 的 change 处理器"
+    body = m.group(1)
+    assert re.search(r"getElementById\('encoding'\)\.value\s*=\s*''", body), (
+        "选择新文件时未复位编码下拉框 → 编码声明会跨文件粘滞并静默读错（R1-1）"
+    )
+
+
+# ── R1-2（2026-09-21 审查）：清理不得误删他人在同目录的文件 ────────────────
+def test_sweep_expired_only_deletes_own_files():
+    """清理只删本应用创建的文件（`ss-` 前缀），保留同目录内的其他 parquet。
+
+    审查 R1-2：`_sweep_expired`/`_cleanup_uploads` 原先按 `*.parquet` 全量匹配。
+    目录默认独占（ADR-003），但 `SMARTSUITE_UPLOAD_DIR` 可被运维指向共享位置，
+    此时无关文件会被删除（实测：10 天前的 other_tool_data.parquet 被清理）。
+    本应用自身文件一律由 `NamedTemporaryFile(prefix="ss-")` 创建，故按前缀收窄即
+    可在不改变自身语义的前提下消除该风险。
+    """
+    upload_dir = app_module._upload_dir()
+    own = upload_dir / "ss-mine.parquet"
+    foreign = upload_dir / "other_tool_data.parquet"
+    own.write_bytes(b"x")
+    foreign.write_bytes(b"x")
+    old_t = time.time() - config_module.UPLOAD_TTL_SECONDS - 60
+    os.utime(own, (old_t, old_t))
+    os.utime(foreign, (old_t, old_t))
+
+    assert app_module._sweep_expired(force=True) == 1
+    assert not own.exists(), "本应用的过期文件应被删除"
+    assert foreign.exists(), "非本应用创建的文件不得删除（R1-2）"
+
+
+def test_cleanup_uploads_only_deletes_own_files(client):
+    """atexit 兜底清理同样只删本应用文件。"""
+    foreign = app_module._upload_dir() / "other_tool_data.parquet"
+    foreign.write_bytes(b"x")
+    (app_module._upload_dir() / "ss-exit2.parquet").write_bytes(b"x")
+
+    app_module._cleanup_uploads()
+
+    assert foreign.exists(), "退出清理不得删除非本应用文件（R1-2）"
+    assert not list(app_module._upload_dir().glob("ss-*.parquet"))

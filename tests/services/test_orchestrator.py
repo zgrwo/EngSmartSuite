@@ -3,17 +3,19 @@
 覆盖范围：
 - 任务路由（已知/未知任务）
 - DEFAULT_PARAMS 注入与参数合并
-- 空字符串 → None 规范化
+- 空字符串规范化（'' → 该参数默认值；默认值为 None 时即 '' → None）
 - 目标列存在性检查
 - 异常捕获与翻译
 - NO_TARGET_TASKS 行为
 """
 
+import logging
+
 import pytest
 import numpy as np
 import pandas as pd
 
-from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.services.orchestrator import (
     DEFAULT_PARAMS,
     NO_DATA_TASKS,
@@ -147,6 +149,70 @@ def test_empty_string_to_none_normalization(sample_doe_data):
             abs(float(row["LCL"]) - 37.7855) < 0.01,
         )
     ), f"控制限数值漂移: {row.to_dict()}"
+
+
+# ── 空字符串归一：非 None 默认值（审查 2026-09-19 E11）──
+#
+# 旧逻辑仅对「默认值为 None」的参数做 '' → None；默认值非 None 的枚举参数
+# 收到 JS 清空后的 '' 会直达引擎并报错（'不支持的检验类型: '）。
+# 新语义：'' 一律视为「未提供」→ 回退该参数的默认值；未知键保持原样。
+
+
+def test_empty_string_enum_param_falls_back_to_default():
+    """枚举参数 test_type='' 应回退默认 'ttest'（复现：此前报「不支持的检验类型: 」）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"test_type": ""})
+    result = orchestrate(req)
+    assert result.status == "ok", f"空枚举参数应回退默认值: {result.messages}"
+    assert result.metadata["test_type"] == DEFAULT_PARAMS["power_analysis"]["test_type"]
+    assert result.metadata["required_n"] == 64, "应与空 params 的结果一致"
+
+
+def test_empty_string_mode_falls_back_to_default():
+    """枚举参数 mode='' 应回退默认 'required_n'（复现：此前报「未知模式: 」）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"mode": ""})
+    result = orchestrate(req)
+    assert result.status == "ok", f"空枚举参数应回退默认值: {result.messages}"
+    assert result.metadata["mode"] == "required_n"
+
+
+def test_empty_string_numeric_param_falls_back_to_default():
+    """数值参数 alpha='' 应回退默认 0.05（而非静默取其它值）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"alpha": ""})
+    result = orchestrate(req)
+    assert result.status == "ok", f"空数值参数应回退默认值: {result.messages}"
+    assert result.metadata["alpha"] == DEFAULT_PARAMS["power_analysis"]["alpha"]
+
+
+def test_explicit_param_still_overrides_default():
+    """归一化不得吞掉显式传入的非空值（防把有效参数也换成默认）。"""
+    req = AnalysisRequest(task="power_analysis", data=pd.DataFrame(), params={"test_type": "anova"})
+    result = orchestrate(req)
+    assert result.status == "ok", result.messages
+    assert result.metadata["test_type"] == "anova", "显式参数必须生效"
+    assert result.metadata["required_n"] == 14
+
+
+def test_unknown_param_key_passes_through_unchanged(monkeypatch):
+    """未知键 '' 不归一到默认值（不吞用户输入），原样传给引擎。"""
+    from smartsuite.services import orchestrator as orch
+
+    received: dict = {}
+
+    def _spy(req):
+        received.update(req.params)
+        return AnalysisResult(task=req.task, status="ok", summary="spy")
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _spy)
+    req = AnalysisRequest(
+        task="correlation",
+        data=pd.DataFrame({"a": [1.0, 2.0, 3.0]}),
+        target_col="a",
+        params={"foo": "", "method": "spearman"},
+    )
+    result = orchestrate(req)
+    assert result.status == "ok", result.messages
+    assert received["foo"] == "", "未知键应原样透传"
+    assert received["method"] == "spearman", "默认值仍应注入"
 
 
 # ── 目标列检查测试 ──
@@ -313,7 +379,7 @@ def test_orchestrate_known_exception_detail_map(monkeypatch):
     monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ValueError("bad data")))
     r1 = orchestrate(req)
     assert r1.status == "error"
-    assert "数据格式不符合分析要求" in r1.messages[0]
+    assert "数据格式或数值范围不符合分析要求" in r1.messages[0]
     assert "bad data" not in r1.messages[0], "不得泄漏异常原文"
 
     monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(KeyError("内部键")))
@@ -333,3 +399,69 @@ def test_orchestrate_unmapped_exception_falls_back_to_generic(monkeypatch):
     result = orchestrate(req)
     assert result.status == "error"
     assert "分析计算过程中出现异常" in result.messages[0]
+
+
+# ── error_id 关联日志与用户消息（审查 2026-09-19 E9）──
+
+
+def _extract_error_ids(messages: list[str]) -> list[str]:
+    """从用户消息中提取「错误编号: xxxxxxxx（…）」的编号。"""
+    ids = []
+    for m in messages:
+        if "错误编号: " in m:
+            ids.append(m.split("错误编号: ")[1].split("（")[0].strip())
+    return ids
+
+
+def test_error_id_in_log_and_messages(monkeypatch, caplog):
+    """未登记异常：日志与用户消息携带同一 error_id，用户可凭编号定位日志。"""
+    from smartsuite.services import orchestrator as orch
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ValueError("bad data")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    with caplog.at_level(logging.ERROR):
+        result = orchestrate(req)
+
+    assert result.status == "error"
+    ids = _extract_error_ids(result.messages)
+    assert len(ids) == 1, f"应恰有一条错误编号消息: {result.messages}"
+    assert len(ids[0]) == 8, f"错误编号应为 8 位 hex: {ids[0]!r}"
+    assert ids[0] in caplog.text, f"日志应含同一 error_id={ids[0]}，实际日志: {caplog.text}"
+    # 既有文案与顺序不变（error_id 追加在末尾；2026-09-22 起文案含数值范围提示）
+    assert "数据格式或数值范围不符合分析要求" in result.messages[0]
+
+
+def test_error_id_present_for_smartsuite_error(monkeypatch, caplog):
+    """SmartSuiteError 分支（无 traceback 的 warning 日志）同样携带 error_id。"""
+    from smartsuite.core.exceptions import AnalysisError
+    from smartsuite.services import orchestrator as orch
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(AnalysisError("矩阵病态")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    with caplog.at_level(logging.WARNING):
+        result = orchestrate(req)
+
+    ids = _extract_error_ids(result.messages)
+    assert len(ids) == 1, f"SmartSuiteError 分支也应有错误编号: {result.messages}"
+    assert ids[0] in caplog.text, f"日志应含同一 error_id={ids[0]}，实际日志: {caplog.text}"
+
+
+def test_error_id_is_unique_per_failure(monkeypatch):
+    """两次失败必须拿到不同编号（否则用户无法区分现场）。"""
+    from smartsuite.services import orchestrator as orch
+
+    monkeypatch.setitem(orch.TASK_REGISTRY, "correlation", _raise(ValueError("boom")))
+    req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
+    first = _extract_error_ids(orchestrate(req).messages)
+    second = _extract_error_ids(orchestrate(req).messages)
+    assert first and second and first[0] != second[0], f"编号重复: {first} vs {second}"
+
+
+def test_success_path_has_no_error_id(monkeypatch):
+    """成功路径不得出现错误编号（防误报）。"""
+    assert (
+        _extract_error_ids(
+            orchestrate(AnalysisRequest(task="power_analysis", data=pd.DataFrame())).messages
+        )
+        == []
+    )

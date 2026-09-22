@@ -12,6 +12,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
 
@@ -87,6 +88,103 @@ def test_spc_ewma_rejects_nan_sigma():
     r = ewma_chart(_req("spc_ewma", df, target="y", params={"mu": "nan", "sigma": "nan"}))
     assert r.status == "error"
     assert any("有限数值" in m or "NaN" in m for m in r.messages)
+
+
+# ── 2b. CUSUM/EWMA 结构参数 k/h/L 的非有限守卫（审查 2026-09-21 D-1）──
+# `x <= 0` 对 NaN 恒为 False（IEEE-754 比较语义）、对 +Inf 亦为 False，
+# 于是 nan/inf 参数绕过「必须为正」守卫，静默关闭全部报警（实测报警数 4→0）。
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
+@pytest.mark.parametrize("key", ["k", "h"])
+def test_spc_cusum_rejects_non_positive_finite_k_h(bad, key):
+    from smartsuite.engine.spc_monitor import cusum_chart
+
+    np.random.seed(1)
+    df = pd.DataFrame(
+        {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
+    )
+    r = cusum_chart(_req("spc_cusum", df, target="y", params={key: bad}))
+    assert r.status == "error", f"{key}={bad!r} 应报错而非静默抑制报警"
+    assert any(key in m for m in r.messages), f"错误文案应点明参数名 {key}: {r.messages}"
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
+def test_spc_ewma_rejects_non_positive_finite_lambda_width(bad):
+    from smartsuite.engine.spc_monitor import ewma_chart
+
+    np.random.seed(1)
+    df = pd.DataFrame(
+        {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
+    )
+    r = ewma_chart(_req("spc_ewma", df, target="y", params={"L": bad}))
+    assert r.status == "error", f"L={bad!r} 应报错而非静默产出无效控制限"
+    assert any("L" in m for m in r.messages), f"错误文案应点明参数名 L: {r.messages}"
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
+def test_spc_cusum_ewma_alarm_count_stable_for_legal_params(bad):
+    from smartsuite.engine.spc_monitor import cusum_chart
+
+    np.random.seed(1)
+    df = pd.DataFrame(
+        {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
+    )
+    r = cusum_chart(_req("spc_cusum", df, target="y", params={"k": 0.5, "h": 5.0}))
+    assert r.status == "ok"
+    assert r.tables, "合法参数必须仍产出表格"
+
+
+# ── 2c. multi_objective 权重非有限（同族 D-1）──
+# `weights=[float(w) for w in weights]` 对 "nan"/"inf" 恒成功，
+# `weight_sum <= 0` 又漏 NaN/+Inf → 得分静默输出 nan（实测 summary "得分: nan"）。
+@pytest.mark.parametrize(
+    "bad_weights",
+    [["nan", 1.0], ["inf", 1.0], ["-inf", 1.0], ["nan", "nan"], [0.0, 0.0], [-1.0, 1.0]],
+)
+def test_multi_objective_rejects_non_finite_or_non_positive_weights(bad_weights):
+    from smartsuite.engine.doe_opt.optimization import multi_objective_opt
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(0, 1, 30),
+            "y1": rng.normal(5, 1, 30),
+            "y2": rng.normal(3, 1, 30),
+        }
+    )
+    objs = [
+        {"col": "y1", "direction": "maximize"},
+        {"col": "y2", "direction": "minimize"},
+    ]
+    r = multi_objective_opt(
+        _req(
+            "multi_objective", df, target="y1", params={"objectives": objs, "weights": bad_weights}
+        )
+    )
+    assert r.status == "error", f"weights={bad_weights!r} 应报错而非输出 得分=nan"
+    assert any("权重" in m for m in r.messages)
+
+
+def test_multi_objective_legal_weights_unchanged():
+    """对照守卫：合法权重下多目标优化正常产出（防把守卫改成永远拒绝）。"""
+    from smartsuite.engine.doe_opt.optimization import multi_objective_opt
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(0, 1, 30),
+            "y1": rng.normal(5, 1, 30),
+            "y2": rng.normal(3, 1, 30),
+        }
+    )
+    objs = [
+        {"col": "y1", "direction": "maximize"},
+        {"col": "y2", "direction": "minimize"},
+    ]
+    r = multi_objective_opt(
+        _req("multi_objective", df, target="y1", params={"objectives": objs, "weights": [0.5, 0.5]})
+    )
+    assert r.status == "ok", r.messages
+    assert "nan" not in (r.summary or "").lower(), "合法权重不得输出 nan 得分"
 
 
 # ── 3. alpha (0,1) 校验 ──
@@ -416,3 +514,299 @@ def test_doe_design_full_factorial_combinatorial_limit_clear_error():
     )
     assert r.status == "error", "组合数超限应显式拒绝"
     assert any("上限" in m for m in r.messages), r.messages
+
+
+def test_is_positive_finite_predicate():
+    """共用参数守卫谓词：NaN/±Inf/0/负数 → False，正有限数 → True。
+
+    审查 2026-09-21 D-1 抽出；本测试是质量守卫「新增公共函数必须配测试」的直接引用。
+    """
+    from smartsuite.engine._utils import is_positive_finite
+
+    for bad in (float("nan"), float("inf"), float("-inf"), 0, 0.0, -1, -1e-9):
+        assert is_positive_finite(bad) is False, f"{bad!r} 应判为非法"
+    for good in (1e-12, 0.5, 5.0, 1e12):
+        assert is_positive_finite(good) is True, f"{good!r} 应判为合法"
+
+
+# ── 12. 数据列 ±Inf 入口哨兵（审查 2026-09-22 发现 2/3）──
+# 入口仅 dropna() 时 ±Inf 穿透：scipy 返回 NaN p 值被表述为「未发现显著差异」，
+# matplotlib/sklearn 抛未捕获 ValueError。入口按缺失剔除 + 显式中文提示。
+def _inf_column_df(n=60, n_inf=1):
+    rng = np.random.default_rng(11)
+    df = pd.DataFrame({"y": rng.normal(10.0, 1.0, n), "g": ["A", "B"] * (n // 2)})
+    df.loc[df.index[:n_inf], "y"] = np.inf
+    return df
+
+
+@pytest.mark.parametrize("test_type", ["ttest_ind", "mannwhitney", "auto"])
+def test_hypothesis_two_sample_inf_dropped_not_silent_nan(test_type):
+    """发现 2（P1）：NaN p 值不得被表达为「未发现显著差异」，须剔除并提示。"""
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    df = _inf_column_df()
+    r = hypothesis_test(
+        _req(
+            "hypothesis_test",
+            df,
+            target="y",
+            features=["g"],
+            params={"test": test_type, "group_col": "g"},
+        )
+    )
+    assert r.status == "ok", r.messages
+    assert np.isfinite(float(r.metadata["p_value"])), f"{test_type}: p 值为 NaN（静默错误判决）"
+    assert any("非有限" in m for m in r.messages), f"{test_type} 未提示剔除: {r.messages}"
+
+
+def _inf_paired_df(n=40):
+    rng = np.random.default_rng(12)
+    df = pd.DataFrame({"before": rng.normal(10.0, 1.0, n), "after": rng.normal(10.5, 1.0, n)})
+    df.loc[0, "before"] = -np.inf
+    return df
+
+
+@pytest.mark.parametrize("test_type", ["ttest_paired", "wilcoxon_paired"])
+def test_hypothesis_paired_inf_dropped_not_silent_nan(test_type):
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _req(
+            "hypothesis_test",
+            _inf_paired_df(),
+            target="before",
+            features=["before", "after"],
+            params={"test": test_type},
+        )
+    )
+    assert r.status == "ok", r.messages
+    assert np.isfinite(float(r.metadata["p_value"])), f"{test_type}: p 值为 NaN"
+    assert any("非有限" in m for m in r.messages)
+
+
+@pytest.mark.parametrize(
+    ("test_type", "params"),
+    [("ttest_1samp", {"popmean": 10.0}), ("wilcoxon_1samp", {"popmedian": 10.0})],
+)
+def test_hypothesis_single_sample_inf_dropped(test_type, params):
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _req("hypothesis_test", _inf_column_df(), target="y", params={"test": test_type, **params})
+    )
+    assert r.status == "ok", r.messages
+    assert np.isfinite(float(r.metadata["p_value"]))
+    assert any("非有限" in m for m in r.messages)
+
+
+def test_hypothesis_ks_inf_dropped():
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    r = hypothesis_test(
+        _req(
+            "hypothesis_test",
+            _inf_column_df(),
+            target="y",
+            features=["g"],
+            params={"test": "ks", "group_col": "g"},
+        )
+    )
+    assert r.status == "ok", r.messages
+    assert np.isfinite(float(r.metadata["p_value"]))
+    assert any("非有限" in m for m in r.messages)
+
+
+def test_hypothesis_kruskal_inf_dropped():
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    rng = np.random.default_rng(15)
+    df = pd.DataFrame(
+        {
+            "g": ["A"] * 20 + ["B"] * 20 + ["C"] * 20,
+            "y": np.concatenate(
+                [rng.normal(10, 1, 20), rng.normal(12, 1, 20), rng.normal(14, 1, 20)]
+            ),
+        }
+    )
+    df.loc[0, "y"] = np.inf
+    r = hypothesis_test(
+        _req(
+            "hypothesis_test",
+            df,
+            target="y",
+            features=["g"],
+            params={"test": "kruskal_wallis", "group_col": "g"},
+        )
+    )
+    assert r.status == "ok", r.messages
+    assert np.isfinite(float(r.metadata["p_value"]))
+    assert any("非有限" in m for m in r.messages)
+
+
+def test_hypothesis_correlation_dispatch_inf_dropped():
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    rng = np.random.default_rng(16)
+    df = pd.DataFrame({"x": rng.normal(0, 1, 60), "y": rng.normal(0, 1, 60)})
+    df.loc[0, "y"] = np.inf
+    r = hypothesis_test(
+        _req(
+            "hypothesis_test",
+            df,
+            target="y",
+            features=["x"],
+            params={"test": "correlation"},
+        )
+    )
+    assert r.status == "ok", r.messages
+    assert np.isfinite(float(r.metadata["p_value"]))
+    assert any("非有限" in m for m in r.messages)
+
+
+def test_hypothesis_friedman_inf_dropped():
+    from smartsuite.engine.root_cause import hypothesis_test
+
+    rng = np.random.default_rng(17)
+    df = pd.DataFrame(
+        {"a": rng.normal(10, 1, 30), "b": rng.normal(11, 1, 30), "c": rng.normal(12, 1, 30)}
+    )
+    df.loc[0, "b"] = np.inf
+    r = hypothesis_test(
+        _req(
+            "hypothesis_test", df, target="a", features=["a", "b", "c"], params={"test": "friedman"}
+        )
+    )
+    assert r.status == "ok", r.messages
+    assert np.isfinite(float(r.metadata["p_value"]))
+    assert any("非有限" in m for m in r.messages)
+
+
+def test_inf_data_column_cleaned_for_previously_raising_tasks():
+    """发现 3：42 任务 +Inf 扫描中曾抛未捕获异常的 8 个任务，须剔除 + 提示。"""
+    from smartsuite.engine.capability import process_capability_analysis
+    from smartsuite.engine.exploratory import bootstrap_ci, box_chart, median_ci
+    from smartsuite.engine.reliability import gage_rr, tolerance_interval
+    from smartsuite.engine.root_cause import decision_tree_analysis, distribution_summary
+
+    rng = np.random.default_rng(13)
+    y_inf = np.concatenate([rng.normal(10.0, 1.0, 59), [np.inf]])
+    df_single = pd.DataFrame({"y": y_inf})
+    df_two = pd.DataFrame({"x": rng.normal(0, 1, 60), "y": y_inf})
+    df_group = pd.DataFrame({"g": ["A", "B"] * 30, "y": y_inf})
+    df_gage = pd.DataFrame(
+        {
+            "m": y_inf,
+            "part": np.repeat(range(10), 6),
+            "op": np.tile(np.repeat(["A", "B", "C"], 2), 10),
+        }
+    )
+    cases = {
+        "process_capability": lambda: process_capability_analysis(
+            _req("process_capability", df_single, target="y")
+        ),
+        "distribution_summary": lambda: distribution_summary(
+            _req("distribution_summary", df_single, target="y")
+        ),
+        "bootstrap_ci": lambda: bootstrap_ci(_req("bootstrap_ci", df_single, target="y")),
+        "median_ci": lambda: median_ci(_req("median_ci", df_single, target="y")),
+        "tolerance_interval": lambda: tolerance_interval(
+            _req("tolerance_interval", df_single, target="y")
+        ),
+        "decision_tree": lambda: decision_tree_analysis(
+            _req("decision_tree", df_two, target="y", features=["x"])
+        ),
+        "gage_rr": lambda: gage_rr(
+            _req(
+                "gage_rr",
+                df_gage,
+                target="m",
+                features=["part", "op"],
+                params={"part_col": "part", "operator_col": "op"},
+            )
+        ),
+        "box_chart": lambda: box_chart(
+            _req("box_chart", df_group, target="y", features=["g"], params={"group_col": "g"})
+        ),
+    }
+    finite_values = {
+        "process_capability": lambda r: r.metadata["mean"],
+        "distribution_summary": lambda r: r.metadata["descriptive"]["均值"],
+        "bootstrap_ci": lambda r: r.metadata["point_estimate"],
+        "median_ci": lambda r: r.metadata["median"],
+        "tolerance_interval": lambda r: r.metadata["lower"],
+        "decision_tree": lambda r: r.metadata["train_r2"],
+        "gage_rr": lambda r: r.metadata["grr_sv"],
+        "box_chart": lambda r: float(r.tables["group_statistics"]["均值"].iloc[0]),
+    }
+    for name, call in cases.items():
+        r = call()
+        assert r.status == "ok", f"{name}: {r.status} {r.messages}"
+        assert any("非有限" in m for m in r.messages), f"{name} 未提示剔除: {r.messages}"
+        value = finite_values[name](r)
+        assert np.isfinite(float(value)), f"{name} 输出非有限值: {value}"
+
+
+def test_correlation_inf_r_finite_implies_p_finite():
+    """发现 4：r 矩阵（pandas 成对剔除 Inf）与 p 表口径必须一致。"""
+    from smartsuite.engine.root_cause import correlation_analysis
+
+    rng = np.random.default_rng(18)
+    df = pd.DataFrame({"x": rng.normal(0, 1, 60), "y": rng.normal(0, 1, 60)})
+    df.loc[0, "y"] = np.inf
+    r = correlation_analysis(_req("correlation", df, target="y", features=["x"]))
+    r_val = r.tables["correlation_matrix"].loc["x", "y"]
+    p_val = r.tables["p_values_raw"].loc["x", "y"]
+    assert np.isfinite(float(r_val))
+    assert np.isfinite(float(p_val)), "r 有限而 p 为 NaN（表内自相矛盾）"
+
+
+# ── 13. int() 参数转换的 OverflowError 同族（审查 2026-09-22 发现 5）──
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf")])
+def test_safe_int_rejects_overflow(bad):
+    from smartsuite.engine.root_cause._shared import _safe_int
+
+    assert _safe_int(bad) is None, f"_safe_int({bad!r}) 不应抛出 OverflowError"
+    assert _safe_int(bad, 7) == 7
+
+
+def test_doe_design_n_runs_inf_rejected_not_overflow_error():
+    from smartsuite.engine.doe_opt import doe_design
+
+    factors = [{"name": "a", "levels": [1, 2]}, {"name": "b", "levels": [1, 2]}]
+    r = doe_design(
+        _req(
+            "doe_design",
+            pd.DataFrame(),
+            target="",
+            params={"method": "fractional_factorial", "factors": factors, "n_runs": float("inf")},
+        )
+    )
+    assert r.status == "error", "int(inf) 应被参数守卫拒绝而非穿透"
+    assert any("n_runs" in m for m in r.messages), r.messages
+
+
+def test_power_analysis_anova_n_groups_inf_rejected():
+    from smartsuite.engine.root_cause import power_analysis
+
+    r = power_analysis(
+        _req(
+            "power_analysis",
+            pd.DataFrame(),
+            target="",
+            params={"test_type": "anova", "mode": "required_n", "n_groups": float("inf")},
+        )
+    )
+    assert r.status == "error", "n_groups=inf 应被参数守卫拒绝"
+    assert any("n_groups" in m for m in r.messages), r.messages
+
+
+def test_decision_tree_max_depth_inf_no_overflow_error():
+    from smartsuite.engine.root_cause import decision_tree_analysis
+
+    rng = np.random.default_rng(19)
+    df = pd.DataFrame({"x": rng.normal(0, 1, 30), "y": rng.normal(0, 1, 30)})
+    r = decision_tree_analysis(
+        _req("decision_tree", df, target="y", features=["x"], params={"max_depth": float("inf")})
+    )
+    assert r.status == "ok", r.messages
+    assert not any("数值溢出" in m for m in r.messages)

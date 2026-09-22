@@ -54,7 +54,7 @@ judge:      good, warn, bad
 contrast:   a, b, c, d
 direction:  positive, negative, zero
 cmap:       correlation, response, sequential, heatmap
-misc:       grid, background, edge
+misc:       grid, background, edge, text   ← text=深灰辅助标注文字（勿用 edge：白底不可见）
 ```
 
 **修复模板**：
@@ -78,7 +78,7 @@ color=PALETTE["anomaly"]["primary"]    # 红色异常线
 3. 该函数 X 列可选吗？→ 如果是，应加入 `_xOptionalTasks`
 4. 手册协同要求与 `_yOnlyTasks` / `_noTargetNeeded` / `_xOptionalTasks` 一致吗？
 
-**关键代码位置**：`app.js` 第 501-510 行
+**关键代码位置**：`app.js` 的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 三个 `new Set([...])` 常量（**按常量名定位，勿记行号**——这些行号已多次漂移：2026-09-21 实测为 769/777/787，早期文档写的 501-510 已失效）
 
 ```javascript
 // _noTargetNeeded: 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
@@ -231,6 +231,60 @@ se = resid_std / np.sqrt(Sxx) if Sxx > 0 else float("nan")
 t_val = float(beta[1] / se) if np.isfinite(se) and se > 0 else float("nan")
 ```
 
+### 陷阱 10：第三方库告警在 `filterwarnings=error` 下被 `except Exception` 吞成业务错误
+
+**现象**（2026-09-21 R1-4 后续，`vif` 完全共线）：`vif_analysis` 返回 `status=error`、
+消息「VIF 计算失败」，**已算出的数值表全部丢失**；同一代码在默认 warnings 过滤器下
+（直接脚本运行）完全正常 → 典型的“只有 pytest / CI 复现”。
+
+**根因**：`pyproject.toml` 的 `filterwarnings = ["error", ...]` 把第三方库内部的告警
+升为异常；被函数外层 `except Exception` 当业务错误捕获。同一种输入在不同依赖分支
+会以**不同形式**发告警——静默必须两条都覆盖（2026-09-21 实测）：
+
+| 依赖分支 | 告警 | 位置 |
+|---|---|---|
+| statsmodels ≥0.15 | `UserWarning("The design matrix is poorly conditioned (condition number=...)")` | 库内自算 `np.linalg.cond(X) > 1e4` 后 `warnings.warn(..., stacklevel=2)` |
+| statsmodels 0.14 | `RuntimeWarning: divide by zero encountered in scalar divide` | 库内 `vif = 1.0/(1.0-r_sq)`，完全共线 r_sq==1 |
+
+既存静默只写了 `SingularMatrixWarning`，两种形态都漏。
+
+**识别信号**：测试报 `DID NOT WARN` / `RuntimeWarning: divide by zero encountered` /
+`VIF 计算失败`，而同一输入在普通脚本里 `status=ok` → 极可能是库告警泄漏。
+
+**排查手法（勿按消息关键词猜，先定位来源）**：
+```python
+with warnings.catch_warnings(record=True) as ws:
+    warnings.simplefilter("always")
+    result = analyze(...)
+for w in ws:
+    print(w.category.__name__, w.message, w.filename, w.lineno)   # 定位到 site-packages 行
+```
+- 按 `w.filename` 判断是**库内部**还是本项目代码，再决定静默还是修值；
+- **两个依赖分支都要跑**：本项目 venv 为 py3.12 + statsmodels 0.15，系统 Python 可能
+  是 py3.14 + statsmodels 0.14（`pyproject` 允许 `>=0.14`）——单分支的“已修好”可能
+  在另一分支仍失败（本陷阱即因此经历一轮误判：0.14 无此 UserWarning，不代表 0.15 没有）。
+
+**修复模板**：
+```python
+# ❌ 只静默了矩阵奇异告警，另两种形态仍泄漏
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", SingularMatrixWarning)
+    vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+
+# ✅ 库英文告警按消息窄静默 + errstate 只管除零/无效（不吞其他告警）
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", SingularMatrixWarning)
+    warnings.filterwarnings(
+        "ignore", message="The design matrix is poorly conditioned", category=UserWarning
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vif_vals = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+```
+
+**回归防线**：`tests/services/test_service_guards.py`（用例 `test_run_analysis_vif_inf_not_in_json`
+同时钉住：引擎路径真值 >1e10（inf 与 1e15 两种形态）、**不泄漏告警**、
+序列化无 `Infinity` 且非有限值清为空串）。
+
 ---
 
 ## 🟢 最佳实践模板
@@ -288,21 +342,24 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
     )
 ```
 
-### 模板 2：新增分析方法的 11 步注册链
+### 模板 2：新增分析方法的 8 步注册链
 
 ```
 □ 1. engine/xxx.py           — 实现 AnalysisRequest → AnalysisResult
 □ 2. engine/__init__.py      — 导出函数名
-□ 3. orchestrator.py         — TASK_REGISTRY 注册
-□ 4. orchestrator.py         — DEFAULT_PARAMS 添加默认值
-□ 5. orchestrator.py         — TASK_LABELS + TASK_GROUPS 添加条目
-□ 6. app.js                  — TASK_PARAMS 添加参数默认值
-□ 7. templates/              — 创建 YAML 模板
-□ 8. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
-□ 9. docs/specification/api-reference.md   — 更新 API 参考
-□ 10. skills/analysis-decision-tree.md — 更新决策树（如引入新分析场景）
-□ 11. docs/user-manual/    — 更新用户手册（如面向用户的新方法）
+□ 3. services/task_spec.py   — 在 TASK_SPECS 追加一条 TaskSpec（**唯一注册点**）
+                               key/func_path/label/group/default_params/raw_cat/no_target/no_data
+                               → TASK_REGISTRY / DEFAULT_PARAMS / TASK_LABELS / TASK_GROUPS /
+                                 RAW_CAT_TASKS / NO_TARGET_TASKS / NO_DATA_TASKS 自动派生
+□ 4. app.js                  — TASK_PARAMS 添加参数默认值
+□ 5. templates/              — 创建 YAML 模板
+□ 6. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
+□ 7. docs/specification/api-reference.md   — 更新 API 参考
+□ 8. docs/user-manual/ + skills/analysis-decision-tree.md — 手册与决策树（如引入新场景）
 ```
+
+> 审查 2026-09-19 B1：第 3 步曾需同步改 `orchestrator.py` 的 7 组集合（含 3 处
+> append/add 补丁）；现这些名字全部由 `derive()` 派生，**新增任务只改这一处**。
 
 ### 模板 3：box_chart / SPC 函数新增 USL/LSL/UCL/CL 参数
 
@@ -395,10 +452,12 @@ result_b = results_b[0]
 | Python 修改不生效 | Flask 未重启 | 重启 `python src/smartsuite/web/app.py` |
 | `ruff` N806 报错 | 函数内常量用了大写名 | 改名 `_lowercase` 或提升到模块级 |
 | 测试失败但代码正确 | 检查是否是 statsmodels/pandas 版本差异 | 查看 CI 日志中的版本号 |
-| 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 11 步清单 |
+| 新增方法后 Web UI 无反应 | 注册链遗漏 | 逐项检查 8 步清单（第 3 步 `task_spec.py` 最易漏） |
 | `sum(axis=None)` FutureWarning | pandas 弃用 | 改为 `.sum().sum()` 链式调用 |
 | Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
 | 微尺度(ppb/pico)数据结论翻转 / Web 整列 0.0000 | 绝对 `EPSILON` 判决或展示层固定舍入 | 见陷阱 9：守卫改精确零、判决相对化、展示走 `round_for_display` |
+| 测试报 `DID NOT WARN` / `divide by zero encountered` / 「VIF 计算失败」，同输入脚本却 `status=ok` | 第三方库告警在 `filterwarnings=error` 下升为异常，被 `except Exception` 吞成业务错误（数值表全丢）；同一输入在不同依赖分支发不同告警（statsmodels ≥0.15 条件数 UserWarning / 0.14 FP 除零） | 见陷阱 10：先 `warnings.catch_warnings(record=True)` 定位 `w.filename/w.lineno`，再按消息窄静默 + `np.errstate`；**两个依赖分支都要跑** |
+| 数据列含 ±Inf：p 值为 NaN 却显示「未发现显著差异」/ 任务抛 `supplied range ... is not finite`、`Input y contains infinity` | `dropna()` 不剔除 ±Inf（Inf 非 NaN），scipy 返回 NaN p、matplotlib/sklearn 直接抛错 | 入口调 `_utils.drop_non_finite(data)`（单列）或 `drop_non_finite_rows(frame, cols)`（多列配对），把 `non_finite_note(n, col)` 追加进 `messages`；回归防线 `tests/engine/test_engine_input_guards.py` 第 12/13 节 |
 
 ---
 

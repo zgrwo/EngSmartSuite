@@ -14,6 +14,15 @@ class AnalysisRequest(BaseModel):
     """分析请求 — Excel 层与引擎层之间的唯一数据入口合约。
 
     Pydantic v2 自动验证：无效输入会产生明确错误消息。
+
+    Note（审查 2026-09-19 B6）:
+        `model_copy(update={...})` 是**浅拷贝**——它不重新校验字段，且 `data`
+        （DataFrame）以**引用共享**而非复制。因此：
+
+        - 需要改参数时整体替换 `params` 字典（`orchestrator.orchestrate` 即如此），
+          不要原地修改传入的字典；
+        - 引擎函数不得修改传入的 `data`，需要改动请自行 `.copy()`；
+        - `update` 不会触发 pydantic 校验，绕过校验的字段不会报错。
     """
 
     model_config = {"arbitrary_types_allowed": True}
