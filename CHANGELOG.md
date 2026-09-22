@@ -2,6 +2,126 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.5.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.4.0...v1.5.0) (2026-09-22)
+
+
+### ✨ 新功能
+
+* **cli:** 新增 --encoding 显式指定 CSV 编码 ([209907c](https://github.com/zgrwo/EngSmartSuite/commit/209907c77a25728f51d521ae203e8d76493db3c7))
+* **cli:** 新增 smartsuite-web 控制台入口并统一三处启动代码 ([26efc54](https://github.com/zgrwo/EngSmartSuite/commit/26efc542c3001e5568805f90949581ffe12c4e34))
+* **engine:** 箱线图每个箱体下方标注 n/均值/标准差/最大/最小值 ([2cab07d](https://github.com/zgrwo/EngSmartSuite/commit/2cab07dc9bbacb829cecf52f52e75aa668dbc08c))
+* **scripts:** 新增 60 秒演示脚本与 gallery 复跑入口 ([f84ca97](https://github.com/zgrwo/EngSmartSuite/commit/f84ca978578da81edd2c6b1cbca782250509ba12))
+* **scripts:** 新增 templates task 键门禁，消除模板静默失效盲区（审查 G-7 P3） ([ac4fe5d](https://github.com/zgrwo/EngSmartSuite/commit/ac4fe5d965f36433d26a1170f136ab20ad567a95))
+* **services:** CSV 读取按 BOM 确定性判定 UTF-16/UTF-32（不回退猜测） ([bfa7965](https://github.com/zgrwo/EngSmartSuite/commit/bfa7965b3e53e38240b21663c0822e1cd7b72137))
+* **services:** CSV 读取支持显式声明编码（白名单 + 中文报错） ([f24e1b3](https://github.com/zgrwo/EngSmartSuite/commit/f24e1b3bc63e99b3487b7401e5642e84e9d9397d))
+* **web:** 上传面板新增文件编码选择并透传 encoding 字段 ([9ddce6e](https://github.com/zgrwo/EngSmartSuite/commit/9ddce6e3f803c15880a76dc95fa5c2a128b98f6c))
+
+
+### 🐛 Bug 修复
+
+* **audit:** 移除导出层双重静默截断，长文本与长表改为显式标注 ([d091ea2](https://github.com/zgrwo/EngSmartSuite/commit/d091ea219289578e0fc9171f2080269a127f0c64))
+* **ci:** 修复 main full 矩阵剩余失败（3.10 tomllib / Windows cp1252） ([b664329](https://github.com/zgrwo/EngSmartSuite/commit/b66432917c344da32dc04ef012494e7302cdfd11))
+* **cli,services:** Excel 忽略 --encoding 时显式提示 + 展示口径改走引擎公开面（R1-10） ([f5d334d](https://github.com/zgrwo/EngSmartSuite/commit/f5d334d7b01e6eed2047e7396a15cb9168f8e446))
+* **data_io:** 移除 CSV latin-1 静默兜底，统一 Web/CLI 编码策略 ([384dd4d](https://github.com/zgrwo/EngSmartSuite/commit/384dd4d444bcf2e1ac242ff1535d0c0800786afb))
+* **docs,scripts:** 目录树未登记检查改递归，补齐 16 处漏登记（审查 F4-1 P3） ([838e339](https://github.com/zgrwo/EngSmartSuite/commit/838e339ddcc195d7b8dd0e7630997bc1ab1de2e1))
+* **engine:** 2026-09-22 审查发现 2-10 修复 + 箱线图统计表改造（72 提交批量） ([9656a3f](https://github.com/zgrwo/EngSmartSuite/commit/9656a3fdc4f8d23a2a56285574f22c7f39b00fd0))
+* **engine:** Cliff's δ 不再套用 Cohen's d 的 CI（消除越界区间）（审查 B-1 P2） ([3604baf](https://github.com/zgrwo/EngSmartSuite/commit/3604bafba9b46dc4cc5e20d36580ac2e5f4fc2e3))
+* **engine:** IsolationForest 入模前标准化，消除微尺度静默零检出（审查 D-4 P1） ([744f747](https://github.com/zgrwo/EngSmartSuite/commit/744f747e55c788b4577e53f2f7d06c6772a3ba50))
+* **engine:** McNemar 优势比按定义处理未定义/无穷，去掉 EPSILON 伪值（审查 B-5 P2） ([b2d7170](https://github.com/zgrwo/EngSmartSuite/commit/b2d7170361e0f24dc53fc9e390400e61258a2e0e))
+* **engine:** VIF 的 inf 不再中断整个任务 + 守卫断言可失败（审查 R1-4 P2） ([b95bd02](https://github.com/zgrwo/EngSmartSuite/commit/b95bd020a14e20c574d3ff045c8aef3d80287512))
+* **engine:** Wilcoxon 效应量改用实际渐近 Z，消除对样本量衰减（审查 B-3 P2） ([8a366ed](https://github.com/zgrwo/EngSmartSuite/commit/8a366ed0b317c23dfc3e6054d8ba0e112c49f609))
+* **engine:** 修复审查发现 2-10 并将箱线图统计值改为对齐表格 ([6fa7b3a](https://github.com/zgrwo/EngSmartSuite/commit/6fa7b3ac10168a17d4e60a0cb78c03831d399b28))
+* **engine:** 参数守卫补 isfinite，消除 nan/inf 静默绕过（审查 D-1 P1） ([e49d376](https://github.com/zgrwo/EngSmartSuite/commit/e49d37686ac33502e5eba84c67d7eb887fdecfec))
+* **engine:** 构建期固定位舍入改走 round_for_display（审查 R1-3 P1） ([b32ef25](https://github.com/zgrwo/EngSmartSuite/commit/b32ef25efd26dc80293e3403235568b597872119))
+* **engine:** 生存分析事件列收紧为 0/1，消除静默错算（审查 D-2 P0） ([f8e52e6](https://github.com/zgrwo/EngSmartSuite/commit/f8e52e6882a870694e6da28f6adbb5fdd637613f))
+* **engine:** 静默 statsmodels 条件数/除零告警，避免完全共线时 VIF 任务整体失败 ([3626660](https://github.com/zgrwo/EngSmartSuite/commit/36266602bc7929f43c906474087e0494a1358cea))
+* **governance:** 修复门禁子进程内存不足导致的间歇性假红 ([893c3ea](https://github.com/zgrwo/EngSmartSuite/commit/893c3ea618747f1d14272158ace658dc5649c200))
+* **scripts:** demo 输出统一 UTF-8（Windows cp1252 管道崩溃） ([f33e69d](https://github.com/zgrwo/EngSmartSuite/commit/f33e69d3caa163f2bb8309b957b7b3033d93970e))
+* **scripts:** falsy_audit 改递归扫描，消除 engine 子包盲区（审查 G-1 P1） ([7b0db92](https://github.com/zgrwo/EngSmartSuite/commit/7b0db92ad09220d24d998fc272669283a9c8da06))
+* **scripts:** verify_consistency 把「未执行」记 SKIP 而非合成 PASS（审查 G-6 P3） ([85034d6](https://github.com/zgrwo/EngSmartSuite/commit/85034d683e9433f6fc0b37d0a934e2847d0de4b3))
+* **scripts:** 手册 CLAIM 门禁修复——引擎漏值计失败 + VIF CLAIM 纳管（审查 G-2/E1-1） ([c72d0c7](https://github.com/zgrwo/EngSmartSuite/commit/c72d0c790d215d038e5be4c9d595521069fe2ee5))
+* **scripts:** 质量守卫识别「同文件内含断言的助手」，消除 3 处误报（审查 FP-1 P3） ([2feee15](https://github.com/zgrwo/EngSmartSuite/commit/2feee158018d1a122cf38c6e975537870fc85903))
+* **services:** numpy 标量类型判据改用 numbers.Real（HTML 报告 float32 失真） ([8d13e31](https://github.com/zgrwo/EngSmartSuite/commit/8d13e315067928626ec7b467118816a48bca5a12))
+* **services:** 异常路径生成 error_id 并同步日志与用户消息 ([173bb16](https://github.com/zgrwo/EngSmartSuite/commit/173bb16db2a83524e596650fe2b66650236f4921))
+* **services:** 空字符串参数归一为默认值，修复枚举参数穿透报错 ([d31dce2](https://github.com/zgrwo/EngSmartSuite/commit/d31dce24bfde61aa3572fd5d44ed04ab4958c20d))
+* **tests:** lint budget 守卫兼容 Python 3.10（tomllib 回退 tomli） ([eacfc8c](https://github.com/zgrwo/EngSmartSuite/commit/eacfc8ca7d436d9463fa53fd5a3d501754c618f5))
+* **tests:** 上传路径穿越用例改用服务端上传目录断言 ([589fac9](https://github.com/zgrwo/EngSmartSuite/commit/589fac914a2c6a49fbb70b49644aa4339a2d4839))
+* **web:** hypothesis_test 参数可达性——检验方法补全 17 项 + 单样本中心参数（E1-2/E1-3） ([835489b](https://github.com/zgrwo/EngSmartSuite/commit/835489b1c7c158aaceb257166ab9196d3c3594ae))
+* **web:** 上传清理只删本应用文件，避免误删共享目录内他人文件（审查 R1-2） ([25bc98b](https://github.com/zgrwo/EngSmartSuite/commit/25bc98bc03ce41246a93e7c65d7440305d108f3c))
+* **web:** 编码下拉框选择新文件时复位 + 补 GB18030 选项（审查 R1-1/R1-7） ([03f4de0](https://github.com/zgrwo/EngSmartSuite/commit/03f4de0f733792074ca2fb626c87671fe51eacfd))
+
+
+### 📄 文档
+
+* **adr:** 纠正 ADR-0004 决策 4 的失实论据 + 加 pandas 行为证据锚点（审查 R1-6 P3） ([4748bea](https://github.com/zgrwo/EngSmartSuite/commit/4748bea0eeca409f22a43065577db58a72612195))
+* **adr:** 记录 CSV 编码策略决策（显式声明 + BOM 判定，不引探测依赖） ([5c05ba9](https://github.com/zgrwo/EngSmartSuite/commit/5c05ba906b9abc3369a9b545f5a1773ec18936a9))
+* **adr:** 记录部署形态决策（单机单用户）并声明部署边界 ([390442e](https://github.com/zgrwo/EngSmartSuite/commit/390442efe2a5f21101c4e6f245e83b772a44bbbd))
+* **core:** 补充浅拷贝契约说明；贡献者导航双向互链 ([e60efff](https://github.com/zgrwo/EngSmartSuite/commit/e60efff8f2a73825c5d289648e01f00ba8ccdd3c))
+* **governance:** 记录跨解释器浮点末位差异 + 更新递归查目录口径（审查 E5-2 / F4-1） ([7dbbf2a](https://github.com/zgrwo/EngSmartSuite/commit/7dbbf2ac86acaa63b9ecbfe73d6a91d3b9550b5e))
+* **roadmap:** 校正测试数口径；test(data_io): 钉住 Big5 静默误解码缺口 ([52c9288](https://github.com/zgrwo/EngSmartSuite/commit/52c92887132d7c6699556f510d0695099a85b253))
+* **user-manual:** 5 章补「常见参数误用」小节并建立双向契约 ([5fbf058](https://github.com/zgrwo/EngSmartSuite/commit/5fbf0589fe96bc1e2765145d6002ba3bfc78764a))
+* **user-manual:** 补充 .xlsm 宏文件风险与只读行为说明 ([e472ee3](https://github.com/zgrwo/EngSmartSuite/commit/e472ee39f4221b9113f61dde839a039ce18e654e))
+* 同步 CSV 编码策略（ADR-0004）到 API 参考、手册与路线图 ([abe0434](https://github.com/zgrwo/EngSmartSuite/commit/abe0434c67071d66e0db4c6a662fa754dfe363a4))
+* 同步 good-first-issue 候选（C5 已完成） ([92fdfb0](https://github.com/zgrwo/EngSmartSuite/commit/92fdfb075fab6d0547903a4259627e9ebcc1add0))
+* 校正版本/测试数/防线文件/行号锚四处口径漂移（审查 F1-1/F1-2/F4-2/G-5） ([705e4af](https://github.com/zgrwo/EngSmartSuite/commit/705e4affe946d6f510269de87a5541992711b384))
+
+
+### 🔧 重构
+
+* **engine:** detection 拆分为子包（纯搬迁，零行为变更） ([ad2e11a](https://github.com/zgrwo/EngSmartSuite/commit/ad2e11a9848884d4346fc1966a4e4cac92628922))
+* **engine:** inverse 拆分为子包（纯搬迁，零行为变更） ([1cdd924](https://github.com/zgrwo/EngSmartSuite/commit/1cdd924e684766b5b33ccb5d997dcd357742d076))
+* **engine:** IQR 判据抽取单一实现 + KS 拟合重复处加交叉引用（审查 A-1 P3） ([eee9bc4](https://github.com/zgrwo/EngSmartSuite/commit/eee9bc462eee00ff8510ebe78171f274e6352b4b))
+* **services:** 任务注册收敛为 TaskSpec 单一事实源 ([c5f558b](https://github.com/zgrwo/EngSmartSuite/commit/c5f558b0b1274ea08918852b9bb0436729921adf))
+* **services:** 借道导出改为显式桥接，补建分层守卫 ([ff9687b](https://github.com/zgrwo/EngSmartSuite/commit/ff9687b0b851ce9afb0259f756999f233c7195b3))
+* **services:** 图窗关闭逻辑去重为单一实现 close_figures ([45caed2](https://github.com/zgrwo/EngSmartSuite/commit/45caed25a1ad67ef44890d911bbfc3827508a050))
+* **services:** 应用限制常量集中到 config.py ([0279f36](https://github.com/zgrwo/EngSmartSuite/commit/0279f36b383089259b85bd2a26d63c47eab9857c))
+* **services:** 错误映射与消息组装外移到 error_messages ([4164921](https://github.com/zgrwo/EngSmartSuite/commit/416492141001c7dcb743e85acd0871a56a5b17ec))
+* **web:** matplotlib 后端收敛为单一配置点并锁定导入时序 ([a5210e6](https://github.com/zgrwo/EngSmartSuite/commit/a5210e6b6753d9e6426bc92f3424af2352377435))
+* **web:** 上传临时文件改专用目录 + mtime TTL 扫描，移除进程级注册表 ([fbf806f](https://github.com/zgrwo/EngSmartSuite/commit/fbf806f0ab20a5cdd77a73eff227757429d5e6a4))
+
+
+### ✅ 测试
+
+* **data_io:** 钉住无 BOM UTF-16 的静默误解码缺口 + 手册补指引（审查 R1-5 P3） ([d404543](https://github.com/zgrwo/EngSmartSuite/commit/d404543eaa3dbf98721e6affca7ed88d9c997d13))
+* **engine:** 偏相关分析补测（correlation.py 74%→95%） ([cf6e5fa](https://github.com/zgrwo/EngSmartSuite/commit/cf6e5fa833fa0cc21f40a422e59254a2e9e981b9))
+* **engine:** 箱线图像素可见性用例兼容无 CJK 字体 CI ([be4e561](https://github.com/zgrwo/EngSmartSuite/commit/be4e561cdb983eb180fc074e60b79dca92d10d6f))
+* **engine:** 补 is_positive_finite 直接单测（质量守卫：新增公共函数必须配测试） ([3553abf](https://github.com/zgrwo/EngSmartSuite/commit/3553abfbe38f5ea33caaf34e5093fd09c27f05db))
+* **guards:** 补 iqr_outlier_mask 直接单测（质量守卫：新增公共函数必须配测试） ([9d3be13](https://github.com/zgrwo/EngSmartSuite/commit/9d3be135c43fcb5dc2200b3e4f71b6fcae6cfdc9))
+* **guards:** 钉住 kappa z 的 Fleiss ASE0 口径，登记 B-2 为假阳性 ([90c592b](https://github.com/zgrwo/EngSmartSuite/commit/90c592b66721e8474adc0e8ec74663176cc2e55b))
+* **integration:** 登记 round_for_display 为工具类公开导出（修复 R1-10 引入的失败） ([fc57deb](https://github.com/zgrwo/EngSmartSuite/commit/fc57deb0bc7a492f9a2c4352d95a47a4ee89f00c))
+* **services:** VIF 告警泄漏用例豁免缺字体环境的渲染噪声 ([2d365eb](https://github.com/zgrwo/EngSmartSuite/commit/2d365eb7ca14e6ef3607ab0d77c8d32e2ba8671d))
+* test_manual_parity 名实相符化——范围声明 + 数值归属 + 死参数（审查 E4-2 P3） ([42b6978](https://github.com/zgrwo/EngSmartSuite/commit/42b6978f626a814e9f0f052030243df595275568))
+* **web:** 新增 tests/security 回归套件（按攻击面组织） ([81bc61c](https://github.com/zgrwo/EngSmartSuite/commit/81bc61c4c6c69b8ce716c1fb39aab0a10679ea22))
+* 测试质量收口——E4-1/E4-3/E5-1/E5-3 四项（审查 Batch 5） ([2e9b293](https://github.com/zgrwo/EngSmartSuite/commit/2e9b293ef414a4927f0b407b148fda9290769f7d))
+
+
+### ⚙️ CI
+
+* CI 矩阵补 Python 3.14 并同步 classifiers ([4f841aa](https://github.com/zgrwo/EngSmartSuite/commit/4f841aa811be62c39d52413516b6c45fe6ffbd2f))
+* quick job 增加 uv lock --offline --check 锁文件新鲜度守卫 ([ffc77a6](https://github.com/zgrwo/EngSmartSuite/commit/ffc77a6ffb60ee5429d207ee683a899443e269d2))
+* 修复 quick job 离线锁检查缺少 Python 解释器 ([ed81f3d](https://github.com/zgrwo/EngSmartSuite/commit/ed81f3db0a156d688a4bae7e28d51d5d7dca04d8))
+* 模块导入验证步骤加断言，不再只 print 计数（审查 G-8 P3） ([7929266](https://github.com/zgrwo/EngSmartSuite/commit/79292667ae89bdbfd0cc8ac59266d73d39321d2a))
+* 离线锁检查失败回退在线复检 ([29efe39](https://github.com/zgrwo/EngSmartSuite/commit/29efe39df54dbd6e6f4b8ce736620982930b785f))
+
+
+### 🚀 性能
+
+* **services:** 三层急切导入改为按需加载，CLI 冷启动 2.9s→0.9s ([90445c4](https://github.com/zgrwo/EngSmartSuite/commit/90445c4d63f02424488434f50065468a4925536e))
+
+
+### 🧹 维护
+
+* **deps:** ruff 0.16.6 → 0.16.8（同步 uv.lock/预提交/文档） ([83d9062](https://github.com/zgrwo/EngSmartSuite/commit/83d9062a70d4e5a07fb6a4b2436b212c10bae1be))
+* **deps:** uv.lock 同步 smartsuite 版本 1.4.0（release 漏更新） ([eeef512](https://github.com/zgrwo/EngSmartSuite/commit/eeef512d4ada0e91abb1dbbd0bb1cbffac399e6b))
+* **lint:** per-file-ignore 收敛 16→9 条并加预算守卫 ([4a7d210](https://github.com/zgrwo/EngSmartSuite/commit/4a7d2103670bdbc24edfd766a85e8fc5d645b7f3))
+
+
+### 🎨 代码风格
+
+* **tests:** ruff format 修正 VIF 用例告警豁免的换行 ([79823e2](https://github.com/zgrwo/EngSmartSuite/commit/79823e2a25643ab76fcc7c6704242df667ea1417))
+* **tests:** 对 C1/C4 新增测试应用 ruff format ([13fc0cb](https://github.com/zgrwo/EngSmartSuite/commit/13fc0cbbccf29d33de8dd6bc1855702f560ec6ec))
+* 对 R1-10 新增代码应用 ruff format（合并可容于 100 列的行） ([be11bea](https://github.com/zgrwo/EngSmartSuite/commit/be11beab52293a32d2d21523c028f5f573cac62c))
+
 ## [1.4.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.3.1...v1.4.0) (2026-09-19)
 
 

@@ -8,7 +8,7 @@ import tempfile
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 
 def setup_logging(log_dir: str | None = None, console_level: int = logging.INFO):
