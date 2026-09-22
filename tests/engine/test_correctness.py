@@ -1529,9 +1529,15 @@ def test_box_chart_stats_table_actually_rendered_visible():
         text = cell.get_text()
         if not text.get_text():
             continue
+        checked += 1
         assert to_rgb(text.get_color()) != bg_rgb, (
             f"表格文字「{text.get_text()}」与背景同色（{text.get_color()}）→ 不可见"
         )
+        # 像素级检查仅覆盖 ASCII 单元格（数字/"n"）：缺 CJK 字体的 CI 环境
+        # （quality.yml 全量 pytest 不装 fonts-noto-cjk）中文渲染为空，
+        # 白字事故同样会命中 ASCII 数值单元格，中文标签由颜色断言兜底
+        if not text.get_text().isascii():
+            continue
         bbox = text.get_window_extent(renderer=renderer)
         x0, x1 = max(int(bbox.x0) - 1, 0), min(int(np.ceil(bbox.x1)) + 1, width)
         y0, y1 = max(int(bbox.y0) - 1, 0), min(int(np.ceil(bbox.y1)) + 1, height)
@@ -1540,7 +1546,6 @@ def test_box_chart_stats_table_actually_rendered_visible():
         assert int(patch.min()) < 200, (
             f"表格文字「{text.get_text()}」渲染区域全为浅色（min={int(patch.min())}）→ 不可见"
         )
-        checked += 1
     assert checked >= 10, f"应检查到统计表全部单元格文字，实际 {checked}"
 
 
