@@ -135,7 +135,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: 安装依赖（冻结锁文件）
-        # 审查 2026-09-11 R-8：ruff 版本以 pyproject.toml dev extra 为准（0.16.6），
+        # 审查 2026-09-11 R-8：ruff 版本以 pyproject.toml dev extra 为准（0.16.8），
         # 现由 uv.lock 锁定，消除"quality.yml 手工钉版本"的漂移面
         run: uv sync --frozen --all-extras
       - name: Ruff format check
