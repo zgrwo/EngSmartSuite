@@ -84,6 +84,12 @@ jobs:
           python-version: "3.11"
           enable-cache: true
 
+      - name: 安装 Python 解释器（离线锁检查前置）
+        # 2026-09-22 PR #44 实测：setup-uv@v10 仅设置 UV_PYTHON，不再落地解释器；
+        # `uv lock --offline` 因「offline 模式下无法下载 3.11」直接失败（5s 红）。
+        # 显式安装后，离线锁检查在缓存解释器上零网络运行。
+        run: uv python install "$UV_PYTHON"
+
       - name: 锁文件新鲜度（防 release/合并漏重新锁定）
         # 背景：release-please 只 bump pyproject/CHANGELOG/manifest，不动 uv.lock；
         # 而 `uv sync --frozen` 在锁过期时仍退出 0（根包版本不参与依赖图求解），
