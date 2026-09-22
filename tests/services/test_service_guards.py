@@ -219,9 +219,7 @@ def test_run_analysis_vif_inf_not_in_json():
         warnings.filterwarnings(
             "ignore", message="Glyph .* missing from font", category=UserWarning
         )
-        warnings.filterwarnings(
-            "ignore", message="Tight layout not applied", category=UserWarning
-        )
+        warnings.filterwarnings("ignore", message="Tight layout not applied", category=UserWarning)
         results = run_analysis("vif", dfv, [], ["a", "b", "c"], [])
     assert not leaked, (
         f"vif 不应向调用方泄漏告警: {[(w.category.__name__, str(w.message)) for w in leaked]}"
