@@ -211,8 +211,17 @@ def test_run_analysis_vif_inf_not_in_json():
     assert "共线" in engine_result.summary, f"应给出共线性告警: {engine_result.summary!r}"
 
     # ② 不得泄漏告警（statsmodels 内部除零 RuntimeWarning；filterwarnings=error 下即中断）
+    #    渲染环境噪声不计入「引擎泄漏」契约：CI（quality.yml 不装 fonts-noto-cjk）
+    #    会因缺 CJK 字体发 Glyph UserWarning、标签更宽触发 tight layout 警告，
+    #    二者与 pyproject 全局 filterwarnings 豁免口径一致。
     with warnings.catch_warnings(record=True) as leaked:
         warnings.simplefilter("always")
+        warnings.filterwarnings(
+            "ignore", message="Glyph .* missing from font", category=UserWarning
+        )
+        warnings.filterwarnings(
+            "ignore", message="Tight layout not applied", category=UserWarning
+        )
         results = run_analysis("vif", dfv, [], ["a", "b", "c"], [])
     assert not leaked, (
         f"vif 不应向调用方泄漏告警: {[(w.category.__name__, str(w.message)) for w in leaked]}"
