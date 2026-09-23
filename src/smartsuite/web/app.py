@@ -76,6 +76,29 @@ def _is_own_upload(path: pathlib.Path) -> bool:
     return path.name.startswith("ss-") and path.suffix == ".parquet"
 
 
+def _parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """把 pyarrow 无法序列化的混合类型 object 列转为 string（其余原样返回）。
+
+    2026-09-23 现场：Excel 同列数值 + 文本（STEPSEQ 含 '02200.1.000100'）时，
+    `to_parquet` 按 int64 推断后抛 ArrowInvalid → 上传 500。该列本无数值语义，
+    转 pandas string（NA 保留为缺失）后落盘，下游按文本列处理。
+    仅处理会致 pyarrow 失败的 mixed 家族：`mixed-integer-float` 是合法数值列
+    （int+float），保持原样以免丢失数值语义。
+    """
+    mixed_cols = [
+        c
+        for c in df.columns
+        if pd.api.types.is_object_dtype(df[c])
+        and pd.api.types.infer_dtype(df[c], skipna=True) in ("mixed", "mixed-integer")
+    ]
+    if not mixed_cols:
+        return df
+    safe = df.copy()
+    for c in mixed_cols:
+        safe[c] = safe[c].astype("string")
+    return safe
+
+
 def _sweep_expired(*, force: bool = False) -> int:
     """删除本目录内 mtime 超过 TTL 的**本应用** parquet，返回删除数。
 
@@ -313,6 +336,9 @@ def upload():
     _mem_mb = len(f_bytes) / (1024 * 1024)
     if len(f_bytes) > config.LARGE_FILE_WARN_BYTES:
         logger.warning("上传文件较大 (%.0f MB)，内存占用可能较高", _mem_mb)
+
+    # 混合类型列先转 string：pyarrow 对 object mixed 列抛 ArrowInvalid（2026-09-23 现场）
+    df = _parquet_safe(df)
 
     # 先写新文件再清理旧文件（避免写失败时丢失已有数据）
     tmp = tempfile.NamedTemporaryFile(
