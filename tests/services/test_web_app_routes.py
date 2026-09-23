@@ -2,7 +2,8 @@
 
 覆盖面：index / csrf-token / tasks 路由、CSRF 403 分支、上传全部分支
 （无文件/无扩展名/坏扩展名/GBK 编码/垃圾字节/坏 zip/zip 炸弹/非 Excel zip/
-列数超限/大文件内存警告/parquet 保存失败/旧文件替换/定期清理）、analyze
+列数超限/大文件内存警告/混合类型列转 string（CSV+Excel）/parquet 保存失败/
+旧文件替换/定期清理）、analyze
 全部 400 校验分支、NO_DATA 任务正路径、数据过期 400、ValidationError 400、
 意外异常 500、main() debug 安全绑定。
 
@@ -230,6 +231,46 @@ def test_upload_large_file_logs_memory_warning(client, caplog):
         resp = _post_csv(client, buf.getvalue())
     assert resp.status_code == 200
     assert any("内存占用" in r.message for r in caplog.records)
+
+
+def test_upload_mixed_type_column_parquet_safe(client):
+    """同列数值+文本（object mixed-integer）不得使 parquet 落盘失败（2026-09-23 现场）。
+
+    现场：STEPSEQ 列含 '02200.1.000100' 文本与数值 → pyarrow 推断 int64 后抛
+    ArrowInvalid("Could not convert '02200.1.000100' ... to int64") → 上传 500。
+    混合列本无数值语义，应统一转 string 后落盘并按文本列展示。
+    """
+    csv = b"STEPSEQ,val\n2200,1\n02200.1.000100,2\n2201,3\n"
+    resp = _post_csv(client, csv)
+    assert resp.status_code == 200, resp.get_json()
+    body = resp.get_json()
+    assert body["shape"] == [3, 2]
+    col = next(c for c in body["columns"] if c["name"] == "STEPSEQ")
+    assert col["missing"] == 0
+    assert col["nunique"] == 3
+    assert "02200.1.000100" in col["sample"]
+    # 落盘可回读且原值保留（后续 analyze 走 read_parquet）
+    with client.session_transaction() as sess:
+        stored = sess["_data_path"]
+    stored_df = pd.read_parquet(stored)
+    assert stored_df["STEPSEQ"].tolist() == ["2200", "02200.1.000100", "2201"]
+
+
+def test_upload_excel_mixed_type_column_parquet_safe(client):
+    """Excel 同列数值+文本（现场 xlsx 路径）同样必须落盘成功。"""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["STEPSEQ", "val"])
+    ws.append([2200, 1])
+    ws.append(["02200.1.000100", 2])
+    ws.append([2201, 3])
+    buf = io.BytesIO()
+    wb.save(buf)
+    resp = _post_csv(client, buf.getvalue(), filename="mixed.xlsx")
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["shape"] == [3, 2]
 
 
 def test_upload_parquet_save_failure_500(client, monkeypatch):
