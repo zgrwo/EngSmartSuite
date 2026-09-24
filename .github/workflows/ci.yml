@@ -91,9 +91,11 @@ jobs:
         run: uv python install "$UV_PYTHON"
 
       - name: 锁文件新鲜度（防 release/合并漏重新锁定）
-        # 背景：release-please 只 bump pyproject/CHANGELOG/manifest，不动 uv.lock；
-        # 而 `uv sync --frozen` 在锁过期时仍退出 0（根包版本不参与依赖图求解），
-        # 故本仓已三次手工补齐（148052a 1.3.1 / 8e30d99 ruff 0.16.6 / eeef512 1.4.0）。
+        # 背景：`uv sync --frozen` 在锁过期时仍退出 0（根包版本不参与依赖图求解），
+        # 此守卫已三次拦住漂移（148052a 1.3.1 / 8e30d99 ruff 0.16.6 / eeef512 1.4.0）。
+        # 2026-09-24 根治：release-please config extra-files 用 toml updater 同步
+        # uv.lock 根包版本（jsonpath 过滤 name=='smartsuite'），发版 PR 不再漏锁；
+        # 本步骤保留为兜底（dependabot / 手工改依赖后漏重新锁定等场景）。
         # --offline：无漂移且缓存命中时零网络开销（实测 1ms），避免索引拖慢或抖动。
         # 文案说明（审查 2026-09-21 G-3）：缓存未命中时离线解析会以
         # "Packages were unavailable because the network was disabled …" /

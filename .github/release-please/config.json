@@ -5,7 +5,12 @@
       "include-component-in-tag": false,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/smartsuite/__init__.py"
+        "src/smartsuite/__init__.py",
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='smartsuite')].version"
+        }
       ],
       "changelog-sections": [
         { "type": "feat",     "section": "✨ 新功能" },
