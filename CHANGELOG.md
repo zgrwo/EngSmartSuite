@@ -2,6 +2,20 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.5.1](https://github.com/zgrwo/EngSmartSuite/compare/v1.5.0...v1.5.1) (2026-09-24)
+
+
+### 🐛 Bug 修复
+
+* **web:** 上传落盘前将混合类型列转 string，修复 parquet 500 ([0a969e4](https://github.com/zgrwo/EngSmartSuite/commit/0a969e4b2c664279d1477ca817552ce011f9284f))
+* **web:** 修复 Excel 混合类型列上传 500（parquet 序列化） ([76d236b](https://github.com/zgrwo/EngSmartSuite/commit/76d236b3300e7bdb08258c895c79f8caf2c7da27))
+
+
+### ⚙️ CI
+
+* **release:** 发版 PR 自动同步 uv.lock 根包版本（extra-files toml） ([64fe560](https://github.com/zgrwo/EngSmartSuite/commit/64fe5605b9cd93c203437aa8f7830bc53943f78e))
+* **release:** 发版 PR 自动同步 uv.lock 根包版本（extra-files toml） ([807e439](https://github.com/zgrwo/EngSmartSuite/commit/807e439fc6dd8273f600688ad8febb47e9ab5863))
+
 ## [1.5.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.4.0...v1.5.0) (2026-09-22)
 
 
