@@ -150,6 +150,7 @@ EngSmartSuite/
 │   │   ├── test_utils.py
 │   │   ├── test_correctness.py     #   数值正确性 — 全量覆盖
 │   │   ├── test_analytical_truths.py #  第①层补强：仅用解析解（退化情形/闭式公式/单调性）
+│   │   ├── test_task_truth_assertions.py # 按任务补解析真值（覆盖此前 21 个零真值任务）
 │   │   ├── test_minitab_alignment.py #  Minitab 口径对照钉住（已对齐项防退化 + 已声明缺口维护）
 │   │   ├── test_edge_cases.py      #   边界情况
 │   │   ├── test_invariants.py      #   数学不变量

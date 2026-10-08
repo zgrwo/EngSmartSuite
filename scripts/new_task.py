@@ -99,9 +99,7 @@ def check_all() -> int:
         for x in problems:
             print(f"  ✗ {x}")
         return 1
-    print(
-        f"  OK: {len(TASK_SPECS)} 个任务的引擎函数 / __all__ / 模板 / api-reference 全部齐全"
-    )
+    print(f"  OK: {len(TASK_SPECS)} 个任务的引擎函数 / __all__ / 模板 / api-reference 全部齐全")
     return 0
 
 
