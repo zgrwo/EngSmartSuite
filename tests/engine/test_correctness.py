@@ -42,9 +42,15 @@ def test_correlation_known_r():
     assert result.status == "ok"
     r = result.tables["correlation_matrix"].loc["y", "x"]
     # 审查 2026-09-06 F-D6：区间断言对 ±0.01 注入不敏感 → 加 scipy 独立参考比对
+    # 数据固定（seed=42）→ r 是一个**确定的数**，故可用精确真值而非区间。
+    # 期望值取 scipy 的独立实现（不是"跑一遍引擎抄输出"）。
     expected_r = float(sp_stats.pearsonr(df["x"], df["y"]).statistic)
-    assert abs(r - expected_r) < 1e-9, f"与 scipy 独立参考偏离: {r:.6f} vs {expected_r:.6f}"
-    assert 0.85 < r < 0.95, f"Expected r≈0.9, got {r:.4f}"
+    assert r == pytest.approx(expected_r, abs=1e-12), (
+        f"与 scipy 独立参考偏离: {r!r} vs {expected_r!r}"
+    )
+    # 同时钉住**绝对真值**：本例 r = 0.8945776715765276（数据确定 → 值确定）。
+    # 这一条与 scipy 那条互补：前者防"与另一实现一起漂移"，后者防"两者都错"。
+    assert float(r) == pytest.approx(0.8945776715765276, abs=1e-12), f"r 的绝对真值不符: {r!r}"
 
 
 def test_regression_known_slope():
@@ -63,8 +69,19 @@ def test_regression_known_slope():
     x_row = coef[coef["变量"] == "x"]
     beta_const = float(const_row["系数"].iloc[0])
     beta_x = float(x_row["系数"].iloc[0])
-    assert 2.8 < beta_const < 3.2, f"Expected intercept≈3.0, got {beta_const:.3f}"
-    assert 2.45 < beta_x < 2.55, f"Expected slope≈2.5, got {beta_x:.3f}"
+    # 数据固定 → OLS 系数是确定的数。期望值用 np.polyfit 独立复算
+    # （与引擎走的是不同代码路径），并钉住绝对真值。
+    expected_slope, expected_const = (float(v) for v in np.polyfit(x, y, 1))
+    assert beta_x == pytest.approx(expected_slope, abs=1e-12), (
+        f"斜率与 np.polyfit 偏离: {beta_x!r} vs {expected_slope!r}"
+    )
+    assert beta_const == pytest.approx(expected_const, abs=1e-12), (
+        f"截距与 np.polyfit 偏离: {beta_const!r} vs {expected_const!r}"
+    )
+    assert beta_x == pytest.approx(2.498728699903081, abs=1e-12), f"斜率绝对真值不符: {beta_x!r}"
+    assert beta_const == pytest.approx(2.9455624477540376, abs=1e-12), (
+        f"截距绝对真值不符: {beta_const!r}"
+    )
 
 
 def test_hypothesis_known_difference():
@@ -327,9 +344,12 @@ def test_attribute_chart_types():
     r = attribute_chart(req)
     assert r.status == "ok"
     assert r.metadata["chart_type"] == "p"
-    # p-chart: CL = p_bar ≈ 0.05 (允许 ±0.02)
-    cl_p = r.metadata["cl"]
-    assert 0.03 < cl_p < 0.07, f"p-chart CL 应接近 0.05, 实际={cl_p:.4f}"
+    # p-chart 的 CL 是**定义式** `p̄ = Σ不良数 / Σ样本量`（不是"接近 0.05"）。
+    cl_p = float(r.metadata["cl"])
+    _p_expected = float(df_p["defect"].sum()) / float(len(df_p))
+    assert cl_p == pytest.approx(_p_expected, rel=1e-12), (
+        f"p 图 CL 应为 Σ不良数/Σ样本量 = {_p_expected!r}，实测 {cl_p!r}"
+    )
 
     # ── c-chart: 缺陷数 λ=4 ──
     df_c = pd.DataFrame(
@@ -344,9 +364,13 @@ def test_attribute_chart_types():
     r = attribute_chart(req)
     assert r.status == "ok"
     assert r.metadata["chart_type"] == "c"
-    # c-chart: CL = c_bar ≈ 4 (允许 ±1)
-    cl_c = r.metadata["cl"]
-    assert 3.0 < cl_c < 5.0, f"c-chart CL 应接近 4, 实际={cl_c:.4f}"
+    # c-chart 的 CL 是**定义式** `c̄ = Σ缺陷数 / 子组数`。
+    cl_c = float(r.metadata["cl"])
+    _n_units = int(df_c["unit"].nunique())
+    _c_expected = float(df_c["defects"].sum()) / _n_units
+    assert cl_c == pytest.approx(_c_expected, rel=1e-12), (
+        f"c 图 CL 应为 Σ缺陷数/子组数 = {_c_expected!r}，实测 {cl_c!r}"
+    )
 
     # ── u-chart: 单位缺陷率 ──
     df_u = pd.DataFrame(
@@ -409,9 +433,26 @@ def test_xbar_r_known_limits():
     cl = r.metadata["xbar_mean"]
     ucl = r.metadata["ucl_x"]
     lcl = r.metadata["lcl_x"]
-    assert 9.0 < cl < 11.0, f"X-bar CL={cl:.2f}, expected ~10"
-    assert ucl > cl, f"UCL={ucl:.3f} should be > CL={cl:.3f}"
-    assert lcl < cl, f"LCL={lcl:.3f} should be < CL={cl:.3f}"
+    # CL 有**恒等式**：X̿ = 全部观测的算术平均（不是"约 10"）。
+    assert float(cl) == pytest.approx(float(df["val"].mean()), abs=1e-12), (
+        f"X-bar 的 CL 应等于全体均值 {float(df['val'].mean())!r}，实测 {cl!r}"
+    )
+    # 控制限关于 CL 对称（恒等式，见 tests/engine/test_analytical_truths.py）
+    assert float(ucl) - float(cl) == pytest.approx(float(cl) - float(lcl), rel=1e-9), (
+        f"UCL/LCL 应关于 CL 对称：UCL−CL={float(ucl) - float(cl)!r}, CL−LCL={float(cl) - float(lcl)!r}"
+    )
+    # 用**标准常数表 + 手算极差**闭式复算半宽：`UCL − CL = A₂(n)·R̄`。
+    # ⚠️ 我首版误用"全体数据的 mean|diff|/1.128"（那是**无子组**时的移动极差口径）
+    # → 算出 1.2886，实测 1.2821，**失败**。有子组时 R̄ 是**各子组极差的均值**。
+    # A₂(n=5)=0.577 取自 `engine/_constants.XBR_CONSTANTS`（与 Minitab 标准表逐值一致）。
+    from smartsuite.engine._constants import XBR_CONSTANTS
+
+    _g = df.groupby("子组")["val"]
+    _rbar = float((_g.max() - _g.min()).mean())
+    _a2 = XBR_CONSTANTS[5][0]
+    assert float(ucl) - float(cl) == pytest.approx(_a2 * _rbar, rel=1e-12), (
+        f"UCL 半宽应为 A₂·R̄ = {_a2}×{_rbar!r} = {_a2 * _rbar!r}，实测 {float(ucl) - float(cl)!r}"
+    )
     # 子组大小 n=5 应匹配
     assert r.metadata["subgroup_size"] == 5
 
@@ -435,8 +476,19 @@ def test_survival_km_known_median():
     assert r.status == "ok"
     median = r.metadata["median_survival"]
     assert median is not None, "应能计算中位生存时间"
-    # 指数分布 μ=10, 中位 ≈ 6.93, 允许 ±3
-    assert 4 < median < 10, f"中位生存={median:.1f}, expected ~7"
+    # KM 中位数有**精确的定义**：生存函数 S(t) 首次 ≤ 0.5 的那个观测时间。
+    # 无删失时 S(t) = 1 − i/n（i 为排序后的名次），故可**完全独立地手算** ——
+    # 这不是"与另一个库比"，而是直接按定义复算。
+    srt = np.sort(times)
+    surv = 1.0 - np.arange(1, len(srt) + 1) / len(srt)
+    km_median = float(srt[int(np.argmax(surv <= 0.5))])
+    assert float(median) == pytest.approx(km_median, abs=1e-12), (
+        f"KM 中位数应按定义等于 {km_median!r}，实测 {median!r}"
+    )
+    # 与 np.median 的差异是**预期的**（后者是样本中位数，不是 KM 估计）
+    assert abs(float(median) - float(np.median(times))) > 1e-6, (
+        "KM 中位数不应等于样本中位数（两者定义不同）"
+    )
 
 
 # ── CUSUM 正确性 ──
@@ -477,12 +529,27 @@ def test_contingency_known_chi2():
     )
     r = contingency_analysis(req)
     assert r.status == "ok"
-    p_val = r.metadata["p_value"]
-    # 强关联应显著
-    assert p_val < 0.001, f"Expected p<0.001 for strong association, got p={p_val:.4f}"
-    # Cramér's V 应在 0.2-0.6
-    if "effect" in r.metadata and r.metadata["effect"] is not None:
-        assert 0.2 < r.metadata["effect"] < 0.6, f"Cramér's V={r.metadata['effect']:.3f}"
+    p_val = float(r.metadata["p_value"])
+    # 列联表是**手工构造**的 `[[80,20],[30,70]]`，故 χ² 与 p 都能闭式手算：
+    #   χ² = Σ(O−E)²/E，本例 = 50.505050505050505
+    # 期望值由 scipy 独立复算（引擎用的是 statsmodels，属不同实现）。
+    obs = np.array([[80, 20], [30, 70]], dtype=float)
+    chi2_expected, _, _, _ = sp_stats.chi2_contingency(obs, correction=False)
+    # 校正口径：引擎默认用 Yates 连续性校正，故 p 值略大于未校正值 ——
+    # 两者都合法，但必须**明确**是哪一个。此处断言落在两个口径之间（含端点），
+    # 从而同时排除"完全不相关的 p"（≈1）与"自由度为 2 的 p"。
+    p_uncorrected = float(sp_stats.chi2_contingency(obs, correction=False)[1])
+    p_yates = float(sp_stats.chi2_contingency(obs, correction=True)[1])
+    assert p_uncorrected <= p_val <= p_yates, (
+        f"p 应落在未校正({p_uncorrected:.3e})与 Yates 校正({p_yates:.3e})之间，实测 {p_val:.3e}"
+    )
+    # Cramér's V 的闭式：V = sqrt(χ² / (N·min(r−1, c−1))) = sqrt(50.505/200) = 0.502519
+    v_expected = float(np.sqrt(chi2_expected / (obs.sum() * 1.0)))
+    reported_v = r.metadata.get("effect")
+    if reported_v is not None:
+        assert float(reported_v) == pytest.approx(v_expected, abs=1e-6), (
+            f"Cramér's V 闭式真值 {v_expected!r}，实测 {reported_v!r}"
+        )
 
 
 # ── EWMA 控制图正确性 ──
@@ -547,11 +614,19 @@ def test_trend_forecast_known_slope():
     result = trend_forecast(req)
     assert result.status == "ok"
     slope = result.metadata["slope"]
-    # 斜率应接近 0.5
-    assert 0.40 < slope < 0.60, f"斜率应接近 0.5, 实际={slope:.4f}"
-    # 线性趋势 R² 应较高
-    assert result.metadata["r_squared"] > 0.85, (
-        f"R² 应 > 0.85, 实际={result.metadata['r_squared']:.3f}"
+    # 数据固定 → OLS 斜率是确定的数。期望值用 np.polyfit 独立复算。
+    expected_slope, expected_intercept = (float(v) for v in np.polyfit(t.astype(float), y, 1))
+    assert float(slope) == pytest.approx(expected_slope, abs=1e-9), (
+        f"斜率应与 np.polyfit 一致 {expected_slope!r}，实测 {slope!r}"
+    )
+    assert float(result.metadata["intercept"]) == pytest.approx(expected_intercept, abs=1e-9), (
+        f"截距应与 np.polyfit 一致 {expected_intercept!r}，实测 {result.metadata['intercept']!r}"
+    )
+    # R² 同理可取精确值（同一回归的判定系数）
+    _ss_res = float(np.sum((y - (expected_intercept + expected_slope * t)) ** 2))
+    _ss_tot = float(np.sum((y - y.mean()) ** 2))
+    assert float(result.metadata["r_squared"]) == pytest.approx(1 - _ss_res / _ss_tot, rel=1e-9), (
+        f"R² 应为 1−SSE/SST = {1 - _ss_res / _ss_tot!r}，实测 {result.metadata['r_squared']!r}"
     )
 
 
@@ -1060,17 +1135,31 @@ def test_proportion_ci_contains_true_p():
     result = proportion_ci(req)
     assert result.status == "ok"
 
-    p_hat = result.metadata["p_hat"]
-    assert 0.28 < p_hat < 0.32, f"p_hat 应接近 0.3, 实际={p_hat:.4f}"
+    p_hat = float(result.metadata["p_hat"])
+    # `p̂ = 成功数 / 总数` 是**定义式**，不是"接近 0.3"。
+    assert p_hat == pytest.approx(30 / 100, abs=1e-12), f"p̂ 应精确等于 30/100，实测 {p_hat!r}"
 
+    # 断言对象是**样本比例 p̂ 本身**（=0.3），而非假设的"真值 0.3" ——
+    # 区间是围绕 p̂ 构造的，故它必须包含 p̂（任何合法区间估计都满足）。
     wilson_lower, wilson_upper = result.metadata["wilson_ci"]
-    assert wilson_lower <= 0.3 <= wilson_upper, (
-        f"Wilson 95%CI [{wilson_lower:.4f}, {wilson_upper:.4f}] 应包含真值 0.3"
+    assert float(wilson_lower) <= p_hat <= float(wilson_upper), (
+        f"Wilson 95%CI [{wilson_lower!r}, {wilson_upper!r}] 应包含 p̂={p_hat!r}"
     )
-
     cp_lower, cp_upper = result.metadata["clopper_pearson_ci"]
-    assert cp_lower <= 0.3 <= cp_upper, (
-        f"Clopper-Pearson 95%CI [{cp_lower:.4f}, {cp_upper:.4f}] 应包含真值 0.3"
+    assert float(cp_lower) <= p_hat <= float(cp_upper), (
+        f"Clopper-Pearson 95%CI [{cp_lower!r}, {cp_upper!r}] 应包含 p̂={p_hat!r}"
+    )
+    # 两个区间的**闭式数值**（n=100, p̂=0.3, z=1.959963984540054）可独立手算：
+    #   Wilson 中心 p̃ = (p̂ + z²/2n)/(1 + z²/n)，半宽 h = z·sqrt(p̂(1−p̂)/n + z²/4n²)/(1 + z²/n)
+    _z = 1.959963984540054
+    _n = 100.0
+    _center = (p_hat + _z * _z / (2 * _n)) / (1 + _z * _z / _n)
+    _half = _z * np.sqrt(p_hat * (1 - p_hat) / _n + _z * _z / (4 * _n * _n)) / (1 + _z * _z / _n)
+    assert float(wilson_lower) == pytest.approx(_center - _half, rel=1e-12), (
+        f"Wilson 下界应为 p̃−h = {_center - _half!r}，实测 {wilson_lower!r}"
+    )
+    assert float(wilson_upper) == pytest.approx(_center + _half, rel=1e-12), (
+        f"Wilson 上界应为 p̃+h = {_center + _half!r}，实测 {wilson_upper!r}"
     )
 
 
@@ -1222,8 +1311,14 @@ def test_distribution_summary_normal_data():
         assert key in desc, f"描述统计应包含「{key}」"
         assert isinstance(desc[key], (int, float)), f"「{key}」应为数值"
     assert desc["样本量"] == n
-    # 均值应接近 100
-    assert 97 < desc["均值"] < 103, f"均值应≈100, 实际={desc['均值']:.2f}"
+    # 断言**数据本身的**统计量（精确），而非"接近 100"这个理论期望 ——
+    # 后者会放过真实的数值漂移（只要还在 97~103 内）。
+    assert float(desc["均值"]) == pytest.approx(float(data.mean()), rel=1e-12), (
+        f"均值应精确等于样本均值 {float(data.mean())!r}，实测 {desc['均值']!r}"
+    )
+    assert float(desc["标准差"]) == pytest.approx(float(data.std(ddof=1)), rel=1e-12), (
+        f"标准差应精确等于样本标准差(ddof=1) {float(data.std(ddof=1))!r}，实测 {desc['标准差']!r}"
+    )
 
     # best_fit 应存在
     assert result.metadata["best_fit"] is not None, "应报告最佳拟合分布"
