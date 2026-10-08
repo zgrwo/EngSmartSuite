@@ -51,6 +51,11 @@ const _ready = new Promise((resolve) => {
 let _apiLabels = {};
 let _apiHints = {};
 let _apiOptions = {};
+// 列需求集合（第 42 轮）：**由 /api/tasks 灌入**，命名带 `_api` 前缀以自证来源。
+// 前端不得再手写这类集合 —— 见 tests/guards/test_task_requirements_ssot.py
+let _apiNoTargetTasks = new Set();
+let _apiYOnlyTasks = new Set();
+let _apiXOptionalTasks = new Set();
 
 /**
  * 该参数的中文标签：**接口 → 参数名本身**（最后兜底保证不空白）。
@@ -93,6 +98,21 @@ function paramOptions(k, task) {
  *
  * @returns {Promise<boolean>} 是否成功灌入
  */
+/** 无需目标列 Y 的任务（后端派生）。 */
+export function noTargetTasks() {
+  return _apiNoTargetTasks;
+}
+
+/** 只需 Y 列即可运行的任务（后端派生）。 */
+export function yOnlyTasks() {
+  return _apiYOnlyTasks;
+}
+
+/** X 列可选的任务（后端派生）。 */
+export function xOptionalTasks() {
+  return _apiXOptionalTasks;
+}
+
 export function paramsReady() {
   return _ready;
 }
@@ -119,6 +139,17 @@ export function hydrateParams(payload) {
   _apiLabels = (payload && payload.param_labels) || {};
   _apiHints = (payload && payload.param_hints) || {};
   _apiOptions = (payload && payload.param_options) || {};
+  // ── 运行前校验的列需求（第 42 轮）──
+  // 原先这三组写死在 `app.js` 里（`_noTargetNeeded` / `_apiYOnlyTasks` /
+  // `_apiXOptionalTasks`）。新增任务若忘改，表现为**静默不可用**
+  // （用户看到「请至少选择一个 X 列」）—— 不报错、不失败，最难发现。
+  // 现由 `services/task_spec.py::TASK_SPECS` 声明 → 派生 → `/api/tasks` 下发。
+  //
+  // 降级语义：本项缺失时保持空集 → 所有任务都要求 Y 与 X 都选
+  // （比"放行然后后端报错"更保守，且**明显可见**：用户会看到提示）。
+  _apiNoTargetTasks = new Set((payload && payload.no_target_tasks) || []);
+  _apiYOnlyTasks = new Set((payload && payload.y_only_tasks) || []);
+  _apiXOptionalTasks = new Set((payload && payload.x_optional_tasks) || []);
   _hydrated = true;
   _resolveReady(true);
   return true;

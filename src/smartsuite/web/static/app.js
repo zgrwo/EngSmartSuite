@@ -27,18 +27,7 @@ import {
   setAll,
   uploadFile,
 } from './state.js';
-import {
-  addFactorRow,
-  addRequestRow,
-  getParams,
-  hasParams,
-  hydrateParams,
-  paramsLoadFailed,
-  paramsReady,
-  removeFactorRow,
-  removeRequestRow,
-  showParams,
-} from './params.js';
+import { addFactorRow, addRequestRow, getParams, hasParams, hydrateParams, noTargetTasks, paramsLoadFailed, paramsReady, removeFactorRow, removeRequestRow, showParams, xOptionalTasks, yOnlyTasks } from './params.js';
 
 // ══════════════════════════════════════════════════════════════
 // 分析执行链
@@ -54,29 +43,16 @@ let _pendingGroupFilter = false; // 是否有待筛选的分组
 
 async function runAnalysis(task) {
   if (_running) return; // 防抖：上一次分析尚未完成
-  // 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
-  const _noTargetNeeded = new Set([
-    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective', 'doe_design',
-    'inverse_solve',
-  ]);
-  if (!_noTargetNeeded.has(task) && !selectedY.size) {
+  // ── 运行前校验：列需求**全部来自后端**（第 42 轮）──
+  // 原先这里是三份手写集合（`_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks`）。
+  // 新增分析方法时若忘改，**不报错、不失败**，只是该任务在 Web 上永远跑不起来
+  // （用户看到「请至少选择一个 X 列」）—— 这是"8 步注册清单"里最隐蔽的一步。
+  // 现由 `services/task_spec.py::TASK_SPECS` 声明、`derive()` 派生、`/api/tasks` 下发，
+  // 前端只读不写，结构上不可能漂移。
+  if (!noTargetTasks().has(task) && !selectedY.size) {
     showToast('请至少选择一个 Y 列'); return;
   }
-  // 仅需 Y 列即可运行的任务（无需选择 X 列）
-  const _yOnlyTasks = new Set([
-    'process_capability', 'trend_forecast',
-    'power_analysis', 'doe_design', 'spc_nonparametric',
-    'distribution_summary', 'proportion_ci',
-    'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
-    'spc_cusum', 'spc_ewma',
-    'grid_search',
-    'inverse_solve',
-  ]);
-  // X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
-  const _xOptionalTasks = new Set([
-    'spc_xbar', 'spc_attribute', 'normality_check', 'anomaly_detect',
-  ]);
-  if (!_yOnlyTasks.has(task) && !_xOptionalTasks.has(task) && !selectedX.size) {
+  if (!yOnlyTasks().has(task) && !xOptionalTasks().has(task) && !selectedX.size) {
     showToast('请至少选择一个 X 列'); return;
   }
   // 有参数配置 → 第一步: 显示参数面板, 等待用户编辑后点"运行"

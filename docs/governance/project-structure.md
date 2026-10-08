@@ -225,6 +225,7 @@ EngSmartSuite/
 │   │   └── test_packaging.py       #   打包契约（PEP 561 py.typed 分发）
 │   ├── guards/                     #   跨层回归防线（审查修复钉死；engine/services/web 变更必跑）
 │   │   ├── test_micro_scale_guards.py     # 微尺度绝对阈值同族/展示层/哨兵
+│   │   ├── test_task_requirements_ssot.py # 列需求单一来源（防前端手写集合回流）
 │   │   ├── test_acf_lasso_guards.py       # ACF 与 Lasso 微尺度相对判据
 │   │   ├── test_capability_spc_guards.py  # 能力/SPC/DOE 防护（规格限哨兵/相对判据/分组校验）
 │   │   ├── test_layer_boundaries.py       # 分层方向 + 借道导出显式化（AST，AGENTS.md 红线）
@@ -393,6 +394,7 @@ EngSmartSuite/
 │   ├── check_params_panel.mjs       #   参数面板半运行时冒烟（步骤④：删字典后仍能渲染）
 │   ├── check_export_flow.mjs        #   前端导出链路半运行时冒烟（Node + DOM 桩加载真实模块）
 │   ├── check_browser_smoke.mjs      #   真浏览器冒烟（系统 Edge + CDP，零依赖）
+│   ├── new_task.py                  #   新增方法脚手架（8 步 → 1 步）+ --check 守门
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
 │   ├── claims_gate.py              #   手册 CLAIM 缺失判据（纯函数，可直测）
 │   ├── templates_gate.py           #   templates/*.yaml 的 task 键校验（G-7）

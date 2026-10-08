@@ -46,6 +46,14 @@ class TaskSpec:
     raw_cat: bool = False
     no_target: bool = False
     no_data: bool = False
+    #: 只需 Y 列即可运行（引擎不读 `feature_cols`）。**必须显式声明** ——
+    #: 曾试图用 AST 推导"是否读 feature_cols"，但 `inverse_solve` 读了它却仍可在
+    #: 只给 Y 时运行（它用 `feature_cols` 定义正向模型的输入列，不是必需的 X 轴）。
+    #: 故这是**策略**，不是可推导的事实。
+    y_only: bool = False
+    #: X 列可选（不选时回退到顺序索引）。与 `y_only` 正交：
+    #: `spc_xbar` 需要 Y 但 X 可选；`bootstrap_ci` 只需 Y。
+    x_optional: bool = False
 
 
 # ── 任务清单（唯一事实源；新增方法只需在此追加一条）──
@@ -115,6 +123,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="比例置信区间",
         group="要因筛选",
         default_params={"ci_level": 0.95, "success_value": None},
+        y_only=True,
     ),
     TaskSpec(
         key="variance_test",
@@ -145,6 +154,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="分布特征摘要",
         group="信度诊断",
         default_params={"bins": 15},
+        y_only=True,
     ),
     TaskSpec(
         key="normality_check",
@@ -152,6 +162,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="正态性评估",
         group="信度诊断",
         default_params={"alpha": 0.05},
+        x_optional=True,
     ),
     TaskSpec(
         key="power_analysis",
@@ -171,6 +182,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         },
         no_target=True,
         no_data=True,
+        y_only=True,
     ),
     TaskSpec(
         key="doe_design",
@@ -189,6 +201,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         },
         no_target=True,
         no_data=True,
+        y_only=True,
     ),
     TaskSpec(
         key="regression",
@@ -210,6 +223,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="网格搜索寻优",
         group="建模优化",
         default_params={"ranges": None, "direction": "maximize", "n_points": 10},
+        y_only=True,
     ),
     TaskSpec(
         key="multi_objective",
@@ -292,6 +306,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         },
         raw_cat=True,
         no_target=True,
+        y_only=True,
     ),
     TaskSpec(
         key="spc_xbar",
@@ -300,6 +315,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         group="过程监控",
         default_params={"group_col": None, "usl": None, "lsl": None, "target": None},
         raw_cat=True,
+        x_optional=True,
     ),
     TaskSpec(
         key="spc_attribute",
@@ -308,6 +324,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         group="过程监控",
         default_params={"chart_type": "p", "group_col": None},
         raw_cat=True,
+        x_optional=True,
     ),
     TaskSpec(
         key="spc_cusum",
@@ -315,6 +332,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="CUSUM控制图",
         group="过程监控",
         default_params={"k": 0.5, "h": 5.0, "group_col": None},
+        y_only=True,
     ),
     TaskSpec(
         key="spc_ewma",
@@ -322,6 +340,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="EWMA控制图",
         group="过程监控",
         default_params={"lam": 0.2, "L": 2.7, "group_col": None},
+        y_only=True,
     ),
     TaskSpec(
         key="process_capability",
@@ -338,6 +357,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
             "subgroup_col": "",
             "subgroup_size": None,
         },
+        y_only=True,
     ),
     TaskSpec(
         key="trend_forecast",
@@ -345,6 +365,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="趋势预测",
         group="过程监控",
         default_params={"forecast_steps": 5},
+        y_only=True,
     ),
     TaskSpec(
         key="anomaly_detect",
@@ -352,6 +373,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="异常检测",
         group="过程监控",
         default_params={"method": "iqr", "alpha": 0.05, "max_outliers": 5},
+        x_optional=True,
     ),
     TaskSpec(
         key="change_point",
@@ -359,6 +381,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="变点检测",
         group="过程监控",
         default_params={"n_changepoints": 5},
+        y_only=True,
     ),
     TaskSpec(
         key="outlier_consensus",
@@ -402,6 +425,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="非参数控制图(分布拟合法)",
         group="过程监控",
         default_params={"side": "two-sided"},
+        y_only=True,
     ),
     TaskSpec(
         key="bootstrap_ci",
@@ -414,6 +438,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
             "ci_level": 0.95,
             "random_state": 42,
         },
+        y_only=True,
     ),
     TaskSpec(
         key="median_ci",
@@ -421,6 +446,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="中位数置信区间",
         group="高级分析",
         default_params={"ci_level": 0.95},
+        y_only=True,
     ),
     TaskSpec(
         key="gage_rr",
@@ -440,6 +466,7 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         label="统计容许区间",
         group="高级分析",
         default_params={"coverage": 0.99, "confidence": 0.95, "side": "two-sided"},
+        y_only=True,
     ),
     TaskSpec(
         key="survival_analysis",
@@ -503,6 +530,8 @@ class DerivedRegistry:
     raw_cat: set[str]
     no_target: set[str]
     no_data: set[str]
+    y_only: set[str]
+    x_optional: set[str]
 
 
 def derive(specs: Sequence[TaskSpec]) -> DerivedRegistry:
@@ -517,6 +546,8 @@ def derive(specs: Sequence[TaskSpec]) -> DerivedRegistry:
     raw_cat: set[str] = set()
     no_target: set[str] = set()
     no_data: set[str] = set()
+    y_only: set[str] = set()
+    x_optional: set[str] = set()
 
     for spec in specs:
         if spec.key in labels:
@@ -526,6 +557,10 @@ def derive(specs: Sequence[TaskSpec]) -> DerivedRegistry:
         default_params[spec.key] = dict(spec.default_params)
         if spec.raw_cat:
             raw_cat.add(spec.key)
+        if spec.y_only:
+            y_only.add(spec.key)
+        if spec.x_optional:
+            x_optional.add(spec.key)
         if spec.no_target:
             no_target.add(spec.key)
         if spec.no_data:
@@ -539,4 +574,6 @@ def derive(specs: Sequence[TaskSpec]) -> DerivedRegistry:
         raw_cat=raw_cat,
         no_target=no_target,
         no_data=no_data,
+        y_only=y_only,
+        x_optional=x_optional,
     )

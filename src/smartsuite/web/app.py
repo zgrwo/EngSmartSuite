@@ -45,6 +45,8 @@ from smartsuite.services.orchestrator import (
     TASK_GROUPS,
     TASK_LABELS,
     TASK_REGISTRY,
+    X_OPTIONAL_TASKS,
+    Y_ONLY_TASKS,
     orchestrate,
 )
 from smartsuite.services.param_labels import (
@@ -785,6 +787,17 @@ def list_tasks():
             # 下拉选项的值 + 显示文案（`Choice` 的 `(值, 文案)` 声明）；
             # 这是删除前端 PARAM_META（169 行）的前置。
             "param_options": derive_param_options(),
+            # ── 运行前校验所需的列需求（第 42 轮）──
+            # 原先这三组写死在 `static/app.js` 的 `_noTargetNeeded` /
+            # `_yOnlyTasks` / `_xOptionalTasks` 里。新增任务若忘改，表现为
+            # **静默不可用**（用户看到「请至少选择一个 X 列」），不报错也不失败 ——
+            # 这正是"新增方法成本 8 步"里最隐蔽的一步。
+            # 现由 `services/task_spec.py::TASK_SPECS` 声明 → `derive()` 派生 →
+            # 本端点下发，前端只读不写，结构上不可能漂移。
+            "no_target_tasks": sorted(NO_TARGET_TASKS),
+            "no_data_tasks": sorted(NO_DATA_TASKS),
+            "y_only_tasks": sorted(Y_ONLY_TASKS),
+            "x_optional_tasks": sorted(X_OPTIONAL_TASKS),
         }
     )
 

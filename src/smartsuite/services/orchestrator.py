@@ -25,6 +25,9 @@ TASK_GROUPS = _derived.groups
 RAW_CAT_TASKS = _derived.raw_cat
 NO_TARGET_TASKS = _derived.no_target
 NO_DATA_TASKS = _derived.no_data
+# Web 层「运行前校验」用：只需 Y / X 可选（第 42 轮从 app.js 的三个手写集合收口而来）
+Y_ONLY_TASKS = _derived.y_only
+X_OPTIONAL_TASKS = _derived.x_optional
 
 
 def _normalize_empty_params(params: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
