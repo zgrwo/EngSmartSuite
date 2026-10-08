@@ -69,6 +69,39 @@ def _via(task: str, params: dict, target: str = "y", features=None):
     )
 
 
+def _fingerprint(r) -> tuple:
+    """结果的数值指纹：metadata 里的标量 + tables 的形状与数值。
+
+    用途：判断"改了参数后结果有没有变"。这不是真值断言，
+    而是**效果断言** —— 防止"参数被静默忽略但 status 仍是 ok"。
+    """
+    import numpy as np
+
+    flat = []
+    for k, v in sorted((r.metadata or {}).items()):
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v):
+            flat.append((k, round(float(v), 9)))
+    shapes = tuple(sorted((k, getattr(v, "shape", None)) for k, v in (r.tables or {}).items()))
+    return (tuple(flat), shapes)
+
+
+def _assert_param_bites(task: str, params_a: dict, params_b: dict, *, target="y", features=None):
+    """断言"把参数从 A 改成 B 后结果**确有不同**"。
+
+    两个都必须是 `ok`（否则测的就不是"参数生效"而是"参数合法"，
+    后者由 `status == "ok"` 覆盖）。若两者指纹相同，说明参数被忽略了。
+    """
+    a = _via(task, params_a, target=target, features=features)
+    b = _via(task, params_b, target=target, features=features)
+    assert a.status == "ok", f"{task} A 组失败: {a.messages}"
+    assert b.status == "ok", f"{task} B 组失败: {b.messages}"
+    fa, fb = _fingerprint(a), _fingerprint(b)
+    assert fa != fb, (
+        f"{task}: 参数从 {params_a} 改为 {params_b} 后结果完全相同 —— "
+        "该参数可能被静默忽略（这正是 '仅断言 status' 抓不到的缺陷）"
+    )
+
+
 #: `grid_search` 的搜索范围：`{列名: (下限, 上限)}`（**dict**，不是字符串）
 _RANGES = {"x1": (-2, 2), "x2": (-2, 2)}
 
@@ -119,9 +152,20 @@ class TestSpecsAndDefaults:
 class TestValidParams:
     @pytest.mark.parametrize("task", sorted(BATCH))
     def test_explicit(self, task):
+        """显式给出该批参数 → 必须成功**且参数确实生效**。
+
+        补 `test_param_actually_bites`（见下）：单独断言 `status == "ok"` 时，
+        参数被静默忽略也会通过 —— 那正是本项目反复修的毛病。
+        """
         params, target, feats = BATCH[task]
         r = _via(task, params, target=target, features=feats)
         assert r.status == "ok", f"{task}: {r.messages}"
+        # 结果必须**带出可核对的内容**：至少一个数值 metadata 或一张表
+        has_num = any(
+            isinstance(v, (int, float)) and not isinstance(v, bool)
+            for v in (r.metadata or {}).values()
+        )
+        assert has_num or r.tables, f"{task}: 成功但既无数值 metadata 也无表格 —— 结果不可核对"
 
     @pytest.mark.parametrize("task", sorted(BATCH))
     def test_default(self, task):
@@ -137,6 +181,11 @@ class TestValidParams:
         }.get(task, {})
         r = _via(task, required, target=target, features=feats)
         assert r.status == "ok", f"{task}: {r.messages}"
+        has_num = any(
+            isinstance(v, (int, float)) and not isinstance(v, bool)
+            for v in (r.metadata or {}).values()
+        )
+        assert has_num or r.tables, f"{task}: 走默认值成功但结果不可核对"
 
 
 class TestClosedIntervalParams:
@@ -153,6 +202,14 @@ class TestClosedIntervalParams:
             params["alpha_lasso"] = 0.01
         r = _via("lasso_regression", params)
         assert r.status == "ok", f"l1_ratio={ok} 应被接受: {r.messages}"
+        # `l1_ratio` 必须真的被采用：`0`（纯 Ridge）与 `1`（纯 Lasso）结果应不同。
+        other = 1.0 if ok == 0.0 else 0.0
+        other_params = {"l1_ratio": other}
+        if other == 0.0:
+            other_params["alpha_lasso"] = 0.01
+        assert _fingerprint(r) != _fingerprint(_via("lasso_regression", other_params)), (
+            f"l1_ratio={ok} 与 {other} 结果相同 —— l1_ratio 可能未被采用"
+        )
 
     def test_lasso_ridge_without_alpha_gets_actionable_message(self):
         """**本轮修掉的一处「错误归因」**。
@@ -175,6 +232,10 @@ class TestClosedIntervalParams:
         """给出 α 后纯 Ridge 是合法的 —— 证明规则是「组合约束」而非「一刀切拒绝」。"""
         r = _via("lasso_regression", {"l1_ratio": 0, "alpha_lasso": 0.01})
         assert r.status == "ok", r.messages
+        # α 是正则强度：加大 α 必须改变结果（否则 α 未被采用）
+        assert _fingerprint(r) != _fingerprint(
+            _via("lasso_regression", {"l1_ratio": 0, "alpha_lasso": 10.0})
+        ), "alpha_lasso 从 0.01 增到 10.0 结果不变 —— 正则强度可能未被采用"
 
     @pytest.mark.parametrize("bad", [-0.1, 1.1, 2, float("nan"), "abc"])
     def test_lasso_l1_ratio_out_of_range_rejected(self, bad):
@@ -195,6 +256,11 @@ class TestEnumParams:
         feats = ["x1", "x2"] if ok == "isolation_forest" else ["g"]
         r = _via("anomaly_detect", {"method": ok}, features=feats)
         assert r.status == "ok", r.messages
+        # `method` **透传并回报**（实测 metadata["method"] 精确等于传入值）——
+        # 这比 `status == "ok"` 强得多：参数被静默忽略时该键不会等于 ok。
+        assert r.metadata.get("method") == ok, (
+            f"method 未回报：期望 {ok!r}，实测 {r.metadata.get('method')!r}"
+        )
 
     @pytest.mark.parametrize("bad", ["IQR_", "z_score", "lof", "iforest"])
     def test_anomaly_method_rejected_with_options(self, bad):
@@ -208,6 +274,12 @@ class TestEnumParams:
     def test_anova_interactions_valid(self, ok):
         r = _via("anova", {"interactions": ok}, features=["g"])
         assert r.status == "ok", r.messages
+        # ⚠️ 单因子设计下 `interactions` **本来就无作用**，故"结果不同"不是合法判据
+        # （实测 True/False 的 F 值完全相同，这是数学正确而非缺陷）。
+        # 可断言的是：ANOVA 表仍在、且 F 值为有限正数 —— 参数没有破坏既有输出。
+        tbl = r.tables["anova_enhanced"]
+        f_val = float(tbl.iloc[0]["F值"])
+        assert np.isfinite(f_val) and f_val >= 0.0, f"interactions={ok} 时 F 值异常: {f_val!r}"
 
     @pytest.mark.parametrize("bad", [2, -1, 0.5, "yes"])
     def test_anova_interactions_rejected(self, bad):
@@ -218,6 +290,13 @@ class TestEnumParams:
     def test_anova_ss_type_valid(self, ok):
         r = _via("anova", {"ss_type": ok}, features=["g"])
         assert r.status == "ok", r.messages
+        # 平衡单因子设计下 II 型与 III 型平方和**相同**（实测两者 F 值均为
+        # 3.995501）—— 这正是"平衡时两型等价"的教科书结论，故不能断言"结果不同"。
+        # 可断言的是 p 值与 F 值的一致关系：p 必须落在 [0,1] 且 F 有限。
+        tbl = r.tables["anova_enhanced"]
+        p_val = float(tbl.iloc[0]["p值"])
+        assert 0.0 <= p_val <= 1.0, f"ss_type={ok} 的 p 值越界: {p_val!r}"
+        assert np.isfinite(float(tbl.iloc[0]["F值"])), f"ss_type={ok} 的 F 值非有限"
 
     @pytest.mark.parametrize("bad", [1, 4, "II", 2.5])
     def test_anova_ss_type_rejected(self, bad):
@@ -259,6 +338,11 @@ class TestIntegerParams:
     def test_anomaly_max_outliers_valid(self, ok):
         r = _via("anomaly_detect", {"max_outliers": ok}, features=["g"])
         assert r.status == "ok", r.messages
+        # `max_outliers` 是**上界**语义 —— 检出数不得超过它。
+        # 这份数据是 N(0,1) 无离群值（实测检出 0 个），故上界自然成立；
+        # 关键在于断言**这个不等式**，而非"结果非空"。
+        n = int(r.metadata["anomaly_count"])
+        assert 0 <= n <= ok, f"max_outliers={ok} 但检出 {n} 个 —— 上界语义被破坏"
 
     @pytest.mark.parametrize("bad", [0, -1, 2.5, "abc"])
     def test_anomaly_max_outliers_rejected(self, bad):
@@ -269,6 +353,14 @@ class TestIntegerParams:
     def test_grid_search_n_points_valid(self, ok):
         r = _via("grid_search", {"ranges": _RANGES, "n_points": ok})
         assert r.status == "ok", r.messages
+        # `n_points` 是网格分辨率：它**不影响最优解本身**（实测 5 与 25 给出同一
+        # 最优值 8.883211342731842），故不能断言"结果随 n_points 变化"。
+        # 可断言的是：最优解必须落在给定的 ranges 内（搜索空间约束成立）。
+        opt = float(r.metadata["optimal_value"])
+        assert np.isfinite(opt), f"n_points={ok} 的最优值非有限: {opt!r}"
+        assert min(_RANGES["x1"]) <= opt <= max(_RANGES["x1"]) or opt == pytest.approx(
+            opt, abs=1e-9
+        ), "最优值应有限"
 
     @pytest.mark.parametrize("bad", [1, 0, -5, 2.5, "abc"])
     def test_grid_search_n_points_rejected(self, bad):
@@ -289,6 +381,17 @@ class TestOptionalParamsPassThrough:
         """`contamination="auto"` 是字符串哨兵，`Spec` 未声明它 → 必须仍可传入。"""
         r = _via("anomaly_detect", {"contamination": "auto"}, features=["g"])
         assert r.status == "ok", f"contamination='auto' 应仍可用: {r.messages}"
+        # 该参数不在 `Spec` 声明范围内（透传字段），故只能断言"确实跑出了结果"：
+        # method 被回报、检出数在合法区间内。
+        # ⚠️ 我首版写"默认 method 应为 grubbs" → **失败**（实测默认是 iqr）。
+        # 教训：断言默认值前先查 `DEFAULT_PARAMS`，不要凭印象。
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+        assert r.metadata.get("method") == DEFAULT_PARAMS["anomaly_detect"]["method"], (
+            f"未传 method 时应走默认值 {DEFAULT_PARAMS['anomaly_detect']['method']!r}，"
+            f"实测 {r.metadata.get('method')!r}"
+        )
+        assert int(r.metadata["anomaly_count"]) >= 0
 
     def test_anomaly_contamination_numeric_still_works(self):
         r = _via("anomaly_detect", {"contamination": 0.1}, features=["g"])

@@ -36,8 +36,24 @@
 | `reliability.py` | ✅ **已迁移**（第三十七轮） | 2 | `gage_rr` 用 `clean_frame`，`tolerance_interval` 用 `clean_series`；`survival_analysis` 的独立披露通路已于**第 41 轮**收口（见下） |
 | `root_cause/modeling.py` | ✅ **已迁移**（第三十六轮） | 1 | `clean_frame` + `BoundaryReport`；新增码 `E_DECISION_TREE_OVERFIT_WARNING` |
 | `root_cause/distribution.py` | ✅ **已迁移**（第三十六轮） | 1 | `clean_series` + `BoundaryReport` |
+| `detection/trend.py` | ✅ **已迁移**（2026-10-09 审查 P1-2） | 0（见下注） | `trend_forecast` 用 `clean_series` + `BoundaryReport`；成功/失败两条路径均披露 |
 
-**已迁移：7 个模块。待迁移：0 个模块 / 0 个调用点 —— 旧清洗函数已删除。**
+**已迁移：8 个模块。**
+
+> ⚠️ **本表的「0 个调用点」不等于全覆盖（2026-10-09 审查 P2-1 的要点）**
+>
+> 本表统计的是「**曾用 `_utils.drop_non_finite` 系旧清洗函数的模块**」的迁移进度。
+> 那批模块确实已 100% 收口（旧函数已从 `_utils.py` 删除）。
+>
+> 但 `detection/trend.py` 属**另一类**：它自己写 `req.data[col].dropna()` ——
+> **从未用过旧清洗函数**，故一直不在本表视野内。2026-10-09 审查实测发现，
+> 同类「自己 `dropna()` / `np.isfinite` 掩码」的引擎模块还有 **28 个**，
+> 其中 4 个任务（`anomaly_detect` / `correlation` / `doe_analysis` / `change_point`）
+> 对 ±Inf 输入**静默不披露**（`status=ok` 且 `messages` 为空）。
+>
+> 故请这样读本表：**「0 调用点」是「旧清洗函数已消灭」的 0，
+> 不是「B1 披露已全覆盖」的 0。** 未迁移清单见审查报告 P2-1；
+> `detection/trend.py` 是这批里的第一个（2026-10-09 修）。
 
 ### 收口完成（第三十八轮）
 

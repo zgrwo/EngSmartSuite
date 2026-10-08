@@ -84,6 +84,22 @@ def partition_finite(s: pd.Series) -> tuple[np.ndarray, int]:
     """返回 (有限值掩码, 非有限值个数)。非数值列按"不可判定"报 0。
 
     这是**唯一**允许出现 `np.isfinite` 掩码的地方（源码守卫会检查其他模块）。
+
+    ## 计数口径：`NaN` **计入**（`np.isfinite` 语义）
+
+    契约依据 `boundary-contract.md` §B0–B3：
+
+        | B1 | 清洗 | 可安全移除后继续 | 移除 + messages 披露**数量与列名** | `NaN`、`±Inf` |
+
+    即 B1 的对象**同时包含 NaN 与 ±Inf**，两者都要披露数量与列名。
+
+    ⚠️ 我曾在 2026-10-09 把这里改成"只计 ±Inf"，理由是"NaN 属缺失语义、
+    应由 dropna 处理"。**那是错的** —— 契约明示 B1 含 NaN，且
+    `tests/engine/test_boundary_guard.py` 有两条用例（`test_counts_non_finite` /
+    `test_nan_is_treated_as_non_finite`）正是钉住这一点。已回退。
+
+    相应地，`non_finite_detail` 的文案必须**同时提到 NaN 与 ±Inf**
+    （原文案只说"±Inf 视为缺失"，与计数不符 —— 这才是真缺陷）。
     """
     try:
         arr = s.to_numpy(dtype=float, na_value=np.nan)
@@ -105,7 +121,11 @@ def non_finite_detail(n_dropped: int, column: str = "") -> str:
     与本函数（单列语义）刻意不同，故不合并。
     """
     where = f"「{column}」" if column else "数据"
-    return f"⚠ {where}含 {n_dropped} 个非有限值（±Inf 视为缺失），已剔除后分析"
+    # ⚠️ 文案必须与 `partition_finite` 的计数口径一致：该函数用 `np.isfinite`，
+    # **NaN 与 ±Inf 都计入**（契约 `boundary-contract.md` B1 明示两者皆属 B1）。
+    # 原文案只写「±Inf 视为缺失」，而实际数字里含 NaN → 披露的"名"与"量"不符。
+    # 2026-10-09 修正为同时点名两者。
+    return f"⚠ {where}含 {n_dropped} 个非有限值（NaN 或 ±Inf），已剔除后分析"
 
 
 def clean_series(
@@ -151,7 +171,7 @@ def clean_frame(
             BoundaryIssue(
                 level="B1",
                 code="E_DATA_NON_FINITE_DROPPED",
-                detail=f"⚠ 数据含 {n_dropped} 行非有限值（±Inf 视为缺失），已剔除后分析",
+                detail=f"⚠ 数据含 {n_dropped} 行非有限值（NaN 或 ±Inf），已剔除后分析",
             )
         )
     if not n_dropped:

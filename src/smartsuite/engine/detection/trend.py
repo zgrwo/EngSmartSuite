@@ -16,6 +16,7 @@ from smartsuite.engine._constants import (
     DW_SAFE_LOWER,
     DW_SAFE_UPPER,
 )
+from smartsuite.engine._guard import BoundaryReport, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import durbin_watson, round_for_display
 
@@ -89,12 +90,26 @@ def _dw_interpretation(dw, n, k=1):
 
 def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
     """线性趋势预测，含精度指标 (MAPE/RMSE/MAE)、残差诊断和 Durbin-Watson 检验。"""
-    data = req.data[req.target_col].dropna()
+    # ── B1 边界处置（2026-10-09 审查 P1-2）──
+    # 原实现只 `dropna()`，**不剔除 ±Inf** → ±Inf 漏进 sklearn，抛
+    # "Input y contains infinity"，被下面的 except 泛化成
+    # 「数据可能不足或存在共线性问题」——**错误归因**（AGENTS 红线）。
+    # 实测：目标列含 4 个 ±Inf（56 个有效点）时报"数据不足"，
+    # 而数据本身充足、与预测列完全无关。
+    # 现改为经 `_guard.clean_series`：清洗与**披露**同源，不再依赖调用方记得拼文案。
+    _report = BoundaryReport()
+    cleaned, n_inf = clean_series(req.data[req.target_col], column=req.target_col, report=_report)
+    data = cleaned.dropna()
+    if n_inf:
+        logger.info("trend_forecast: 剔除 %d 个非有限值（列 %s）", n_inf, req.target_col)
     if len(data) < 3:
         return AnalysisResult(
             task="trend_forecast",
             status="error",
-            messages=["有效数据不足(至少3个点)"],
+            messages=[
+                f"有效数据不足(至少3个点，实际 {len(data)} 个)",
+                *_report.messages(),
+            ],
         )
 
     # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
@@ -363,15 +378,29 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
                 "ljung_box_lags": lb_lags,
                 "forecast_steps": steps,
                 "n": n,
+                # B1 披露（2026-10-09 审查 P1-2）：清洗数量进 metadata、
+                # 用户可见文案进 messages —— 与已迁移模块口径一致。
+                **({"boundary_codes": _report.codes()} if _report.codes() else {}),
             },
+            messages=_report.messages(),
         )
     except (ValueError, np.linalg.LinAlgError) as e:
         logger.warning("趋势预测模型拟合失败: %s", e)
+        # ── 禁止错误归因（2026-10-09 审查 P1-2）──
+        # 原文案固定说「数据可能不足或存在共线性问题」两句都未经证实：
+        #   · "数据不足" —— 上一行的 `len(data) < 3` 已排除，此处 data 至少 3 个点；
+        #   · "共线性"   —— 本任务只有 1 个自变量（时间轴），共线性无从谈起。
+        # 改为：只陈述已核实的事实（样本量、异常），并给出**未归因**的排查方向。
+        _n = len(data)
+        _hints = [f"趋势拟合失败（有效观测 {_n} 个）"]
+        if n_inf:
+            _hints.append(
+                f"其中已剔除 {n_inf} 个非有限值（±Inf/NaN），建议先核查这些值的来源（除零/溢出）"
+            )
+        _hints.append("请检查数值是否存在极端量级或类型异常；若持续失败请附数据样本反馈")
         return AnalysisResult(
             task="trend_forecast",
             status="error",
-            messages=[
-                "趋势预测模型拟合失败，数据可能不足或存在共线性问题，"
-                "请检查数据中是否包含足够的有效观测值。"
-            ],
+            messages=[*_hints, *_report.messages()],
+            metadata={"boundary_codes": _report.codes()} if _report.codes() else {},
         )
