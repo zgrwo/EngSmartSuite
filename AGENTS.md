@@ -133,6 +133,10 @@ EngSmartSuite/
 - 错误信息使用中文工艺术语，不暴露 traceback
 - 优雅降级：输出失败退到更可靠格式
 - 退化输入走哨兵值（NaN/""），不静默传播 —— 见 [sentinel-contract.md](docs/governance/sentinel-contract.md)
+- **退化输入的处置按 B0–B3 分级，且必须经 `engine/_guard.py`**（不得逐函数手写清洗）—— 见 [boundary-contract.md](docs/governance/boundary-contract.md)
+  - **禁止错误归因**：真实原因不是 X，就不得输出关于 X 的提示（反例：`+Inf` 导致 σ 不可算，却报「常量列（标准差为 0）」）
+  - **禁止静默降级**：B2/B3（降级/近似）必须在用户可见处标注，不得只写 `logger.debug`
+  - 由 `tests/guards/test_boundary_contract.py` 强制
 
 ### 3. 文档同步
 
@@ -251,6 +255,8 @@ EngSmartSuite/
 | [project-structure.md](docs/governance/project-structure.md) | 结构地图 |
 | [documentation.md](docs/governance/documentation.md) | 文档职责 |
 | [ai-review-prompt.md](docs/governance/ai-review-prompt.md) | AI 深度审查 Prompt 模板（产出归档 logs/reports/） |
-| [sentinel-contract.md](docs/governance/sentinel-contract.md) | 哨兵契约（L1-L5 + NaN/Inf 守卫清单） |
+| [sentinel-contract.md](docs/governance/sentinel-contract.md) | 哨兵契约（L1-L5 值级 + NaN/Inf 守卫清单） |
+| [boundary-contract.md](docs/governance/boundary-contract.md) | 边界处理契约（B0-B3 输入级：拒绝/清洗/降级/近似） |
+| [improvement-plan.md](docs/governance/improvement-plan.md) | 改善计划（阶段 P1-P5 + 问题总账，随实施更新状态） |
 | [adr-template.md](docs/adr/adr-template.md) | ADR 模板（重大架构决策记录） |
 | [tooling-pitfalls.md](docs/governance/tooling-pitfalls.md) | 工具链陷阱清单（PowerShell/git/CI） |

@@ -164,14 +164,51 @@ jobs:
       - name: 服务层测试
         run: uv run pytest tests/services/ -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-services
 
+      # 阶段 P4（2026-09-24）：参数契约落在 core/（engine 与 services 共用的轻量层），
+      # 其测试独立成目录。它是"参数校验唯一入口"的契约测试，必须在 PR 阶段跑。
+      - name: 数据契约层测试（core：param_spec 参数契约）
+        run: uv run pytest tests/core/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-core
+
       - name: 回归防线测试（guards：微尺度/规格限/跨层）
         run: uv run pytest tests/guards/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-guards
 
+      # 审查 2026-09-24（P3-6）：安全与交叉验证此前**只在 full 矩阵（main push）跑**，
+      # PR 阶段可静默合入安全回归与数值口径回归。两组耗时实测合计 <5s
+      # （security 21 例 / crossval 15 例），纳入 PR 门禁成本可忽略。
+      - name: Web 安全回归（CSRF/CSP/上传/不泄漏）
+        run: uv run pytest tests/security/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-security
+
+      - name: 交叉验证（独立第二实现 / 手工公式对账）
+        run: uv run pytest tests/crossval/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-crossval
+
+      # 阶段 P3：参考值金标准层 —— 从教科书公式**独立推导**的控制限/累积和/
+      # 时变控制限/方差分量对账。它是"引擎之外"的裁判，必须在 PR 阶段跑。
+      - name: 金标准层（教科书公式独立复算：SPC/CUSUM/EWMA/Gage R&R）
+        run: uv run pytest tests/golden/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-golden
+
       - name: 治理脚本测试
         run: uv run pytest tests/scripts/ -q --tb=short --basetemp=${{ runner.temp }}/pytest-scripts
+        # 注：tests/scripts/test_frontend_modules.py 用 Node 静态解析前端 ES module
+        # （具名导入必须真实存在 / 无循环依赖）。GitHub runner 自带 node；
+        # 本地无 node 时该层自动 skip，MIME 分发层仍会运行。
 
-      - name: 集成测试
-        run: uv run pytest tests/integration/test_integration.py tests/integration/test_task_registry_smoke.py -x -q --tb=short --basetemp=${{ runner.temp }}/pytest-integration
+      # 审查 2026-09-24（P3-6）：此前 quick 只跑 test_integration.py + smoke，
+      # 漏掉 chemical / reliability / warranty / workflows / packaging 五个文件
+      # （合计 33 例、实测 <15s）。test_web_e2e.py 需运行中的服务器，由 e2e job 覆盖。
+      - name: 集成测试（进程内，不含需服务器的 E2E）
+        run: |
+          uv run pytest \
+            tests/integration/test_integration.py \
+            tests/integration/test_integration_chemical.py \
+            tests/integration/test_integration_reliability.py \
+            tests/integration/test_integration_warranty.py \
+            tests/integration/test_workflows.py \
+            tests/integration/test_packaging.py \
+            tests/integration/test_task_registry_smoke.py \
+            tests/integration/test_api_tasks_params.py \
+            tests/integration/test_api_tasks_param_labels.py \
+            tests/integration/test_report_export.py \
+            -q --tb=short --basetemp=${{ runner.temp }}/pytest-integration
 
       # 审查 2026-08-19 #5.3：全量一致性门禁此前只在 main push 的 full job 跑，
       # 引擎崩溃（如 scatter_plot 重复列）可在 PR 阶段静默合入；纳入 PR 门禁

@@ -92,11 +92,11 @@ waitress-serve --listen=127.0.0.1:5050 smartsuite.web.app:app
 | 模块 | 做什么 |
 |------|------|
 | 正态性检验 | Anderson-Darling / Shapiro-Wilk / Kolmogorov-Smirnov |
-| 过程能力 | Cp / Cpk / Pp / Ppk（Cpm 与 Box-Cox 变换仅 CLI/模板） |
-| 测量系统分析 | Gage R&R（X-bar & R 法，ANOVA 方差分解） |
+| 过程能力 | Cp / Cpk / Pp / Ppk（Cpm 与 Box-Cox 变换仅 Python API/CLI 参数，未接入 Web 面板） |
+| 测量系统分析 | Gage R&R（**均值-极差法 + ANOVA 方差分解**，后者含交互项与 F/p） |
 | SPC 控制图 | X-bar-R/S、I(MR)、p / np / c / u、CUSUM、EWMA、非参数 |
-| 可靠性/寿命 | Kaplan-Meier、Weibull 拟合、Log-rank、容差区间 |
-| 假设检验 | t / 配对 / Mann-Whitney / Wilcoxon / Kruskal-Wallis / McNemar / KS 等 17 种 |
+| 可靠性/寿命 | Kaplan-Meier、Weibull 拟合（**含删失 MLE**）、B10/寿命百分位 + CI、Log-rank、容差区间 |
+| 假设检验 | t（**Welch 口径**）/ 配对 / Mann-Whitney / Wilcoxon / Kruskal-Wallis / McNemar / KS 等 17 种 |
 | 回归分析 | 多元 OLS / Lasso / Huber / 分位数 / Logistic（不含逐步/PLS） |
 | 工艺参数反解 | 已知来料与输出目标，反求可调参数/时间（含可达性判定与模型质量表） |
 | DoE | 全因子 / 部分因子 / Plackett-Burman / 田口 / Box-Behnken / CCD |
@@ -192,6 +192,31 @@ smartsuite/web/        ← Web 层：依赖 services/，不直接依赖 engine/
 
 ## 已知限制
 
+> 下面几条是**功能性边界**，不是待办清单的占位符。判断分析结论前请先确认是否踩到。
+
+- **可靠性：Weibull 拟合已支持右删失**（对数似然含删失观测，2026-09-24 起）——
+  同时输出 B10 与寿命百分位（B1/B5/B10/B50）及其 95% 置信区间。
+  删失比例 >50% 时会提示置信区间明显变宽，**请以 CI 而非点估计作为判据**。
+  未支持：加速寿命模型（ALT）、区间删失/左删失。
+- **测量系统分析：Gage R&R 同时给出两法** ——
+  **均值-极差法**（AIAG 传统口径）与 **ANOVA 方差分解**（四项：部件/操作员/交互/重复性，
+  含 F/p 与 Satterthwaite 有效自由度的 95% 分量 CI）。两者并列显示、不互相替换。
+  注意均值-极差法**没有交互分量**：交互占主导时它会明显低估总变异
+  （实测一例：0.451 vs 真值 1.030，ANOVA 为 1.072），此情形请以 ANOVA 法为准。
+  未支持：嵌套（nested）设计与扩展（expanded）Gage R&R。
+- **过程能力：Cp/Cpk 的组内 σ 有三种口径**（`metadata.within_sigma_method` 会写明用了哪种）：
+  - 默认 **移动极差法**（`mean(|diff|)/1.128`）——⚠️ 隐含"数据行序 = 采样时间顺序"假设，
+    筛选/排序过的数据或按批次成组采集的数据会失真；
+  - `subgroup_col` —— 按指定列分组，组内去均值后池化，**完全不受行序影响**（推荐）；
+  - `subgroup_size` —— 按行序切连续等长子组。
+
+  Cp/Cpk 的 CI 按估计量的有效自由度构造（移动极差法 ≈0.606(n−1)；
+  池化法按子组结构）。**Pp/Ppk 也提供 95% CI**（整体 σ 的自由度即 n−1）。
+- **ANOVA：平方和类型可选 Type II / Type III**（`ss_type`，默认 Type II 保持向后兼容；
+  **Type III 是 Minitab/SAS 默认口径**）。⚠️ **不平衡设计下两种类型可能给出相反结论** ——
+  实测同一份数据因子 a：Type II p=0.021（显著）vs Type III p=0.079（不显著）。
+  引擎会在不平衡时提示当前口径并给出各因子组合的样本量。
+  效应量同时给出经典 η² 与偏 η²，解读按经典 η² 的 Cohen 阈值。
 - **Python ≥ 3.10**：依赖 Pydantic v2 数据验证
 - **scipy 版本**：锁定下限，API 变更需回归测试
 - **matplotlib**：引擎自动使用 Agg 后端（engine/__init__.py 自动配置）

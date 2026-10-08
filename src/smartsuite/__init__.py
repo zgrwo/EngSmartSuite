@@ -11,21 +11,57 @@ from typing import Any, cast
 __version__ = "1.5.0"
 
 
+LOG_DIR_ENV = "SMARTSUITE_LOG_DIR"
+"""覆盖日志目录的环境变量名（运维/容器/测试显式指定）。"""
+
+
+def _default_log_dir() -> str:
+    """解析默认日志目录 —— **绝不落在包安装目录内**。
+
+    契约：docs/governance/boundary-contract.md（B0/B1）
+
+    审查 2026-09-24（第三轮复核 P1-7）：原实现为
+
+        log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
+
+    源码检出（src 布局）下解析到仓库根 `logs/`，正确。但 **wheel/site-packages 安装**
+    后 `dirname(__file__)` 是 `.../site-packages/smartsuite`，该路径变成
+    `.../site-packages/logs`，产生两类后果：
+
+      1. 可写时污染 Python 的 site-packages（卸载包不会清理）；
+      2. 不可写时静默降级到系统临时目录，用户找不到日志也不知该去哪找。
+
+    新优先级：
+      1. `SMARTSUITE_LOG_DIR` 环境变量（相对路径按 cwd 解析）；
+      2. 当前工作目录下的 `logs/` —— 与 `run_server.py` 从仓库根启动的既有行为一致，
+         源码检出的开发者体验不变；
+      3. 调用方无法写入时由 `setup_logging` 降级并**记日志说明落点**。
+    """
+    env_dir = os.environ.get(LOG_DIR_ENV)
+    if env_dir and env_dir.strip():
+        return os.path.abspath(os.path.normpath(env_dir.strip()))
+    return os.path.abspath(os.path.join(os.getcwd(), "logs"))
+
+
 def setup_logging(log_dir: str | None = None, console_level: int = logging.INFO):
     """配置双通道日志：控制台 INFO + 文件 DEBUG（自动轮转，保留最近 5 个文件）。
 
     Args:
-        log_dir: 日志目录，默认项目根目录下的 logs/
+        log_dir: 日志目录。缺省时按 `_default_log_dir()` 解析
+            （`SMARTSUITE_LOG_DIR` 环境变量 → cwd/logs）。
         console_level: 控制台最低级别，默认 INFO
 
     审查 2026-08-19 Round-2：
     - 幂等守卫基于本包 handler 标记（此前任何 root.handlers 都会跳过，干扰其他包）；
     - log_dir 做 normpath 归一化；
     - 日志目录创建失败时降级到系统临时目录，仍失败则仅保留控制台日志。
+
+    审查 2026-09-24（第三轮复核 P1-7）：默认落点由"包相对路径"改为 cwd，
+    避免 wheel 安装后写入 site-packages；降级链保留但**必须记日志说明落点**，
+    不再静默（用户需要知道日志实际在哪）。
     """
     if log_dir is None:
-        # 项目根目录相对于 __init__.py 是 ../../（src/ 布局）
-        log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
+        log_dir = _default_log_dir()
     log_dir = os.path.normpath(log_dir)
 
     root = logging.getLogger()
@@ -41,12 +77,17 @@ def setup_logging(log_dir: str | None = None, console_level: int = logging.INFO)
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, "smartsuite.log")
     except OSError as e:
-        logging.getLogger(__name__).warning("日志目录创建失败 (%s)，降级到系统临时目录", e)
+        _fallback_dir = tempfile.gettempdir()
+        logging.getLogger(__name__).warning(
+            "日志目录不可用 (%s: %s)，降级到系统临时目录 %s", log_dir, e, _fallback_dir
+        )
         try:
-            os.makedirs(tempfile.gettempdir(), exist_ok=True)
-            log_file = os.path.join(tempfile.gettempdir(), "smartsuite.log")
+            os.makedirs(_fallback_dir, exist_ok=True)
+            log_file = os.path.join(_fallback_dir, "smartsuite.log")
         except OSError as e2:
-            logging.getLogger(__name__).warning("临时目录创建也失败 (%s)，仅使用控制台日志", e2)
+            logging.getLogger(__name__).warning(
+                "临时目录创建也失败 (%s)，仅使用控制台日志（本次运行不留日志文件）", e2
+            )
             log_file = None
 
     if log_file is not None:
