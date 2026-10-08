@@ -7,9 +7,25 @@ import pandas as pd
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Integer, Opt, Spec
 from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十二轮）──
+# 只声明 `n_changepoints`：`min_segment` 的默认值**依赖样本量**
+# （`_def_ms = min(max(10, n // 20), (n - 1) // 2)`），属依赖数据的规则，
+# 按设计留在引擎（`Spec` 只做与数据无关的校验）。
+PARAM_SPECS = {
+    "change_point": Spec(
+        n_changepoints=Opt(
+            Integer(min=1),
+            default=5,
+            label="变点数",
+            hint="期望检测的变点上限；至少 1",
+        )
+    ),
+}
 
 
 def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
@@ -40,17 +56,18 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     # 参数类型安全转换 (CLI/YAML 传入字符串时防护)
     try:
         min_segment = int(min_segment)
-        max_cp = int(max_cp)
         min_peak_ratio = float(min_peak_ratio)
     except (ValueError, TypeError):
         return AnalysisResult(
             task="change_point",
             status="error",
-            messages=[
-                "变点检测参数格式错误：min_segment 和 n_changepoints 需为整数，"
-                "min_peak_ratio 需为数值"
-            ],
+            messages=["变点检测参数格式错误：min_segment 需为整数，min_peak_ratio 需为数值"],
         )
+    # `n_changepoints` 走声明式校验（P4 步骤③，第二十二轮）：失败时抛
+    # ParamValidationError，由 orchestrator 统一转成 status="error" + 中文文案。
+    # `min_peak_ratio` 的合理区间依赖数据尺度（默认 2.0 对应约 5% 误报率），
+    # 属依赖数据的规则，按设计留在引擎。
+    max_cp = PARAM_SPECS["change_point"].validate_or_raise(req.params).n_changepoints
 
     # 参数范围校验（审查 2026-08-19 #1.3）
     if min_segment < 1:

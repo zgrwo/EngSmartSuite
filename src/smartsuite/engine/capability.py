@@ -8,39 +8,271 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, CrossRule, Finite, Integer, Opt, Spec
 from smartsuite.engine._constants import (
     CPK_EXCELLENT,
     CPK_GOOD,
     CPK_MINIMUM,
 )
+from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, check_non_constant, clean_series
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import drop_non_finite, non_finite_note, shapiro_p
+from smartsuite.engine._utils import shapiro_p
 
 logger = logging.getLogger(__name__)
 
+# ── 声明式参数契约（阶段 P4 步骤②，2026-09-24）──
+# 契约：docs/governance/improvement-plan.md §六
+#
+# 本常量是 `process_capability` 参数的**唯一声明处**：校验、默认值、
+# 中文标签/提示均由此派生（将来前端 `TASK_PARAMS`/`PARAM_META` 与
+# api-reference 的参数段也从这里生成）。
+#
+# ⚠️ 范围界定：`Spec` 只承载**与数据无关**的参数校验。
+# 依赖数据的检查（样本量 ≥3、非恒定列、子组结构）**留在引擎**，
+# 因为那属 `_guard.py` 的 B0–B3 职责（boundary-contract）。
+PARAM_SPEC = Spec(
+    usl=Opt(
+        Finite(),
+        label="规格上限 (USL)",
+        hint="客户/设计要求的上限；与 LSL 同时给出时用于计算 Cp",
+    ),
+    lsl=Opt(Finite(), label="规格下限 (LSL)", hint="通常为 0 或设计下限"),
+    target=Opt(Finite(), label="Cpm 目标值", hint="给出后额外计算 Taguchi 能力指数 Cpm"),
+    transform=Opt(
+        Choice("boxcox"),
+        label="正态化变换",
+        hint="仅对全为正值的数据可用；规格限会同步变换",
+    ),
+    subgroup_col=Opt(
+        label="子组列",
+        hint="按该列分组池化求组内 σ，不受数据行序影响（推荐）；与「子组大小」二选一",
+    ),
+    subgroup_size=Opt(
+        Integer(min=2),
+        label="子组大小",
+        hint="按行序切连续等长子组；与「子组列」二选一",
+    ),
+).cross(
+    CrossRule(
+        field_name="lsl",
+        check=lambda p: p["usl"] is None or p["lsl"] is None or p["usl"] > p["lsl"],
+        code="E_SPEC_INVERTED",
+        message="规格限无效: USL 必须大于 LSL，请检查规格上下限。",
+    )
+)
 
-def _cp_confidence_interval(cp, n, alpha=0.05):
-    """Cp/Cpk 95% 置信区间 (基于 χ² 分布)。"""
-    dof = n - 1
-    if dof <= 0 or cp is None:
+# ── 移动极差法组内 σ 的有效自由度系数 ──
+# 契约：docs/governance/boundary-contract.md（B3 近似）
+#
+# σ̂_within = mean(MR)/d2（d2=1.128，n=2）不是样本方差的缩放：
+# 它由 n−1 个**高度相关**的移动极差构成（相邻 MR 共享一个观测），
+# 故有效自由度远小于 n−1。
+#
+# 实测（logs/reports/verify-round3/a1a3a7_sigma_eta.py，20000 次蒙特卡洛 n=100）：
+#     Var(σ̂)/E(σ̂)² = 1/(2·df_eff)  →  df_eff = 60.0 = 0.606·(n−1)
+# 该比值与 n 无关（n=20/50/100/200 实测波动 < 0.01），故按系数实现。
+#
+# 审查 2026-09-24（第三轮复核 P0-3）：原 `_cp_confidence_interval` 用 dof=n−1，
+# 使 Cp/Cpk 的 χ²/Bissell 区间过窄约 1.28 倍 → **Cpk 下限虚高**，
+# 而"Cpk 下限 ≥1.33"正是工艺放行判据。
+# 依据：移动极差估计量的方差见 Montgomery《Introduction to Statistical Quality
+# Control》关于 I-MR 图 σ̂ 的讨论（d3/d2 的相对标准差）。R 的 qcc 包对
+# "基于 MR 的 σ" 亦使用约 0.62(n−1) 量级的有效自由度。
+_MR_DOF_RATIO = 0.606
+
+
+def _mr_dof_eff(n: int) -> float:
+    """移动极差法 σ̂ 的有效自由度 df_eff ≈ 0.606·(n−1)。
+
+    Returns:
+        n ≥ 2 时返回正的浮点数；n < 2 时返回 0.0（调用方据此跳过 CI，
+        而不是产出虚假区间——见 sentinel-contract「不可估计不伪造」）。
+    """
+    if n < 2:
+        return 0.0
+    return _MR_DOF_RATIO * (n - 1)
+
+
+def _cp_confidence_interval(cp, n, alpha=0.05, dof: float | None = None):
+    """Cp 的 95% 置信区间（χ² 分布）。
+
+    审查 2026-09-24 P0-3：自由度由 `n−1` 改为 `df_eff = 0.606(n−1)`
+    （移动极差估计量的有效自由度）。覆盖率检验见
+    `tests/engine/test_capability_ci_coverage.py`（改前实测约 0.78，改后回到名义 0.95）。
+
+    审查 2026-09-24 P2-5：新增 `dof` 参数以便**同一函数**服务 Pp——
+    Pp 用样本标准差（自由度恰为 `n−1`），Cp 用组内 σ（自由度按估计量收缩）。
+    两者区间**形式完全相同**，只有自由度不同，故复用而非复制（避免两份公式漂移）。
+    显式传入 `dof` 时以传入值为准。
+    """
+    if cp is None:
         return (None, None)
-    chi2_lower = sp_stats.chi2.ppf(alpha / 2, dof)
-    chi2_upper = sp_stats.chi2.ppf(1 - alpha / 2, dof)
-    ci_lower = cp * np.sqrt(chi2_lower / dof)
-    ci_upper = cp * np.sqrt(chi2_upper / dof)
+    effective_dof = _mr_dof_eff(n) if dof is None else float(dof)
+    if effective_dof <= 0:
+        return (None, None)
+    chi2_lower = sp_stats.chi2.ppf(alpha / 2, effective_dof)
+    chi2_upper = sp_stats.chi2.ppf(1 - alpha / 2, effective_dof)
+    ci_lower = cp * np.sqrt(chi2_lower / effective_dof)
+    ci_upper = cp * np.sqrt(chi2_upper / effective_dof)
     return (float(ci_lower), float(ci_upper))
 
 
-def _cpk_confidence_interval(cpk, n, alpha=0.05):
-    """Cpk 95% 置信区间近似 (Bissell 方法)。"""
-    if cpk is None or n < 2:
+def _cpk_confidence_interval(cpk, n, alpha=0.05, dof: float | None = None):
+    """Cpk 95% 置信区间近似（Bissell 方法）。
+
+    Bissell 的 `se = sqrt(1/(9n) + Cpk²/(2·dof))` 假定 σ̂ 是样本标准差
+    （`dof = n−1`）。本模块的 Cpk 用组内 σ，故第二项的分母用该估计量的
+    有效自由度；第一项 `1/(9n)` 刻画均值偏移项，与 σ 估计量无关，保持不变。
+
+    审查 2026-09-24 P2-5：新增 `dof` 参数以复用于 Ppk（Ppk 的 σ 是样本标准差，
+    `dof = n−1`）。显式传入时以传入值为准。
+    """
+    if cpk is None:
         return (None, None)
-    se = np.sqrt(1 / (9 * n) + cpk**2 / (2 * (n - 1)))
+    effective_dof = _mr_dof_eff(n) if dof is None else float(dof)
+    if effective_dof <= 0:
+        return (None, None)
+    se = np.sqrt(1 / (9 * n) + cpk**2 / (2 * effective_dof))
     z = sp_stats.norm.ppf(1 - alpha / 2)
     ci_lower = cpk - z * se
     ci_upper = cpk + z * se
-    # P2 fix: Bissell 近似在小样本/小 Cpk 时可能产生负下限，Cpk 物理下限为 0
-    return (max(float(ci_lower), 0.0), float(ci_upper))
+    # 审查 2026-09-24 P2-5：钳位必须**保留点估计在区间内**。
+    #
+    # 原实现只把下限钳到 0，这在 Cpk < 0（过程均值落在规格限之外）时给出
+    # **下限 0 高于点估计**的荒谬区间 —— 实测 Cpk=−6.19 时得 CI=(0.0, −5.25)，
+    # 上下限还是反的。而 Cpk<0 恰恰是最需要预警的情形。
+    #
+    # 正确做法：按点估计符号决定钳位方向。点估计 ≥0 时把负下限抬到 0；
+    # 点估计 <0 时把正上限压到 0（"上限 0"意为"最好也不过零能力"）。
+    lo, hi = float(ci_lower), float(ci_upper)
+    if cpk >= 0:
+        lo = max(lo, 0.0)
+        hi = max(hi, lo)
+    else:
+        hi = min(hi, 0.0)
+        lo = min(lo, hi)
+    return (lo, hi)
+
+
+def _pooled_within_sigma(
+    values: np.ndarray, labels: np.ndarray | None, subgroup_size: int | None
+) -> tuple[float | None, str, list[str]]:
+    """池化组内 σ —— 不依赖"数据行序 = 时间顺序"假设。
+
+    契约：docs/governance/boundary-contract.md（B0 拒绝 / B3 近似）
+
+    审查 2026-09-24（第三轮复核 P2-5）：引擎原先只有**移动极差法**
+    （`mean(|diff|)/1.128`），它隐含"相邻行在时间上相邻"。从 Excel 筛选或排序
+    一次就会破坏该假设；而按批次成组采集的数据里，移动极差会把**批间跳变**
+    算进"组内变异"，使 Cp 偏小。
+
+    本函数提供两条显式子组路径：
+
+    - `labels`（来自 `subgroup_col`）：按列分组，各组内去该组均值后池化
+      —— **完全不受行序影响**；
+    - `subgroup_size`：按行序切成连续等长子组（经典 X-bar/R 的合理子组）。
+
+    池化定义（Montgomery 式 6.17 的样本标准差形式）：
+
+        σ_pooled = sqrt( Σ_g Σ_i (x_gi − x̄_g)² / (N − k) )
+
+    即"合并在组内自由度上的组内平方和"，k 为子组数。
+
+    Returns:
+        `(sigma, method, problems)`。`problems` 非空时调用方应**拒绝**该输入
+        （B0），而不是回落到移动极差法 —— 静默回落会让用户以为用了子组口径。
+
+    > ⚠️ **已知局限**：本函数用无偏合并**标准差**，而经典 X-bar/R 的
+    > `σ̂ = R̄/d2` 是极差口径。n=5 时两者期望相同，小样本（n=2/3）下
+    > 极差口径的方差更大；本实现选标准差口径（自由度明确、可精确验证）。
+    """
+    problems: list[str] = []
+    if subgroup_size is not None:
+        if not isinstance(subgroup_size, (int, float)) or isinstance(subgroup_size, bool):
+            return (
+                None,
+                "pooled_subgroup_size",
+                [f"参数 subgroup_size 值无效: {subgroup_size!r}，请输入 ≥2 的整数"],
+            )
+        if float(subgroup_size) != int(subgroup_size):
+            return (
+                None,
+                "pooled_subgroup_size",
+                [f"参数 subgroup_size 必须为整数，当前: {subgroup_size!r}"],
+            )
+        size = int(subgroup_size)
+        if size < 2:
+            return (
+                None,
+                "pooled_subgroup_size",
+                [
+                    f"参数 subgroup_size 必须 ≥2（子组内至少 2 个观测才能估计组内变异），当前: {size}"
+                ],
+            )
+        n_total = len(values)
+        if size >= n_total:
+            return (
+                None,
+                "pooled_subgroup_size",
+                [
+                    f"子组大小 ({size}) 不小于样本量 ({n_total})，无法分组。"
+                    "请减小 subgroup_size 或改用 subgroup_col 指定分组列。"
+                ],
+            )
+        n_groups = n_total // size
+        if n_groups < 2:
+            return (
+                None,
+                "pooled_subgroup_size",
+                [f"按子组大小 {size} 只能分出 {n_groups} 个子组，至少需要 2 个。"],
+            )
+        groups = [values[i * size : (i + 1) * size] for i in range(n_groups)]
+        remainder = n_total - n_groups * size
+        if remainder:
+            # 显式披露而非静默丢弃（B2：降级必须可见）
+            problems.append(
+                f"注意：样本量 {n_total} 不是子组大小 {size} 的整数倍，"
+                f"末尾 {remainder} 个观测未参与组内 σ 估计（池化使用前 "
+                f"{n_groups * size} 个观测）。"
+            )
+        return _pool_groups(groups, problems), "pooled_subgroup_size", problems
+
+    # labels 路径
+    assert labels is not None  # 调用方保证二者之一非空
+    uniq, counts = np.unique(labels, return_counts=True)
+    if len(uniq) < 2:
+        return (
+            None,
+            "pooled_subgroup_col",
+            [
+                f"分组列只有 {len(uniq)} 个不同取值（{uniq.tolist() if len(uniq) else '空'}）。"
+                "池化组内 σ 需要至少 2 个子组；若数据整体为一组，请改用移动极差法（不传该参数）。"
+            ],
+        )
+    thin = [(str(u), int(c)) for u, c in zip(uniq, counts, strict=True) if c < 2]
+    if thin:
+        shown = ", ".join(f"{u}({c} 个)" for u, c in thin[:5])
+        return (
+            None,
+            "pooled_subgroup_col",
+            [
+                f"分组列存在仅含 1 个观测的子组：{shown}"
+                + ("…" if len(thin) > 5 else "")
+                + "。这类子组对组内变异无贡献，保留会**静默低估**组内 σ，故拒绝。"
+            ],
+        )
+    groups = [values[labels == u] for u in uniq]
+    return _pool_groups(groups, problems), "pooled_subgroup_col", problems
+
+
+def _pool_groups(groups: list[np.ndarray], problems: list[str]) -> float | None:
+    """合并组内平方和 → 池化 σ；`N−k ≤ 0` 时返回 None（调用方跳过）。"""
+    total = sum(len(g) for g in groups)
+    k = len(groups)
+    if total - k <= 0:
+        return None
+    ss = sum(float(((g - g.mean()) ** 2).sum()) for g in groups)
+    return float(np.sqrt(ss / (total - k)))
 
 
 def _sigma_level(cpk_val):
@@ -92,9 +324,15 @@ def _normality_warning(data):
 def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     """过程能力分析：Cp/Cpk/Pp/Ppk/Cpm，含置信区间、DPMO 和 Sigma Level。"""
     data = req.data[req.target_col].dropna()
+    # ── 边界处置（B0/B1）：**一处声明、一处执行**，走 `engine/_guard.py` ──
     # 审查 2026-09-22 发现 3：±Inf 穿透 dropna 后使 matplotlib hist/set_xlim 抛
-    # ValueError（被 orchestrator 泛化翻译为「数据格式不符合要求」）；入口按缺失剔除
-    data, n_inf = drop_non_finite(data)
+    # ValueError（被 orchestrator 泛化翻译为「数据格式不符合要求」）；入口按缺失剔除。
+    #
+    # 第三十五轮：由手抄（`drop_non_finite` + `non_finite_note` + `warn_msgs`）
+    # 改为 `_guard` —— 清算的**披露与错误码**在 `_guard` 一处产出，
+    # 本模块只负责把 `report.messages()` 接进结果。
+    report = BoundaryReport()
+    data, _n_inf = clean_series(data, column=req.target_col, report=report)
     if len(data) < 3:
         return AnalysisResult(
             task="process_capability",
@@ -106,80 +344,38 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # Round-2 #A2n：常量数据 → Cp/Cpk/Pp 全 None 且 status=ok，误导
-    if data.nunique() <= 1:
+    # 第三十五轮：改由 `_guard.check_non_constant` 判定（B0），
+    # 使"常量列"这一拒绝与其它模块**同源**（此前各模块手写各自的判据与文案）。
+    _const_issue = check_non_constant(data, what="目标列")
+    if _const_issue is not None:
         return AnalysisResult(
             task="process_capability",
             status="error",
             messages=["目标列为常量列（标准差为 0），过程能力无法估计。"],
         )
 
-    usl = req.params.get("usl")
-    lsl = req.params.get("lsl")
-    target = req.params.get("target")  # Cpm 目标值
-    transform = req.params.get("transform")  # None | "boxcox"
+    # ── 参数校验（阶段 P4 步骤②③：声明式 Spec + 抛异常式传播）──
+    # 原先这里有约 55 行手写的 try/float/isfinite 重复块（usl/lsl/target 各一遍，
+    # 每遍两个错误分支）。现由 PARAM_SPEC 一处完成强转、NaN/Inf 拒绝、
+    # 取值域与交叉规则校验。
+    #
+    # **抛异常而非 return status="error"**：参数校验失败是预期内的可复用失败，
+    # 由 orchestrator 的 `except SmartSuiteError → build_error_result()` 统一转结果。
+    # 若在此处早退，每迁移一个任务反而 +1 处早退（见 core/param_spec.py 的说明）。
+    #
+    # 行为兼容性由 tests/engine/test_capability_param_migration.py 锁定；
+    # Web/CLI 侧看到的仍是 status="error" + 精确中文文案（由编排层组装）。
+    _params = PARAM_SPEC.validate_or_raise(req.params)
+    usl = _params.usl
+    lsl = _params.lsl
+    target = _params.target
+    transform = _params.transform
 
-    # 统一转换为 float（Web UI 端发送数字，CLI/直接调用可能为字符串）
-    # 审查 2026-09-05 C1：float("inf")/float("nan") 不抛 ValueError，需 isfinite
-    # 显式拒绝，否则 cp=inf/cp=nan 等荒谬结果静默输出（sentinel-contract L1）
-    if usl is not None:
-        try:
-            usl = float(usl)
-        except (ValueError, TypeError):
-            return AnalysisResult(
-                task="process_capability",
-                status="error",
-                messages=[f"规格上限 USL 值无效: {usl}，请输入数值"],
-            )
-        if not np.isfinite(usl):
-            return AnalysisResult(
-                task="process_capability",
-                status="error",
-                messages=[f"规格上限 USL 必须为有限数值，当前: {req.params.get('usl')!r}"],
-            )
-    if lsl is not None:
-        try:
-            lsl = float(lsl)
-        except (ValueError, TypeError):
-            return AnalysisResult(
-                task="process_capability",
-                status="error",
-                messages=[f"规格下限 LSL 值无效: {lsl}，请输入数值"],
-            )
-        if not np.isfinite(lsl):
-            return AnalysisResult(
-                task="process_capability",
-                status="error",
-                messages=[f"规格下限 LSL 必须为有限数值，当前: {req.params.get('lsl')!r}"],
-            )
-    if target is not None:
-        try:
-            target = float(target)
-        except (ValueError, TypeError):
-            # 审查 2026-09-05 C1：目标值无效不再静默置 None（掩盖用户输入错误）
-            return AnalysisResult(
-                task="process_capability",
-                status="error",
-                messages=[f"Cpm 目标值无效: {req.params.get('target')}，请输入数值"],
-            )
-        if not np.isfinite(target):
-            return AnalysisResult(
-                task="process_capability",
-                status="error",
-                messages=[f"Cpm 目标值必须为有限数值，当前: {req.params.get('target')!r}"],
-            )
-
-    # ── 规格限有效性校验 (P2 fix: 防止 USL ≤ LSL 导致负 Cp) ──
-    if usl is not None and lsl is not None and usl <= lsl:
-        return AnalysisResult(
-            task="process_capability",
-            status="error",
-            messages=[f"规格限无效: USL ({usl}) ≤ LSL ({lsl})，请确保 USL > LSL。"],
-        )
+    # 注：原 `USL ≤ LSL` 的手写校验已删除 —— 它现在是 `PARAM_SPEC` 的交叉规则
+    # （`E_SPEC_INVERTED`）。保留两份会让规则漂移，而 Spec 已是唯一声明处。
     n = len(data)
 
-    warn_msgs: list[str] = []
-    if n_inf:
-        warn_msgs.append(non_finite_note(n_inf, req.target_col))
+    # `n_inf` 的披露已由上面的 `clean_series(report=...)` 记录 → 不再手写
     boxcox_lambda: float | None = None
 
     # ── Box-Cox 变换（非正态数据处理）──
@@ -201,26 +397,113 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
             if target is not None and target > 0:
                 target = sp_stats.boxcox(np.array([target]), lmbda=lam)[0]
             if (usl is not None and usl <= 0) or (lsl is not None and lsl <= 0):
-                warn_msgs.append(
-                    "⚠ Box-Cox 变换后规格限非正（λ<0 时小值规格限可变换为负），"
-                    "无法在变换域计算能力指数，已回退使用原始数据"
+                report.add(
+                    BoundaryIssue(
+                        level="B2",
+                        code="E_CAPABILITY_BOXCOX_TRANSFORMED_SPEC_NONPOSITIVE",
+                        detail=(
+                            "⚠ Box-Cox 变换后规格限非正（λ<0 时小值规格限可变换为负），"
+                            "无法在变换域计算能力指数，已回退使用原始数据"
+                        ),
+                    )
                 )
                 data = _orig_data
                 usl, lsl, target = _orig_usl, _orig_lsl, _orig_target
                 boxcox_lambda = None
         else:
-            warn_msgs.append("⚠ Box-Cox 变换失败（数据必须全部为正值），使用原始数据分析")
+            report.add(
+                BoundaryIssue(
+                    level="B2",
+                    code="E_CAPABILITY_BOXCOX_FAILED",
+                    detail="⚠ Box-Cox 变换失败（数据必须全部为正值），使用原始数据分析",
+                )
+            )
 
     norm_warn = _normality_warning(data)
     if norm_warn and transform != "boxcox":
-        warn_msgs.append(norm_warn)
+        # 正态性提示属 B3（近似：用正态口径算能力指数，但数据不满足正态假设）
+        report.add(
+            BoundaryIssue(
+                level="B3",
+                code="E_CAPABILITY_DATA_NOT_NORMAL",
+                detail=norm_warn,
+            )
+        )
 
     mu = float(data.mean())
     sigma_overall = float(data.std(ddof=1))  # 整体 σ (用于 Pp/Ppk)
-    # ⚠ 移动极差法隐含“数据按行序 = 时间顺序”假设（相邻行差分）；
-    # 若数据未按采样时间排序，组内 σ 估计将失真。用户手册 7.5 已提示先排序。
-    mr = np.abs(np.diff(data.values))
-    within_sigma = float(np.mean(mr) / 1.128) if len(mr) > 0 else sigma_overall
+
+    # ── 组内 σ：三选一（审查 2026-09-24 P2-5）──
+    # 默认仍是移动极差法（向后兼容），但显式披露其"行序 = 时间顺序"假设；
+    # 提供两条子组路径以摆脱该假设。
+    subgroup_col = req.params.get("subgroup_col")
+    subgroup_size = req.params.get("subgroup_size")
+    if subgroup_col and subgroup_size:
+        return AnalysisResult(
+            task="process_capability",
+            status="error",
+            messages=[
+                "参数 subgroup_col 与 subgroup_size 只能二选一（同时给出属歧义输入）。"
+                "按列分组请用 subgroup_col，按行序切子组请用 subgroup_size。"
+            ],
+        )
+
+    # 三个分支统一产出 `_pooled_sigma`（float | None）与 `within_method`，
+    # 由下方守卫统一判定 None；`within_sigma` 只在守卫之后绑定为 float，
+    # 使类型检查器与运行时校验看到同一件事（避免 12 处 `Optional` 报错）。
+    within_method: str
+    _sub_problems: list[str]
+    _pooled_sigma: float | None
+    if subgroup_col:
+        if subgroup_col not in req.data.columns:
+            return AnalysisResult(
+                task="process_capability",
+                status="error",
+                messages=[
+                    f"分组列「{subgroup_col}」不存在于数据中。"
+                    f"可用列：{', '.join(map(str, req.data.columns[:12]))}"
+                    + ("…" if len(req.data.columns) > 12 else "")
+                ],
+            )
+        _labels = req.data.loc[data.index, subgroup_col].to_numpy()
+        _pooled_sigma, within_method, _sub_problems = _pooled_within_sigma(
+            data.to_numpy(), _labels, None
+        )
+    elif subgroup_size is not None:
+        _pooled_sigma, within_method, _sub_problems = _pooled_within_sigma(
+            data.to_numpy(), None, subgroup_size
+        )
+    else:
+        # ⚠ 移动极差法隐含"数据按行序 = 时间顺序"假设（相邻行差分）；
+        # 若数据未按采样时间排序，组内 σ 估计将失真。
+        mr = np.abs(np.diff(data.values))
+        _pooled_sigma = float(np.mean(mr) / 1.128) if len(mr) > 0 else sigma_overall
+        within_method = "moving_range"
+        _sub_problems = [
+            "组内 σ 使用**移动极差法**（相邻行差分的均值 / 1.128），"
+            "隐含「数据行序 = 采样时间顺序」假设。若数据经过筛选/排序，或按批次成组采集，"
+            "该估计会失真 —— 请用 subgroup_col 指定分组列，或用 subgroup_size 指定子组大小。"
+        ]
+
+    # 子组路径的显式错误（B0 拒绝，不回落）+ 披露（B2 降级可见）
+    if _pooled_sigma is None:
+        return AnalysisResult(
+            task="process_capability",
+            status="error",
+            messages=_sub_problems or ["子组口径无法估计组内标准差，请检查分组设置。"],
+        )
+    within_sigma: float = _pooled_sigma
+    for _msg in _sub_problems:
+        report.add(
+            BoundaryIssue(
+                level="B3",
+                code="E_CAPABILITY_SUBGROUP_SIGMA_CAVEAT",
+                # 文案拼装规则与迁移前**逐字一致**（以「注意」开头的不加 ⚠ 前缀）——
+                # 改写文案会改变用户可见内容，那不属于"消除手抄"的范围。
+                detail=_msg if _msg.startswith("注意") else f"⚠ {_msg}",
+            )
+        )
+    within_sigma_dof = _mr_dof_eff(n) if within_method == "moving_range" else None
 
     # ── 计算各项能力指数 ──
 
@@ -277,8 +560,21 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         cpm = float((usl - lsl) / (6 * tau)) if tau > 0 else None
 
     # 置信区间
-    cp_ci = _cp_confidence_interval(cp, n) if cp is not None else (None, None)
-    cpk_ci = _cpk_confidence_interval(cpk_val, n) if cpk_val is not None else (None, None)
+    cp_ci = _cp_confidence_interval(cp, n, dof=within_sigma_dof) if cp is not None else (None, None)
+    cpk_ci = (
+        _cpk_confidence_interval(cpk_val, n, dof=within_sigma_dof)
+        if cpk_val is not None
+        else (None, None)
+    )
+    # Pp/Ppk 的 CI（审查 2026-09-24 P2-5）：整体 σ 是样本标准差，自由度恰为 n−1，
+    # 无需像组内 σ 那样收缩。此前 Ppk 无区间，而它常被直接当放行判据用。
+    _overall_dof = float(n - 1) if n > 1 else 0.0
+    pp_ci = _cp_confidence_interval(pp, n, dof=_overall_dof) if pp is not None else (None, None)
+    ppk_ci = (
+        _cpk_confidence_interval(ppk_val, n, dof=_overall_dof)
+        if ppk_val is not None
+        else (None, None)
+    )
 
     # Sigma Level + DPMO
     sigma_lvl, dpmo = _sigma_level(cpk_val) if cpk_val is not None else (None, None)
@@ -462,14 +758,27 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
             "cpm": cpm,
             "cp_ci": cp_ci,
             "cpk_ci": cpk_ci,
+            # Pp/Ppk 的 CI（P2-5）
+            "pp_ci": pp_ci,
+            "ppk_ci": ppk_ci,
             "sigma_level": sigma_lvl,
             "dpmo": dpmo,
             "mean": mu,
             "sigma_overall": sigma_overall,
             "sigma_within": within_sigma,
+            # 组内 σ 的口径（P2-5）：moving_range / pooled_subgroup_col /
+            # pooled_subgroup_size。三种口径的数值不可直接比较，必须随数值披露。
+            "within_sigma_method": within_method,
             "n": n,
             "judge": judge,
             "boxcox_lambda": boxcox_lambda,
+            # ── 边界处置的**机器可读错误码**（第三十五轮随 `_guard` 迁移兑现）──
+            # 迁移前是手抄的 `warn_msgs: list[str]`，只有文案、没有码 ——
+            # 上游（API 消费者、日志聚合）无法可靠地按"处置类型"分流，
+            # 只能对中文文案做子串匹配（脆弱且随文案改动失效）。
+            # 现由 `BoundaryIssue.code` 一处产出，`report.codes()` 去重导出。
+            # 详情（含列名与数量）仍在 `messages` 里，供用户阅读。
+            "boundary_codes": report.codes(),
         },
-        messages=warn_msgs,
+        messages=report.messages(),
     )

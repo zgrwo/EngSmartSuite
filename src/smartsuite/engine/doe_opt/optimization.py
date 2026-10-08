@@ -8,10 +8,50 @@ import pandas as pd
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Integer, Opt, Spec
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import is_positive_finite, round_for_display
 
 logger = logging.getLogger(__name__)
+
+# `ranges` / `objectives` / `weights` 是用户手写的结构化输入（`ranges` 实测接受
+# `{列名: (下限, 上限)}` dict），格式校验属业务规则、引擎内已有专门实现 →
+# 声明为**透传**字段（无校验器），只为让 `defaults()` 与 `DEFAULT_PARAMS` 精确相等。
+PARAM_SPECS = {
+    "grid_search": Spec(
+        ranges=Opt(default=None, label="搜索范围", hint="格式 {列名: (下限, 上限)}"),
+        direction=Opt(
+            Choice(("maximize", "最大化"), ("minimize", "最小化")),
+            default="maximize",
+            label="优化方向",
+            hint="期望响应越大越好（最大化）还是越小越好（最小化）",
+        ),
+        n_points=Opt(
+            # 至少 2：网格搜索在每个维度上至少需要 2 个点才有意义。
+            # 迁移前实测 `1`/`0`/`-5`/`2.5`/`"abc"`/`inf` **全部返回 ok**
+            # （`int()` 失败静默回落默认值 10，且无区间检查）—— 已修为明确拒绝。
+            Integer(min=2),
+            default=10,
+            label="网格点数",
+            hint="每个维度上的取样点数（至少 2）；点数越多越慢",
+        ),
+    ),
+    "multi_objective": Spec(
+        # ⚠️ 实测真实形态：`objectives` 是**字典列表**（每项含 `col` + `direction`），
+        # `weights` 是**数值列表**。我最初把两者写成"逗号分隔字符串"，
+        # 核对引擎源码与既有测试后修正 —— 这也正是它们不宜强校验的原因。
+        objectives=Opt(
+            default=None,
+            label="优化目标",
+            hint="目标列表，每项形如 {col: 列名, direction: maximize|minimize}",
+        ),
+        weights=Opt(
+            default=None,
+            label="权重",
+            hint="与目标一一对应的**数值列表**；留空按等权",
+        ),
+    ),
+}
 
 
 def grid_search(req: AnalysisRequest) -> AnalysisResult:
@@ -40,13 +80,16 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
             task="grid_search", status="error", messages=["参数搜索范围格式无效:"] + _invalid_ranges
         )
 
-    n_points = req.params.get("n_points", 10)
-    try:
-        n_points = int(n_points)
-    except (ValueError, TypeError, OverflowError):
-        # OverflowError（审查 2026-09-22 发现 5 同族）：int(float('inf')) 穿透守卫
-        n_points = 10
-    # 防止内存耗尽：限制搜索点数
+    # 参数校验（P4 步骤③，第二十四轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前 `n_points` **无任何校验**：`int()` 失败静默回落 10，且区间靠
+    # `max(2, min(n, 30))` 静默夹紧 —— 用户设 100 会得到 30 却毫不知情（静默降级）。
+    # 现由 `Integer(min=2)` 明确拒绝非法值；"上限夹紧"因涉及**内存保护**
+    # （`total_points = n_points ** len(ranges)` 会爆炸）而保留，但下面会披露。
+    _g = PARAM_SPECS["grid_search"].validate_or_raise(req.params)
+    n_points = _g.n_points
+    # 防止内存耗尽：限制搜索点数（**有意的保护性夹紧**，非静默降级 —— 见下方披露）
+    _n_points_requested = n_points
     n_points = max(2, min(n_points, 30))
     if len(ranges) > 4:
         return AnalysisResult(
@@ -57,14 +100,7 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     total_points = n_points ** len(ranges)
     if total_points > 50000:
         n_points = max(2, int(50000 ** (1.0 / len(ranges))))
-    direction = req.params.get("direction", "maximize")
-    # 审查 2026-08-19 #2.6：direction 白名单校验
-    if direction not in ("maximize", "minimize"):
-        return AnalysisResult(
-            task="grid_search",
-            status="error",
-            messages=[f"方向参数 direction 无效: {direction!r}，请使用 'maximize' 或 'minimize'"],
-        )
+    direction = _g.direction  # 已由 PARAM_SPECS 校验并取用
     _gs_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
 
     # 审查 2026-08-19 #2.1：isinstance 校验对 NaN 恒真、NaN>=NaN 恒假，

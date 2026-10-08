@@ -9,14 +9,14 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Finite, Opt, Spec
+from smartsuite.core.param_specs_common import ALPHA, GROUP_COL
 from smartsuite.engine._constants import (
     EPSILON,
 )
+from smartsuite.engine._guard import BoundaryReport, clean_frame, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
-    drop_non_finite,
-    drop_non_finite_rows,
-    non_finite_note,
     round_for_display,
     shapiro_p,
 )
@@ -28,6 +28,61 @@ from smartsuite.engine.root_cause._shared import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十六轮；第三十八轮补回）──
+# 契约：docs/governance/improvement-plan.md §六
+#
+# 迁移前 `alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)` 在**每个分支**
+# 各写一遍（17 处），每处重复读取与转换同一个参数；`test` 的取值集则是一段手写
+# 白名单判断。现统一由本 Spec 一处声明：
+#   · `test`  → `Choice`，17 种取值**都带中文文案**（前端下拉框要用）
+#   · `alpha` → 共享字段 `ALPHA`（`Finite(gt=0, lt=1)`，越界会让结论恒显著/恒不显著）
+#   · `popmean` / `popmedian` → 单样本检验的参考值，可负（`Finite()` 不限符号），
+#     但必须**有限**（NaN/Inf 会让比较恒为 False，静默给出错误结论）
+#
+# 与 `_HYPOTHESIS_TEST_TYPES` 的一致性由
+# `tests/engine/test_param_migration_batch7.py::test_test_type_set_matches_engine_whitelist`
+# 强制（两处清单漂移会失败）。
+PARAM_SPECS: dict[str, Spec] = {
+    "hypothesis_test": Spec(
+        test=Opt(
+            Choice(
+                ("ttest_ind", "独立样本 t 检验（Welch）"),
+                ("ttest_1samp", "单样本 t 检验"),
+                ("ttest_paired", "配对样本 t 检验"),
+                ("wilcoxon_1samp", "单样本 Wilcoxon 符号秩检验"),
+                ("wilcoxon_paired", "配对 Wilcoxon 符号秩检验"),
+                ("mannwhitney", "Mann-Whitney U 检验"),
+                ("kruskal_wallis", "Kruskal-Wallis 检验"),
+                ("kruskal", "Kruskal-Wallis 检验（别名）"),
+                ("jonckheere", "Jonckheere-Terpstra 趋势检验"),
+                ("mcnemar", "McNemar 检验"),
+                ("mann_kendall", "Mann-Kendall 趋势检验"),
+                ("auto", "自动选择（按正态性）"),
+                ("cochran_q", "Cochran Q 检验"),
+                ("ks", "Kolmogorov-Smirnov 检验"),
+                ("friedman", "Friedman 检验"),
+                ("cohens_d", "Cohen's d 效应量"),
+                ("correlation", "相关系数检验"),
+            ),
+            default="ttest_ind",
+            label="检验类型",
+            hint="留空按 ttest_ind；auto 会先做正态性检验再选择参数/非参数方法",
+        ),
+        alpha=ALPHA,
+        group_col=GROUP_COL,
+        # ⚠️ 默认值是 **0**（不是 None）—— 由 `Spec.defaults() == DEFAULT_PARAMS[task]`
+        # 对拍断言实测校正（我首版写 None，该断言立刻失败）。
+        popmean=Opt(
+            Finite(), default=0.0, label="总体均值（单样本 t 检验）", hint="可为负；须为有限数"
+        ),
+        # ⚠️ 默认值是 **0**（不是 None）—— 由 `Spec.defaults() == DEFAULT_PARAMS[task]`
+        # 对拍断言实测校正（我首版写 None，该断言立刻失败）。
+        popmedian=Opt(
+            Finite(), default=0.0, label="总体中位数（单样本 Wilcoxon）", hint="可为负；须为有限数"
+        ),
+    ),
+}
 
 
 def _resolve_group_col(req, task_name: str) -> tuple[str | None, AnalysisResult | None]:
@@ -227,9 +282,13 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
         )
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
-    g1, n_inf1 = drop_non_finite(g1)
-    g2, n_inf2 = drop_non_finite(g2)
-    inf_msgs = [non_finite_note(n, req.target_col) for n in (n_inf1, n_inf2) if n]
+    # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+    # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+    # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    _report = BoundaryReport()
+    g1, _n1 = clean_series(g1, column=req.target_col, report=_report)
+    g2, _n2 = clean_series(g2, column=req.target_col, report=_report)
+    inf_msgs = _report.messages()
     if len(g1) < 3 or len(g2) < 3:
         return AnalysisResult(
             task="hypothesis_test",
@@ -283,8 +342,12 @@ def _ht_friedman(req: AnalysisRequest) -> AnalysisResult:
     if len(measure_cols) < 2:
         measure_cols = [req.target_col] + [c for c in req.feature_cols[:2] if c in req.data.columns]
     sub = req.data[measure_cols].dropna()
-    sub, n_inf = drop_non_finite_rows(sub, measure_cols)
-    inf_msgs = [non_finite_note(n_inf)] if n_inf else []
+    # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+    # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+    # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    _report = BoundaryReport()
+    sub, _n_inf = clean_frame(sub, measure_cols, report=_report)
+    inf_msgs = _report.messages()
     if len(sub) < 3 or len(measure_cols) < 2:
         return AnalysisResult(
             task="hypothesis_test",
@@ -358,16 +421,21 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
         )
     g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
     g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
-    g1, n_inf1 = drop_non_finite(g1)
-    g2, n_inf2 = drop_non_finite(g2)
+    # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+    # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+    # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    _report = BoundaryReport()
+    g1, _n1 = clean_series(g1, column=req.target_col, report=_report)
+    g2, _n2 = clean_series(g2, column=req.target_col, report=_report)
     if len(g1) < 3 or len(g2) < 3:
         return AnalysisResult(
             task="hypothesis_test",
             status="error",
             messages=[f"每组至少需要 3 个有效数据，当前 g1={len(g1)}, g2={len(g2)}"],
         )
-    warn_list: list[str] = []
-    warn_list.extend(non_finite_note(n, req.target_col) for n in (n_inf1, n_inf2) if n)
+    # 第三十八轮：非有限值披露由 `_guard` 记录；`warn_list` 仍承载`_cohens_d` 追加的**其它**警告（样本量不足等）。
+    warn_list: list[str] = _report.messages()
+    # （第三十八轮）非有限值的披露已由上面的 `_report` 记录，此处不再重复拼装。
     d = _cohens_d(g1.values, g2.values, warn_list)
     ci = _cohens_d_ci(d, len(g1), len(g2))
     label = _effect_size_label(abs(d), "cohens_d")
@@ -430,8 +498,12 @@ def _ht_correlation(req: AnalysisRequest) -> AnalysisResult:
         )
     x_col = feat_cols[0]
     sub = req.data[[req.target_col, x_col]].dropna()
-    sub, n_inf = drop_non_finite_rows(sub, [req.target_col, x_col])
-    inf_msgs = [non_finite_note(n_inf)] if n_inf else []
+    # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+    # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+    # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    _report = BoundaryReport()
+    sub, _n_inf = clean_frame(sub, [req.target_col, x_col], report=_report)
+    inf_msgs = _report.messages()
     if len(sub) < 3:
         return AnalysisResult(
             task="hypothesis_test",
@@ -553,26 +625,17 @@ def _wilcoxon_rank_r(diff, direction: float) -> float:
 
 def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     """假设检验：独立样本、配对样本、单样本 t 检验 / Mann-Whitney U，含效应量。"""
-    test_type = req.params.get("test", "ttest_ind")
-    if not isinstance(test_type, str) or test_type not in _HYPOTHESIS_TEST_TYPES:
-        return AnalysisResult(
-            task="hypothesis_test",
-            status="error",
-            messages=[
-                f"不支持的检验类型: {test_type!r}，可选: "
-                + ", ".join(sorted(_HYPOTHESIS_TEST_TYPES))
-            ],
-        )
-
-    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
-    if not 0 < alpha < 1:
-        return AnalysisResult(
-            task="hypothesis_test",
-            status="error",
-            messages=[
-                f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}（越界会使检验结论恒显著或恒不显著）"
-            ],
-        )
+    # ── 参数校验（P4 步骤③）：失败时抛 ParamValidationError，
+    # 由 orchestrator 的 `except SmartSuiteError → build_error_result()` 统一转结果。
+    #
+    # **抛异常而非 `return status="error"`**：参数校验失败是预期内的可复用失败。
+    # 若在此处早退，每迁移一个任务反而 +1 处早退（见 core/param_spec.py 的说明）。
+    #
+    # 迁移前这里是两段手写检查（白名单判断 + alpha 区间判断，约 20 行），
+    # 且 `alpha` 在**每个分支**里各读一次（共 17 处）。现统一由 Spec 一处声明与校验。
+    _hp = PARAM_SPECS["hypothesis_test"].validate_or_raise(req.params)
+    test_type = _hp.test
+    alpha = _hp.alpha
 
     # 调度到独立分支函数（新增检验类型只需在 _HYPOTHESIS_DISPATCH 注册）
     if test_type in _HYPOTHESIS_DISPATCH:
@@ -581,8 +644,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── 单样本检验 ──
     if test_type == "ttest_1samp":
         data = req.data[req.target_col].dropna()
-        data, n_inf = drop_non_finite(data)
-        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
+        # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+        # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+        # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+        _report = BoundaryReport()
+        data, _n_inf = clean_series(data, column=req.target_col, report=_report)
+        inf_msgs = _report.messages()
         popmean = _safe_float(req.params.get("popmean", 0), 0.0)
         if len(data) < 3:
             return AnalysisResult(
@@ -686,8 +753,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             )
         col1, col2 = req.feature_cols[0], req.feature_cols[1]
         sub = req.data[[col1, col2]].dropna()
-        sub, n_inf = drop_non_finite_rows(sub, [col1, col2])
-        inf_msgs = [non_finite_note(n_inf)] if n_inf else []
+        # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+        # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+        # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+        _report = BoundaryReport()
+        sub, _n_inf = clean_frame(sub, [col1, col2], report=_report)
+        inf_msgs = _report.messages()
         if len(sub) < 3:
             return AnalysisResult(
                 task="hypothesis_test", status="error", messages=["有效配对数据不足(至少3对)"]
@@ -793,8 +864,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── 单样本 Wilcoxon 符号秩检验 ──
     if test_type == "wilcoxon_1samp":
         data = req.data[req.target_col].dropna()
-        data, n_inf = drop_non_finite(data)
-        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
+        # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+        # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+        # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+        _report = BoundaryReport()
+        data, _n_inf = clean_series(data, column=req.target_col, report=_report)
+        inf_msgs = _report.messages()
         popmedian = _safe_float(req.params.get("popmedian", 0), 0.0)
         if len(data) < 5:
             return AnalysisResult(
@@ -890,8 +965,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if group_err is not None:
             return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
-        sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
-        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
+        # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+        # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+        # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+        _report = BoundaryReport()
+        sub, _n_inf = clean_frame(sub, [req.target_col], report=_report)
+        inf_msgs = _report.messages()
         groups = sub[group_col].unique()
         # Round-2 #A2e：无分组列时回退到连续特征列 → 每观测一组、η²_H=1.000 误导
         if len(groups) > 20:
@@ -1158,8 +1237,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # ── Mann-Kendall 趋势检验 ──
     if test_type == "mann_kendall":
         data = req.data[req.target_col].dropna()
-        data, n_inf = drop_non_finite(data)
-        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
+        # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+        # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+        # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+        _report = BoundaryReport()
+        data, _n_inf = clean_series(data, column=req.target_col, report=_report)
+        inf_msgs = _report.messages()
         n = len(data)
         if n < 4:
             return AnalysisResult(
@@ -1240,8 +1323,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if group_err is not None:
             return group_err
         sub = req.data[[req.target_col, group_col]].dropna()
-        sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
-        inf_msgs = [non_finite_note(n_inf, req.target_col)] if n_inf else []
+        # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+        # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+        # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+        _report = BoundaryReport()
+        sub, _n_inf = clean_frame(sub, [req.target_col], report=_report)
+        inf_msgs = _report.messages()
         groups = sub[group_col].unique()
         # Round-2 #A2e：同 kruskal——连续列回退产生伪分组
         if len(groups) > 20:
@@ -1340,8 +1427,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             )
         col1, col2 = req.feature_cols[0], req.feature_cols[1]
         sub = req.data[[col1, col2]].dropna()
-        sub, n_inf = drop_non_finite_rows(sub, [col1, col2])
-        inf_msgs = [non_finite_note(n_inf)] if n_inf else []
+        # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+        # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+        # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+        _report = BoundaryReport()
+        sub, _n_inf = clean_frame(sub, [col1, col2], report=_report)
+        inf_msgs = _report.messages()
         if len(sub) < 5:
             return AnalysisResult(
                 task="hypothesis_test", status="error", messages=["有效配对数据不足(至少5对)"]
@@ -1452,8 +1543,12 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-09-22 发现 2：±Inf 既非 NaN 也未被 dropna 剔除，scipy 对含 Inf
     # 数组返回 NaN p 值，而 `p < alpha` 对 NaN 恒 False → 被表述为「未发现显著差异」。
     # 入口按缺失处理剔除并显式提示（同一缺陷族：paired/mannwhitney/wilcoxon 已同修）。
-    g1, n_inf1 = drop_non_finite(g1)
-    g2, n_inf2 = drop_non_finite(g2)
+    # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
+    # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
+    # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    _report = BoundaryReport()
+    g1, _n1 = clean_series(g1, column=req.target_col, report=_report)
+    g2, _n2 = clean_series(g2, column=req.target_col, report=_report)
 
     # 最小样本量检查 — 与其他分支保持一致 (P2-3 fix)
     min_n = 3
@@ -1465,8 +1560,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # ── 自动选择参数/非参数检验 ──
-    norm_warn: list[str] = []
-    norm_warn.extend(non_finite_note(n, req.target_col) for n in (n_inf1, n_inf2) if n)
+    # 第三十八轮：非有限值披露由 `_guard` 记录；`norm_warn` 仍承载**正态性/方差齐性**等其它警告。
+    norm_warn: list[str] = _report.messages()
+    # （第三十八轮）非有限值的披露已由上面的 `_report` 记录，此处不再重复拼装。
     sw1 = sw2 = 1.0  # 初始化为正态（用于 auto 分支中条件不满足时的回退）
     norm_already_checked = False
     if test_type == "auto":
@@ -1488,6 +1584,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         if min(sw1, sw2) < 0.05:
             norm_warn.append(f"正态性检验 p={min(sw1, sw2):.4f}<0.05，建议使用 Mann-Whitney U 检验")
 
+    # 这两个只在 t 检验分支被赋值；先置 None，使表格构建对两个分支都成立
+    _welch_df: float | None = None
+    _var_note: str | None = None
     if test_type == "mannwhitney":
         stat, p = sp_stats.mannwhitneyu(g1, g2)
         test_name = "Mann-Whitney U 检验"
@@ -1495,8 +1594,26 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "Cliff's δ"
         effect_label = _effect_size_label(effect_size, "cliffs_delta")
     else:
-        stat, p = sp_stats.ttest_ind(g1, g2)
-        test_name = "独立样本 t 检验"
+        # ── 独立样本 t 检验：**默认 Welch**（合并方差 t 检验假设方差齐性，而该假设
+        # 在工艺数据里经常不成立；Welch 在方差不齐时控制 I 类错误，齐性时功效几乎无损失）──
+        # 审查发现（P2-4）：原实现 `sp_stats.ttest_ind(g1, g2)` **未传 `equal_var`**，
+        # 而 scipy 的默认是 `equal_var=True`（Student）→ 实测不等方差情形下
+        # 报出的 p 值系统性偏离 Welch（本例 0.8267 vs 0.5990）。
+        _tt = sp_stats.ttest_ind(g1, g2, equal_var=False)
+        stat, p = float(_tt.statistic), float(_tt.pvalue)
+        _welch_df = float(_tt.df)
+        # 披露方差齐性判定 —— 用户需要知道"为什么用 Welch、差异有多大"
+        _levene = sp_stats.levene(g1, g2, center="median")
+        _levene_p = float(_levene.pvalue)
+        _var_note = f"Levene 检验 p={_levene_p:.4f}，" + (
+            "方差不齐（p<0.05），采用 Welch 校正"
+            if _levene_p < 0.05
+            else "未发现方差不齐，Welch 与合并方差结果接近"
+        )
+        if _levene_p < 0.05:
+            # 方差不齐会实质影响结论解读 → 主动告知（B3：近似/口径选择须可见）
+            norm_warn.append(f"两组方差不齐（{_var_note}）")
+        test_name = "独立样本 t 检验 (Welch)"
         effect_size = _cohens_d(g1.values, g2.values, norm_warn)
         # 逐公式审计 2026-09-05 瑕疵#8：_cohens_d 实际返回含小样本校正的 Hedges g
         # （J=1-3/(4N-9)），标签同步更正，避免统计口径误读
@@ -1573,6 +1690,10 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             "检验方法": [test_name],
             "统计量": [f"{stat:.4f}"],
             "p值": [f"{p:.4f}"],
+            # 自由度：t 检验分支给出 Welch–Satterthwaite 近似值（**非** n1+n2−2）。
+            # 用户核对结论时要看它 —— 合并方差自由度会系统性高估显著性。
+            "自由度": [f"{_welch_df:.2f}" if _welch_df is not None else "—"],
+            "方差齐性": [_var_note if _var_note is not None else "—"],
             "显著性水平": [str(alpha)],
             "效应量": [f"{effect_name}={effect_size:.3f}"],
             "效应量解读": [effect_label],

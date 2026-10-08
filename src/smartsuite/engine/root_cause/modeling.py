@@ -12,15 +12,43 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.tools.sm_exceptions import SingularMatrixWarning
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Finite, Integer, Opt, Spec
+from smartsuite.core.param_specs_common import RANDOM_STATE
 from smartsuite.engine._constants import (
     VIF_THRESHOLD,
 )
+from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, clean_frame
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import drop_non_finite_rows, non_finite_note
-from smartsuite.engine._utils import safe_float as _safe_float
-from smartsuite.engine.root_cause._shared import _safe_int
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十一轮起：共享字段库驱动）──
+# 契约：docs/governance/improvement-plan.md §六
+# 按**任务**登记（本模块含 decision_tree / vif / logistic_regression 等）。
+PARAM_SPECS = {
+    # 第二十二轮：`max_depth` ≥1（sklearn 对 ≤0 抛 ValueError，原先只做类型转换
+    # 而无区间检查 —— 实际有检查，见迁移注释）；`random_state` 引用共享常量。
+    "decision_tree": Spec(
+        max_depth=Opt(
+            Integer(min=1),
+            default=5,
+            label="最大深度",
+            hint="决策树最大深度；至少 1（越大越容易过拟合）",
+        ),
+        random_state=RANDOM_STATE,
+    ),
+    # `threshold` 此前**完全没有校验**（实测：`'abc'` 静默回落默认值；
+    # `inf` 使判定表全空且阈值参考线不显示；`-1` 把全部变量判为高 VIF）。
+    # 三者都是"静默降级"，故 `gt=0` + 有限数值。
+    "vif": Spec(
+        threshold=Opt(
+            Finite(gt=0),
+            default=VIF_THRESHOLD,
+            label="VIF 阈值",
+            hint=f"VIF 超过该值判为存在共线性；默认 {VIF_THRESHOLD}",
+        )
+    ),
+}
 
 
 def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -48,7 +76,10 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-09-22 发现 3：sklearn `tree.fit` 对 ±Inf 抛
     # ValueError('Input y contains infinity...')；入口按缺失剔除
     _numeric_cols = [c for c in [req.target_col] + cols if pd.api.types.is_numeric_dtype(df[c])]
-    df, n_inf = drop_non_finite_rows(df, _numeric_cols)
+    # 第三十六轮：手抄清洗改为 `_guard.clean_frame`（一处声明、一处执行）。
+    # `n_inf` 仍取出 —— 下面的"不足"错误文案需要它（告知用户**为什么**样本变少了）。
+    report = BoundaryReport()
+    df, n_inf = clean_frame(df, _numeric_cols, report=report)
     if len(df) < 5:
         return AnalysisResult(
             task="decision_tree",
@@ -63,17 +94,13 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=["目标列为常量列，决策树特征重要性无意义（避免假 R²=1）"],
         )
-    # 审查 2026-08-19 #1.4：字符串 max_depth/random_state 会触发 sklearn
-    # InvalidParameterError，此处安全转换
-    max_depth = _safe_int(req.params.get("max_depth", 5), 5)
-    random_state = _safe_int(req.params.get("random_state", 42), 42)
-    # Round-2 #A2g：max_depth<=0 → sklearn ValueError → 通用错误
-    if max_depth is not None and max_depth < 1:
-        return AnalysisResult(
-            task="decision_tree",
-            status="error",
-            messages=[f"max_depth 必须 ≥ 1，当前: {max_depth}"],
-        )
+    # 参数校验（P4 步骤③，第二十二轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前是 `_safe_int` 安全转换 + 一段 max_depth≥1 检查、random_state 无区间；
+    # 现由 `Integer(min=1)` / `Integer(min=0)` 一次表达（并**拒绝小数**）。
+    _dt = PARAM_SPECS["decision_tree"].validate_or_raise(req.params)
+    max_depth = _dt.max_depth
+    random_state = _dt.random_state
 
     tree = DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
     tree.fit(X, y)
@@ -123,9 +150,7 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 交叉验证评估过拟合 ──
     from sklearn.model_selection import cross_val_score
 
-    warn_msgs: list[str] = []
-    if n_inf:
-        warn_msgs.append(non_finite_note(n_inf, req.target_col))
+    # `n_inf` 的披露已由上面的 `clean_frame(report=...)` 记录 → 不再手写
     cv_scores = []
     if len(df) >= 10:
         try:
@@ -133,9 +158,15 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
             cv_r2 = float(np.mean(cv_scores))
             train_r2 = float(tree.score(X, y))
             if train_r2 - cv_r2 > 0.3:
-                warn_msgs.append(
-                    f"⚠ 过拟合警告: 训练R²={train_r2:.3f}, "
-                    f"交叉验证R²={cv_r2:.3f} (差距={train_r2 - cv_r2:.2f})"
+                report.add(
+                    BoundaryIssue(
+                        level="B3",
+                        code="E_DECISION_TREE_OVERFIT_WARNING",
+                        detail=(
+                            f"⚠ 过拟合警告: 训练R²={train_r2:.3f}, "
+                            f"交叉验证R²={cv_r2:.3f} (差距={train_r2 - cv_r2:.2f})"
+                        ),
+                    )
                 )
         except Exception:
             logger.debug("交叉验证失败", exc_info=True)
@@ -229,8 +260,9 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
             "train_r2": float(tree.score(X, y)),
             "max_depth": max_depth,
             "n_samples": len(df),
+            "boundary_codes": report.codes(),
         },
-        messages=warn_msgs,
+        messages=report.messages(),
     )
 
 
@@ -257,7 +289,9 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 用户可通过 params 自定义阈值，fallback 到全局常量
-    threshold = _safe_float(req.params.get("threshold", VIF_THRESHOLD), VIF_THRESHOLD)
+    # 参数校验（P4 步骤③，第二十一轮）：失败时抛 ParamValidationError。
+    # 迁移前此参数无校验（见 PARAM_SPECS 的说明）。
+    threshold = PARAM_SPECS["vif"].validate_or_raise(req.params).threshold
 
     try:
         X = sm.add_constant(df)

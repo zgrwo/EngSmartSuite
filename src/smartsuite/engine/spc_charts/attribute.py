@@ -6,9 +6,53 @@ from matplotlib import cm
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Opt, Spec
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import _adjust_xlabels, round_for_display
 from smartsuite.engine.spc_charts._shared import _natural_sort_key
+
+# ── 声明式参数契约（阶段 P4 步骤③，2026-09-24）──
+# 契约：docs/governance/improvement-plan.md §六
+#
+# 只有 `chart_type` 是**纯参数校验**（枚举 + 默认值），故进 Spec；
+# `group_col` / `n_col` / `subgroup_col` / `filter_groups` 需引用实际列，
+# 属**依赖数据**的检查，留在引擎（`n_col` 的存在性检查见下方实现）。
+#
+# `Choice` 自带大小写与首尾空白归一：`"P"` / `"p "` 都会被接受为 p 图
+# —— Web 表单与 YAML 模板里写 `"P"` 很自然，不该因大小写报错。
+PARAM_SPEC = Spec(
+    chart_type=Opt(
+        Choice("p", "np", "c", "u"),
+        default="p",
+        label="控制图类型",
+        hint="p=不良率（需 0/1 数据）、np=不良数、c=缺陷数、u=单位缺陷数",
+    ),
+    group_col=Opt(label="分组列", hint="按该列分出多条序列（多机台/多产线）"),
+    n_col=Opt(label="样本量列", hint="每组的检验数；不给时按行数计"),
+    subgroup_col=Opt(label="子组列", hint="长格式子组标识"),
+    filter_groups=Opt(label="分组筛选", hint="仅保留指定分组的序列"),
+)
+
+
+def _unequal_sample_sizes(n_vals) -> tuple[float, float] | None:
+    """子组样本量是否不一致；一致返回 None，不一致返回 (最小, 最大)。
+
+    契约：docs/governance/boundary-contract.md（B0 拒绝）
+
+    用于 np/c 图的前置校验——这两类图的控制限是**常数**，只在样本量相等时成立。
+    用相对容差比较（浮点 n_col 可能有微小表示误差），而非精确相等。
+    """
+    arr = np.asarray(n_vals, dtype=float)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return None
+    lo, hi = float(finite.min()), float(finite.max())
+    if lo == hi:
+        return None
+    # 相对容差：1e-9 量级视为相等（n_col 浮点读取的表示误差）
+    if (hi - lo) <= 1e-9 * max(abs(hi), 1.0):
+        return None
+    return lo, hi
 
 
 def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -20,7 +64,17 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         group_col: 分组依据 (可选，不同值=不同颜色的线)
         n_col: 样本量列名 (p/u 图需要，变样本量时使用)
     """
-    chart_type = req.params.get("chart_type", "p")
+    # ── 参数校验（阶段 P4 步骤③：声明式 Spec + 抛异常式传播）──
+    # 原先 `req.params.get("chart_type", "p")` 在键存在但值为 None 时
+    # 默认值不生效 → 报"不支持的图表类型: None"（归因误导，且违反引擎
+    # "None = 未提供"的既有约定）。Spec 统一处理该语义与大小写归一。
+    #
+    # **抛异常而非 return status="error"**：由 orchestrator 的
+    # `except SmartSuiteError → build_error_result()` 统一转结果 ——
+    # 若在此早退，每迁移一个任务反而 +1 处早退
+    # （见 core/param_spec.py::validate_or_raise 的说明）。
+    _params = PARAM_SPEC.validate_or_raise(req.params)
+    chart_type = _params.chart_type
     data = req.data.copy()
     y_col = req.target_col
     _text_mapped = False  # 文本二值列被映射为 0/1 时置 True（用于下游语义提示）
@@ -117,7 +171,23 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 按图表类型计算
-    n_col = req.params.get("n_col")
+    n_col = _params.n_col
+    # 审查 2026-09-24（P4 步骤③ 迁移时发现）：原实现是
+    # `if n_col and n_col in data.columns:` —— 用户显式给了 n_col 但列名打错时
+    # 条件为假，引擎**静默回落到 size（行数）**，控制限随之算错且**无任何提示**。
+    # 这违反 boundary-contract 的"禁止静默降级"：用户以为在按实际检验数计算。
+    # 显式指定即必须生效；不存在则明确拒绝。
+    if n_col and n_col not in data.columns:
+        _avail = ", ".join(map(str, list(data.columns)[:12]))
+        return AnalysisResult(
+            task="spc_attribute",
+            status="error",
+            messages=[
+                f"样本量列「{n_col}」不存在于数据中。可用列：{_avail}"
+                + ("…" if len(data.columns) > 12 else "")
+                + "。若不需按实际检验数计算，请不要指定 n_col（默认按行数计）。"
+            ],
+        )
     if n_col and n_col in data.columns:
         # P1 fix: 始终用 ["_x", "_g"] 分组（非分组模式下 _g="_default"），
         # 确保 n_map 键与 agg 行结构一致；同时 NaN 值回退到平均样本量
@@ -135,13 +205,17 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     else:
         agg["n_vals"] = agg["size"].astype(float)
 
+    # 审查 2026-09-24（P4 步骤③ 迁移）：`p` 与 `u` 图原先各写一份**完全相同**的
+    # 零样本量检查（消息逐字一致），合并到分派之前做一次。`np` 图的消息不同
+    # （它明确指向 n_col 语义），保留在各自分支内。
+    if chart_type in ("p", "u") and (agg["n_vals"] == 0).any():
+        return AnalysisResult(
+            task="spc_attribute",
+            status="error",
+            messages=["子组样本量包含0值，无法计算比率控制图"],
+        )
+
     if chart_type == "p":
-        if (agg["n_vals"] == 0).any():
-            return AnalysisResult(
-                task="spc_attribute",
-                status="error",
-                messages=["子组样本量包含0值，无法计算比率控制图"],
-            )
         agg["stat"] = agg["count"] / agg["n_vals"]
         stat_name = "不良率(p)"
         p_bar = float(agg["count"].sum() / agg["n_vals"].sum())
@@ -167,6 +241,24 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
                 status="error",
                 messages=["np 图要求各子组样本量 n>0（n_col 指定样本量时不得含 0）"],
             )
+        # 审查 2026-09-24（第三轮复核 P2-6）：np 图的控制限公式
+        #   UCL = np̄ + 3·sqrt(np̄(1−p̄))
+        # 是**常数限**，仅在"各子组样本量相等"时成立。原实现对 n_vals 不等的情形
+        # 无任何校验，直接套常数限 → 静默给出错误的控制限与违规判定。
+        # 对照：p 图用逐点变限 cl ± 3·sqrt(cl(1−cl)/n_i)，不等 n 下仍然正确。
+        _np_unequal = _unequal_sample_sizes(agg["n_vals"])
+        if _np_unequal is not None:
+            return AnalysisResult(
+                task="spc_attribute",
+                status="error",
+                messages=[
+                    f"np 图要求各子组样本量相等，但实际样本量不一致（最小 {_np_unequal[0]:g}、"
+                    f"最大 {_np_unequal[1]:g}，共 {len(agg)} 个子组）。"
+                    "np 图使用常数控制限，样本量不等时会给出错误的控制限与违规判定。"
+                    "请改用 p 图（支持不等样本量，控制限逐点随 n 变化），"
+                    "或将数据按等样本量重新划分批次。"
+                ],
+            )
         agg["stat"] = agg["count"].astype(float)
         stat_name = "不良数(np)"
         np_bar = float(agg["count"].mean())
@@ -187,6 +279,22 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         ucl_const = float(np_bar + 3 * np.sqrt(np_bar * (1 - p_bar)))
 
     elif chart_type == "c":
+        # 审查 2026-09-24 P2-6：c 图同理——UCL = c̄ + 3·sqrt(c̄) 要求各子组
+        # 的**检查单位数**相等。等样本量场景下 n_col 恒定或未提供（每子组行数相同），
+        # 故这里用 n_vals 而非 size 判定（n_col 显式给出单位数时以其为准）。
+        _c_unequal = _unequal_sample_sizes(agg["n_vals"])
+        if _c_unequal is not None:
+            return AnalysisResult(
+                task="spc_attribute",
+                status="error",
+                messages=[
+                    f"c 图要求各子组的检查单位数相等，但实际不一致（最小 {_c_unequal[0]:g}、"
+                    f"最大 {_c_unequal[1]:g}，共 {len(agg)} 个子组）。"
+                    "c 图使用常数控制限，单位数不等时会给出错误的控制限与违规判定。"
+                    "请改用 u 图（支持不等单位数，控制限逐点随 n 变化），"
+                    "或统一各子组的检查单位数。"
+                ],
+            )
         agg["stat"] = agg["count"].astype(float)
         stat_name = "缺陷数(c)"
         c_bar = float(agg["count"].mean())
@@ -194,12 +302,6 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         ucl_const = float(c_bar + 3 * np.sqrt(c_bar))
 
     elif chart_type == "u":
-        if (agg["n_vals"] == 0).any():
-            return AnalysisResult(
-                task="spc_attribute",
-                status="error",
-                messages=["子组样本量包含0值，无法计算比率控制图"],
-            )
         agg["stat"] = agg["count"] / agg["n_vals"]
         stat_name = "单位缺陷率(u)"
         u_bar = float(agg["count"].sum() / agg["n_vals"].sum())

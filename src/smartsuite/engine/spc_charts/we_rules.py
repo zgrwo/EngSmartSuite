@@ -5,25 +5,56 @@ import numpy as np
 from smartsuite.engine._constants import EPSILON
 
 
+def c4(n: int) -> float:
+    """c4 无偏修正因子 — **对数域差分**计算，任意 n ≥ 2 稳定。
+
+    契约：docs/governance/boundary-contract.md（B3 近似）
+
+    c4 = sqrt(2/(n-1)) · Γ(n/2) / Γ((n-1)/2)
+
+    审查 2026-09-24（第三轮复核 P0-1，复现脚本 logs/reports/verify-round3/
+    a2_c4_precision.py）：原实现直接调用 `math.gamma(n/2)`，而 `math.gamma(190)`
+    已超出 float 上限（≈1.8e308）→ `math.gamma(380/2)` 抛 `OverflowError`。
+    端到端实测：子组 n≥380 时 spc_xbar 崩溃，用户看到
+    「数值溢出，数据中可能存在极端值」——把「子组太大」误归因为「数据有极端值」。
+
+    改为对数域差分后 Γ 约去，全程不构造 Γ 本身：
+
+        ln c4 = 0.5·ln(2/(n-1)) + lgamma(n/2) − lgamma((n-1)/2)
+
+    实测与 `math.gamma` 路径在 n<380 区间相对误差 < 1e-12（即**精度不变**），
+    且 n=5000 仍返回 0.99995（不会溢出）。n→∞ 时 c4→1，单调递增。
+
+    Args:
+        n: 子组大小（n ≥ 2；n < 2 由调用方保证，见 spc_charts/xbar_r.py）
+
+    Returns:
+        (0, 1) 区间内的有限 float
+    """
+    import math
+
+    ln_c4 = 0.5 * math.log(2.0 / (n - 1)) + math.lgamma(n / 2.0) - math.lgamma((n - 1) / 2.0)
+    # 下界守卫：n=2 时 c4≈0.7979，远离 0；此守卫仅防 n 极大的浮点塌缩（理论 c4→1）
+    return max(math.exp(ln_c4), EPSILON)
+
+
 def _xbar_s_constants(n: int) -> tuple[float, float, float, float]:
     """计算 x-bar/S 控制图常数 (c4, A3, B3, B4)，支持任意 n ≥ 2。
 
     用于 n > 25 时替代 R 图（S 图在大子组时比 R 图更高效）。
-    使用 math.gamma 精确计算 c4 无偏常量。
+    c4 走对数域稳定路径（见 `c4()`），不再受 Γ 溢出限制。
 
     Returns:
         (c4, A3, B3, B4)
     """
     import math
 
-    c4 = math.sqrt(2.0 / (n - 1)) * math.gamma(n / 2.0) / math.gamma((n - 1) / 2.0)
-    # 审查 2026-09-01 C-10：内联 1e-10 与 _constants.EPSILON 同值，统一引用常量
-    c4 = max(c4, EPSILON)
-    A3 = 3.0 / (c4 * math.sqrt(n))
-    common = 3.0 * math.sqrt(max(0.0, 1.0 - c4**2)) / c4
+    _c4 = c4(n)
+    A3 = 3.0 / (_c4 * math.sqrt(n))
+    common = 3.0 * math.sqrt(max(0.0, 1.0 - _c4**2)) / _c4
     B3 = max(0.0, 1.0 - common)
     B4 = 1.0 + common
-    return c4, A3, B3, B4
+    return _c4, A3, B3, B4
 
 
 def _we_rules_xbar(values, cl, sigma):

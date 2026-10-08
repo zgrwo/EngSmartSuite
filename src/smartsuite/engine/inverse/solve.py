@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Opt, Spec
 from smartsuite.engine._constants import (
     INVERSE_ATTAIN_N,
     INVERSE_MAX_REQUESTS,
@@ -46,6 +47,107 @@ from smartsuite.engine.inverse._report import (
 )
 from smartsuite.engine.inverse._roles import _resolve_roles, _split_rows
 from smartsuite.engine.inverse._solver import _reachable_range, _solve_one
+
+# ── 声明式参数契约（P4 步骤③，第二十七轮）──
+# 契约：docs/governance/improvement-plan.md §六
+#
+# ⚠️ 本任务的参数**有意不做批量拒绝**：实测其参数处理
+# （`engine/inverse/_params.py`）**已经是契约要求的「可见降级」** ——
+#   model='bogus'       → 「参数「model」取值无效（bogus），可选：auto/linear/poly/gpr/gbm/rate」
+#   weight_mode='bogus' → 「参数「weight_mode」取值无效（'bogus'），已回退默认 std」
+#   max_starts=0        → 「参数「max_starts」=0 应为正整数，已按 1 处理」
+# 每条降级都写进用户可见的 `messages`（B2/B3 契约），而不是静默改写 ——
+# 这比「批量拒绝」更贴合反演求解的交互场景（用户在试参数，一次说清所有可调项更好）。
+#
+# 故本 Spec **只提供标签/提示/选项**（步骤④ 的标签派生需要它们），
+# 非枚举字段一律声明为**透传**（无校验器），不改变既有校验语义。
+PARAM_SPECS = {
+    "inverse_solve": Spec(
+        model=Opt(
+            Choice(
+                ("auto", "自动选择"),
+                ("linear", "线性回归"),
+                ("poly", "多项式回归"),
+                ("gpr", "高斯过程回归"),
+                ("gbm", "梯度提升"),
+                ("rate", "速率模型"),
+            ),
+            default="auto",
+            label="前向模型",
+            hint="反演所依据的「参数 -> 输出」模型；auto 按数据量自动挑选",
+        ),
+        incoming_cols=Opt(
+            default="",
+            label="来料列",
+            hint="勾选来料条件列；不勾选则按前缀 incoming/来料 自动识别",
+        ),
+        variable_cols=Opt(
+            default="",
+            label="可调参数列",
+            hint="勾选待反解的可调参数列；不勾选则按前缀 variable/变量/可调 识别",
+        ),
+        fixed_cols=Opt(
+            default="",
+            label="固定参数列",
+            hint="勾选固定工况列（可选）；不勾选则按前缀 fixed/固定 识别",
+        ),
+        output_cols=Opt(
+            default="",
+            label="输出列",
+            hint="勾选输出列；不勾选则按前缀 output/输出 识别",
+        ),
+        target_cols=Opt(
+            default="",
+            label="目标列",
+            hint="可选：目标值列（默认与输出列按后缀/顺序配对）",
+        ),
+        time_col=Opt(
+            default="",
+            label="时间/时长列",
+            hint="rate 模型必需；留空自动识别含 time/时间 的列",
+        ),
+        time_adjustable=Opt(
+            default="false",
+            label="时间是否可调",
+            hint="固定=取历史中位数；可调=参与寻优",
+        ),
+        time_min=Opt(default="", label="时间下限", hint="留空用历史最小值"),
+        time_max=Opt(default="", label="时间上限", hint="留空用历史最大值"),
+        variable_bounds=Opt(
+            default="",
+            label="参数边界 (JSON)",
+            hint='格式: {"注射压力":[50,90]}；留空用各列历史范围',
+        ),
+        output_weights=Opt(
+            default="",
+            label="输出权重 (JSON)",
+            hint='格式: {"拉伸强度":2.0}；留空按等权',
+        ),
+        weight_mode=Opt(
+            Choice(
+                ("std", "标准差归一化"),
+                ("range", "极差归一化"),
+                ("none", "不加权"),
+            ),
+            default="std",
+            label="偏差权重口径",
+            hint="多输出时如何把各输出的偏差合成一个目标",
+        ),
+        reg_lambda=Opt(default=0.02, label="正则强度 lambda", hint="抑制过拟合；越大越保守"),
+        attain_tol=Opt(
+            default=0.5,
+            label="达到阈值 (sigma)",
+            hint="目标达成判定容差，单位为预测标准差",
+        ),
+        max_starts=Opt(default=10, label="优化起点数", hint="多起点寻优的次数；越多越稳也越慢"),
+        random_state=Opt(default=42, label="随机种子", hint="多起点抽样与噪声项的可复现性"),
+        request_rows=Opt(
+            default=None,
+            label="反演请求行",
+            hint='可选：待反演的来料/固定条件，形如 [{"列名": 数值}, ...]',
+        ),
+    ),
+}
 
 
 def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:

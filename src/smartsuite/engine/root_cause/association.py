@@ -8,6 +8,8 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Spec
+from smartsuite.core.param_specs_common import ALPHA
 from smartsuite.engine._constants import (
     CRAMERS_V_LARGE,
     CRAMERS_V_MEDIUM,
@@ -15,10 +17,20 @@ from smartsuite.engine._constants import (
     EPSILON,
 )
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import safe_float as _safe_float
 from smartsuite.engine._utils import threshold_label
 
 logger = logging.getLogger(__name__)
+
+
+# ── 声明式参数契约（P4 步骤③，第二十轮：共享字段库驱动）──
+# 契约：docs/governance/improvement-plan.md §六
+# `alpha` 与 9 个任务完全一致（标签/区间/默认值）→ 引用共享常量，不重写声明。
+PARAM_SPECS = {
+    # 本模块含 3 个任务（contingency / cohens_kappa / cronbach_alpha），
+    # 故必须**按任务**登记 —— 用模块级 PARAM_SPEC 会让另两个任务继承本 Spec，
+    # 拿到不属于自己的标签与选项（第二十轮实测发现该缺陷）。
+    "contingency": Spec(alpha=ALPHA),
+}
 
 
 def _cramers_v_interpretation(v):
@@ -159,13 +171,9 @@ def contingency_analysis(req: AnalysisRequest) -> AnalysisResult:
         effect_name = "Cramér's V"
         effect_label = _cramers_v_interpretation(effect)
 
-    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
-    if not 0 < alpha < 1:
-        return AnalysisResult(
-            task="contingency",
-            status="error",
-            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
-        )
+    # 参数校验（P4 步骤③）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    alpha = PARAM_SPECS["contingency"].validate_or_raise(req.params).alpha
     conclusion = "两变量存在显著关联" if p_val < alpha else "两变量未发现显著关联"
 
     # 可视化：分组柱状图（各保养日状态内原料类型占比；堆叠会把两个状态的占比相加，无意义）

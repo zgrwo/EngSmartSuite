@@ -8,10 +8,30 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Opt, Spec
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十三轮）──
+# 契约：docs/governance/improvement-plan.md §六
+# 枚举**逐任务**声明（不进共享库）。注意值集是 two-sided/upper/lower，
+# **不是** two-sided/one-sided —— 共享库的判据表记录了这处踩坑。
+PARAM_SPECS = {
+    "spc_nonparametric": Spec(
+        side=Opt(
+            Choice(
+                ("two-sided", "双侧"),
+                ("upper", "单侧上限（越小越好）"),
+                ("lower", "单侧下限（越大越好）"),
+            ),
+            default="two-sided",
+            label="控制限方向",
+            hint="双侧=同时关注上下偏移；单侧用于只关心一个方向的特性",
+        )
+    ),
+}
 
 
 def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
@@ -36,14 +56,12 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"有效数据不足(至少10个点, 当前{n}个)"],
         )
 
-    side = req.params.get("side", "two-sided")
-    # Round-2 #A2p：未知 side 此前静默按双侧执行
-    if side not in ("two-sided", "upper", "lower"):
-        return AnalysisResult(
-            task="spc_nonparametric",
-            status="error",
-            messages=[f"不支持的 side: {side!r}，可选 two-sided/upper/lower"],
-        )
+    # 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 原 Round-2 #A2p 的"未知 side 静默按双侧执行"守卫（白名单检查）已由
+    # `Choice` 前置表达并**给出可选值的中文文案**，故此处不再重复 ——
+    # 死代码会让后来者以为"还要在这里改值集"。
+    side = PARAM_SPECS["spc_nonparametric"].validate_or_raise(req.params).side
     values = data.values
 
     # 审查 2026-08-19 #2.5：常量列 → 所有 KS p 为 nan → 假"过程稳定 ✓ CL=nan"

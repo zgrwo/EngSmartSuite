@@ -6,9 +6,32 @@ from matplotlib import cm
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Finite, Opt, Spec
+from smartsuite.core.param_specs_common import GROUP_COL
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import is_positive_finite
 from smartsuite.engine.spc_charts._shared import _resolve_groups
+
+# ── 声明式参数契约（P4 步骤③，第二十三轮）──
+# 契约：docs/governance/improvement-plan.md §六
+PARAM_SPECS = {
+    "spc_cusum": Spec(
+        k=Opt(
+            Finite(gt=0),
+            default=0.5,
+            label="K 值 (松弛因子)",
+            hint="参考值（通常取 0.5σ）；须为正的有限数",
+        ),
+        h=Opt(
+            Finite(gt=0),
+            default=5.0,
+            label="H 值 (决策区间)",
+            hint="判定失控的累积偏差阈值；须为正的有限数，工程上常用 4~5",
+        ),
+        group_col=GROUP_COL,
+        mu=Opt(Finite(), default=None, label="过程均值 μ", hint="留空则由数据估计"),
+        sigma=Opt(Finite(), default=None, label="过程标准差 σ", hint="留空则由数据估计"),
+    ),
+}
 
 
 def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -24,46 +47,12 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     group_vals, group_names, has_groups, y_col, _all_groups_meta = _resolve_groups(req)
 
     # 公共参数 (cusum)
-    k = req.params.get("k", 0.5)
-    h = req.params.get("h", 5.0)
-    try:
-        k, h = float(k), float(h)
-    except (ValueError, TypeError):
-        return AnalysisResult(
-            task="spc_cusum",
-            status="error",
-            messages=[f"参数 k/h 值无效: k={k}, h={h}，请输入数值"],
-        )
-    if not is_positive_finite(k):
-        return AnalysisResult(
-            task="spc_cusum",
-            status="error",
-            messages=[f"参数 k ({k}) 无效：参考值必须为正的有限数，建议 k=0.5"],
-        )
-    if not is_positive_finite(h):
-        return AnalysisResult(
-            task="spc_cusum",
-            status="error",
-            messages=[f"参数 h ({h}) 无效：决策区间必须为正的有限数，建议 h=4~5"],
-        )
-
-    user_mu = req.params.get("mu")
-    user_sigma = req.params.get("sigma")
-    if user_mu is not None and user_sigma is not None:
-        try:
-            user_mu, user_sigma = float(user_mu), float(user_sigma)
-        except (ValueError, TypeError):
-            return AnalysisResult(
-                task="spc_cusum",
-                status="error",
-                messages=[f"参数 mu/sigma 值无效: mu={user_mu}, sigma={user_sigma}，请输入数值"],
-            )
-        if not (np.isfinite(user_mu) and np.isfinite(user_sigma)):
-            return AnalysisResult(
-                task="spc_cusum",
-                status="error",
-                messages=["参数 mu/sigma 必须为有限数值（不允许 NaN/Inf）"],
-            )
+    # 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前是 `float()` 转换 + 四段检查（约 40 行）；现由 PARAM_SPECS 一次表达。
+    _p = PARAM_SPECS["spc_cusum"].validate_or_raise(req.params)
+    k, h = _p.k, _p.h
+    user_mu, user_sigma = _p.mu, _p.sigma
     # Round-2 #A2j：与 EWMA 一致——只传一个时此前静默忽略两个
     if (user_mu is None) != (user_sigma is None):
         return AnalysisResult(

@@ -11,6 +11,8 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, CrossRule, Integer, Opt, Spec
+from smartsuite.core.param_specs_common import ALPHA
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     round_for_display,
@@ -21,6 +23,88 @@ from smartsuite.engine._utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十一轮：共享字段库驱动）──
+# 契约：docs/governance/improvement-plan.md §六
+#
+# 按**任务**登记（本模块含 doe_design / doe_analysis / response_surface /
+# grid_search 等多个任务）—— 用模块级 `PARAM_SPEC` 会让邻居任务继承本 Spec，
+# 拿到不属于自己的标签与选项（第二十轮实测过该缺陷）。
+PARAM_SPECS = {
+    # `alpha` 与另外 8 个任务完全一致（标签/区间/默认值）→ 引用共享常量
+    "doe_analysis": Spec(alpha=ALPHA),
+    # 第二十七轮：`doe_design` 的 8 个参数。迁移顺带修掉 4 处静默降级/错误归因：
+    # `center_points`/`n_runs` 此前**完全不校验**、`replicates=2.5` 被 `int()` 静默截断、
+    # `seed=-1` 被报成误导性的「数据格式或数值范围不符合分析要求」。
+    #
+    # ⚠️ `alpha` 是**多形态**参数（"rotatable"/"orthogonal"/"face" 或**正数**）。
+    # `Choice` 无法表达"枚举或数值"，故声明为**透传** + 一条跨字段规则：
+    # 数值形态必须有限且为正（原先 `_is_num(inf) and inf > 0` 为真 → `inf` 被接受）。
+    # 字符串形态的合法性由引擎 `_resolve_alpha` 判定（返回 None → 明确中文错误）。
+    "doe_design": Spec(
+        method=Opt(
+            Choice(
+                ("full_factorial", "全因子"),
+                ("fractional_factorial", "部分因子"),
+                ("plackett_burman", "Plackett-Burman 筛选"),
+                ("taguchi", "Taguchi 正交表"),
+                ("box_behnken", "Box-Behnken 响应面"),
+                ("ccd", "中心复合设计 (CCD)"),
+            ),
+            default="full_factorial",
+            label="设计方法",
+            hint="全因子适合因子少；部分因子/PB 适合筛选；BB/CCD 用于响应面优化",
+        ),
+        factors=Opt(
+            default=None, label="因子定义", hint="形如 [{name: 因子名, levels: [水平...]}]"
+        ),
+        replicates=Opt(
+            Integer(min=1), default=1, label="重复次数", hint="每个试验点的重复运行次数；至少 1"
+        ),
+        randomize=Opt(
+            default=True, label="随机化运行顺序", hint="避免时间相关干扰；接受 true/false"
+        ),
+        seed=Opt(
+            Integer(min=0),
+            default=42,
+            label="随机种子",
+            hint="随机化顺序的种子；非负整数（负数会让 numpy 拒绝）",
+        ),
+        center_points=Opt(
+            Integer(min=0),
+            default=3,
+            label="中心点重复数",
+            hint="仅 Box-Behnken / CCD 使用；0 表示不添加中心点",
+        ),
+        alpha=Opt(
+            default="rotatable",
+            label="CCD 轴向距离 α",
+            hint="仅 CCD：rotatable / orthogonal / face，或填正数",
+        ),
+        n_runs=Opt(
+            Integer(min=1),
+            default=None,
+            label="指定运行数",
+            hint="仅部分因子 / Plackett-Burman：强制运行数；留空自动取最小可行值",
+        ),
+    ).cross(
+        CrossRule(
+            field_name="alpha",
+            check=lambda p: (
+                not (
+                    isinstance(p.get("alpha"), (int, float))
+                    and not isinstance(p.get("alpha"), bool)
+                    and not (p["alpha"] > 0 and p["alpha"] != float("inf"))
+                )
+            ),
+            code="E_DOE_ALPHA_NOT_POSITIVE_FINITE",
+            message=(
+                "CCD 轴向距离 α 若填数值，必须为**正的有限数**"
+                "（也可是 rotatable / orthogonal / face）"
+            ),
+        )
+    ),
+}
 
 # ══════════════════════════════════════════════════════════════════════
 # DOE 实验设计（doe_design）— 生成实验设计矩阵
@@ -70,6 +154,12 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     grand_mean = float(df[req.target_col].mean())
     grand_std = float(df[req.target_col].std(ddof=1))
+
+    # 参数校验（P4 步骤③，第二十一轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前这是在**因子循环内部**读取并校验的（每个因子重读一遍）；
+    # 现提到循环外一次取用 —— 既消除重复，也让"alpha 非法"立刻失败而非跑到第一个因子。
+    alpha = PARAM_SPECS["doe_analysis"].validate_or_raise(req.params).alpha
 
     # ── 回归法估计效应（编码变量 -1/+1，比中位数分割更准确）──
     effects = []
@@ -158,14 +248,6 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         # 审查 2026-09-16 B-1：效应占比分母原为 abs(grand_mean)+EPSILON 并附加
         # 绝对门槛，微尺度整体均值会扭曲/清零占比 → 改精确零判据（量纲同比，占比无量纲）
         effect_ratio = abs(effect) / abs(grand_mean) if grand_mean != 0 else 0.0
-        alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
-        # Round-2 P3：alpha 越界（如 2.0）→ 全因子"显著"
-        if not 0 < alpha < 1:
-            return AnalysisResult(
-                task="doe_analysis",
-                status="error",
-                messages=[f"alpha 必须在 (0, 1) 区间内，当前: {alpha!r}"],
-            )
         effects.append(
             {
                 "因子": col,
@@ -610,19 +692,13 @@ def _resolve_alpha(alpha, k, center_points):
     return None
 
 
-def _assemble_design(req, factors, coded, method, oa_name, oa_spec):
-    """映射到实际水平 + 重复 + 随机化 + 运行顺序，组装 AnalysisResult。"""
-    replicates = req.params.get("replicates", 1)
-    try:
-        replicates = int(replicates)
-    except (ValueError, TypeError):
-        return AnalysisResult(
-            task="doe_design",
-            status="error",
-            messages=[f"replicates 值无效: {replicates}，请输入整数"],
-        )
-    if replicates < 1:
-        return AnalysisResult(task="doe_design", status="error", messages=["replicates 必须 ≥ 1"])
+def _assemble_design(req, factors, coded, method, oa_name, oa_spec, spec_params):
+    """映射到实际水平 + 重复 + 随机化 + 运行顺序，组装 AnalysisResult。
+
+    `spec_params` 是 `PARAM_SPECS["doe_design"].validate_or_raise(...)` 的结果 ——
+    校验只做一次，本函数从中取值（原先在这里重复 `int()` 转换 + 静默回落）。
+    """
+    replicates = spec_params.replicates
 
     cols = {}
     for ci, f in enumerate(factors):
@@ -640,12 +716,12 @@ def _assemble_design(req, factors, coded, method, oa_name, oa_spec):
         df = pd.concat([df] * replicates, ignore_index=True)
         df.insert(0, "重复", np.repeat(np.arange(1, replicates + 1), len(coded)))
 
-    randomize = _as_bool(req.params.get("randomize", True), True)
-    seed = req.params.get("seed", 42)
-    try:
-        seed = int(seed)
-    except (ValueError, TypeError):
-        seed = 42
+    # `randomize` 是混合类型（默认布尔）→ 透传后仍走 `_as_bool` 归一；
+    # `seed` 已由 Spec 校验（`Integer(min=0)`）—— 原先 `seed=-1` 会让
+    # `np.random.RandomState(-1)` 抛 "Seed must be between 0 and 2**32-1"，
+    # 被 orchestrator 泛化成误导性的「数据格式或数值范围不符合分析要求」。
+    randomize = _as_bool(spec_params.randomize, True)
+    seed = spec_params.seed if spec_params.seed is not None else 42
     if randomize:
         df = df.sample(frac=1.0, random_state=np.random.RandomState(seed)).reset_index(drop=True)
     df.insert(0, "运行顺序", np.arange(1, len(df) + 1))
@@ -692,13 +768,14 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
 
     数据要求: 无（忽略 req.data，因子从 params 读取）
     """
-    method = req.params.get("method", "full_factorial")
-    if method not in _VALID_DOE_METHODS:
-        return AnalysisResult(
-            task="doe_design",
-            status="error",
-            messages=[f"method 无效: {method!r}，支持: {list(_VALID_DOE_METHODS)}"],
-        )
+    # 参数校验（P4 步骤③，第二十七轮）：失败时抛 ParamValidationError。
+    _dd = PARAM_SPECS["doe_design"].validate_or_raise(req.params)
+    # 参数校验（P4 步骤③，第二十七轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 原 `method` 白名单检查已由 `Choice` 表达（并给出 6 种设计的中文文案）；
+    # `replicates`/`seed`/`center_points`/`n_runs` 原先**完全无校验**或靠 `int()`
+    # 静默截断 / 靠 numpy 抛误导性错误，现由 `Integer` 一次表达。
+    method = _dd.method
     factors, errs = _parse_factors(req.params)
     if errs:
         return AnalysisResult(task="doe_design", status="error", messages=errs)
@@ -809,15 +886,8 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
                 return AnalysisResult(
                     task="doe_design", status="error", messages=["ccd 支持 2-10 个因子"]
                 )
-            center_points = req.params.get("center_points", 3)
-            try:
-                center_points = int(center_points)
-            except (ValueError, TypeError):
-                center_points = 3
-            if center_points < 0:
-                return AnalysisResult(
-                    task="doe_design", status="error", messages=["center_points 必须 ≥ 0"]
-                )
+            # `center_points` 已由 Spec 校验（`Integer(min=0)`），此处直接取用
+            center_points = _dd.center_points
             if method == "box_behnken":
                 coded = np.vstack(
                     [
@@ -827,7 +897,7 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
                 )
                 oa_name, oa_spec = "Box-Behnken", f"k={k}"
             else:
-                alpha = _resolve_alpha(req.params.get("alpha", "rotatable"), k, center_points)
+                alpha = _resolve_alpha(_dd.alpha, k, center_points)
                 if alpha is None:
                     return AnalysisResult(
                         task="doe_design",
@@ -847,4 +917,4 @@ def doe_design(req: AnalysisRequest) -> AnalysisResult:
             messages=["实验设计生成失败：请检查因子水平、alpha 与 center_points 参数配置"],
         )
 
-    return _assemble_design(req, factors, coded, method, oa_name, oa_spec)
+    return _assemble_design(req, factors, coded, method, oa_name, oa_spec, _dd)

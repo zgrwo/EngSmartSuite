@@ -6,7 +6,16 @@ from matplotlib import cm
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Spec
+from smartsuite.core.param_specs_common import GROUP_COL, LSL, TARGET, USL
 from smartsuite.engine._constants import XBR_CONSTANTS
+from smartsuite.engine._guard import (
+    BoundaryIssue,
+    BoundaryReport,
+    explain_undefined_sigma,
+    non_finite_detail,
+    partition_finite,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import _adjust_xlabels
 from smartsuite.engine.spc_charts._shared import _natural_sort_key
@@ -16,6 +25,15 @@ from smartsuite.engine.spc_charts.we_rules import (
     _we_rules_xbar,
     _xbar_s_constants,
 )
+
+# ── 声明式参数契约（P4 步骤③，第二十五轮）──
+# 契约：docs/governance/improvement-plan.md §六
+#
+# `spc_xbar` 是**零专有声明**任务：4 个参数全部来自共享字段库
+# （第二十轮建库时的目标形态）。
+PARAM_SPECS = {
+    "spc_xbar": Spec(group_col=GROUP_COL, usl=USL, lsl=LSL, target=TARGET),
+}
 
 
 def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
@@ -30,6 +48,8 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     """
     data = req.data.copy()
     y_col = req.target_col
+    # 边界处置记录（契约 B0–B3）：入口清洗的披露统一从这里汇入 messages
+    _boundary = BoundaryReport()
 
     # ── 1. 提取 X 列（横坐标）──
     x_col = req.feature_cols[0] if req.feature_cols else None
@@ -71,12 +91,28 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # 过滤有效数据
     valid = data["_y"].notna()
+    # B1 清洗：±Inf 必须在建子组之前剔除（契约 docs/governance/boundary-contract.md）。
+    # 审查 2026-09-24 R3-P1-6：含 +Inf 时 σ 变 NaN，原先落入下方「常量列（标准差为 0）」
+    # 分支 → 把「数据含 Inf」误归因为「数据是常量」，用户查常量列永远查不到原因。
+    _finite_mask, _n_inf = partition_finite(data["_y"])
+    valid = valid & pd.Series(_finite_mask, index=data.index)
+    if _n_inf:
+        _boundary.add(
+            BoundaryIssue(
+                level="B1",
+                code="E_DATA_NON_FINITE_DROPPED",
+                # 第三十六轮：文案构造集中在 `_guard.non_finite_detail`，
+                # 不再借 `_utils` 的旧披露函数另拼一份（避免格式漂移）。
+                detail=non_finite_detail(_n_inf, y_col),
+                column=y_col,
+            )
+        )
     data_valid = data[valid].copy()
     if len(data_valid) < 2:
         return AnalysisResult(
             task="spc_xbar",
             status="error",
-            messages=[f"目标列「{y_col}」有效数据不足（至少需要2个数据点）"],
+            messages=[f"目标列「{y_col}」有效数据不足（至少需要2个数据点）"] + _boundary.messages(),
         )
 
     # 按 (X值, 分组值) 聚合
@@ -269,12 +305,22 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 #A2l：绝对阈值 1e-12 误报微尺度数据 → 相对阈值
     # 审查 2026-09-16 B-4：原 `_scale=1.0` 兜底使阈值退回绝对值 → pico 级真实波动
     # 误报常量；改为相对数据自身幅值（|x|max），全零列才判常量
+    # 审查 2026-09-24 R3-P1-6：非有限 σ 必须**先于**常量判据单独归因——
+    # NaN 与任何数比较恒为 False，会静默穿过相对阈值判据后落到同一句「常量列」文案
+    if not np.isfinite(sigma_xbar) or not np.isfinite(xbar_bar):
+        issue = explain_undefined_sigma(
+            multi_data["xbar"] if len(multi_data) > 0 else agg["xbar"], column=y_col
+        )
+        return AnalysisResult(
+            task="spc_xbar", status="error", messages=[issue.detail] + _boundary.messages()
+        )
     _abs_scale = float(np.max(np.abs(agg["xbar"].values)))
     if _abs_scale == 0 or sigma_xbar <= 1e-12 * _abs_scale:
         return AnalysisResult(
             task="spc_xbar",
             status="error",
-            messages=[f"目标列「{y_col}」为常量列（标准差为 0），控制图无意义。"],
+            messages=[f"目标列「{y_col}」为常量列（标准差为 0），控制图无意义。"]
+            + _boundary.messages(),
         )
 
     # ── 7. 图表渲染 ──
@@ -368,8 +414,16 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     # 规格限
     # 审查 2026-09-19 D-1：float() 不拦 inf/nan（capability C1 同族），必须 isfinite
     # 显式拒绝，不再静默忽略非法参数（哨兵 L1）
+    # 参数校验（P4 步骤③，第二十五轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # `usl`/`lsl`/`target` 三个规格限一次取用（含默认值 None）。
+    _xp = PARAM_SPECS["spc_xbar"].validate_or_raise(req.params)
+
     for spec_key, spec_label in [("usl", "USL"), ("lsl", "LSL")]:
-        spec_val = req.params.get(spec_key)
+        # 参数校验（P4 步骤③，第二十五轮）：失败时抛 ParamValidationError。
+        # 迁移前这里是 `req.params.get(spec_key)` 动态键读取 + 手写有限性检查；
+        # 现由 Spec 一次校验并取用（含默认值 None）。
+        spec_val = _xp.get(spec_key)
         if spec_val is not None:
             try:
                 sv = float(spec_val)
@@ -393,7 +447,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
                 alpha=0.9,
                 label=f"{spec_label}={sv}",
             )
-    target_spec = req.params.get("target")
+    target_spec = _xp.target  # 同上：已由 Spec 校验并取用
     if target_spec is not None:
         try:
             tv = float(target_spec)
@@ -825,6 +879,6 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=f"{stability_summary}。X-bar CL={xbar_bar:.4f}, UCL={ucl_x:.4f}, LCL={lcl_x:.4f}",
-        messages=messages,
+        messages=_boundary.messages() + messages,
         metadata=metadata,
     )

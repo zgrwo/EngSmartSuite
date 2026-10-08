@@ -9,6 +9,7 @@ from scipy import stats as sp_stats
 from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Integer, Opt, Spec
 from smartsuite.engine._constants import (
     DW_NEGATIVE_AUTOCORR,
     DW_POSITIVE_AUTOCORR,
@@ -19,6 +20,20 @@ from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import durbin_watson, round_for_display
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十一轮）──
+# 契约：docs/governance/improvement-plan.md §六
+# 按任务登记（本模块含 trend_forecast / change_point 等多个任务）。
+PARAM_SPECS = {
+    "trend_forecast": Spec(
+        forecast_steps=Opt(
+            Integer(min=1, max=1000),
+            default=5,
+            label="预测步数",
+            hint="向未来推算的步数；上限 1000（防止画出无法辨认的长尾）",
+        )
+    ),
+}
 
 
 def _acf_values(residuals, max_lag):
@@ -95,22 +110,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
             messages=["目标列为常量列（无变异），趋势预测无意义。"],
         )
 
-    # Round-2 #A3b：forecast_steps 类型/范围校验（字符串/浮点此前 TypeError）
-    steps = req.params.get("forecast_steps", 5)
-    try:
-        steps = int(steps)
-    except (ValueError, TypeError):
-        return AnalysisResult(
-            task="trend_forecast",
-            status="error",
-            messages=[f"forecast_steps 必须是正整数，当前: {steps!r}"],
-        )
-    if steps < 1 or steps > 1000:
-        return AnalysisResult(
-            task="trend_forecast",
-            status="error",
-            messages=[f"forecast_steps 必须在 1~1000 之间，当前: {steps}"],
-        )
+    # 参数校验（P4 步骤③，第二十一轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前这里是 `int(steps)` + 两段区间检查（约 16 行）；
+    # 现由 `Integer(min=1, max=1000)` 一次表达 —— 且**拒绝小数**（原 `int(5.5)` 会静默截断为 5）。
+    steps = PARAM_SPECS["trend_forecast"].validate_or_raise(req.params).forecast_steps
     try:
         n = len(data)
         X = np.arange(n).reshape(-1, 1)

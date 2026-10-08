@@ -9,11 +9,32 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Integer, Opt, Spec
+from smartsuite.core.param_specs_common import ALPHA
+from smartsuite.engine._guard import BoundaryReport, clean_series
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import drop_non_finite, non_finite_note, round_for_display, shapiro_p
-from smartsuite.engine._utils import safe_float as _safe_float
+from smartsuite.engine._utils import round_for_display, shapiro_p
 
 logger = logging.getLogger(__name__)
+
+
+# ── 声明式参数契约（P4 步骤③，第二十轮起：共享字段库驱动）──
+# 按**任务**登记（本模块含 normality_check / distribution_summary 两个任务）。
+PARAM_SPECS = {
+    "normality_check": Spec(alpha=ALPHA),
+    # 第二十一轮：`bins` 默认 15（对齐 `DEFAULT_PARAMS` / 前端面板初值）。
+    # `None` 仍表示"按样本量自动分箱"（文档化行为）—— 迁移时我最初把默认写成
+    # `None`，被"Spec 默认值 == DEFAULT_PARAMS"的对拍用例抓出。
+    # 迁移顺带修掉一处静默降级：非整数此前会静默回落自动分箱（用户以为设了自己的箱数）。
+    "distribution_summary": Spec(
+        bins=Opt(
+            Integer(min=1),
+            default=15,
+            label="直方图箱数",
+            hint="留空（不传）则按样本量自动分箱（min(30, 2√n)）；须为正整数",
+        )
+    ),
+}
 
 
 def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
@@ -22,8 +43,10 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     提供全面的单变量分布描述和拟合诊断。
     """
     data = req.data[req.target_col].dropna()
-    # 审查 2026-09-22 发现 3：±Inf 使 hist/set_xlim 抛 ValueError；入口按缺失剔除
-    data, n_inf = drop_non_finite(data)
+    # 审查 2026-09-22 发现 3：±Inf 使 hist/set_xlim 抛 ValueError；入口按缺失剔除。
+    # 第三十六轮：改为 `_guard.clean_series`（披露与错误码在一处产出）。
+    report = BoundaryReport()
+    data, _n_inf = clean_series(data, column=req.target_col, report=report)
     n = len(data)
     if n < 3:
         return AnalysisResult(
@@ -100,20 +123,11 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             pass
 
     # 直方图 + 拟合曲线
-    bins_param = req.params.get("bins")
-    if bins_param is not None:
-        try:
-            n_bins = int(bins_param)
-        except (ValueError, TypeError):
-            n_bins = min(30, int(np.sqrt(n)) * 2)
-        if n_bins < 1:
-            return AnalysisResult(
-                task="distribution_summary",
-                status="error",
-                messages=[f"bins 参数必须为正整数，当前值: {bins_param}"],
-            )
-    else:
-        n_bins = min(30, int(np.sqrt(n)) * 2)
+    # 参数校验（P4 步骤③，第二十一轮）：失败时抛 ParamValidationError。
+    # **行为改进**：非整数/非法值此前走 `except (ValueError, TypeError)` **静默回落
+    # 自动分箱**（用户以为设了自己的箱数），现明确拒绝；`None`（未提供）仍走自动分箱。
+    _bins = PARAM_SPECS["distribution_summary"].validate_or_raise(req.params).bins
+    n_bins = _bins if _bins is not None else min(30, int(np.sqrt(n)) * 2)
     fig = Figure(figsize=(8, 5))
     ax = fig.add_subplot(111)
     ax.hist(
@@ -183,8 +197,13 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             f"σ={desc['标准差']:.3f}, CV={_cv_txt}%。"
             f"最佳拟合: {best_fit} (KS p={fits[best_fit]['KS p']:.3f})"
         ),
-        metadata={"descriptive": desc, "fits": fits, "best_fit": best_fit},
-        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
+        metadata={
+            "descriptive": desc,
+            "fits": fits,
+            "best_fit": best_fit,
+            "boundary_codes": report.codes(),
+        },
+        messages=report.messages(),
     )
 
 
@@ -206,13 +225,8 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"列「{_non_num[0]}」为非数值列，正态性检验需要数值数据。"],
         )
 
-    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
-    if not 0 < alpha < 1:
-        return AnalysisResult(
-            task="normality_check",
-            status="error",
-            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
-        )
+    # 参数校验（P4 步骤③）：失败时抛 ParamValidationError
+    alpha = PARAM_SPECS["normality_check"].validate_or_raise(req.params).alpha
 
     results = []
     for col in cols:

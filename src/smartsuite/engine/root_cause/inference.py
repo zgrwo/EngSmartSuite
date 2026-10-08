@@ -9,10 +9,30 @@ from matplotlib.figure import Figure
 from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Opt, Spec
+from smartsuite.core.param_specs_common import ALPHA, CI_LEVEL, GROUP_COL
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import safe_float as _safe_float
 
 logger = logging.getLogger(__name__)
+
+
+# ── 声明式参数契约（P4 步骤③，第二十轮起：共享字段库驱动）──
+# 按**任务**登记（本模块含 proportion_ci / variance_test 等多个任务）。
+PARAM_SPECS = {
+    "variance_test": Spec(group_col=GROUP_COL, alpha=ALPHA),
+    # 第二十二轮：`ci_level` 引用共享常量；`success_value` 故意**不校验** ——
+    # 它是"成功标签的匹配值"，用户可能用 1 / "1" / "合格" 等任意类型，
+    # 故只声明标签与提示、`validator=None` 原样透传。
+    "proportion_ci": Spec(
+        ci_level=CI_LEVEL,
+        success_value=Opt(
+            default=None,
+            label="成功值",
+            hint="指定哪个取值算作「成功」（如 1 / 合格）；留空则自动识别常见标签",
+        ),
+    ),
+}
 
 
 def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
@@ -51,14 +71,10 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
 
     p_hat = successes / n
 
-    # 置信水平（用户可配置，默认 95%）
-    ci_level = _safe_float(req.params.get("ci_level", 0.95), 0.95)
-    if not 0 < ci_level < 1:
-        return AnalysisResult(
-            task="proportion_ci",
-            status="error",
-            messages=[f"置信水平 ci_level 必须在 (0, 1) 范围内，当前值: {ci_level}"],
-        )
+    # 参数校验（P4 步骤③，第二十二轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前是 `_safe_float` 安全转换 + 一段 (0,1) 区间检查。
+    ci_level = PARAM_SPECS["proportion_ci"].validate_or_raise(req.params).ci_level
     alpha_tail = (1 - ci_level) / 2
 
     # Wilson Score CI
@@ -143,8 +159,12 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
 
     用于 ANOVA 前验证方差齐性假设，或比较不同组的离散程度。
     """
-    # 显式检查 None：避免 DEFAULT_PARAMS 注入 None 阻断 fallback 逻辑 (P2 fix)
-    group_col = req.params.get("group_col")
+    # 参数校验（P4 步骤③）：失败时抛 ParamValidationError。
+    # `group_col` 的缺省由共享常量 `GROUP_COL` 给 `None`，与下面的回落判断
+    # （`if group_col is None: group_col = feature_cols[0]`）直接兼容。
+    # 仍保留 `or None` 归一：显式传空串时也走回落，与迁移前行为一致。
+    _params = PARAM_SPECS["variance_test"].validate_or_raise(req.params)
+    group_col = _params.group_col or None
     if group_col is None:
         group_col = req.feature_cols[0] if req.feature_cols else None
     if group_col is None or group_col not in req.data.columns:

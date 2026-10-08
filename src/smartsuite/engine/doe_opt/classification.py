@@ -8,10 +8,24 @@ import statsmodels.api as sm
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Finite, Opt, Spec
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十三轮）──
+# 契约：docs/governance/improvement-plan.md §六
+PARAM_SPECS = {
+    "logistic_regression": Spec(
+        threshold=Opt(
+            Finite(gt=0, lt=1),
+            default=0.5,
+            label="分类阈值",
+            hint="预测概率超过该值判为 1/正类；必须在 (0,1) 开区间内",
+        )
+    ),
+}
 
 # 阳性标签候选列表 — roc_analysis 和 logistic_regression 共享 (P2-12 fix)
 _POSITIVE_LABELS = ["不合格", "是", "1", 1, True, "fail", "异常"]
@@ -197,22 +211,9 @@ def logistic_regression(req: AnalysisRequest) -> AnalysisResult:
     pos_label = _detect_positive_label(unique_y)
     y = (sub[req.target_col] == pos_label).astype(int).values
 
-    # 分类阈值 — 提前提取+防护，避免被模型拟合异常误翻译
-    threshold = req.params.get("threshold", 0.5)
-    try:
-        threshold = float(threshold)
-    except (ValueError, TypeError):
-        return AnalysisResult(
-            task="logistic_regression",
-            status="error",
-            messages=[f"参数 threshold 值无效: {threshold}，请输入数值 (0~1)"],
-        )
-    if not 0 < threshold < 1:
-        return AnalysisResult(
-            task="logistic_regression",
-            status="error",
-            messages=[f"阈值 threshold 必须在 (0, 1) 范围内，当前值: {threshold}"],
-        )
+    # 分类阈值 — 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError。
+    # 原为 `float()` 转换 + 两段检查；现由 `Finite(gt=0, lt=1)` 一次表达。
+    threshold = PARAM_SPECS["logistic_regression"].validate_or_raise(req.params).threshold
 
     try:
         X = sm.add_constant(sub[cols])

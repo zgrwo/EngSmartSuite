@@ -8,9 +8,23 @@ import statsmodels.api as sm
 from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Opt, Spec
 from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十二轮）──
+# 枚举**逐任务**声明（不进共享库：值集就是语义本身）。
+PARAM_SPECS = {
+    "response_surface": Spec(
+        direction=Opt(
+            Choice(("maximize", "最大化"), ("minimize", "最小化")),
+            default="maximize",
+            label="优化方向",
+            hint="期望响应越大越好（最大化）还是越小越好（最小化）",
+        )
+    ),
+}
 
 
 def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
@@ -95,14 +109,10 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
     )
 
     # ── 最优点查找 ──
-    direction = req.params.get("direction", "maximize")
-    # 审查 2026-08-19 #2.6：direction 白名单校验（拼写错误静默反转方向）
-    if direction not in ("maximize", "minimize"):
-        return AnalysisResult(
-            task="response_surface",
-            status="error",
-            messages=[f"方向参数 direction 无效: {direction!r}，请使用 'maximize' 或 'minimize'"],
-        )
+    # 参数校验（P4 步骤③，第二十二轮）：失败时抛 ParamValidationError。
+    # 原实现有白名单校验（审查 2026-08-19 #2.6：拼写错误会静默反转方向），
+    # 现由 `Choice` 表达 —— 且**给出可选值的中文文案**供下拉框显示。
+    direction = PARAM_SPECS["response_surface"].validate_or_raise(req.params).direction
     # colormap 方向适配: maximize→绿高红低, minimize→红低绿高(RdYlGn反转)
     _rsm_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
     if direction == "minimize":

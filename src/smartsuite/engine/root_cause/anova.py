@@ -1,6 +1,7 @@
 """单因素方差分析。"""
 
 import logging
+import re
 
 import numpy as np
 import pandas as pd
@@ -10,16 +11,86 @@ from scipy import stats as sp_stats
 from statsmodels.formula.api import ols
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Opt, Spec
+from smartsuite.core.param_specs_common import ALPHA
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import safe_float as _safe_float
 from smartsuite.engine._utils import shapiro_p
 from smartsuite.engine.root_cause._shared import _effect_interpretation
 
 logger = logging.getLogger(__name__)
 
+#: 支持的平方和类型。Type III 是 Minitab / SAS 的默认口径。
+_SUPPORTED_SS_TYPES = (2, 3)
+
+# ── 声明式参数契约（P4 步骤③，第二十四轮）──
+# 契约：docs/governance/improvement-plan.md §六
+PARAM_SPECS = {
+    "anova": Spec(
+        alpha=ALPHA,
+        # `interactions` 是 0/1 开关（引擎按真值判断 `if req.params.get("interactions")`）。
+        # 用 `Choice` 而非 `Integer(min=0,max=1)`：值集就是 {0,1}，语义比区间更准。
+        interactions=Opt(
+            Choice((0, "不含交互"), (1, "含两两交互")),
+            default=0,
+            label="含两两交互 (0/1)",
+            hint="含交互项会显著增加模型自由度；样本量不足时结论不稳定",
+        ),
+        # ⚠️ 别名 "2"/"3" 必须保留：原 `_parse_ss_type` 明确接受字符串写法
+        # （Web 表单与 CLI 会传字符串），只写 `Choice(2, 3)` 会让 `"2"` 被拒 —— 那是行为回归。
+        ss_type=Opt(
+            Choice(
+                (2, "Type II（引擎默认）"),
+                (3, "Type III（Minitab/SAS 默认）"),
+                aliases={"2": 2, "3": 3},
+            ),
+            default=2,
+            label="平方和类型",
+            hint="各因子组合样本量不等时两种口径可能给出不同结论；需与 Minitab/SAS 对齐请选 Type III",
+        ),
+    ),
+}
+
+
+def _parse_ss_type(raw) -> tuple[int | None, str | None]:
+    """解析 `ss_type` 参数 → `(类型, 错误信息)`。
+
+    审查 2026-09-24（P2-3）：平方和类型**改变结论**（实测同数据 Type II 给
+    p=0.017 显著、Type III 给 p=0.066 不显著），故非法输入必须明确拒绝（B0），
+    **不得静默回落到默认值** —— 否则用户以为用了 Type III 而实际得到 Type II。
+
+    可接受的写法：`2` / `3` / `2.0` / `3.0` / `"2"` / `"3"`（Web 表单与 CLI 会传字符串）。
+    未指定（None / 空串）→ 返回 `(None, None)`，由调用方取默认值。
+    """
+    if raw is None:
+        return None, None
+    if isinstance(raw, str) and not raw.strip():
+        return None, None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None, f"参数 ss_type 值无效: {raw!r}，请输入 2 或 3"
+    if not np.isfinite(val) or val not in _SUPPORTED_SS_TYPES:
+        return None, f"参数 ss_type 仅支持 2 或 3（Type II / Type III 平方和），当前: {raw!r}"
+    return int(val), None
+
 
 def _eta_squared(aov_table):
-    """计算偏 η² 效应量。"""
+    """效应量：同时给出**经典 η²** 与**偏 η²**，并各自标注口径。
+
+    契约：docs/governance/boundary-contract.md（B3 近似 / 禁止错误归因）
+
+    审查 2026-09-24（第三轮复核 P1-1）：原实现只算偏 η² 却以键名 `η²` 输出，
+    而解读阈值 `ETA_SQ_SMALL/MEDIUM/LARGE`（`_constants.py:32-34`）是
+    **Cohen 的经典 η² 阈值**。多因子设计中偏 η² > 经典 η²，导致
+    **效应量被系统性夸大**（实测双因子 + 交互，n=240：f2 的偏 η²=0.0373
+    对经典 η²=0.0249，夸大 50%；交互项 0.0077 vs 0.0050，夸大 54%）。
+
+    两口径定义（SS 来自 typ=2 ANOVA 表）：
+        经典 η² = SS_effect / SS_total                     ← 与 Cohen 阈值配套
+        偏   η² = SS_effect / (SS_effect + SS_residual)     ← 多因子更常用，但阈值不同
+
+    单因子设计下两者相等，既有单因子用例不受影响。
+    """
     ss_residual = aov_table["sum_sq"].get("Residual", 0)
     ss_total = sum(aov_table["sum_sq"])
     effect_sizes = {}
@@ -36,14 +107,20 @@ def _eta_squared(aov_table):
             continue
         ss_effect = aov_table.loc[idx, "sum_sq"]
         # 偏 η² = SS_effect / (SS_effect + SS_residual)
-        eta2 = ss_effect / (ss_effect + ss_residual) if (ss_effect + ss_residual) > 0 else 0
+        eta2_partial = ss_effect / (ss_effect + ss_residual) if (ss_effect + ss_residual) > 0 else 0
+        # 经典 η² = SS_effect / SS_total（与 Cohen 阈值配套的口径）
+        eta2_classic = ss_effect / ss_total if ss_total > 0 else 0
         # ω² 近似
         _df_e = float(aov_table.loc[idx, "df"])
         df_effect = max(_df_e, 1) if not np.isnan(_df_e) else 1
         denom = ss_total + ms_residual
         omega2 = (ss_effect - df_effect * ms_residual) / denom if denom > 0 else 0
         omega2 = max(0, omega2)
-        effect_sizes[idx] = {"η²": float(eta2), "ω²": float(omega2)}
+        effect_sizes[idx] = {
+            "η²": float(eta2_classic),
+            "偏 η²": float(eta2_partial),
+            "ω²": float(omega2),
+        }
     return effect_sizes
 
 
@@ -108,17 +185,67 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     _escaped = [c.replace(chr(39), chr(39) + chr(39)) for c in cols]
     _escaped_target = req.target_col.replace(chr(39), chr(39) + chr(39))
-    terms = [f"Q('{ec}')" for ec in _escaped]
-    if req.params.get("interactions") and len(cols) >= 2:
+    # 参数校验（P4 步骤③，第二十四轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前 `alpha`/`interactions`/`ss_type` 在三处分别读取，现一次取用。
+    _p = PARAM_SPECS["anova"].validate_or_raise(req.params)
+    alpha, interactions, ss_type = _p.alpha, _p.interactions, _p.ss_type
+
+    # 效应结构（主效应 + 可选两两交互），以**原始列名**表示；公式在下面按口径构建
+    effects: list[tuple[str, ...]] = [(c,) for c in cols]
+    if interactions and len(cols) >= 2:
         for i in range(len(cols)):
             for j in range(i + 1, len(cols)):
-                terms.append(f"Q('{_escaped[i]}'):Q('{_escaped[j]}')")
-    formula = f"Q('{_escaped_target}') ~ " + " + ".join(terms)
+                effects.append((cols[i], cols[j]))
+
+    # ── 平方和类型（审查 2026-09-24 P2-3）──
+    # Type II（引擎原行为，默认）对每个效应做"不含该效应与其他效应交互项"的校正；
+    # Type III（Minitab/SAS 默认）做"含所有其他效应（含交互）"的边际校正。
+    # 平衡/正交设计下两者重合；**不平衡设计下可给出相反结论**。
+    # `ss_type` 已由 `Choice(2, 3, aliases={"2": 2, "3": 3})` 前置校验
+    # （原 `_parse_ss_type` 的白名单与别名归一由 `Choice` 表达），此处不再重复。
 
     warn_msgs: list[str] = []
+    if ss_type == 3:
+        # ⚠️ Type III **必须**用效应编码（sum-to-zero），否则数值不是 SAS/Minitab 口径。
+        #
+        # 实测（2×2 平衡设计，8 样本/单元，真值 a 主效应 1.0）：
+        #     treatment 编码（patsy 默认）typ=3 → a 的 SS = 3.1962  ← **错**
+        #     sum-to-zero 编码           typ=3 → a 的 SS = 3.7398  ← 正确
+        # 而 Type II 在两种编码下都给 3.7398（平衡设计下 Type II 与 III 按定义重合）。
+        #
+        # 即 `anova_lm(typ=3)` **不会**自动改用效应编码 —— 它按给定编码计算。
+        # 不平衡设计下差异更大（实测 a 的 SS：treatment 2.0283 vs sum 3.4159）。
+        #
+        # 同时：patsy 的 `Q()` 只接受一个参数，无法写成 `Q(col, Sum)`，
+        # 故此处把列重命名为安全内部名后用 `C(name, Sum)`。
+        # 表行标签随后映射回与 Type II 相同的形态，保证两种口径的表结构一致。
+        safe = pd.DataFrame(
+            {
+                **{f"f{i}__": req.data[c].to_numpy() for i, c in enumerate(cols)},
+                "y__": req.data[req.target_col].to_numpy(),
+            }
+        )
+        _rename = {f"f{i}__": c for i, c in enumerate(cols)}
+        terms = [f"C(f{i}__, Sum)" for i in range(len(cols))]
+        if interactions and len(cols) >= 2:
+            for i in range(len(cols)):
+                for j in range(i + 1, len(cols)):
+                    terms.append(f"C(f{i}__, Sum):C(f{j}__, Sum)")
+        fit_formula = "y__ ~ " + " + ".join(terms)
+        fit_data = safe
+    else:
+        terms = [f"Q('{ec}')" for ec in _escaped]
+        if interactions and len(cols) >= 2:
+            for i in range(len(cols)):
+                for j in range(i + 1, len(cols)):
+                    terms.append(f"Q('{_escaped[i]}'):Q('{_escaped[j]}')")
+        fit_formula = f"Q('{_escaped_target}') ~ " + " + ".join(terms)
+        fit_data = req.data
+
     try:
-        model = ols(formula, data=req.data).fit()
-        anova_table = sm.stats.anova_lm(model, typ=2)
+        model = ols(fit_formula, data=fit_data).fit()
+        anova_table = sm.stats.anova_lm(model, typ=ss_type)
     except Exception:
         logger.debug("ANOVA 模型拟合失败", exc_info=True)
         return AnalysisResult(
@@ -126,7 +253,25 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=["ANOVA 模型拟合失败，请检查数据是否包含缺失值或非数值列"],
         )
+    # Type III 表含截距行（对工艺分析无意义，且 Type II 表没有）→ 剔除，保持行集合一致
+    if "Intercept" in anova_table.index:
+        anova_table = anova_table.drop(index="Intercept")
 
+    if ss_type == 3:
+        # 内部名 → 原始列名，且形态与 Type II 的 `Q('col')` 标签一致
+        def _back(name: str) -> str:
+            return re.sub(
+                r"C\((f\d+__)(?:, Sum)?\)",
+                lambda m: f"Q('{_rename.get(m.group(1), m.group(1))}')",
+                name,
+            )
+
+        anova_table.index = [_back(str(i)) for i in anova_table.index]
+
+    # ── 设计平衡性（决定 Type II 与 III 是否有差异）──
+    _cell = req.data.groupby(cols, dropna=True)[req.target_col].size()
+    cell_sizes = sorted(int(v) for v in _cell.tolist())
+    design_balanced = len(set(cell_sizes)) <= 1
     # ── 假设检验前提验证 ──
 
     # Levene 方差齐性检验（按第一个因子分组）
@@ -161,13 +306,25 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     # ── 效应量计算 ──
     effect_sizes = _eta_squared(anova_table)
 
-    alpha = _safe_float(req.params.get("alpha", 0.05), 0.05)
-    if not 0 < alpha < 1:
-        return AnalysisResult(
-            task="anova",
-            status="error",
-            messages=[f"alpha 必须在 (0,1) 区间内，当前: {alpha!r}"],
-        )
+    # ── 不平衡设计披露（P2-3）──
+    # 不平衡时 Type II 与 Type III 可给出**相反结论**，用户必须知道当前口径
+    if not design_balanced:
+        _span = f"{cell_sizes[0]}–{cell_sizes[-1]}" if len(cell_sizes) > 1 else str(cell_sizes[0])
+        if ss_type == 3:
+            warn_msgs.append(
+                f"⚠ 设计不平衡（各因子组合的样本量 {_span} 不等），已按 **Type III** 平方和计算。"
+                "Type III 是 Minitab/SAS 默认口径（各效应的边际贡献，含交互校正）；"
+                "若需与 Type II 口径对照，请将 ss_type 设为 2。"
+            )
+        else:
+            warn_msgs.append(
+                f"⚠ 设计不平衡（各因子组合的样本量 {_span} 不等），当前使用 **Type II** 平方和。"
+                "不平衡设计下 Type II 与 Type III 对同一效应可能给出**不同结论**；"
+                "Minitab/SAS 默认 Type III，如需对齐请将 ss_type 设为 3。"
+            )
+
+    # `alpha` 已在函数开头由 `PARAM_SPECS["anova"]` 一次校验并取用（见上方注释）；
+    # 原此处重复读取 + 区间检查已删。
     sig_factors: list[tuple[str, str]] = []  # (raw_col_name, formatted_display_str)
     for i, col in enumerate(cols):
         _esc_key = _escaped[i]
@@ -238,7 +395,10 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             else None,
         }
         es = effect_sizes.get(idx, {})
+        # 审查 2026-09-24 P1-1：展示"经典 η²"并按经典阈值解读（两者口径一致）；
+        # 偏 η² 同时给出，供多因子设计参照——**不可混用阈值**。
         row["η²"] = es.get("η²", None)
+        row["偏 η²"] = es.get("偏 η²", None)
         row["ω²"] = es.get("ω²", None)
         row["效应量解读"] = (
             _effect_interpretation(es.get("η²", 0)) if es.get("η²") is not None else ""
@@ -358,6 +518,12 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
             "effect_size_ci": _eta_squared_ci(
                 float(model.fvalue), int(model.df_model), int(model.df_resid)
             ),
+            # 平方和口径与设计平衡性（P2-3）：不平衡时两种类型可给出相反结论，
+            # 故必须与数值一起披露，便于判据复核与追溯
+            "ss_type": ss_type,
+            "ss_type_name": f"Type {ss_type}",
+            "design_balanced": design_balanced,
+            "cell_sizes": cell_sizes,
         },
         messages=warn_msgs,
     )

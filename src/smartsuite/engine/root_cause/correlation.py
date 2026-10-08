@@ -11,6 +11,7 @@ from scipy import stats as sp_stats
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Opt, Spec
 from smartsuite.engine._constants import (
     EPSILON,
     SIG_EXTREME,
@@ -22,6 +23,31 @@ from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.root_cause._shared import _correlation_ci, _effect_size_label
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十三轮）──
+# 契约：docs/governance/improvement-plan.md §六
+PARAM_SPECS = {
+    "correlation": Spec(
+        method=Opt(
+            Choice(
+                ("pearson", "Pearson（线性相关）"),
+                ("spearman", "Spearman（秩相关，抗离群）"),
+                ("kendall", "Kendall（秩相关，小样本更稳）"),
+            ),
+            default="pearson",
+            label="相关方法",
+            hint="Pearson 测线性；Spearman/Kendall 测单调关系且抗离群值",
+        ),
+        control_vars=Opt(
+            # 默认值与 `DEFAULT_PARAMS` 一致是 `[]`（而非 `None`）——
+            # 由 `Spec.defaults()` 的对拍用例抓出。引擎侧把 `None` 与 `[]`
+            # 都当作"无控制变量"，故两者语义等价，但声明必须与默认值表一致。
+            default=[],
+            label="控制变量(逗号分隔)",
+            hint="偏相关：控制这些变量后再计算目标与其余列的净相关",
+        ),
+    ),
+}
 
 
 def _significance_stars(p):
@@ -76,13 +102,10 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效样本不足(至少3行含数据)，相关分析在极小样本下无意义"],
         )
 
-    method = req.params.get("method", "pearson")  # "pearson" | "spearman" | "kendall"
-    if method not in ("pearson", "spearman", "kendall"):
-        return AnalysisResult(
-            task="correlation",
-            status="error",
-            messages=[f"不支持的相关性方法「{method}」，可选: pearson / spearman / kendall"],
-        )
+    # 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 原白名单检查已由 `Choice` 表达并**给出可选值的中文文案**（供下拉框显示）。
+    method = PARAM_SPECS["correlation"].validate_or_raise(req.params).method
     if method == "spearman":
         corr = req.data[cols].corr(method="spearman")
         corr_label = "Spearman ρ"

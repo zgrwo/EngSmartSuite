@@ -12,17 +12,98 @@ from scipy import stats as sp_stats
 from sklearn.linear_model import LinearRegression
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Finite, Integer, Opt, Spec
+from smartsuite.core.param_specs_common import (
+    BOOL_SWITCH,
+    CI_LEVEL,
+    GROUP_COL,
+    LSL,
+    RANDOM_STATE,
+    TARGET,
+    USL,
+)
+from smartsuite.engine._guard import BoundaryReport, clean_frame, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     _adjust_xlabels,
-    drop_non_finite,
-    drop_non_finite_rows,
-    non_finite_note,
     round_for_display,
-    safe_float,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── 声明式参数契约（P4 步骤③，第二十轮：共享字段库驱动）──
+PARAM_SPECS = {
+    # 本模块含 4 个任务（box_chart/scatter_plot/bootstrap_ci/median_ci），
+    # 故按任务登记
+    "median_ci": Spec(ci_level=CI_LEVEL),
+    # 第二十五轮：
+    # `n_bootstrap` 声明为 [100, 10000] 闭区间 —— 这是引擎原夹紧逻辑的上下界；
+    # 迁移前越界值被**静默夹紧**（50→100、20000→10000），非法值静默回落默认 2000。
+    "bootstrap_ci": Spec(
+        statistic=Opt(
+            Choice(
+                ("mean", "均值"),
+                ("median", "中位数"),
+                ("std", "标准差"),
+                ("var", "方差"),
+            ),
+            default="mean",
+            label="统计量",
+            hint="要估计置信区间的统计量",
+        ),
+        n_bootstrap=Opt(
+            Integer(min=100, max=10000),
+            default=2000,
+            label="重抽样次数",
+            hint="Bootstrap 重抽样次数，范围 [100, 10000]；越多越稳定也越慢",
+        ),
+        ci_level=CI_LEVEL,
+        random_state=RANDOM_STATE,
+    ),
+    # 第二十五轮：`fit` 此前**无白名单校验**（拼错静默变成「不拟合」）。
+    # `show_ci` 的默认值是**字符串** "true"（不是布尔），故 Spec 只接受
+    # "true"/"false" 字符串；「字符串 → 布尔」的转换留在引擎。
+    "scatter_plot": Spec(
+        fit=Opt(
+            Choice(
+                ("none", "不拟合"),
+                ("linear", "线性趋势线"),
+                ("lowess", "LOWESS 平滑线"),
+            ),
+            default="none",
+            label="拟合方式",
+            hint="线性=最小二乘直线；LOWESS=局部加权平滑（适合非线性趋势）",
+        ),
+        # 第三十轮：改用共享的 `BOOL_SWITCH`（**行为改进**）。
+        # 迁移前是透传字段 + 引擎的宽容归一 `str.lower() not in ("false","0","no","")`，
+        # 于是 `"maybe"`/`"yes"`/`123` 都**静默变成 True**（用户以为关掉了却还开着）。
+        # 现由 `Choice` + 别名（`True`/`1` → "true"）收口：合法写法照旧，非法写法明确拒绝。
+        show_ci=BOOL_SWITCH,
+        group_col=GROUP_COL,
+    ),
+    # 第二十六轮：`mode` 此前**无白名单校验** —— 实测 mode='grid'/'FACET_' 都返回
+    # ok 并静默按 facet 执行（用户以为切换了布局）。现由 Choice 明确拒绝。
+    # 五个控制/规格限 + target 由**动态键循环**读取，与 spc_xbar 同构，全部来自共享库。
+    "box_chart": Spec(
+        mode=Opt(
+            Choice(("facet", "分面（每水平一个子图）"), ("nested", "嵌套（同图分组）")),
+            default="facet",
+            label="布局模式",
+            hint="分面=每个水平独立子图；嵌套=同一坐标轴内按组并列",
+        ),
+        # 第三十轮：与 `scatter_plot.show_ci` 同因同解 —— 改用共享 `BOOL_SWITCH`。
+        # 注意默认值从布尔 `True` 变为字符串 `"true"`（对齐 `DEFAULT_PARAMS`）；二者等价。
+        show_stats=BOOL_SWITCH,
+        group_col=GROUP_COL,
+        usl=USL,
+        lsl=LSL,
+        ucl=Opt(Finite(), default=None, label="控制上限 UCL", hint="可选参考线"),
+        lcl=Opt(Finite(), default=None, label="控制下限 LCL", hint="可选参考线"),
+        cl=Opt(Finite(), default=None, label="中心线 CL", hint="可选参考线"),
+        target=TARGET,
+    ),
+}
 
 
 def median_ci(req: AnalysisRequest) -> AnalysisResult:
@@ -32,20 +113,17 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
     """
     data = req.data[req.target_col].dropna()
     # 审查 2026-09-22 发现 3：±Inf 穿透 dropna 使 hist/set_xlim 抛 ValueError
-    data, n_inf = drop_non_finite(data)
+    # 第三十七轮：手抄清洗 → `_guard.clean_series`（披露与错误码在一处产出）
+    _report = BoundaryReport()
+    data, _n_inf = clean_series(data, column=req.target_col, report=_report)
     n = len(data)
     if n < 5:
         return AnalysisResult(
             task="median_ci", status="error", messages=["有效数据不足(至少5个点)"]
         )
 
-    ci_level = safe_float(req.params.get("ci_level", 0.95), 0.95)
-    if not 0 < ci_level < 1:
-        return AnalysisResult(
-            task="median_ci",
-            status="error",
-            messages=[f"ci_level 必须在 (0, 1) 区间内，当前: {ci_level!r}"],
-        )
+    # 参数校验（P4 步骤③）：失败时抛 ParamValidationError
+    ci_level = PARAM_SPECS["median_ci"].validate_or_raise(req.params).ci_level
     alpha = 1 - ci_level
 
     sorted_data = np.sort(data.values)
@@ -112,7 +190,7 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
             "ci_level": ci_level,
             "n": n,
         },
-        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
+        messages=_report.messages(),
     )
 
 
@@ -127,7 +205,9 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     返回百分位法（Percentile）Bootstrap 置信区间。
     """
     data = req.data[req.target_col].dropna()
-    data, n_inf = drop_non_finite(data)
+    # 第三十七轮：手抄清洗 → `_guard.clean_series`（披露与错误码在一处产出）
+    _report = BoundaryReport()
+    data, _n_inf = clean_series(data, column=req.target_col, report=_report)
     n = len(data)
     if n < 5:
         return AnalysisResult(
@@ -136,29 +216,21 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效数据不足(至少5个点)"],
         )
 
-    statistic = req.params.get("statistic", "mean")
+    # 参数校验（P4 步骤③，第二十五轮）：失败时抛 ParamValidationError。
+    # 迁移前 `n_bootstrap` 被静默夹紧（50->100、20000->10000）、非法值静默回落 2000。
+    _bp = PARAM_SPECS["bootstrap_ci"].validate_or_raise(req.params)
+    statistic = _bp.statistic
     if statistic not in ("mean", "median", "std", "var"):
         return AnalysisResult(
             task="bootstrap_ci",
             status="error",
             messages=[f"不支持的 statistic: {statistic!r}，可选 mean/median/std/var"],
         )
-    n_boot_raw = req.params.get("n_bootstrap", 2000)
-    try:
-        n_boot = max(100, min(int(n_boot_raw), 10000))
-    except (ValueError, TypeError, OverflowError):
-        # OverflowError（审查 2026-09-22 发现 5 同族）：int(float('inf')) 不抛
-        # ValueError，此前穿透参数守卫（doe_design/power_analysis 同族）
-        n_boot = 2000
-    ci_level = safe_float(req.params.get("ci_level", 0.95), 0.95)
-    if not 0 < ci_level < 1:
-        return AnalysisResult(
-            task="bootstrap_ci",
-            status="error",
-            messages=[f"ci_level 必须在 (0, 1) 区间内，当前: {ci_level!r}"],
-        )
+    # `n_bootstrap` / `ci_level` 已由 Spec 一次校验并取用（见上方注释）
+    n_boot = _bp.n_bootstrap
+    ci_level = _bp.ci_level
     alpha = 1 - ci_level
-    random_state = int(safe_float(req.params.get("random_state", 42), 42))
+    random_state = _bp.random_state
 
     rng = np.random.RandomState(random_state)
     values = data.values
@@ -279,7 +351,7 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
             "n_bootstrap": n_boot,
             "n": n,
         },
-        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
+        messages=_report.messages(),
     )
 
 
@@ -414,7 +486,11 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 #A3：group_col 可能与 target/sub_col 同列（UI 可触发），
     # 去重列名避免 sub[col] 返回 DataFrame → .unique() AttributeError
     _cols_needed = list(dict.fromkeys([req.target_col, group_col] + ([sub_col] if sub_col else [])))
-    mode = req.params.get("mode", "facet")  # "facet" | "nested"
+    # 参数校验（P4 步骤③，第二十六轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # `mode` 此前**无白名单校验**（实测 'grid'/'FACET_' 静默按 facet 执行）。
+    _bc = PARAM_SPECS["box_chart"].validate_or_raise(req.params)
+    mode = _bc.mode
 
     # ── 规格限与控制限（可选参考线）──
     def _draw_ref_lines(ax):
@@ -440,50 +516,27 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
         ("lcl", PALETTE["control"]["primary"], "--"),
         ("cl", PALETTE["control"]["primary"], "--"),
     ]:
-        val = req.params.get(key)
-        if val is not None:
-            try:
-                val_f = float(val)
-            except (ValueError, TypeError):
-                return AnalysisResult(
-                    task="box_chart",
-                    status="error",
-                    messages=[f"{_ref_labels[key]} 值无效: {val}，请输入数值"],
-                )
-            if not np.isfinite(val_f):
-                return AnalysisResult(
-                    task="box_chart",
-                    status="error",
-                    messages=[f"{_ref_labels[key]} 必须为有限数值，当前: {val!r}"],
-                )
-            _ref_lines.append((val_f, color, style, key.upper()))
-    target_val = req.params.get("target")
-    if target_val is not None:
-        try:
-            target_f = float(target_val)
-        except (ValueError, TypeError):
-            return AnalysisResult(
-                task="box_chart",
-                status="error",
-                messages=[f"目标值 Target 值无效: {target_val}，请输入数值"],
-            )
-        if not np.isfinite(target_f):
-            return AnalysisResult(
-                task="box_chart",
-                status="error",
-                messages=[f"目标值 Target 必须为有限数值，当前: {target_val!r}"],
-            )
-        _ref_lines.append((target_f, PALETTE["direction"]["zero"], ":", "Target"))
+        # 参考线已由 Spec 校验（`Finite()`，含 isfinite）→ 此处只需取值
+        val_f = _bc.get(key)
+        if val_f is not None:
+            _ref_lines.append((float(val_f), color, style, key.upper()))
+    # `target` 同样已由 Spec 校验
+    target_f = _bc.target
+    if target_f is not None:
+        _ref_lines.append((float(target_f), PALETTE["direction"]["zero"], ":", "Target"))
 
     # show_stats：把 n/均值/标准差/最大值/最小值标注到每个箱体正下方
     # （标注带占用坐标区下沿，箱体自动压缩，图形整体尺寸不变；分面模式逐面板标注）
-    show_stats = req.params.get("show_stats", True)
-    if isinstance(show_stats, str):
-        show_stats = show_stats.lower() not in ("false", "0", "no", "")
+    # `show_stats` 现由 `BOOL_SWITCH` 校验（合法值是 "true"/"false"，
+    # 且 `True`/`1` 经别名归一到 "true"）→ 这里只需一次比较。
+    # 原先的宽容白名单（"0"/"no"/""）已随非法值被明确拒绝而不再需要。
+    show_stats = _bc.show_stats == "true"
 
     sub = req.data[_cols_needed].dropna()
     # 审查 2026-09-22 发现 3：目标列 ±Inf 使 boxplot/set_ylim 抛 ValueError
-    sub, n_inf = drop_non_finite_rows(sub, [req.target_col])
+    # 第三十七轮：同上，改走 `_guard.clean_frame`（多列按行清洗）
+    _report = BoundaryReport()
+    sub, _n_inf = clean_frame(sub, [req.target_col], report=_report)
     if len(sub) < 5:
         return AnalysisResult(
             task="box_chart", status="error", messages=["有效数据不足(至少5个点)"]
@@ -664,7 +717,7 @@ def box_chart(req: AnalysisRequest) -> AnalysisResult:
             "nested_label": nested_label,
             "groups": [str(g) for g in all_groups],
         },
-        messages=[non_finite_note(n_inf, req.target_col)] if n_inf else [],
+        messages=_report.messages(),
     )
 
 
@@ -706,10 +759,20 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # ── 参数提取 ──
-    fit_type = req.params.get("fit", "none")
-    show_ci = req.params.get("show_ci", True)
-    if isinstance(show_ci, str):
-        show_ci = show_ci.lower() not in ("false", "0", "no", "")
+    # 参数校验（P4 步骤③，第二十五/三十轮）：失败时抛 ParamValidationError。
+    # `fit` 此前**无白名单校验**（拼错静默变成「不拟合」）；
+    # `show_ci` 现由共享的 `BOOL_SWITCH` 校验（合法值 "true"/"false"，
+    # `True`/`1` 经别名归一到 "true"）。
+    _sp = PARAM_SPECS["scatter_plot"].validate_or_raise(req.params)
+    fit_type = _sp.fit
+    # 归一简化为直比。原写法是
+    #     `show_ci = show_ci.lower() not in ("false", "0", "no", "")`
+    # —— 我一度以为它对字符串 `"false"` 会误判为真（"非空字符串恒真"），
+    # 但**实测证伪**：`"false".lower() not in (...)` 就是 `False`，旧逻辑是对的。
+    # 它现在的唯一问题是**冗余**：`Choice` 已把取值限定为 "true"/"false"，
+    # 那串多写法白名单（"0"/"no"/""）再也不会命中。故简化为与
+    # `box_chart.show_stats` 一致的直比，行为等价。
+    show_ci = _sp.show_ci == "true"
 
     # ── 分组信息 ──
     if has_groups:

@@ -9,6 +9,8 @@ from scipy import stats as sp_stats
 from sklearn.preprocessing import StandardScaler
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import Choice, Integer, Opt, Spec
+from smartsuite.core.param_specs_common import ALPHA
 from smartsuite.engine._constants import (
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
@@ -19,17 +21,45 @@ from smartsuite.engine.detection._shared import iqr_outlier_mask
 
 logger = logging.getLogger(__name__)
 
+# ── 声明式参数契约（P4 步骤③，第二十四轮）──
+# 契约：docs/governance/improvement-plan.md §六
+# 只声明 `DEFAULT_PARAMS` 里的三个参数。`contamination` 不在默认值表里且
+# 支持 `(0,0.5]` 数值**或字符串 "auto"** 双形态，故有意不声明 → 原样透传。
+PARAM_SPECS = {
+    "anomaly_detect": Spec(
+        method=Opt(
+            Choice(
+                ("iqr", "IQR（四分位距，单变量）"),
+                ("zscore", "Z-score（标准差，单变量）"),
+                ("grubbs", "Grubbs（单变量，逐点剔除）"),
+                ("isolation_forest", "孤立森林（多变量）"),
+            ),
+            default="iqr",
+            label="异常检测方法",
+            hint="IQR/Z-score/Grubbs 为单变量；孤立森林可同时利用多个特征",
+        ),
+        alpha=ALPHA,
+        max_outliers=Opt(
+            Integer(min=1),
+            default=5,
+            label="最多异常点数",
+            hint="Grubbs 检验逐点剔除的上限；至少 1",
+        ),
+    ),
+}
+
 
 def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     """异常检测：IQR / Z-score (单变量) 或 Isolation Forest (多变量)。"""
-    method = req.params.get("method", "iqr")
-    # Round-2 #A2p：未知 method 此前静默按 Z-score 执行
-    if method not in ("isolation_forest", "grubbs", "iqr", "zscore"):
-        return AnalysisResult(
-            task="anomaly_detect",
-            status="error",
-            messages=[f"不支持的检测方法: {method!r}，可选 isolation_forest/grubbs/iqr/zscore"],
-        )
+
+    # 参数校验（P4 步骤③，第二十四轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 原 Round-2 #A2p 的"未知 method 静默按 Z-score 执行"守卫（白名单检查）
+    # 已由 `Choice` 前置表达并给出中文文案，故不再重复。
+    _ap = PARAM_SPECS["anomaly_detect"].validate_or_raise(req.params)
+    method = _ap.method
+    alpha = _ap.alpha
+    max_outliers = _ap.max_outliers
 
     # ── 多变量异常检测 (Isolation Forest) ──
     if method == "isolation_forest":
@@ -191,29 +221,10 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
 
     if method == "grubbs":
         # Grubbs 检验：每次检测最大偏差，迭代最多 5 个异常点
-        # 类型安全转换（审查 2026-08-19 #1.4：CLI/YAML 字符串参数会 TypeError）
-        # 审查 2026-09-16 C-1：int(inf) 抛 OverflowError 且不在捕获元组内 → 补齐
-        try:
-            alpha_g = float(req.params.get("alpha", 0.05))
-            max_outliers = int(req.params.get("max_outliers", 5))
-        except (ValueError, TypeError, OverflowError):
-            return AnalysisResult(
-                task="anomaly_detect",
-                status="error",
-                messages=["Grubbs 检验参数格式错误：alpha 需为数值，max_outliers 需为整数"],
-            )
-        if not 0 < alpha_g < 1:
-            return AnalysisResult(
-                task="anomaly_detect",
-                status="error",
-                messages=[f"alpha 必须在 (0, 1) 区间内，当前: {alpha_g!r}"],
-            )
-        if max_outliers < 1:
-            return AnalysisResult(
-                task="anomaly_detect",
-                status="error",
-                messages=[f"max_outliers 必须 ≥ 1，当前: {max_outliers}"],
-            )
+        # `alpha` / `max_outliers` 已在函数开头由 `PARAM_SPECS["anomaly_detect"]`
+        # 一次校验并取用（含 `int(inf)` 这类 OverflowError 场景 —— `Integer`
+        # 会先判 `isfinite`，故不存在溢出穿透）。此处只做别名，不再重复校验。
+        alpha_g = alpha
         # 审查 2026-09-16 B-2：原 `sigma < EPSILON`（绝对 1e-10）在首次迭代对微尺度
         # 数据直接 break → 静默返回 0 异常。常量列改为显式中文错误；迭代中 sigma 归零
         # （剔除后剩余值全同）才 break（此时已返回已检出异常，语义正确）。

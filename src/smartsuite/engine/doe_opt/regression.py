@@ -11,6 +11,7 @@ from scipy import stats as sp_stats
 from statsmodels.tools.sm_exceptions import SingularMatrixWarning
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
+from smartsuite.core.param_spec import CrossRule, Finite, Opt, Spec
 from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
@@ -22,6 +23,76 @@ from smartsuite.engine._utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── 声明式参数契约（P4 步骤③，第二十二轮）──
+# 按**任务**登记（本模块含 regression / quantile_regression / lasso_regression 等）。
+# ⚠️ 有意**不含** `regression`：实测 `regression_analysis()` 不读取任何 params，
+#    而 `DEFAULT_PARAMS['regression'] = {'model_type': 'linear'}` 是**未接线的参数**
+#    （前端能设、引擎不看）。那是独立问题，需先确认该被读还是该移除，故本轮不处理。
+PARAM_SPECS = {
+    # 第二十四轮：`l1_ratio` 的区间是 **[0, 1] 闭区间**（引擎源码 `0 <= l1_ratio <= 1`），
+    # 与 `alpha` 的 (0,1) 开区间不同 —— `0`=纯 Ridge、`1`=纯 Lasso，两端都合法。
+    #
+    # ⚠️ 但 **sklearn 另有一条约束**：`l1_ratio=0`（纯 Ridge）时它无法自动生成
+    # alpha 网格，会抛 `ValueError: Automatic alpha grid generation is not supported
+    # for l1_ratio=0`。而该异常被 `orchestrator` 泛化翻译成误导性的
+    # 「**数据格式或数值范围不符合分析要求**」—— 真实原因是**参数组合**问题。
+    # 这正是 boundary-contract 禁止的"错误归因"。
+    # 故用 `CrossRule` 在参数层把它变成明确的中文错误。
+    "lasso_regression": Spec(
+        # `alpha_lasso` 声明为**透传**字段（无校验器）：语义是
+        # `None` / 数值 / `"auto"` 三形态；但必须出现在 `defaults()` 里
+        # 才能与 `DEFAULT_PARAMS` 精确相等（对拍断言要求）。
+        alpha_lasso=Opt(
+            default=None,
+            label="α (正则化强度)",
+            hint='留空则由交叉验证自动选择；也可填 "auto"',
+        ),
+        l1_ratio=Opt(
+            Finite(ge=0, le=1),
+            default=1.0,
+            label="L1 比率 (ElasticNet)",
+            hint=(
+                "1.0=纯 Lasso，0=纯 Ridge，中间为 ElasticNet。"
+                "注意：取 0（纯 Ridge）时必须同时指定 α"
+            ),
+        ),
+    ).cross(
+        CrossRule(
+            field_name="l1_ratio",
+            check=lambda p: not (p.get("l1_ratio") == 0 and p.get("alpha_lasso") is None),
+            code="E_LASSO_RIDGE_NEEDS_ALPHA",
+            message=(
+                "l1_ratio=0 表示纯 Ridge，sklearn 无法自动生成 α 网格 —— "
+                "请同时指定 α，或把 l1_ratio 设为大于 0（如 1.0 = 纯 Lasso）"
+            ),
+        )
+    ),
+    # 第三十轮（三个待决策项之一）：`model_type` 是**文档化的保留参数**。
+    #
+    # 取证：`docs/specification/api-reference.md` 明写
+    #   `params: model_type (保留参数，当前仅支持 OLS)`
+    # 故引擎不读它是**有意设计**，不是缺陷 —— 我第二十四轮把它记成
+    # 「未接线的参数（缺陷）」是**误判**，现予更正。
+    #
+    # 但第二十七轮我给它写的界面文案不合格：标签「回归模型类型」暗示可以选择，
+    # 提示里还出现了「台账」这种**内部词**。界面文案是给用户看的，必须诚实。
+    "regression": Spec(
+        model_type=Opt(
+            default="linear",
+            label="模型类型（保留）",
+            hint="当前仅支持 OLS 线性回归；此参数为后续扩展保留，改动不影响结果",
+        )
+    ),
+    "quantile_regression": Spec(
+        quantile=Opt(
+            Finite(gt=0, lt=1),
+            default=0.5,
+            label="分位数 τ",
+            hint="要拟合的分位（0.5=中位数回归）；必须在 (0,1) 开区间内",
+        )
+    ),
+}
 
 
 def _std_beta(model, X):
@@ -393,16 +464,12 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     alpha = req.params.get("alpha_lasso", None)
     if alpha is not None:
         alpha = _safe_float(alpha, 1.0)
-    l1_ratio = _safe_float(
-        req.params.get("l1_ratio", 1.0), 1.0
-    )  # 1.0 = pure Lasso, <1 = ElasticNet
-    # Round-2 P3：l1_ratio 越界此前静默按纯 Lasso/ElasticNet 执行
-    if not 0 <= l1_ratio <= 1:
-        return AnalysisResult(
-            task="lasso_regression",
-            status="error",
-            messages=[f"l1_ratio 必须在 [0, 1] 区间内，当前: {l1_ratio!r}"],
-        )
+
+    # 参数校验（P4 步骤③，第二十四轮）：失败时抛 ParamValidationError。
+    # 原 Round-2 P3 的"越界静默按纯 Lasso/ElasticNet 执行"守卫已由
+    # `Finite(ge=0, le=1)`（**闭**区间 —— `0`=纯 Ridge、`1`=纯 Lasso，两端都合法）
+    # 前置表达。`alpha_lasso` 有 `None` 与 `"auto"` 双哨兵语义，故不声明、原样透传。
+    l1_ratio = PARAM_SPECS["lasso_regression"].validate_or_raise(req.params).l1_ratio
 
     _lasso_max_iter = 5000
     if alpha is not None:
@@ -715,21 +782,10 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
     if len(sub) < len(cols) + 2:
         return AnalysisResult(task="quantile_regression", status="error", messages=["有效样本不足"])
 
-    quantile = req.params.get("quantile", 0.5)
-    try:
-        quantile = float(quantile)
-    except (ValueError, TypeError):
-        return AnalysisResult(
-            task="quantile_regression",
-            status="error",
-            messages=[f"参数 quantile 值无效: {quantile}，请输入数值 (0~1)"],
-        )
-    if not 0 < quantile < 1:
-        return AnalysisResult(
-            task="quantile_regression",
-            status="error",
-            messages=[f"分位数 τ 必须在 (0, 1) 范围内，当前值: {quantile}"],
-        )
+    # 参数校验（P4 步骤③，第二十二轮）：失败时抛 ParamValidationError，
+    # 由 orchestrator 统一转成 status="error" + 中文文案。
+    # 迁移前是 `float()` 转换 + 两段检查（约 15 行）。
+    quantile = PARAM_SPECS["quantile_regression"].validate_or_raise(req.params).quantile
     try:
         X_df = sub[cols]
         y = sub[req.target_col]
