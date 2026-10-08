@@ -10,7 +10,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Finite, Opt, Spec
 from smartsuite.engine._constants import EPSILON
-from smartsuite.engine._guard import BoundaryReport, clean_frame, clean_series
+from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, clean_frame, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     round_for_display,
@@ -1315,6 +1315,15 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 去重列名避免重复列索引产生 DataFrame（与 box_chart 的 _cols_needed 同模式）
     cols = list(dict.fromkeys([time_col, event_col] + ([group_col] if group_col else [])))
     sub = req.data[cols].dropna()
+    # ── 非有限值处置（B1）──
+    # 第 41 轮修：入口原先**只做 `dropna()`，没有非有限值清洗**。实测后果有二：
+    #   1. `±Inf` 使 Weibull MLE 失败 → `weibull_shape`/`weibull_scale` 静默变 `None`，
+    #      而 `messages` 为空（用户不知道参数为何缺失）；
+    #   2. `+Inf` 在 KM 排序里落到最右端，被当作「活得最久」的观测 —— 实测把中位数
+    #      由 77.06 抬到 86.38（点估计被污染）。
+    # `NaN` 仍走 `dropna`（缺失语义，无需披露）；`±Inf` 是**非有限值**，须清洗 + 披露。
+    _report = BoundaryReport()
+    sub, _n_inf = clean_frame(sub, [time_col], report=_report)
     if len(sub) == 0:
         return AnalysisResult(
             task="survival_analysis",
@@ -1407,7 +1416,9 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     weibull_method = None
     b10_life: float | None = None
     b10_ci: tuple[float | None, float | None] = (None, None)
-    warn_msgs: list[str] = []
+    # 第 41 轮：原先是手写的字符串列表收集警告（只有文案、无错误码），
+    # 现与清洗披露统一汇入上面的 `_report` —— 用户看到一次汇总，
+    # 上游可按 `metadata["boundary_codes"]` 分流。
     if len(fail_times) >= 5:
         shape_fit, scale_fit, cov_fit, _info = _weibull_fit_censored(times, events)
         if shape_fit is not None:
@@ -1419,14 +1430,26 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
                 shape_fb, _loc, scale_fb = sp_stats.weibull_min.fit(fail_times, floc=0)
                 weibull_shape, weibull_scale = float(shape_fb), float(scale_fb)
                 weibull_method = "uncensored_mle_fallback"
-                warn_msgs.append(
-                    "⚠ 含删失 Weibull MLE 未能收敛，已降级为仅用失效数据的估计"
-                    "（忽略删失观测，形状参数 β 可能被低估）。"
+                _report.add(
+                    BoundaryIssue(
+                        level="B2",
+                        code="E_SURVIVAL_WEIBULL_MLE_NOT_CONVERGED",
+                        detail=(
+                            "⚠ 含删失 Weibull MLE 未能收敛，已降级为仅用失效数据的估计"
+                            "（忽略删失观测，形状参数 β 可能被低估）。"
+                        ),
+                    )
                 )
             except Exception:
                 logger.debug("Weibull fit failed in survival_analysis", exc_info=True)
     elif len(fail_times) > 0:
-        warn_msgs.append(f"⚠ 失效观测仅 {len(fail_times)} 个（少于 5 个），未做 Weibull 参数估计。")
+        _report.add(
+            BoundaryIssue(
+                level="B3",
+                code="E_SURVIVAL_TOO_FEW_EVENTS",
+                detail=(f"⚠ 失效观测仅 {len(fail_times)} 个（少于 5 个），未做 Weibull 参数估计。"),
+            )
+        )
 
     # B10（10% 失效寿命）—— 可靠性工程的常用寿命指标，含 95% CI
     if weibull_shape is not None and weibull_scale is not None:
@@ -1437,10 +1460,16 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
     if n_censored > 0 and weibull_method == "censored_mle":
         cens_frac = n_censored / max(len(times), 1)
         if cens_frac > 0.5:
-            warn_msgs.append(
-                f"⚠ 删失比例较高（{n_censored}/{len(times)} = {cens_frac:.0%}），"
-                "Weibull 参数与寿命百分位的置信区间会明显变宽，"
-                "请以 CI 而非单点估计作为判据。"
+            _report.add(
+                BoundaryIssue(
+                    level="B3",
+                    code="E_SURVIVAL_HIGH_CENSORING",
+                    detail=(
+                        f"⚠ 删失比例较高（{n_censored}/{len(times)} = {cens_frac:.0%}），"
+                        "Weibull 参数与寿命百分位的置信区间会明显变宽，"
+                        "请以 CI 而非单点估计作为判据。"
+                    ),
+                )
             )
 
     # Log-rank 检验 (分组比较)；group_col == event_col 时分组即事件本身，无比较意义
@@ -1587,7 +1616,7 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
         tables=tables,
         figures=[fig],
         summary=summary,
-        messages=warn_msgs,
+        messages=_report.messages(),
         metadata={
             "median_survival": median_survival,
             "n_total": n_total,
@@ -1601,5 +1630,9 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             "b10_life": b10_life,
             "b10_ci": list(b10_ci),
             "logrank_p": logrank_result["p值"] if logrank_result else None,
+            # ── 边界处置的机器可读错误码（第 41 轮随 `_guard` 收口兑现）──
+            # 原先是手写 list 收集文案，只有中文、没有码 ——
+            # 上游对「处置类型」分流只能做子串匹配（脆弱且随文案失效）。
+            "boundary_codes": _report.codes(),
         },
     )

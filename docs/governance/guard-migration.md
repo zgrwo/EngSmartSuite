@@ -33,7 +33,7 @@
 | `spc_charts/xbar_r.py` | ✅ 已接入（更早） | 0 | `_guard` 的最早接入点，作为范式 |
 | `root_cause/hypothesis.py` | ✅ **已迁移**（第三十八轮） | 15 | 5 个函数 / 15 处；**每个清洗点自带一个 report**（不跨分支共用，原因见该文件注释） |
 | `exploratory.py` | ✅ **已迁移**（第三十七轮） | 3 | `median_ci` / `bootstrap_ci` 用 `clean_series`，`box_chart` 用 `clean_frame` |
-| `reliability.py` | ✅ **已迁移**（第三十七轮） | 2 | `gage_rr` 用 `clean_frame`，`tolerance_interval` 用 `clean_series`；**`survival_analysis` 的 `warn_msgs` 通路未纳入本次迁移**（见下） |
+| `reliability.py` | ✅ **已迁移**（第三十七轮） | 2 | `gage_rr` 用 `clean_frame`，`tolerance_interval` 用 `clean_series`；`survival_analysis` 的独立披露通路已于**第 41 轮**收口（见下） |
 | `root_cause/modeling.py` | ✅ **已迁移**（第三十六轮） | 1 | `clean_frame` + `BoundaryReport`；新增码 `E_DECISION_TREE_OVERFIT_WARNING` |
 | `root_cause/distribution.py` | ✅ **已迁移**（第三十六轮） | 1 | `clean_series` + `BoundaryReport` |
 
@@ -43,9 +43,21 @@
 
 全包内 `drop_non_finite` / `drop_non_finite_rows` 调用点实测 **0**；三个旧函数（含 `non_finite_note`）已从 `_utils.py` 删除；`tests/engine/test_utils.py` 里针对它们的 4 个用例已移除（等价行为由 `clean_series` / `clean_frame` 的用例覆盖）。判据（调用点数降到 0）已达成 —— 本清单由「迁移进度表」转为「**已完成的收口记录**」。
 
-### 已知未纳入迁移的一处
+### 原「已知未纳入」的一处已收口（第 41 轮）
 
-`reliability.py` 的 **`survival_analysis`** 有另一套披露通路（`warn_msgs: list[str]`，3 处 `append`），**不是**非有限值清洗，故不计入本清单的调用点数。它与 `capability.py` 迁移前的形态同构，可在后续轮次按同一范式收口。
+`reliability.py` 的 **`survival_analysis`** 原有一套独立披露通路
+（手写 `list[str]` + 3 处 `append`），**不是**非有限值清洗，故当时不计入调用点数。
+第 41 轮已按同一范式收口，并**顺带修掉一个真实缺陷**：
+
+- 入口原先**只做 `dropna()`、没有非有限值清洗** → `±Inf` 使 Weibull MLE 失败、
+  `weibull_shape`/`weibull_scale` 静默变 `None` 而 `messages` 为空；
+  且 `+Inf` 在 KM 排序里落到最右端被当作「活得最久」，实测把中位数由 77.06 抬到 86.38
+- 现走 `clean_frame(report=...)`，披露 + 错误码一并产出
+- 三条既有警告也改为带码：
+  `E_SURVIVAL_WEIBULL_MLE_NOT_CONVERGED`（B2）、
+  `E_SURVIVAL_TOO_FEW_EVENTS` / `E_SURVIVAL_HIGH_CENSORING`（B3）
+- `metadata["boundary_codes"]` 已暴露
+- 复现测试：`tests/engine/test_survival_nonfinite.py`（16 项）
 
 ## 判据（可测量，故"完成"可判定）
 
