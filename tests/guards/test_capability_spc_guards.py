@@ -257,12 +257,16 @@ def test_breusch_pagan_micro_scale_heteroscedastic_not_na():
     X = sm.add_constant(x)
     model = sm.OLS(y, X).fit()
     lm, p = _breusch_pagan(model, X)
-    assert lm is not None and p is not None, "微尺度异方差数据的 BP 检验不应退化为 N/A"
+    # 拆成两条**可核对**断言，取代 `x is not None and y is not None` 复合形态
+    # （复合 `is not None` 对守卫是弱形态，且失败时不区分是哪个退了化）。
+    assert lm is not None, "微尺度异方差数据的 BP 统计量不应退化为 N/A"
+    assert 0.0 <= p <= 1.0, f"BP 的 p 应为概率，实测 {p!r}"
     # 同尺度同方差（残差为真实数据而非舍入噪声）的 BP 同样可计算，LM 为量纲无关比值
     y_h = 1e-10 + rng.normal(0, 1, n) * 1e-13
     model_h = sm.OLS(y_h, X).fit()
-    lm_h, _ = _breusch_pagan(model_h, X)
+    lm_h, p_h = _breusch_pagan(model_h, X)
     assert lm_h is not None, "微尺度同方差真实数据的 BP 不应退化为 N/A"
+    assert 0.0 <= p_h <= 1.0, f"BP 的 p 应为概率，实测 {p_h!r}"
     # 完美拟合（残差仅浮点舍入水平）仍应判 N/A——保留原 #审查 2026-08-19 行为
     y_perfect = 1.0 + 2.0 * (x / n)
     model_p = sm.OLS(y_perfect, X).fit()

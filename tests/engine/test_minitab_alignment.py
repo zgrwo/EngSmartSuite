@@ -152,10 +152,13 @@ class TestCapabilityAlignsWithMinitabDefinitions:
     def test_all_four_indices_are_present(self):
         """Minitab 能力分析的四项指数都必须输出（缺一项用户就得换工具）。"""
         r = self._run_cap()
+        # 一条**具体**断言取代 `is not None` + `> 0` 两条弱形态：
+        # 既排除 None，也钉住"有限正数"。
         for key in ("cp", "cpk", "pp", "ppk"):
             value = r.metadata.get(key)
-            assert value is not None, f"缺能力指数 {key}（Minitab 有）"
-            assert float(value) > 0, (key, value)
+            assert isinstance(value, (int, float)) and np.isfinite(value) and value > 0, (
+                f"能力指数 {key} 应为有限正数，实测 {value!r}（Minitab 有此项）"
+            )
 
 
 class TestGageRrAlignsWithMinitabOutputs:

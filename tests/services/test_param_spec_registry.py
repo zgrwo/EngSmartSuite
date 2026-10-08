@@ -81,7 +81,6 @@ class TestSpecIsResolvedPerTask:
         """
         s_vt = spec_for_task("variance_test")
         s_pc = spec_for_task("proportion_ci")
-        assert s_vt is not None and s_pc is not None
         assert s_vt is not s_pc, "两个任务必须各有独立 Spec"
         assert set(s_vt.field_names) == {"group_col", "alpha"}
         assert set(s_pc.field_names) == {"ci_level", "success_value"}

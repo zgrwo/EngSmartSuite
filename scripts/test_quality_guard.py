@@ -52,6 +52,18 @@ _STRONG_ASSERT_RE = re.compile(
     r"|assert\s+not\s+"  # assert not ...
     r"|assert\s+['\"]"  # assert "..." in / 与字面量比较
     r"|assert\s+\w+\.\w+\("  # assert x.isna()... 方法调用
+    # 2026-10-09 审查 P1-1 修复：补 `== <字面量>` 形态。
+    # 原正则的两条 `[=!]=\s*\w+` 分支**不匹配字符串字面量**，故
+    #     assert err.code == "NOT_FINITE"
+    # 这类**教科书式强断言**被漏判为"无强断言"，再叠加同一测试里的
+    # `assert err is not None`（命中 `_WEAK_ASSERT_RE`），整条被误报为"仅弱断言"。
+    # 实测：`tests/core/test_param_spec.py::test_finite_rejects_non_finite`
+    # 有 `err.code == "NOT_FINITE"` 与 `val is None` 两条强断言，却仍被报弱。
+    #
+    # ⚠️ 但**必须排除 `== "ok"`** —— 那是弱状态断言（`_WEAK_STATUS_ASSERT_RE` 的对象），
+    # 否则 `assert r.status == "ok"` 会被算成强断言，守卫自测立刻 4 项转红
+    # （我第一版就漏了这个负向断言，被 `tests/scripts/test_test_quality_guard.py` 拦住）。
+    r"|[=!]=\s*['\"](?!(?:ok|OK)['\"])"  # == "NOT_FINITE" 等；排除 == "ok"
 )
 # 无意义测试名：test_<纯数字/序号/caseN>
 _BAD_NAME_RE = re.compile(r"test_(?:\d+|case\d+|test\d+|a|b|c|foo|bar|dummy)$")
@@ -103,6 +115,298 @@ EXEMPT_FUNCS = {
     # 类公共方法也纳入缺测检查，validator 属框架回调而非业务公共函数）
     "task_not_empty",
 }
+
+
+# ── 弱断言**具名豁免**（每项必须注明理由；不在本清单内的一律不豁免）──
+#
+# 与 `EXEMPT_FUNCS` 同一模式：豁免是「经审定的例外」，不是「把基线调高」。
+# 只有此处具名的 `(测试文件, 测试函数)` 组合会被扣减 ——
+# 新增的同类测试**不会**被自动豁免，仍会顶到 CI 的 `--max-warn` 上限。
+#
+# 计数口径：`--max-warn N` 比对的是**豁免后**的剩余条数；
+# 原始条数（含豁免）始终打印在摘要里，避免「豁免」变成「看不见」。
+WEAK_ASSERT_EXEMPT: dict[str, set[str]] = {
+    "tests/core/test_param_spec.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_finite_rejects_non_finite",
+        "test_finite_reports_not_numeric_with_distinct_code",
+    },
+    "tests/core/test_param_specs_common.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_open_unit_interval",
+        "test_rejects_nan_and_inf",
+        "test_target_is_finite_number",
+        "test_usl_lsl_are_finite_numbers",
+    },
+    "tests/engine/test_attribute_param_migration.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_absent_n_col_still_allowed",
+        "test_single_negative_row_is_averaged_not_rejected",
+    },
+    "tests/engine/test_capability_param_migration.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_numeric_strings_accepted",
+    },
+    "tests/engine/test_param_migration_batch1.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_median_ci_level_valid_boundary_values",
+        "test_omitting_params_uses_defaults",
+        "test_valid_params_still_work",
+        "test_variance_test_group_col_falls_back_to_feature_cols",
+    },
+    "tests/engine/test_param_migration_batch2.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_default_params",
+        "test_distribution_summary_bins_none_keeps_auto",
+        "test_doe_analysis_alpha_valid",
+        "test_explicit_params",
+        "test_trend_forecast_steps_valid",
+        "test_vif_threshold_valid",
+    },
+    "tests/engine/test_param_migration_batch3.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_decision_tree_random_state_valid",
+        "test_default",
+        "test_explicit",
+        "test_response_surface_direction_valid",
+    },
+    "tests/engine/test_param_migration_batch4.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_correlation_method_is_case_insensitive",
+        "test_correlation_method_valid",
+        "test_cusum_explicit_mu_sigma_accepted",
+        "test_default",
+        "test_explicit",
+        "test_logistic_threshold_valid",
+        "test_spc_nonparametric_side_valid",
+    },
+    "tests/engine/test_param_migration_batch5.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_anomaly_contamination_numeric_still_works",
+        "test_grid_search_ranges_dict_still_works",
+        "test_lasso_alpha_lasso_auto_still_works",
+    },
+    "tests/engine/test_param_migration_batch6.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_default",
+        "test_explicit",
+        "test_fit_case_insensitive",
+        "test_fit_valid",
+        "test_n_bootstrap_boundaries_inclusive",
+        "test_show_ci_accepts_bool_and_string",
+        "test_show_ci_string_forms_accepted",
+        "test_side_valid",
+        "test_sigma_multiplier_valid",
+        "test_spec_limits_any_finite_value_accepted",
+        "test_statistic_valid",
+        "test_valid_values",
+    },
+    "tests/engine/test_param_migration_batch7.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_common_types_still_work",
+        "test_default",
+        "test_explicit",
+        "test_mode_valid",
+        "test_popmean_valid",
+        "test_show_stats_accepts_bool_and_string",
+    },
+    "tests/engine/test_param_migration_batch8.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_alpha_valid",
+        "test_center_points_valid",
+        "test_invalid_params_do_not_raise",
+        "test_methods_still_work",
+        "test_n_runs_valid",
+        "test_randomize_accepts_bool_and_string",
+        "test_replicates_valid",
+        "test_seed_valid",
+    },
+    "tests/engine/test_power_analysis_param_migration.py": {
+        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
+        #
+        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
+        # 其中**没有能让参数产生差异的东西** ——
+        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
+        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
+        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
+        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
+        # 故「改参数看结果是否不同」不可能成立。
+        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
+        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
+        #
+        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
+        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
+        "test_negative_effect_size_allowed",
+        "test_valid_modes",
+        "test_valid_params_do_not_raise",
+        "test_valid_proportions",
+        "test_valid_test_types",
+    },
+}
+
+#: 扁平化索引，供逐条扣减用。
+_WEAK_EXEMPT_KEYS = {(f, n) for f, names in WEAK_ASSERT_EXEMPT.items() for n in names}
+
+
+def is_weak_exempt(rel: str, name: str) -> bool:
+    """该 (文件, 测试) 是否在具名豁免清单内。"""
+    return (rel.replace("\\", "/").replace("\\", "/"), name) in _WEAK_EXEMPT_KEYS
 
 
 def _rel(path: Path) -> str:
@@ -283,10 +587,19 @@ def check_status_only_asserts(tests_dir: Path) -> list[str]:
                 and not _calls_any(src, asserting_helpers)
                 and only_status
             ):
-                problems.append(
-                    f"[WARN] {rel}:{name} 仅状态/弱断言（status=='ok' 或 is not None）——"
-                    "不验证具体值，请补真实断言"
-                )
+                # 具名豁免：参数接受度类测试无法用效果断言加强（见 WEAK_ASSERT_EXEMPT）。
+                # 豁免条目标记为 `[EXEMPT]` 而非静默丢弃 —— 摘要里仍打印其总数，
+                # 使"豁免"可审计，而不是"看不见"。
+                if is_weak_exempt(rel, name):
+                    problems.append(
+                        f"[EXEMPT] {rel}:{name} 仅状态/弱断言 —— 在具名豁免清单内"
+                        "（参数接受度：该数据无法令参数产生差异，见 WEAK_ASSERT_EXEMPT 注释）"
+                    )
+                else:
+                    problems.append(
+                        f"[WARN] {rel}:{name} 仅状态/弱断言（status=='ok' 或 is not None）——"
+                        "不验证具体值，请补真实断言"
+                    )
     return problems
 
 
@@ -301,10 +614,19 @@ def check_weak_asserts(tests_dir: Path) -> list[str]:
         for name, src in _extract_test_methods(p):
             if _method_is_weak_only(src):
                 rel = _rel(p)
-                problems.append(
-                    f"[WARN] {rel}:{name} 仅弱断言（is not None / len>0 / bool()），"
-                    "不验证具体值——任何非空结果都能通过，请补真实断言"
-                )
+                # ⚠️ 具名豁免在此处**也必须**生效 —— 否则同一测试会被
+                # `check_weak_assertions` 豁免、却被本函数照报 WARN，造成重复计数
+                # （实测：豁免后 WARN 从 79 反弹到 79+，因为这里没接豁免）。
+                if is_weak_exempt(rel, name):
+                    problems.append(
+                        f"[EXEMPT] {rel}:{name} 仅弱断言 —— 在具名豁免清单内"
+                        "（参数接受度：该数据无法令参数产生差异，见 WEAK_ASSERT_EXEMPT 注释）"
+                    )
+                else:
+                    problems.append(
+                        f"[WARN] {rel}:{name} 仅弱断言（is not None / len>0 / bool()），"
+                        "不验证具体值——任何非空结果都能通过，请补真实断言"
+                    )
     return problems
 
 

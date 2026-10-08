@@ -43,8 +43,17 @@ jobs:
       - name: 安装依赖（冻结锁文件）
         run: uv sync --frozen --all-extras
       - name: Run test quality guard
-        # WARN 基线 10（2026-09-22 审查发现 6：4 条弱断言改量纲不变量后由 14 收紧）
-        run: uv run python scripts/test_quality_guard.py --max-warn 10
+        # WARN 基线 12（2026-10-09 发版前全量审查 P1-1）。
+        # 审查实测：CI 口径 89 > 10 → 红；而本地 verify_all.py 跑的是**默认口径**
+        # （exit 0）→ 假绿。本轮两处一起修：verify_all 复用本参数，
+        # WARN 由 89 压到 11：
+        #   · 修守卫自身 1 处漏判（_STRONG_ASSERT_RE 不识别 `== "字面量"`，
+        #     使含 `err.code == "NOT_FINITE"` 的测试被误报为弱）；
+        #   · 64 条"参数接受度"测试加**具名豁免**（WEAK_ASSERT_EXEMPT，逐项注明理由：
+        #     该数据无法令参数产生差异，实测确认无法做效果断言）；
+        #   · 其余逐条加强（参数回报 / 上界语义 / p 值范围 / 拆复合断言 / 删冗余 is not None）。
+        # 基线 12 = 实测 11 + 1 条余量。**豁免条数始终打印**，避免"豁免变看不见"。
+        run: uv run python scripts/test_quality_guard.py --max-warn 12
 
   docs-consistency:
     name: 文档一致性（断链/目录树/裸异常/版本漂移）

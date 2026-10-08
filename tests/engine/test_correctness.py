@@ -475,7 +475,9 @@ def test_survival_km_known_median():
     r = survival_analysis(req)
     assert r.status == "ok"
     median = r.metadata["median_survival"]
-    assert median is not None, "应能计算中位生存时间"
+    # 不再单独断言 `is not None` —— 下面的 `approx` 已隐含它（None 会让它直接失败）。
+    # 留一条"任何非空结果都能通过"的弱断言，只会让 `test_quality_guard`
+    # 把整条测试判为弱断言（实测 `--max-warn` 会因它多计 1 条）。
     # KM 中位数有**精确的定义**：生存函数 S(t) 首次 ≤ 0.5 的那个观测时间。
     # 无删失时 S(t) = 1 − i/n（i 为排序后的名次），故可**完全独立地手算** ——
     # 这不是"与另一个库比"，而是直接按定义复算。
