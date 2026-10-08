@@ -141,6 +141,95 @@ class TestAnovaComponentsPresent:
             assert np.isfinite(entry["F"]), f"{effect} 的 F 非有限"
             assert 0.0 <= entry["p"] <= 1.0, f"{effect} 的 p 越界: {entry['p']}"
 
+    # ── ANOVA 恒等式：这些关系对**任意数据**都成立，故是比"非负"强得多的真值 ──
+
+    def test_sum_of_squares_decomposes_exactly(self):
+        """**平方和分解恒等式**：`Σ(MS×df) = SST`（总离差平方和）。
+
+        真值来源：单因素/多因素 ANOVA 的定义 —— 总平方和等于各来源平方和之和。
+        期望值用**手算**：`SST = Σ(y − ȳ)²`（与引擎无关）。
+        实测该数据上相对差 1.2e-15（浮点极限）。
+
+        ⚠️ 取 df 与 MS 的方式要注意：`anova_f_tests[effect]["df"]` 对三个因子效应
+        是 `(分子df, 分母df)` **元组**，而 `repeatability` 只有单个 `int` ——
+        我首版一律按 `[0]` 取，在 repeatability 上抛 TypeError。
+        """
+        r = _run(_crossed_frame(4))
+        ft = r.metadata["anova_f_tests"]
+        ss_total = 0.0
+        for _effect, entry in ft.items():
+            df = entry["df"]
+            df_num = int(df[0]) if isinstance(df, tuple) else int(df)
+            ss_total += float(entry["MS"]) * df_num
+        df = _crossed_frame(4)
+        sst_manual = float(((df["y"] - df["y"].mean()) ** 2).sum())
+        assert ss_total == pytest.approx(sst_manual, rel=1e-9), (
+            f"Σ(MS×df)={ss_total!r} 应等于手算 SST={sst_manual!r}"
+        )
+
+    def test_f_statistics_equal_mean_square_ratios(self):
+        """**F 统计量的定义式**：`F = MS_效应 / MS_误差`。
+
+        交叉设计的标准分母：部件与操作员用**交互**的 MS，交互用**重复性**的 MS。
+        期望值由手算比值给出 —— 不是"大于 0"这种弱界。
+        """
+        ft = _run(_crossed_frame(4)).metadata["anova_f_tests"]
+        ms = {k: float(v["MS"]) for k, v in ft.items()}
+        for effect, numerator, denominator in (
+            ("part", "part", "interaction"),
+            ("operator", "operator", "interaction"),
+            ("interaction", "interaction", "repeatability"),
+        ):
+            expected = ms[numerator] / ms[denominator]
+            assert float(ft[effect]["F"]) == pytest.approx(expected, rel=1e-12), (
+                f"F({effect}) 应为 MS_{numerator}/MS_{denominator}={expected!r}，"
+                f"实测 {ft[effect]['F']!r}"
+            )
+
+    def test_repeatability_component_equals_residual_mean_square(self):
+        """重复性方差分量**恒等于**残差均方 `MS_残差`（ANOVA 法的定义）。"""
+        r = _run(_crossed_frame(4))
+        comps = r.metadata["anova_variance_components"]
+        ms_rep = float(r.metadata["anova_f_tests"]["repeatability"]["MS"])
+        assert float(comps["repeatability"]) == pytest.approx(ms_rep, rel=1e-12), (
+            f"重复性分量应为 MS_残差={ms_rep!r}，实测 {comps['repeatability']!r}"
+        )
+
+    def test_variance_component_confidence_intervals_bracket_their_estimates(self):
+        """每个分量的 95% CI 必须**包含**它自己的点估计（区间的基本性质）。
+
+        对 `seed` 遍历多组数据 —— 单组可能是巧合，多组才说明实现正确。
+        """
+        for seed in range(6):
+            r = _run(_crossed_frame(seed))
+            comps = r.metadata["anova_variance_components"]
+            ci = r.metadata["anova_ci95"]
+            for key, value in comps.items():
+                lo, hi = (float(v) for v in ci[key])
+                assert lo <= float(value) <= hi, (
+                    f"seed={seed} 分量 {key}={value!r} 不在其 CI [{lo!r}, {hi!r}] 内"
+                )
+
+    def test_mean_squares_are_consistent_between_table_and_metadata(self):
+        """`tables["gage_rr_anova"]` 的「均方」列必须与 `metadata` 的 `MS` **在展示精度上一致**。
+
+        同一条数据在两处露面 —— 若不一致，用户从表里读到的与机器读取到的就是不同值。
+
+        ⚠️ 我首版断言"两处的**浮点值**集合相等"→ **失败**：表里是**展示精度**
+        （实测 `0.391181`、`6.55702`），`metadata` 是完整精度。
+        这不是缺陷 —— 表是给人看的，`metadata` 是给机器读的。故判据改为
+        **按表里的精度取整后相等**（既抓住真不一致，又不误报合法的取整）。
+        """
+        r = _run(_crossed_frame(4))
+        tbl = r.tables["gage_rr_anova"]
+        ft = r.metadata["anova_f_tests"]
+        meta_ms = [float(v["MS"]) for v in ft.values()]
+        for text in (str(v) for v in tbl["均方"]):
+            decimals = len(text.split(".")[1]) if "." in text else 0
+            assert any(round(ms, decimals) == float(text) for ms in meta_ms), (
+                f"表里的均方 {text} 在 metadata 中找不到按 {decimals} 位取整的对应值"
+            )
+
     def test_anova_table_is_present_in_tables(self):
         """ANOVA 表必须进 `tables`（用户可见，不只在 metadata）。"""
         r = _run(_crossed_frame(4))
