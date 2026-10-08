@@ -69,6 +69,12 @@ EXCLUDED_DIRS = {
 # 源码文件无门禁——实测注入 src/smartsuite/engine/spc_charts/zz_*.py 退出 0）
 _SUBDIR_CHECK = ("src", "docs", "skills", "tests", "scripts", "templates", ".github", "benchmarks")
 
+# 递归要求登记的**代码**根目录：其下的 .py 一律须在目录树中登记，
+# 与"该目录是否已被标为 recursive"无关（堵住"新建目录第一个文件漏网"的缺口）。
+# 限定 .py 是实测决定：全量递归会产出 82 项噪音（多为 docs 配图等汇总资产），
+# 而只查代码 .py 时全仓违规数为 0。见 check_subdir_undeclared 的注释。
+_CODE_RECURSIVE_ROOTS = frozenset({"src", "tests", "scripts", "benchmarks"})
+
 # 反引号路径检查：仅检查以已知根目录前缀开头的引用（语义明确指向仓库内路径）
 _KNOWN_ROOT_PREFIXES = (
     "scripts/",
@@ -639,6 +645,28 @@ def check_subdir_undeclared(root: Path, strict: bool) -> list[str]:
         if p.name == ".gitkeep" or rel in declared or p.name in ignored:
             continue
         if p.parent.relative_to(root).as_posix() in recursive:
+            problems.append(f"[未声明文件] {rel}（请同步 project-structure.md 目录树）")
+            continue
+        # 审查 2026-09-24（第三轮复核 P3-3 附带发现）：`_recursive_dirs` 只覆盖
+        # **已声明至少一个子项**的目录 —— 于是**新建目录的第一个文件永远漏网**
+        # （实测：新增 tests/golden/test_spc_msa_golden.py 时本检查无任何输出，
+        #  而该文件确实未登记）。
+        #
+        # 补一条**兜底**规则：代码目录（src/tests/scripts/benchmarks）下的 .py，
+        # 若其父目录未落入 recursive（即最深层那个新目录），也要求登记。
+        #
+        # 两个边界均为实测决定：
+        #   ① 只查代码根下的 .py —— 全量递归会产出 82 项噪音（多为 docs 配图等
+        #      汇总资产），而只查代码 .py 时全仓违规数为 0；
+        #   ② 仅在父目录**不在** recursive 时生效 —— 保留"目录树只声明某目录本身
+        #      （未逐项列出）时其内容豁免"的既有语义（有专门测试锁定）。
+        rel_parts = Path(rel).parts
+        if (
+            p.suffix == ".py"
+            and rel_parts
+            and rel_parts[0] in _CODE_RECURSIVE_ROOTS
+            and len(rel_parts) > 2  # 位于子目录内（顶层文件已由 check_undeclared 覆盖）
+        ):
             problems.append(f"[未声明文件] {rel}（请同步 project-structure.md 目录树）")
     return problems
 

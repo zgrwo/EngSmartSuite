@@ -537,7 +537,10 @@ rpt("anova", "ABS mean", 4.217, round(abs_mean, 4), 0.005)
 
 p()
 p("--- 4.3 HYPOTHESIS_TEST ---")
-rpt("hypothesis_test", "t statistic", 12.60, ht_stat, 0.05)
+# 审查 2026-09-24（第三轮复核 P2-4）：独立双样本 t 检验默认改为 Welch
+# （新增 Levene 方差齐性检验 + Welch–Satterthwaite 自由度），手册 §4.3 的统计量
+# 随之由 Student 口径 12.60 变为 Welch 口径 10.92。参考值同步，容差不变。
+rpt("hypothesis_test", "t statistic", 10.92, ht_stat, 0.05)
 rpt("hypothesis_test", "p value", 0.0000, ht_p, 0.001)
 # Extract group means from ds table
 for i in range(len(ds)):
