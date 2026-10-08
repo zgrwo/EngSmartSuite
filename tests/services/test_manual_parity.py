@@ -169,8 +169,26 @@ def test_manual_4_2_anova(raw_df):
             p_val = float(anova_tbl["data"][0][anova_tbl["columns"].index("p值")])
             eta2 = float(anova_tbl["data"][0][anova_tbl["columns"].index("η²")])
 
-        assert 0.5 < p_val < 0.8, f"{path_name}: p={p_val:.4f}，手册预期≈0.615"
-        assert 0.001 < eta2 < 0.01, f"{path_name}: η²={eta2:.4f}，手册预期≈0.0027"
+        # 期望值**取自手册原文**（§4.2 的 ANOVA 表）：
+        #   `| Q('原料类型') | 4 | 4.12 | 1.03 | 0.67 | 0.615 | 0.0027 | ... |`
+        # 这是"文档承诺 vs 引擎实现"的对账，不是抄引擎输出。
+        # 容差取表格精度（3 位小数）的一半量级，使"表格错一位"能被抓住。
+        assert p_val == pytest.approx(0.615, abs=5e-4), (
+            f"{path_name}: p={p_val!r}，手册表格写 0.615"
+        )
+        assert eta2 == pytest.approx(0.0027, abs=5e-5), (
+            f"{path_name}: η²={eta2!r}，手册表格写 0.0027"
+        )
+        # 完整精度只在 **Python 直调**路径上断言 —— Web 路径的值经序列化
+        # **按展示精度取整**（实测 Web 给 0.6152，即 4 位小数），
+        # 对 Web 用 1e-12 容差会误报（我首版就是这样，被实测拦住）。
+        if path_name == "Python":
+            assert p_val == pytest.approx(0.6152425554079081, abs=1e-12), (
+                f"Python 直调: p 精确值漂移（{p_val!r}）"
+            )
+            assert eta2 == pytest.approx(0.002672756928191164, abs=1e-15), (
+                f"Python 直调: η² 精确值漂移（{eta2!r}）"
+            )
 
     # 数值交叉验证
     py_p = float(r_py.metadata.get("p_value", 999))
@@ -203,8 +221,20 @@ def test_manual_4_3_hypothesis_test(raw_df):
         p_val = float(meta.get("p_value", 999))
         d_val = float(meta.get("effect_size", 0))
 
-        assert p_val < 0.001, f"{path_name}: p={p_val:.6f}，手册预期<0.001"
-        assert 1.0 < abs(d_val) < 1.6, f"{path_name}: d={d_val:.3f}，手册预期≈1.31"
+        # 期望值**取自手册原文**（§4.3 的结果表）：
+        #   `| Welch 独立样本 t 检验 | 10.92 | 0.0000 | Hedges g=1.310 | 大 | 100.0% | ... |`
+        # 注意手册把检验名写作 "Welch" —— 与引擎第三十八轮起的默认口径一致。
+        assert abs(d_val) == pytest.approx(1.310, abs=5e-4), (
+            f"{path_name}: |g|={abs(d_val)!r}，手册表格写 1.310"
+        )
+        # 手册的 p 值列写 "0.0000"（4 位小数显示），故真值是"小于 5e-5"这一**确定性上界**，
+        # 而非"小于 0.001"这种宽泛界。引擎实测 1.2006271775120562e-19。
+        assert p_val < 5e-5, f"{path_name}: p={p_val!r}，手册表格显示 0.0000（即 <5e-5）"
+        # 完整精度同样只在 Python 直调路径断言（Web 经展示精度取整）
+        if path_name == "Python":
+            assert p_val == pytest.approx(1.2006271775120562e-19, rel=1e-9), (
+                f"Python 直调: p 精确值漂移（{p_val!r}）"
+            )
 
     # 均值验证: 保养日=否 ≈4.41, 是≈2.89
     py_p = float(r_py.metadata.get("p_value", 999))

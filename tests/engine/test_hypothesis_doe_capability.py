@@ -7,6 +7,7 @@
 """
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
@@ -157,8 +158,31 @@ class TestMed2Interaction:
         inter_rows = eff[eff["因子"].astype(str).str.contains(r"×|:|x", case=False, regex=True)]
         assert len(inter_rows) >= 1, f"应包含交互效应行，实际因子: {list(eff['因子'])}"
         inter_effect = float(inter_rows.iloc[0]["主效应"])
-        # 真实交互效应 = 2*5 = 10
-        assert 8 < inter_effect < 12, f"交互效应应≈10，实际={inter_effect:.3f}"
+        # ── 解析真值：2×2 因子设计的**效应 = 2×系数**（效应是高低水平均值之差）──
+        #   y = 2A + 3B + 5AB  →  真值 A=4, B=6, AB=10
+        # 实测（n=40, σ=0.1）：AB=10.5423、B=5.3960、A=3.8040。
+        # 容差 ±1.0 **由实测抽样误差标定**：观测到的最大偏离是 B 的 0.6040。
+        # ⚠️ 我上一版取 ±0.6（按最大偏离 0.5423 标定）→ B 的 0.6040 恰好超出而失败。
+        # 教训：**用样本实测值标定容差必须留余量**，否则等于把噪声当规范。
+        assert inter_effect == pytest.approx(10.0, abs=1.0), (
+            f"交互效应真值为 2×5=10，实测 {inter_effect:.4f}"
+        )
+        eff_a = float(eff[eff["因子"] == "A"]["主效应"].iloc[0])
+        eff_b = float(eff[eff["因子"] == "B"]["主效应"].iloc[0])
+        assert eff_a == pytest.approx(4.0, abs=1.0), f"A 主效应真值为 2×2=4，实测 {eff_a:.4f}"
+        assert eff_b == pytest.approx(6.0, abs=1.0), f"B 主效应真值为 2×3=6，实测 {eff_b:.4f}"
+        # 上面三条容差宽松（容纳抽样噪声），故**另加精确值钉住**：
+        # 数据固定（seed=42）→ 这三个数是确定的，任何漂移都会被抓住。
+        # 双断言分工：前者验"算法方向对不对"，后者验"数值有没有动"。
+        assert inter_effect == pytest.approx(10.5423, abs=5e-4), f"AB 精确值漂移: {inter_effect!r}"
+        assert eff_a == pytest.approx(3.8040, abs=5e-4), f"A 精确值漂移: {eff_a!r}"
+        assert eff_b == pytest.approx(5.3960, abs=5e-4), f"B 精确值漂移: {eff_b!r}"
+        # ── 排序不变量（比单点容差更稳健，且不依赖噪声实现）──
+        # 真值 AB(10) > B(6) > A(4) → 排序必须保持，否则说明效应表算错或串位。
+        assert inter_effect > eff_b > eff_a, (
+            f"效应排序应为 AB > B > A（真值 10 > 6 > 4），"
+            f"实测 AB={inter_effect:.4f}, B={eff_b:.4f}, A={eff_a:.4f}"
+        )
         assert inter_rows.iloc[0]["显著"] == "是", "强交互应标记显著"
 
     def test_doe_analysis_no_spurious_interaction(self):
@@ -206,8 +230,17 @@ class TestMed2Interaction:
         eff = r.tables["effect_estimates"]
         eff_a = float(eff[eff["因子"] == "A"]["主效应"].iloc[0])
         eff_b = float(eff[eff["因子"] == "B"]["主效应"].iloc[0])
-        assert 3.5 < eff_a < 6.5
-        assert -4.5 < eff_b < -1.5
+        # ── 解析真值：y = 2.5A − 1.5B  →  真值 A=+5, B=−3 ──
+        # 实测（n=20, σ=0.3）：A=4.6284、B=−2.9810；容差 ±1.0 由实测抽样误差标定（留余量）。
+        assert eff_a == pytest.approx(5.0, abs=1.0), f"A 主效应真值为 2×2.5=5，实测 {eff_a:.4f}"
+        assert eff_b == pytest.approx(-3.0, abs=1.0), (
+            f"B 主效应真值为 2×(−1.5)=−3，实测 {eff_b:.4f}"
+        )
+        # 精确值钉住（seed=42 → 确定；分工同上一处）
+        assert eff_a == pytest.approx(4.6284, abs=5e-4), f"A 精确值漂移: {eff_a!r}"
+        assert eff_b == pytest.approx(-2.9810, abs=5e-4), f"B 精确值漂移: {eff_b!r}"
+        # ── 符号不变量：A 为正、B 为负（数据构造保证；符号反了说明因子串位）──
+        assert eff_a > 0 > eff_b, f"符号应为 A>0>B，实测 A={eff_a:.4f}, B={eff_b:.4f}"
 
 
 # ═══════════════════════════════════════════════════════════
