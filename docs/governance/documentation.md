@@ -31,7 +31,7 @@
   → ③ services/orchestrator.py → TASK_REGISTRY 注册
   → ④ DEFAULT_PARAMS 添加默认参数
   → ⑤ TASK_LABELS + TASK_GROUPS 添加条目
-  → ⑥ web/static/app.js → TASK_PARAMS
+  → ⑥ `/api/tasks` 下发 → 前端 `params.js` 接收（`app.js` 只读，无副本字典）
   → ⑦ templates/ 创建 YAML 模板
   → ⑧ 测试：test_correctness + test_invariants
   → ⑨ specification/api-reference.md 更新

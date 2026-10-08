@@ -70,7 +70,8 @@ core/   (contracts.py：AnalysisRequest / AnalysisResult；exceptions.py)   ← 
 
 ```
 engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_SPECS 追加一条 TaskSpec
-→ web/static/app.js TASK_PARAMS → templates/ YAML → 测试（correctness+invariants）
+→ `derive(TASK_SPECS)` 派生 → `/api/tasks` 下发 → 前端 `params.js` 接收（`app.js` 只读）
+→ templates/ YAML → 测试（correctness+invariants）
 → api-reference.md → user-manual/（五段式）+ 决策树
 ```
 
@@ -84,7 +85,7 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 - `_yOnlyTasks`：仅需 Y 列（process_capability/trend_forecast/distribution_summary/proportion_ci/spc_cusum…）
 - `_xOptionalTasks`：X 列可选回退（spc_xbar/spc_attribute/normality_check/anomaly_detect…）
 
-任务注册完整性由 `ci.yml` consistency job 的 5 路集合断言（REGISTRY=DEFAULT_PARAMS=LABELS=GROUPS）+ `engine __all__` 覆盖 + `verify_frontend_params.py`（静态解析 app.js TASK_PARAMS ↔ DEFAULT_PARAMS 键集，2026-09-06 E4/G4 起）+ `verify_cross_consistency.py`（运行时交叉验证 + 手册 CLAIM）强制。
+任务注册完整性由 `ci.yml` consistency job 的集合断言（REGISTRY=DEFAULT_PARAMS=LABELS=GROUPS 全部来自 `derive(TASK_SPECS)`）+ `engine __all__` 覆盖 + `verify_frontend_params.py`（静态解析 app.js TASK_PARAMS ↔ DEFAULT_PARAMS 键集，2026-09-06 E4/G4 起）+ `verify_cross_consistency.py`（运行时交叉验证 + 手册 CLAIM）强制。
 
 ### 3.4 哨兵契约 L1-L5 与 NaN/Inf/None 守卫
 
@@ -158,7 +159,7 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 | 源代码 | `ruff check src/smartsuite/ scripts/ tests/` + `ruff format --check src/smartsuite/ scripts/ tests/` + 聚焦 pytest（`run_affected_tests.py` 增量判定） |
 | 引擎/数值 | 追加四层防线：`pytest tests/engine/test_correctness.py tests/engine/test_invariants.py tests/engine/test_edge_cases.py -q` + `pytest tests/guards/ -q`（微尺度/规格限回归）+ `python scripts/verify_consistency.py --skip-pytest`（42 任务 status=ok 冒烟）+ `python scripts/verify_manual_claims.py`（手册 CLAIM ↔ 引擎输出） |
 | 服务/桥接 | `preprocess_data` 改动必查全部解包调用方 + `pytest tests/services/ -q` |
-| 前端/参数面板 | 四点一致性（app.js TASK_PARAMS / PARAM_META / PARAM_LABELS / orchestrator DEFAULT_PARAMS）+ `python scripts/verify_frontend_params.py`（键集静态比对）+ `python scripts/verify_cross_consistency.py`（运行时） |
+| 前端/参数面板 | **单一来源架构**（`TaskSpec` 声明 → `derive()` → `/api/tasks` → `params.js` 接收；`app.js` 已无副本字典）+ `python scripts/verify_frontend_params.py`（键集静态比对）+ `python scripts/verify_cross_consistency.py`（运行时） |
 | 脚本/门禁 | `pytest tests/scripts/ -q`（治理脚本自测）+ 负向注入验证（见 6.4） |
 | 文档/发版 | `python scripts/verify_docs.py --strict` + `python scripts/falsy_audit.py` + 版本链核对（pyproject/CHANGELOG/manifest） + **远端拓扑核验（发版前全量）**：`git ls-remote origin refs/heads/main 'refs/tags/v*'` + 仓库外临时克隆判祖先（见「4.2 附注」） |
 
@@ -286,8 +287,8 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 
 | 模式 | 检查方法 |
 | :--- | :--- |
-| 前端→orchestrator→引擎参数错位 | 对照 api-reference 参数名/默认值与 app.js TASK_PARAMS、orchestrator DEFAULT_PARAMS（verify_cross_consistency 只查默认值集合，不查语义） |
-| 列约束三集合与引擎实际使用 | `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 中多/漏/错任务（陷阱 2） |
+| 前端→orchestrator→引擎参数错位 | 对照 api-reference 参数名/默认值与 `orchestrator.DEFAULT_PARAMS`（均派生自 `TASK_SPECS`；前端只读，无副本可比）（verify_cross_consistency 只查默认值集合，不查语义） |
+| 列约束集合与引擎实际使用 | `/api/tasks` 下发的 `no_target_tasks` / `y_only_tasks` / `x_optional_tasks` 与 `TaskSpec` 声明是否一致、以及前端是否**回退到手写集合**（`tests/guards/test_frontend_taxonomy.py` 防回流） |
 | 参数语义共享错配 | `side`（tolerance_interval 的"检验侧" vs spc_nonparametric 的"控制限方向"）等共享参数需 `key@task_name` 覆写 |
 | falsy 参数默认值 | `params.get("alpha", 0.05)` 对显式传 0/False 的处理；空串→float 防护路径（`(ValueError, TypeError)` 捕获 + `np.isfinite` 显式拒绝，见 C1） |
 | 参数可达性 | 前端面板提供引擎不支持的选项（历史：`mad` 选项被移除，78a0f14）/ 引擎支持的参数前端不可达（历史：power/correlation 参数补齐，78a0f14）——前端选项集 ⊆ 引擎能力，双向核对 |

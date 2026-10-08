@@ -351,7 +351,7 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
                                key/func_path/label/group/default_params/raw_cat/no_target/no_data
                                → TASK_REGISTRY / DEFAULT_PARAMS / TASK_LABELS / TASK_GROUPS /
                                  RAW_CAT_TASKS / NO_TARGET_TASKS / NO_DATA_TASKS 自动派生
-□ 4. app.js                  — TASK_PARAMS 添加参数默认值
+□ 4. services/task_spec.py — TaskSpec 声明参数（默认值由 derive() 派生，勿抄到前端）
 □ 5. templates/              — 创建 YAML 模板
 □ 6. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
 □ 7. docs/specification/api-reference.md   — 更新 API 参考
@@ -399,7 +399,7 @@ for key, color, style in [
         _ref_lines.append((val_f, color, style, key.upper()))
 ```
 
-**前端 TASK_PARAMS**：
+**参数默认值的单一来源**（`app.js` 已无 `TASK_PARAMS` 字典，2026 单一来源重构后前端只读）：
 ```javascript
 task_name: { ..., usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
 ```
@@ -409,7 +409,7 @@ task_name: { ..., usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
 当修改/新增参数时，确保三处一致：
 
 ```
-1. app.js TASK_PARAMS[task] = { key: defaultValue }     ← 控制显示哪些参数
+1. TaskSpec(params={...})                      ← 声明参数与默认值（单一来源）
 2. app.js PARAM_META[key] = { type, label, options }    ← 控制渲染方式（可选）
 3. app.js PARAM_LABELS[key] = '中文标签'                  ← 中文显示名（可选）
 4. orchestrator.py DEFAULT_PARAMS[task] = { key: val }  ← Python 端默认值

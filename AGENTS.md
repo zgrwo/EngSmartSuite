@@ -140,7 +140,7 @@ EngSmartSuite/
 
 ### 3. 文档同步
 
-- 新增方法 → api-reference + user-manual + TASK_REGISTRY + TASK_LABELS + TASK_GROUPS + app.js TASK_PARAMS
+- 新增方法 → api-reference + user-manual + `TASK_SPECS` 声明（`TASK_REGISTRY` / `TASK_LABELS` / `TASK_GROUPS` / 参数默认值 / 列需求集合全部由 `derive()` 派生）
 - 手册示例遵循 参数选择→示例图片→数值结果→解读→补充备注 五段式（六段式承诺经两次审查均未兑现，修订承诺而非补全 40 节）
 
 ### 4. 测试 4 层防线

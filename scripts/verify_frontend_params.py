@@ -1,23 +1,38 @@
 """
-verify_frontend_params.py — 前后端参数静态一致性门禁（审查 2026-09-06 E4/G4）。
+verify_frontend_params.py — 前后端参数一致性门禁（审查 2026-09-06 E4/G4）。
 
-解析 web/static/app.js 的 TASK_PARAMS（前端参数面板），与 orchestrator.DEFAULT_PARAMS
-（后端默认参数）逐任务比对：
-  1. 前端任务集 == TASK_REGISTRY 任务集（无缺/多余任务）
-  2. 每任务前端键集 == 后端键集（无前端多余 = 引擎不支持但面板可设；
-     无后端多余 = 引擎参数前端不可达）
+## 现行口径（缺省）：**单一来源架构**
+
+2026 年的前端重构删除了 `app.js` 的 `TASK_PARAMS` 副本字典，参数默认值改为
+**单一来源**：
+
+    `services/task_spec.py::TASK_SPECS` 的 `TaskSpec` 声明
+      → `derive()` → `orchestrator.DEFAULT_PARAMS`
+      → `/api/tasks` 下发 → 前端 `params.js::hydrateParams` 接收
+
+故本门禁缺省检查的是**这条链是否接通**：
+  1. `/api/tasks` 下发的默认值 == `orchestrator.DEFAULT_PARAMS`（逐任务逐键）
+  2. `static/*.js` 必须真的调用 `hydrateParams()` —— 否则下发值永远不会到位
   3. inverse_solve 列角色勾选前缀 INVERSE_PREFIXES == 引擎 DEFAULT_PREFIXES
      （2026-09-11 审查 F4：双份 SSOT 漂移会导致勾选组预勾选错列）
-  4. 简单标量默认值一致（2026-09-13 审查 F-2：键集相等但默认值可静默漂移，
-     如 inverse model 前端 linear / 后端 auto）；带引号数值（'0.05'）归一后比较
-     （N-2）；有意差异须在 KNOWN_DEFAULT_DIFFERENCES 登记，登记失配或过期同样 FAIL。
-  5. 非空数组/对象默认值不参与标量比对，出现即 FAIL 并要求在
-     KNOWN_COMPOUND_DEFAULTS 显式登记豁免（N-3：复合默认值解析超出静态标量口径）。
+  4. 有意差异须在 KNOWN_DEFAULT_DIFFERENCES 登记，登记失配或过期同样 FAIL。
 发现差异即 FAIL 并 exit 1。
 
-历史背景：该一致性此前无任何自动化——ci.yml consistency job 步骤名
-"前后端参数默认值一致性"实跑 verify_cross_consistency（运行时交叉验证，不含
-app.js 解析）；`mad` 选项 / power/correlation 参数不可达（78a0f14）均为人工发现。
+## 历史口径（`--static` 保留）
+
+前端曾有 `TASK_PARAMS` 副本，那时门禁做**静态解析比对**：解析 `app.js` 的
+`TASK_PARAMS` 与 `DEFAULT_PARAMS` 逐任务比对键集与默认值。键集不等的两个方向
+含义不同 —— 前端多余 = 引擎不支持但面板可设；后端多余 = 引擎参数前端不可达。
+该字典已删除，此路径仅供历史对照。
+
+⚠️ 本 docstring 长期停留在这段历史描述上，而实现早已改为单一来源口径 ——
+2026-10-09 审查 P2-2 发现并修正（**文档说 A、代码做 B** 会误导后续读者，
+且本文件本身就是"审查者必跑基线"的一部分）。
+
+历史背景：该一致性此前无任何自动化 —— `ci.yml` consistency job 步骤名
+"前后端参数默认值一致性"实跑 `verify_cross_consistency`（运行时交叉验证，
+不含前端解析）；`mad` 选项 / power/correlation 参数不可达（78a0f14）
+均为人工发现。
 """
 
 import re
