@@ -51,12 +51,13 @@ class AnalysisResult:
 ### hypothesis_test
 - **Task Key**: `hypothesis_test`
 - **描述**: 多种假设检验，含效应量和统计功效
-- **params**: `test` (默认 "ttest_ind"), `alpha` (0.05), `group_col`
+- **params**: `test` (默认 `"ttest_ind"`), `alpha` (0.05), `group_col`, `popmean` (默认 0，单样本 t),
+  `popmedian` (默认 0，单样本 Wilcoxon)
 - **支持的检验类型**:
 
 | test 值 | 描述 | 额外参数 |
 |---------|------|---------|
-| `ttest_ind` | 独立样本 t 检验 | `group_col` |
+| `ttest_ind` | 独立样本 t 检验（**默认 Welch**，见下方口径说明） | `group_col` |
 | `ttest_paired` | 配对 t 检验 | — |
 | `ttest_1samp` | 单样本 t 检验 | `popmean` |
 | `mannwhitney` | Mann-Whitney U 检验 | `group_col` |
@@ -75,6 +76,7 @@ class AnalysisResult:
 | `correlation` | 相关显著性检验 | `group_col` |
 
 **口径说明**（逐公式审计 2026-09-05）：
+- `ttest_ind` **默认 Welch**（`equal_var=False`，不假设等方差；2026-09-24 起）。同时输出 Levene 方差齐性判定与 Welch–Satterthwaite 自由度；方差不齐时在 `messages` 里主动告知。改用合并方差（Student）口径会得到不同的 p 值 —— 详见 [用户手册 04](../user-manual/04-root-cause.md)；
 - `ttest_ind` / `cohens_d` 的效应量为 **Hedges g**（合并标准差 d 乘小样本校正因子）；
 - `ttest_paired` 的效应量 d_z = mean(col1−col2)/sd(col1−col2)，**符号与统计量方向一致**；
 - `jonckheere` 报告**双侧** p 值（有序备择如需单侧请自行折半判读）；

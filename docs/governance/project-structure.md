@@ -35,10 +35,12 @@ EngSmartSuite/
 │       ├── py.typed                #   PEP 561 类型标记（下游 mypy 类型分发）
 │       ├── cli.py                  #   CLI 入口: smartsuite run / list
 │       │
-│       ├── core/                   # ① 数据契约层：仅 pandas+pydantic（AnalysisRequest 为 Pydantic BaseModel）
+│       ├── core/                   # ① 数据契约层（仅 stdlib+pandas+pydantic；engine 与 services 共用）
 │       │   ├── __init__.py
 │       │   ├── contracts.py        #   AnalysisRequest / AnalysisResult
 │       │   ├── constants.py        #   GROUP_COLORS（跨层配色常量，纯数据：web/engine 都取）
+│       │   ├── param_spec.py       #   声明式参数契约（P4 基础设施：Spec/Req/Opt + 校验器 + 内省）
+│       │   ├── param_specs_common.py #  共享参数声明库（P4 步骤③加速器：ALPHA/GROUP_COL/USL…）
 │       │   └── exceptions.py       #   分层异常体系（3 层）
 │       │
 │       ├── engine/                 # ③ 分析引擎层：纯 Python，零 xlwings/flask 依赖
@@ -47,6 +49,7 @@ EngSmartSuite/
 │       │   ├── _constants.py       #   统计分析常量（阈值/乘数/效应量判定）
 │       │   ├── _doe_arrays.py      #   DOE 设计矩阵（中心复合/Box-Behnken 编码表）
 │       │   ├── _utils.py           #   共享工具函数 (safe_float, threshold_label)
+│       │   ├── _guard.py           #   边界处理唯一执行点（B0–B3：拒绝/清洗/降级/近似）
 │       │   ├── root_cause/         #   要因分析子包（2026-09-19 由 root_cause.py 拆分，公开 API 不变）
 │       │   │   ├── __init__.py     #     13 个公开函数 re-export
 │       │   │   ├── _shared.py      #     共享助手（效应量/CI/分组解析）
@@ -98,6 +101,7 @@ EngSmartSuite/
 │       ├── services/               # ② 应用服务层：唯一桥接层
 │       │   ├── __init__.py
 │       │   ├── task_spec.py        #   TASK_SPECS（任务注册唯一事实源）+ derive 派生
+│       │   ├── param_labels.py     #   参数标签/提示派生（P4 步骤④：由各任务 PARAM_SPEC 派生）
 │       │   ├── config.py           #   应用限制常量（上传/行数/zip/会话阈值）
 │       │   ├── orchestrator.py     #   编排 + 任务注册结构（由 task_spec.derive 派生）
 │       │   ├── error_messages.py   #   异常→中文工艺术语映射 + 统一错误结果组装
@@ -112,7 +116,11 @@ EngSmartSuite/
 │           ├── api.py              #   REST API: run_analysis / column_info
 │           ├── templates/index.html#   主页面
 │           └── static/
-│               ├── app.js          #   前端逻辑：列标记、参数面板、结果渲染
+│               ├── app.js          #   入口模块：分析执行链 + 根级事件委托（P3-3 拆分）
+│               ├── util.js         #   无依赖工具：HTML 转义 / 数值展示 / 页内 toast
+│               ├── api.js          #   CSRF token 获取 + 带 token 的 fetch（403 重试一次）
+│               ├── state.js        #   列数据 / Y·X·类别选择 / 上传 / 列渲染
+│               ├── params.js       #   参数面板：默认值与元数据、控件、因子与请求行编辑器
 │               ├── favicon.svg     #   浏览器页签图标（index.html link rel=icon）
 │               └── style.css       #   前端样式
 │
@@ -124,6 +132,10 @@ EngSmartSuite/
 │   │   ├── chemical_batch.xlsx     #   化工批次数据
 │   │   ├── reliability.xlsx        #   可靠性数据
 │   │   └── warranty.xlsx           #   保修数据
+│   ├── core/                       #   数据契约层单元测试
+│   │   ├── test_param_spec.py      #   声明式参数契约（校验器 / None 语义 / 内省形状）
+│   │   ├── test_param_spec_choice_options.py # Choice 选项显示文案（(值,文案) + options()）
+│   │   └── test_param_specs_common.py # 共享字段库（含「哪些不得共享」的判据测试）
 │   ├── engine/                     #   引擎层单元测试（原 test_engine/）
 │   │   ├── __init__.py
 │   │   ├── test_root_cause.py
@@ -137,6 +149,8 @@ EngSmartSuite/
 │   │   ├── test_spc_monitor.py
 │   │   ├── test_utils.py
 │   │   ├── test_correctness.py     #   数值正确性 — 全量覆盖
+│   │   ├── test_analytical_truths.py #  第①层补强：仅用解析解（退化情形/闭式公式/单调性）
+│   │   ├── test_minitab_alignment.py #  Minitab 口径对照钉住（已对齐项防退化 + 已声明缺口维护）
 │   │   ├── test_edge_cases.py      #   边界情况
 │   │   ├── test_invariants.py      #   数学不变量
 │   │   ├── test_property_invariants.py # 属性测试（hypothesis：量纲/不变量/退化）
@@ -147,11 +161,35 @@ EngSmartSuite/
 │   │   ├── test_inverse_package_parity.py # 工艺参数反解子包拆分组装对照
 │   │   ├── test_engine_bootstrap.py #  引擎包根初始化（MATPLOTLIB_FONT_PATH 分支）
 │   │   ├── test_engine_input_guards.py # 引擎输入防护（审查修复钉死）
+│   │   ├── test_boundary_guard.py  #   边界处理原语单测（_guard.py 的 B0–B3 行为）
+│   │   ├── test_capability_ci_coverage.py # 能力指数 CI 的覆盖率检验（MR-σ 有效自由度）
+│   │   ├── test_survival_event_semantics.py # 生存分析事件列语义（文本编码不猜）
+│   │   ├── test_anova_effect_size.py # ANOVA 效应量口径（经典 η² vs 偏 η²，statsmodels 复算）
+│   │   ├── test_welch_ttest.py     #   独立双样本 t 检验的方差假设（Welch + Levene 披露）
+│   │   ├── test_attribute_sample_size.py # 属性图样本量假设（np/c 常数限仅在等 n 时成立）
+│   │   ├── test_weibull_censored.py #   含删失 Weibull MLE + B10/寿命百分位 CI
+│   │   ├── test_gage_rr_anova.py   #   Gage R&R ANOVA 方差分解 + F 检验 + 分量 CI（P2-1）
+│   │   ├── test_capability_subgroups.py # 过程能力子组/池化 within-σ + Pp/Ppk CI（P2-5）
+│   │   ├── test_capability_guard_migration.py # capability 迁移 _guard 的行为锁定 + 错误码断言
+│   │   ├── test_capability_param_migration.py # 参数校验迁移对拍（P4 步骤②：Spec ↔ 引擎判定一致）
+│   │   ├── test_attribute_param_migration.py # 参数校验迁移对拍（P4 步骤③：chart_type 枚举 + None 语义）
+│   │   ├── test_power_analysis_param_migration.py # 参数校验迁移对拍（P4 步骤③：9 参数枚举/区间 + 别名归一）
+│   │   ├── test_param_migration_batch1.py # 批量迁移对拍（P4 步骤③：共享字段库驱动 4 个任务）
+│   │   ├── test_param_migration_batch2.py # 批量迁移对拍第二批（doe_analysis/trend_forecast/vif/distribution_summary）
+│   │   ├── test_param_migration_batch3.py # 批量迁移对拍第三批（decision_tree/proportion_ci/quantile_regression/response_surface/change_point）
+│   │   ├── test_param_migration_batch4.py # 批量迁移对拍第四批（correlation/logistic_regression/spc_nonparametric/spc_cusum/spc_ewma）
+│   │   ├── test_param_migration_batch5.py # 批量迁移对拍第五批（lasso_regression/multi_objective/anomaly_detect/anova/grid_search）
+│   │   ├── test_param_migration_batch6.py # 批量迁移对拍第六批（spc_xbar/scatter_plot/tolerance_interval/bootstrap_ci/gage_rr）
+│   │   ├── test_param_migration_batch7.py # 批量迁移对拍第七批（box_chart/hypothesis_test）
+│   │   ├── test_param_migration_batch8.py # 批量迁移对拍第八批（doe_design/inverse_solve/regression，含步骤④前置断言）
+│   │   ├── test_param_spec_gaps.py   # 参数契约表达力缺口（Choice 非字符串别名 / 保留参数文案 / %P/T 补实现）
+│   │   ├── test_anova_ss_type.py   #   ANOVA Type II/III 平方和（不平衡设计 + 编码正确性，P2-3）
 │   │   └── test_spc_hypothesis_basics.py # SPC/假设检验基础覆盖
 │   ├── services/                   #   服务层单元测试（原 test_services/）
 │   │   ├── __init__.py
 │   │   ├── test_orchestrator.py
 │   │   ├── test_task_spec_derivation.py
+│   │   ├── test_param_spec_registry.py # PARAM_SPECS 按任务解析（防同模块邻居 Spec 泄漏）
 │   │   ├── test_data_io.py
 │   │   ├── test_audit.py
 │   │   ├── test_audit_truncation.py # audit 导出截断（长文本/长表显式标注）
@@ -160,6 +198,7 @@ EngSmartSuite/
 │   │   ├── test_service_guards.py  #   服务层防护（CLI/API/审计/报告/日志）
 │   │   ├── test_config_limits.py   #   应用限制常量集中化（config.py 单一来源）
 │   │   ├── test_error_messages.py  #   异常→中文消息映射与统一错误结果
+│   │   ├── test_error_attribution.py #  错误归因防线（两支建议结构，禁止单一病因断言）
 │   │   ├── test_lazy_exports.py    #   services/orchestrator 按需加载契约
 │   │   ├── test_numeric_scalar_types.py # numpy 标量类型判据（numbers.Real）
 │   │   ├── test_upload_limits.py   #   Web 上传限制校验
@@ -167,13 +206,19 @@ EngSmartSuite/
 │   │   ├── test_web_app_routes.py  #   Web 路由直测（app.py 分支/安全/清理）
 │   │   ├── test_web_api.py         #   Web API 内部机制（序列化/合并矩阵/兜底）
 │   │   ├── test_cli_paths.py       #   CLI 分支补测（模板/输入/校验/输出）
+│   │   ├── test_output_path.py     #   报告导出路径处理（归一化/建目录/拒绝不可写目标）
+│   │   ├── test_logging_setup.py   #   日志目录解析（环境变量/cwd 优先，不写 site-packages）
+│   │   ├── test_session_path_containment.py # 会话数据路径归属校验（越界拒绝 + 不误删）
 │   │   └── test_manual_usage_pitfalls.py # 手册「常见参数误用」双向契约
 │   ├── integration/                #   跨层集成 / E2E（服务+引擎+Web 端到端）
 │   │   ├── test_integration.py
 │   │   ├── test_integration_chemical.py
 │   │   ├── test_integration_reliability.py
 │   │   ├── test_integration_warranty.py
-│   │   ├── test_task_registry_smoke.py # 任务注册冒烟（全任务可调用 + 计数/标签/分组）
+│   │   ├── test_task_registry_smoke.py
+│   │   ├── test_api_tasks_params.py # /api/tasks 下发 params（P4 步骤④：消灭前端平行字典）
+│   │   ├── test_api_tasks_param_labels.py # /api/tasks 下发 param_labels/param_hints（派生自 Spec）
+│   │   ├── test_report_export.py   # 报告导出（P5：export_report 分发器 + /api/export 端点） # 任务注册冒烟（全任务可调用 + 计数/标签/分组）
 │   │   ├── test_web_e2e.py         #   Web UI E2E（需运行中的服务器）
 │   │   ├── test_workflows.py       #   工作流串联测试
 │   │   └── test_packaging.py       #   打包契约（PEP 561 py.typed 分发）
@@ -187,6 +232,9 @@ EngSmartSuite/
 │   │   ├── test_figure_cleanup.py         # 图窗释放（close_figures 单一实现）
 │   │   ├── test_lint_budget.py            # per-file-ignore 预算守卫（收敛趋势不反弹）
 │   │   ├── test_web_ui_guards.py          # 前端一致性（三集合/参数可达性/编码下拉）
+│   │   ├── test_frontend_taxonomy.py      # 前端任务分类学 ↔ 后端 NO_TARGET/NO_DATA 一致性
+│   │   ├── test_boundary_contract.py      # 边界契约 B0–B3（c4 稳定性/CSRF/错误归因源码防线）
+│   │   ├── test_boundary_disclosure.py #  B1 静默清洗防线（AST 作用域判定，补既有守卫盲区）
 │   │   └── test_cross_layer_guards.py     # 跨层防护（序列化/预处理/Web API 校验）
 │   ├── security/                   #   Web 安全回归（按攻击面组织：CSRF/CSP/上传/不泄漏）
 │   │   ├── __init__.py
@@ -194,6 +242,13 @@ EngSmartSuite/
 │   │   └── test_web_security.py    #   跨端点不变量：POST 端点自动发现 + CSRF 全覆盖
 │   ├── crossval/                   #   关键方法交叉验证（手工公式/已知性质）
 │   │   └── test_method_crossval.py
+│   ├── golden/                     #   参考值金标准层（阶段 P3：引擎之外的裁判）
+│   │   ├── __init__.py
+│   │   ├── _loader.py              #     参考值装载器（有值对账／无值 skip + 缺口披露）
+│   │   ├── reference.json          #     外部参考值表（当前空占位，schema 已定义）
+│   │   ├── test_reference_loader.py #    装载器自测 + UNANCHORED_METHODS 局限登记
+│   │   ├── test_spc_msa_golden.py  #     X-bar/R 控制限、CUSUM、EWMA 时变限、Gage R&R 分量
+│   │   └── test_methods_golden.py  #     P2 二期：Gage ANOVA 分解、Type III（双路径）、池化 σ、Pp/Ppk CI
 │   └── scripts/                    #   治理脚本测试
 │       ├── test_retry.py
 │       ├── test_common.py               #   门禁子进程环境助手（BLAS 线程限制/UTF-8）
@@ -206,7 +261,11 @@ EngSmartSuite/
 │       ├── test_manual_claims_freshness.py # 2026-09-06 F-D1 手册新鲜度校验自测
 │       ├── test_claims_gate.py          #   2026-09-21 G-2 手册 CLAIM 缺失判据自测
 │       ├── test_templates_gate.py       #   2026-09-21 G-7 模板 task 键校验自测
-│       └── test_verify_frontend_params.py # 2026-09-06 E4/G4 前后端键集自测
+│       ├── test_verify_frontend_params.py # 2026-09-06 E4/G4 前后端键集自测
+│       ├── test_frontend_modules.py     # 前端 ES module 解析 + MIME 分发（P3-3，需 Node）
+│       ├── test_export_flow.py          #   前端导出链路半运行时冒烟（P5.3，需 Node）
+│       ├── test_params_panel.py         #   参数面板半运行时冒烟（P4 步骤④，需 Node）
+│       └── test_ci_layer_coverage.py    #   PR 门禁覆盖守卫（测试目录/文件须接入 quick job）
 │
 ├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）
 │   └── test_benchmarks.py          #   3 任务 × 3 规模端到端基准（非 tests/ 防线）
@@ -217,9 +276,13 @@ EngSmartSuite/
 │   ├── gallery.md                  #   示例集（代表方法图 + CLI 命令）
 │   ├── governance/                 #   治理与基础
 │   │   ├── ai-review-prompt.md     #   AI 深度审查 Prompt 模板
+│   │   ├── boundary-contract.md    #   边界处理契约 B0-B3（输入级：拒绝/清洗/降级/近似）
 │   │   ├── context.md              #   术语表
 │   │   ├── documentation.md        #   文档职责
 │   │   ├── falsy-pitfalls.md       #   Falsy 陷阱清单
+│   │   ├── guard-migration.md      #   `_guard` 迁移清单（边界处理收口的进度单一事实源）
+│   │   ├── improvement-plan.md     #   改善计划（阶段 P1-P5 + 问题总账）
+│   │   ├── minitab-alignment.md    #   与 Minitab 的口径对照（含实测证据与如实缺口）
 │   │   ├── project-structure.md    #   本文件（目录树契约）
 │   │   ├── review-checklist.md     #   人类 PR 审查清单（可执行，20 项）
 │   │   ├── sentinel-contract.md    #   哨兵契约 L1-L5 与 NaN/Inf 守卫
@@ -323,7 +386,10 @@ EngSmartSuite/
 │   ├── retry.py                    #   瞬态错误重试装饰器
 │   ├── verify_consistency.py       #   行为/架构一致性
 │   ├── verify_cross_consistency.py #   Web/CLI 交叉一致性
-│   ├── verify_frontend_params.py   #   前后端参数键集静态一致性
+│   ├── verify_frontend_params.py   #   前后端参数键集静态一致性（扫描 static/*.js 全部）
+│   ├── check_js_modules.mjs        #   前端 ES module 导入/导出与依赖图校验（Node）
+│   ├── check_params_panel.mjs       #   参数面板半运行时冒烟（步骤④：删字典后仍能渲染）
+│   ├── check_export_flow.mjs        #   前端导出链路半运行时冒烟（Node + DOM 桩加载真实模块）
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
 │   ├── claims_gate.py              #   手册 CLAIM 缺失判据（纯函数，可直测）
 │   ├── templates_gate.py           #   templates/*.yaml 的 task 键校验（G-7）
