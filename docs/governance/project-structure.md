@@ -266,6 +266,7 @@ EngSmartSuite/
 │       ├── test_frontend_modules.py     # 前端 ES module 解析 + MIME 分发（P3-3，需 Node）
 │       ├── test_export_flow.py          #   前端导出链路半运行时冒烟（P5.3，需 Node）
 │       ├── test_params_panel.py         #   参数面板半运行时冒烟（P4 步骤④，需 Node）
+│       ├── test_browser_smoke.py         #   真浏览器冒烟（Edge + CDP）的 pytest 包装
 │       └── test_ci_layer_coverage.py    #   PR 门禁覆盖守卫（测试目录/文件须接入 quick job）
 │
 ├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）
@@ -391,6 +392,7 @@ EngSmartSuite/
 │   ├── check_js_modules.mjs        #   前端 ES module 导入/导出与依赖图校验（Node）
 │   ├── check_params_panel.mjs       #   参数面板半运行时冒烟（步骤④：删字典后仍能渲染）
 │   ├── check_export_flow.mjs        #   前端导出链路半运行时冒烟（Node + DOM 桩加载真实模块）
+│   ├── check_browser_smoke.mjs      #   真浏览器冒烟（系统 Edge + CDP，零依赖）
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
 │   ├── claims_gate.py              #   手册 CLAIM 缺失判据（纯函数，可直测）
 │   ├── templates_gate.py           #   templates/*.yaml 的 task 键校验（G-7）
