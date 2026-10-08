@@ -269,6 +269,7 @@ EngSmartSuite/
 │       ├── test_export_flow.py          #   前端导出链路半运行时冒烟（P5.3，需 Node）
 │       ├── test_params_panel.py         #   参数面板半运行时冒烟（P4 步骤④，需 Node）
 │       ├── test_browser_smoke.py         #   真浏览器冒烟（Edge + CDP）的 pytest 包装
+│       ├── test_truth_coverage.py        #   真值覆盖率门禁的包装 + 扫描器自证
 │       └── test_ci_layer_coverage.py    #   PR 门禁覆盖守卫（测试目录/文件须接入 quick job）
 │
 ├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）
@@ -399,6 +400,7 @@ EngSmartSuite/
 │   ├── verify_manual_claims.py     #   手册数值实跑验证
 │   ├── claims_gate.py              #   手册 CLAIM 缺失判据（纯函数，可直测）
 │   ├── templates_gate.py           #   templates/*.yaml 的 task 键校验（G-7）
+│   ├── truth_coverage.py             #   分析类数值真值覆盖率门禁（选项 A 口径）
 │   ├── manual_claims_freshness.py  #   手册 CLAIM 新鲜度校验（F-D1：手册↔快照↔引擎）
 │   ├── falsy_audit.py              #   Falsy 模式审计
 │   ├── gen_requirements.py         #   依赖清单生成

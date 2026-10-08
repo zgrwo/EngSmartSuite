@@ -14,6 +14,7 @@ verify_all.py — 全量验证入口（一个命令完成全部治理验证）
   4. 文档一致性（verify_docs.py --strict：断链/目录树/裸异常/版本漂移）
   5. Falsy 审计（falsy_audit.py）
   6. 测试质量守卫（test_quality_guard.py：弱断言/缺测/命名）
+7. 数值真值覆盖率（truth_coverage.py：分析类测试被真值钉住的比例）
 
 注：verify_consistency.py（含 pytest 子进程，重）不纳入本入口（由 CI full job
 与 consistency job 覆盖）；verify_manual_claims.py 已接入 CI quick job
@@ -88,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
             ("文档一致性", [PYTHON, "scripts/verify_docs.py", "--strict"]),
             ("Falsy 审计", [PYTHON, "scripts/falsy_audit.py"]),
             ("测试质量守卫", [PYTHON, "scripts/test_quality_guard.py"]),
+            # 分析类数值真值覆盖率（选项 A 口径，2026-09-24）：
+            # "引擎算出来的数，有多少被真值钉住"。原口径（真值测试/全部测试）
+            # 经实测判定结构性不可达 —— 32% 的测试其正确性判据本来就不是数值。
+            ("数值真值覆盖率", [PYTHON, "scripts/truth_coverage.py"]),
         ]
 
     all_passed = True
