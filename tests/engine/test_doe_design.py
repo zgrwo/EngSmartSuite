@@ -218,9 +218,12 @@ def test_doe_design_taguchi_l36_end_to_end():
 
 
 def test_doe_design_invalid_method():
-    r = doe_design(_req("nope", [{"name": "A", "levels": [1, 2]}]))
+    """P4 步骤③（第二十七轮）：参数校验改抛异常 → 经编排层取用户可见结果。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    r = orchestrate(_req("nope", [{"name": "A", "levels": [1, 2]}]))
     assert r.status == "error"
-    assert any("method" in m for m in r.messages)
+    assert any("method" in m or "方法" in m for m in r.messages), r.messages
 
 
 def test_doe_design_missing_factors():

@@ -1,0 +1,28 @@
+{
+  "_schema": {
+    "description": "外部参考值表 —— 由项目之外的实现生成，供 tests/golden/ 对账。",
+    "note": "本项目当前不使用任何第三方统计工具做验证（2026-09-24 决定），故 values 为空。本文件的价值在于把'未锚定'状态记录在案，而不是假装已锚定。",
+    "provenance": {
+      "generator": "生成方式（说明用什么产生了这些数值）",
+      "generated_at": "生成日期 YYYY-MM-DD",
+      "generator_version": "生成器版本（工具名 + 版本）",
+      "dataset": "所用数据集说明（必须可复现：固定数据或固定种子）",
+      "independence": "该参考与 smartsuite 引擎的独立程度，取值见 tests/golden/_loader.py"
+    },
+    "values": {
+      "<task_key>": {
+        "<case_name>": {
+          "<metric>": "数值 | null"
+        }
+      }
+    }
+  },
+  "provenance": {
+    "generator": "无 —— 本项目不使用第三方统计工具做数值验证",
+    "generated_at": null,
+    "generator_version": null,
+    "dataset": null,
+    "independence": "none"
+  },
+  "values": {}
+}

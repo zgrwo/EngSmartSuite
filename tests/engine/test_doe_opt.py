@@ -125,7 +125,6 @@ def test_roc_all_nan_target():
 
 def test_grid_search_nan_ranges_rejected():
     """审查 2026-08-19 #2.1：NaN 上下限必须被明确拒绝（此前静默穿透）。"""
-    from smartsuite.engine.doe_opt import grid_search
 
     np.random.seed(1)
     df = pd.DataFrame(
@@ -148,7 +147,7 @@ def test_grid_search_nan_ranges_rejected():
 
 def test_grid_search_invalid_direction_rejected():
     """审查 2026-08-19 #2.6：direction 拼写错误不得静默反转方向。"""
-    from smartsuite.engine.doe_opt import grid_search
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame(
@@ -164,7 +163,8 @@ def test_grid_search_invalid_direction_rejected():
         feature_cols=["料温"],
         params={"ranges": {"料温": [170, 190]}, "direction": "max"},
     )
-    result = grid_search(req)
+    # P4 步骤③（第二十四轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    result = orchestrate(req)
     assert result.status == "error"
     assert any("direction" in m for m in result.messages)
 

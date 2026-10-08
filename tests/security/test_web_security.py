@@ -167,3 +167,76 @@ def test_error_responses_do_not_leak_internals(client, csrf, payload, filename):
     body = resp.get_data(as_text=True)
     for leaked in ("Traceback", "site-packages", 'File "', "smartsuite/", "smartsuite\\\\"):
         assert leaked not in body, f"响应泄漏内部信息 {leaked!r}：{body[:200]}"
+
+
+# ── 请求体超限（413）────────────────────────────────────────────────
+#
+# 审查 2026-09-24（第九轮独立复测 A6）：本套件此前**没有** 413 的 HTTP 路径测试。
+# 原审计记为"部分属实：确无 HTTP 路径测试；但前端已补偿"（前端预检 50MB）。
+# 前端补偿不能替代服务端验证 —— 直接调 API 的客户端（curl/脚本）不受前端约束。
+#
+# 原症状：Flask 在路由前抛 413，若无 errorhandler 则返回 **HTML** 错误页，
+# 而前端 `r.json()` 解析失败 → 用户看到 "not json" 之类的误导提示（审查 2026-08-19 M5）。
+
+
+def test_oversized_upload_returns_json_413_with_chinese_message(client, csrf, monkeypatch):
+    """超过 `MAX_CONTENT_LENGTH` 的上传必须返回 **JSON** 413（而非 HTML 网关页）。
+
+    临时收紧限制到 128 字节以便构造超限请求（生产限制是 50MB，构造真实超限
+    需要 50MB 内存，测试里不划算）；测的是**同一段错误处理路径**。
+    """
+    monkeypatch.setitem(flask_app.config, "MAX_CONTENT_LENGTH", 128)
+    resp = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(b"x" * 4096), "big.csv")},
+        content_type="multipart/form-data",
+        headers={"X-CSRF-Token": csrf()},
+    )
+    assert resp.status_code == 413, (resp.status_code, resp.get_data(as_text=True)[:200])
+    assert "application/json" in resp.headers.get("Content-Type", ""), (
+        f"413 必须返回 JSON（前端按 JSON 解析），实际 Content-Type="
+        f"{resp.headers.get('Content-Type')!r}"
+    )
+    payload = resp.get_json()
+    assert payload and payload.get("error"), f"413 响应体缺 error 字段：{payload}"
+    # 中文提示（面向工艺用户），且不得泄漏内部细节
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in payload["error"]), (
+        f"413 提示应为中文：{payload['error']!r}"
+    )
+    for leaked in ("Traceback", "site-packages", "MAX_CONTENT_LENGTH"):
+        assert leaked not in payload["error"], f"413 提示泄漏内部细节 {leaked!r}"
+
+
+def test_oversized_request_is_rejected_before_parsing(client, csrf, monkeypatch):
+    """413 必须在**读取/解析请求体之前**发生（否则大文件仍会占用内存）。
+
+    观测方式：即便 body 内容完全非法（不是合法 multipart 文件），
+    也应先因超限被拒（413），而不是先报解析错误（400）。
+    """
+    monkeypatch.setitem(flask_app.config, "MAX_CONTENT_LENGTH", 64)
+    resp = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(b"\x00" * 8192), "junk.bin")},
+        content_type="multipart/form-data",
+        headers={"X-CSRF-Token": csrf()},
+    )
+    assert resp.status_code == 413, (
+        f"超限应在解析前拒绝（413），实际 {resp.status_code}：{resp.get_data(as_text=True)[:200]}"
+    )
+
+
+def test_missing_csrf_does_not_bypass_size_limit(client, monkeypatch):
+    """CSRF 失败（403）与超限（413）是两条独立防线，不得互相掩盖。
+
+    本用例确认：无 token + 超限 → 仍是 403（安全优先），
+    而有 token + 超限 → 413。两条防线各自生效，顺序明确。
+    """
+    monkeypatch.setitem(flask_app.config, "MAX_CONTENT_LENGTH", 128)
+    resp = client.post(
+        "/api/upload",
+        data={"file": (io.BytesIO(b"x" * 4096), "big.csv")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 403, (
+        f"无 CSRF token 时应先被安全门拦下（403），实际 {resp.status_code}"
+    )

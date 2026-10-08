@@ -71,21 +71,23 @@ def test_spc_u_chart_negative_counts_rejected():
 
 # ── 2. CUSUM/EWMA NaN/Inf 参数守卫 ──
 def test_spc_cusum_rejects_nan_sigma():
-    from smartsuite.engine.spc_monitor import cusum_chart
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame({"y": np.random.normal(0, 1, 40)})
-    r = cusum_chart(_req("spc_cusum", df, target="y", params={"mu": "nan", "sigma": "nan"}))
+    # P4 步骤③（第二十三轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(_req("spc_cusum", df, target="y", params={"mu": "nan", "sigma": "nan"}))
     assert r.status == "error"
     assert any("有限数值" in m or "NaN" in m for m in r.messages)
 
 
 def test_spc_ewma_rejects_nan_sigma():
-    from smartsuite.engine.spc_monitor import ewma_chart
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame({"y": np.random.normal(0, 1, 40)})
-    r = ewma_chart(_req("spc_ewma", df, target="y", params={"mu": "nan", "sigma": "nan"}))
+    # P4 步骤③（第二十三轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(_req("spc_ewma", df, target="y", params={"mu": "nan", "sigma": "nan"}))
     assert r.status == "error"
     assert any("有限数值" in m or "NaN" in m for m in r.messages)
 
@@ -96,26 +98,31 @@ def test_spc_ewma_rejects_nan_sigma():
 @pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
 @pytest.mark.parametrize("key", ["k", "h"])
 def test_spc_cusum_rejects_non_positive_finite_k_h(bad, key):
-    from smartsuite.engine.spc_monitor import cusum_chart
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame(
         {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
     )
-    r = cusum_chart(_req("spc_cusum", df, target="y", params={key: bad}))
+    # P4 步骤③（第二十三轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(_req("spc_cusum", df, target="y", params={key: bad}))
     assert r.status == "error", f"{key}={bad!r} 应报错而非静默抑制报警"
-    assert any(key in m for m in r.messages), f"错误文案应点明参数名 {key}: {r.messages}"
+    # 文案给出中文标签（如「K 值 (松弛因子)」）或参数名其一即可
+    assert any(key in m or "K 值" in m or "H 值" in m for m in r.messages), (
+        f"错误文案应点明是哪个参数: {r.messages}"
+    )
 
 
 @pytest.mark.parametrize("bad", ["nan", "inf", "-inf", 0, -1])
 def test_spc_ewma_rejects_non_positive_finite_lambda_width(bad):
-    from smartsuite.engine.spc_monitor import ewma_chart
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame(
         {"y": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(3, 1, 20)])}
     )
-    r = ewma_chart(_req("spc_ewma", df, target="y", params={"L": bad}))
+    # P4 步骤③（第二十三轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(_req("spc_ewma", df, target="y", params={"L": bad}))
     assert r.status == "error", f"L={bad!r} 应报错而非静默产出无效控制限"
     assert any("L" in m for m in r.messages), f"错误文案应点明参数名 L: {r.messages}"
 
@@ -204,19 +211,18 @@ def _alpha_df(n=30):
 
 
 def test_anova_alpha_out_of_range_rejected():
-    from smartsuite.engine.root_cause import anova_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     df = _alpha_df()
     for bad in (0, 1.5):
-        r = anova_analysis(
-            _req("anova", df, target="val", features=["group"], params={"alpha": bad})
-        )
+        # P4 步骤③（第二十四轮）：参数校验改抛异常 → 经编排层取用户可见结果
+        r = orchestrate(_req("anova", df, target="val", features=["group"], params={"alpha": bad}))
         assert r.status == "error", f"alpha={bad} 应报错"
         assert any("alpha" in m for m in r.messages)
 
 
 def test_hypothesis_test_alpha_out_of_range_rejected():
-    from smartsuite.engine.root_cause import hypothesis_test
+    from smartsuite.services.orchestrator import orchestrate
 
     df = pd.DataFrame(
         {
@@ -224,7 +230,8 @@ def test_hypothesis_test_alpha_out_of_range_rejected():
             "v": np.concatenate([np.random.normal(0, 1, 20), np.random.normal(0.5, 1, 20)]),
         }
     )
-    r = hypothesis_test(
+    # P4 步骤③（第二十六轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         _req(
             "hypothesis_test",
             df,
@@ -238,12 +245,11 @@ def test_hypothesis_test_alpha_out_of_range_rejected():
 
 
 def test_contingency_alpha_out_of_range_rejected():
-    from smartsuite.engine.root_cause import contingency_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     df = pd.DataFrame({"a": ["A"] * 40 + ["B"] * 40, "b": ["X", "Y"] * 40})
-    r = contingency_analysis(
-        _req("contingency", df, target="a", features=["b"], params={"alpha": 0})
-    )
+    # P4 步骤③（第二十轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(_req("contingency", df, target="a", features=["b"], params={"alpha": 0}))
     assert r.status == "error"
     assert any("alpha" in m for m in r.messages)
 
@@ -471,26 +477,28 @@ def test_survival_empty_group_col_not_silently_substituted():
 # ── 10. SPC/箱线图参考线参数非有限值拒绝（审查 2026-09-19 D-1）──
 def test_spc_xbar_reference_lines_reject_non_finite():
     """usl/lsl/target='inf'/'nan'/'-inf' 不得静默接受（capability C1 同族）。"""
-    from smartsuite.engine.spc_charts import xbar_r_chart
+    from smartsuite.services.orchestrator import orchestrate
 
     rng = np.random.RandomState(6)
     df = pd.DataFrame({"y": rng.normal(10, 1, 60)})
+    # P4 步骤③（第二十五轮）：参数校验改抛异常 → 经编排层取用户可见结果
     for bad in ("inf", "nan", "-inf"):
-        r = xbar_r_chart(_req("spc_xbar", df, target="y", params={"usl": bad, "lsl": 0}))
+        r = orchestrate(_req("spc_xbar", df, target="y", params={"usl": bad, "lsl": 0}))
         assert r.status == "error", f"usl={bad!r} 应报错，实际 status={r.status}"
-        assert any("有限" in m for m in r.messages), r.messages
-    r = xbar_r_chart(_req("spc_xbar", df, target="y", params={"target": "nan"}))
-    assert r.status == "error" and any("有限" in m for m in r.messages)
+        assert any("有限" in m or "规格限" in m for m in r.messages), r.messages
+    r = orchestrate(_req("spc_xbar", df, target="y", params={"target": "nan"}))
+    assert r.status == "error" and any("有限" in m or "目标值" in m for m in r.messages)
 
 
 def test_box_chart_reference_lines_reject_non_finite():
     """usl/lsl/ucl/lcl/cl/target 的 inf/nan 不得静默忽略。"""
-    from smartsuite.engine.exploratory import box_chart
+    from smartsuite.services.orchestrator import orchestrate
 
     rng = np.random.RandomState(6)
     df = pd.DataFrame({"y": rng.normal(10, 1, 40), "g": ["A", "B"] * 20})
+    # P4 步骤③（第二十六轮）：参数校验改抛异常 → 经编排层取用户可见结果
     for key in ("usl", "lsl", "ucl", "lcl", "cl", "target"):
-        r = box_chart(_req("box_chart", df, target="y", features=["g"], params={key: "nan"}))
+        r = orchestrate(_req("box_chart", df, target="y", features=["g"], params={key: "nan"}))
         assert r.status == "error", f"{key}='nan' 应报错，实际 status={r.status}"
         assert any("有限" in m for m in r.messages), r.messages
 
@@ -770,10 +778,11 @@ def test_safe_int_rejects_overflow(bad):
 
 
 def test_doe_design_n_runs_inf_rejected_not_overflow_error():
-    from smartsuite.engine.doe_opt import doe_design
+    from smartsuite.services.orchestrator import orchestrate
 
     factors = [{"name": "a", "levels": [1, 2]}, {"name": "b", "levels": [1, 2]}]
-    r = doe_design(
+    # P4 步骤③（第二十七轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         _req(
             "doe_design",
             pd.DataFrame(),
@@ -782,13 +791,14 @@ def test_doe_design_n_runs_inf_rejected_not_overflow_error():
         )
     )
     assert r.status == "error", "int(inf) 应被参数守卫拒绝而非穿透"
-    assert any("n_runs" in m for m in r.messages), r.messages
+    assert any("n_runs" in m or "指定运行数" in m for m in r.messages), r.messages
 
 
 def test_power_analysis_anova_n_groups_inf_rejected():
-    from smartsuite.engine.root_cause import power_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
-    r = power_analysis(
+    # P4 步骤③：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         _req(
             "power_analysis",
             pd.DataFrame(),
@@ -797,16 +807,36 @@ def test_power_analysis_anova_n_groups_inf_rejected():
         )
     )
     assert r.status == "error", "n_groups=inf 应被参数守卫拒绝"
-    assert any("n_groups" in m for m in r.messages), r.messages
+    assert any("n_groups" in m or "组数" in m for m in r.messages), r.messages
 
 
 def test_decision_tree_max_depth_inf_no_overflow_error():
-    from smartsuite.engine.root_cause import decision_tree_analysis
+    """`max_depth=inf` 必须给出**参数错误**，而非误导性的「数值溢出」。
+
+    审查 2026-09-24（P4 步骤③，第二十二轮）——**行为改进，本用例已随之更新**：
+
+    迁移前 `_safe_int(inf)` 捕获 `OverflowError` 后**静默回落默认值 5**，
+    于是 `max_depth=inf` 返回 `status="ok"`。原用例断言 `status=="ok"` 的
+    真实意图是"不得出现『数值溢出，数据中可能存在极端值』这类与用户参数无关的
+    提示"（审查 2026-09-22 发现 5），但它把**静默降级**一起固化了下来。
+
+    迁移后 `Integer(min=1)` 明确拒绝 `inf`（B0），报错文案指向参数本身。
+    故本用例改为：断言错误 + 文案含 `max_depth` + **不含**「数值溢出」。
+    """
+    from smartsuite.services.orchestrator import orchestrate
 
     rng = np.random.default_rng(19)
     df = pd.DataFrame({"x": rng.normal(0, 1, 30), "y": rng.normal(0, 1, 30)})
-    r = decision_tree_analysis(
+    r = orchestrate(
         _req("decision_tree", df, target="y", features=["x"], params={"max_depth": float("inf")})
     )
-    assert r.status == "ok", r.messages
-    assert not any("数值溢出" in m for m in r.messages)
+    assert r.status == "error", "inf 应被参数守卫明确拒绝（迁移前静默回落默认值）"
+    joined = " ".join(r.messages)
+    assert "max_depth" in joined or "最大深度" in joined, joined
+    assert "数值溢出" not in joined, f"不得归因为数据问题: {joined}"
+
+    # 对照：合法值仍正常
+    r_ok = orchestrate(
+        _req("decision_tree", df, target="y", features=["x"], params={"max_depth": 3})
+    )
+    assert r_ok.status == "ok", r_ok.messages

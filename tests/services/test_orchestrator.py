@@ -398,7 +398,12 @@ def test_orchestrate_unmapped_exception_falls_back_to_generic(monkeypatch):
     req = AnalysisRequest(task="correlation", data=pd.DataFrame({"a": [1, 2]}), target_col="a")
     result = orchestrate(req)
     assert result.status == "error"
-    assert "分析计算过程中出现异常" in result.messages[0]
+    # 第三十一轮：兜底文案改为"分析计算过程中出现**未预期的**异常（成因未归类）"——
+    # 原「请检查数据完整性」是无依据的病因断言（未归类异常的成因是未知的）。
+    # 本断言保留"分析计算过程中出现"这一半，并新增对两支建议的校验。
+    assert "分析计算过程中出现" in result.messages[0]
+    assert "未预期" in result.messages[0], result.messages
+    assert "[内部]" in result.messages[0], result.messages
 
 
 # ── error_id 关联日志与用户消息（审查 2026-09-19 E9）──

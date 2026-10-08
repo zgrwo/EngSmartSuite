@@ -265,9 +265,18 @@ def test_vif_infinite_vif_does_not_abort_task(monkeypatch):
 
 
 @pytest.fixture()
-def api_client(tmp_path):
-    """带 CSRF + _data_path 会话的 Flask test client。"""
-    from smartsuite.web.app import app
+def api_client(tmp_path, monkeypatch):
+    """带 CSRF + _data_path 会话的 Flask test client。
+
+    审查 2026-09-24（第三轮复核 P3-2）：会话数据路径现须落在**上传目录之内**
+    （`_is_within_upload_dir`），故 fixture 显式指向 `SMARTSUITE_UPLOAD_DIR`
+    而非任意 tmp_path —— 否则会被越界校验正确拒绝，本组用例测的就不是
+    "analyze 的业务分支"而是"路径校验"了。
+    越界拒绝本身由 tests/services/test_session_path_containment.py 覆盖。
+    """
+    from smartsuite.web.app import _upload_dir, app
+
+    monkeypatch.setenv("SMARTSUITE_UPLOAD_DIR", str(tmp_path / "smartsuite-uploads"))
 
     df = pd.DataFrame(
         {
@@ -277,7 +286,7 @@ def api_client(tmp_path):
             "原料类型_B": [5.0, 6.0, 7.0, 8.0, 9.0],
         }
     )
-    pq = tmp_path / "data.parquet"
+    pq = _upload_dir() / "ss-test.parquet"
     df.to_parquet(pq)
     client = app.test_client()
     with client.session_transaction() as sess:

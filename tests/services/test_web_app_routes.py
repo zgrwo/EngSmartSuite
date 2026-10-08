@@ -840,18 +840,20 @@ def test_new_file_selection_resets_encoding_selector():
     无浏览器环境，故做静态判读（与 `verify_frontend_params.py` 同类手法）：
     `file-input` 的 change 处理器体内必须出现对 `#encoding` 的复位赋值。
     同一文件**切换下拉框**仍按当前值重传（由 R1-1 引入的 change 监听承担）。
+
+    审查 2026-09-24（P3-3）：处理器提取为具名函数 `onNewFileSelected`（原先内联
+    箭头函数，正则依赖其书写形状）。扫描范围也改为 static/ 下全部 JS ——
+    若日后搬走，本用例不会因"文件不对"而静默失败。
     """
     import re
 
-    js = (pathlib.Path(app_module.__file__).parent / "static" / "app.js").read_text(
-        encoding="utf-8"
+    static = pathlib.Path(app_module.__file__).parent / "static"
+    js = "\n".join(p.read_text(encoding="utf-8") for p in sorted(static.glob("*.js")))
+    assert "getElementById('file-input').addEventListener('change'" in js, (
+        "前端未给 file-input 绑定 change 监听"
     )
-    m = re.search(
-        r"getElementById\('file-input'\)\.addEventListener\('change',\s*e\s*=>\s*\{(.*?)\n\}\);",
-        js,
-        re.S,
-    )
-    assert m, "app.js 应存在 file-input 的 change 处理器"
+    m = re.search(r"function onNewFileSelected\(e\)\s*\{(.*?)\n\}", js, re.S)
+    assert m, "未找到 onNewFileSelected 处理器（file-input 的 change 回调）"
     body = m.group(1)
     assert re.search(r"getElementById\('encoding'\)\.value\s*=\s*''", body), (
         "选择新文件时未复位编码下拉框 → 编码声明会跨文件粘滞并静默读错（R1-1）"

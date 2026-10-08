@@ -212,8 +212,11 @@ def test_degenerate_inputs_return_error_without_raising():
 
 def test_doe_design_zero_n_runs_not_silently_defaulted():
     """falsy 0 陷阱（历史 M-4）：n_runs=0 必须显式报错，不得回退 2**k 默认。"""
+    from smartsuite.services.orchestrator import orchestrate
+
     factors = [{"name": f"F{i}", "levels": ["低", "高"]} for i in range(3)]
-    zero = doe_design(
+    # P4 步骤③（第二十七轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    zero = orchestrate(
         AnalysisRequest(
             task="doe_design",
             data=pd.DataFrame(),
@@ -221,7 +224,8 @@ def test_doe_design_zero_n_runs_not_silently_defaulted():
         )
     )
     assert zero.status == "error", f"n_runs=0 应报错: {zero.status}"
-    assert "n_runs" in zero.messages[0] and "0" in zero.messages[0], zero.messages
+    # 文案给出中文标签（「指定运行数」）或参数名其一即可
+    assert any("n_runs" in m or "指定运行数" in m for m in zero.messages), zero.messages
 
     default = doe_design(
         AnalysisRequest(

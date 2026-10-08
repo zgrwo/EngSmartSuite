@@ -1,8 +1,16 @@
 """关键方法交叉验证测试 — 5 方法（ANOVA/回归/SPC/能力/Gage R&R）。
 
-审查 2026-08-19 #3.2：本文件此前声称"与 R 4.3+ 输出对比（容差 ±1e-4）"，
-但实际不含任何 R 参考数值——现如实标注为 手工公式/已知性质 交叉验证。
-后续录入真实 R 输出数值后，可改回"R 参考对比"并逐项比对。
+**参考实现来源（务必如实理解）**：本文件**不含任何 R 输出数值**。
+参考值来自**独立第二实现**——statsmodels/scipy 的不同 API 路径 + 手工公式。
+审查 2026-09-24（第三轮复核 P1-4）：文件头此前已如实说明"不含 R 参考数值"，
+但类与方法的 docstring 仍写着 `R 参考: qcc(...)` / `R 参考: gageRR(...)` —— 文档自相矛盾。
+本机实测**无 R 环境**（`Rscript` 不存在，`R` 仅为 PowerShell 的 `Invoke-History` 别名），
+故按预案退化为独立第二实现，并逐处标注来源，不再冒充 R 输出。
+
+> 独立第二实现的价值**低于**外部权威软件，但仍高于"用同一库再算一遍"：
+> 它至少能发现公式转写错误、口径混用（如用整体 σ 校验组内 σ 口径的 Cp）与参数误配。
+> 真正的外部锚定（Minitab/JMP/R 输出比对）仍是待办，见
+> `docs/governance/improvement-plan.md` 的阶段 P3。
 
 运行方式：pytest tests/crossval/ -v
 """
@@ -16,12 +24,12 @@ from smartsuite.services.orchestrator import orchestrate
 
 
 # ═══════════════════════════════════════════════════════════
-# 固定测试数据（与 R 脚本使用相同数据）
+# 固定测试数据（各参考实现与本文件共用同一份数据）
 # ═══════════════════════════════════════════════════════════
 
 
 def _make_anova_data():
-    """三组单因子数据，对应 R: aov(y ~ group, data=df)"""
+    """三组单因子数据；参考实现: statsmodels 手算 SSB/SSW（非 R 输出）。"""
     np.random.seed(2024)
     g1 = np.array([23.1, 24.5, 22.8, 25.0, 23.9, 24.1, 23.5, 24.8])
     g2 = np.array([26.2, 27.1, 25.8, 26.9, 27.5, 26.0, 25.5, 27.8])
@@ -36,7 +44,7 @@ def _make_anova_data():
 
 
 def _make_regression_data():
-    """多元回归数据，对应 R: lm(y ~ x1 + x2, data=df)"""
+    """多元回归数据；参考实现: statsmodels OLS（非 R 输出）。"""
     np.random.seed(2024)
     n = 30
     x1 = np.array(
@@ -112,7 +120,7 @@ def _make_regression_data():
 
 
 def _make_spc_data():
-    """SPC 数据：25 子组 × 5 样本，对应 R: qcc(data, type='xbar')"""
+    """SPC 数据：25 子组 × 5 样本；参考实现: R̄/d2 手工控制限公式（非 R 输出）。"""
     np.random.seed(2024)
     data = np.random.normal(50, 2, (25, 5))
     # 注入一个偏移：第 20 组均值偏高
@@ -121,7 +129,7 @@ def _make_spc_data():
 
 
 def _make_capability_data():
-    """过程能力数据，对应 R: cp/cpk 计算"""
+    """过程能力数据；参考实现: 组内σ(MR 法)/整体σ 手工公式（非 R 输出）。"""
     np.random.seed(2024)
     data = np.random.normal(10.0, 0.5, 100)
     return data
@@ -229,14 +237,26 @@ class TestAnovaCrossVal:
 
 
 # ═══════════════════════════════════════════════════════════
-# 测试 2: 回归 — 对比 R lm() 输出
+# 测试 2: 回归 — 对比 statsmodels OLS（独立第二实现，非 R）
 # ═══════════════════════════════════════════════════════════
 
 
 class TestRegressionCrossVal:
-    """R 参考: summary(lm(y ~ x1 + x2, data=df))"""
+    """参考实现：**statsmodels OLS**（独立于本引擎的第二实现）。
 
-    def test_regression_r_squared(self):
+    审查 2026-09-24（第三轮复核 P1-4）：本类原 docstring 写
+    `R 参考: summary(lm(y ~ x1 + x2, data=df))`，但文件头已自认
+    "实际不含任何 R 参考数值"——文档自相矛盾。本机无 R 环境（已实测确认），
+    故按预案退化为独立第二实现，并**如实标注来源**，不再冒充 R 输出。
+    """
+
+    def test_regression_matches_statsmodels_r_squared(self):
+        """R² 与 statsmodels OLS 独立复算一致（rel<1e-9）。
+
+        审查 2026-09-24 P1-4：原断言仅 `r2 > 0.9`（弱下界）。
+        """
+        import statsmodels.api as sm
+
         df = _make_regression_data()
         r = orchestrate(
             AnalysisRequest(
@@ -248,12 +268,15 @@ class TestRegressionCrossVal:
             )
         )
         assert r.status == "ok"
-        r2 = r.metadata.get("r_squared", 0)
-        # y = 2.5*x1 + 1.8*x2 + noise(σ=2)，R² 应很高 (>0.9)
-        assert r2 > 0.9, f"R² too low: {r2}"
+        model = sm.OLS(df["y"], sm.add_constant(df[["x1", "x2"]])).fit()
+        assert float(r.metadata["r_squared"]) == pytest.approx(model.rsquared, rel=1e-9), (
+            f"引擎 R²={r.metadata['r_squared']} vs statsmodels {model.rsquared}"
+        )
 
-    def test_regression_coefficients_sign(self):
-        """系数符号应与真实值一致：x1>0, x2>0"""
+    def test_regression_coefficients_match_statsmodels(self):
+        """系数与 statsmodels 一致（rel<1e-6）；原断言只查符号/范围。"""
+        import statsmodels.api as sm
+
         df = _make_regression_data()
         r = orchestrate(
             AnalysisRequest(
@@ -264,21 +287,24 @@ class TestRegressionCrossVal:
                 params={"alpha": 0.05},
             )
         )
-        # 从表格中提取系数
-        coef_table = r.tables.get("coefficients")
-        assert coef_table is not None
-        # x1 系数应约为 2.5 (±1)
-        x1_coef = coef_table[coef_table.iloc[:, 0].str.contains("x1")].iloc[0, 1]
-        assert 1.5 < float(x1_coef) < 3.5, f"x1 coef out of range: {x1_coef}"
+        model = sm.OLS(df["y"], sm.add_constant(df[["x1", "x2"]])).fit()
+        coef_table = r.tables["coefficients"]
+        name_col = coef_table.columns[0]
+        for feature, expected in (("x1", model.params["x1"]), ("x2", model.params["x2"])):
+            row = coef_table[coef_table[name_col].astype(str).str.contains(feature)]
+            assert len(row) == 1, f"应恰好命中一行 {feature}"
+            assert float(row.iloc[0, 1]) == pytest.approx(expected, rel=1e-6), (
+                f"{feature} 系数不符：引擎 {row.iloc[0, 1]} vs statsmodels {expected}"
+            )
 
 
 # ═══════════════════════════════════════════════════════════
-# 测试 3: SPC Xbar-R — 对比 R qcc 包
+# 测试 3: SPC Xbar-R — 手工控制限公式（独立复算，非 R qcc）
 # ═══════════════════════════════════════════════════════════
 
 
 class TestSpcCrossVal:
-    """R 参考: qcc(data, type='xbar', nsigmas=3)
+    """参考实现：手工 X-bar/R 控制限公式（非 R qcc——本机无 R，见文件头）。
 
     审查 2026-09-06 F-D3：引擎契约中 feature_cols[0] 是横坐标（子组由同一
     X 值下的多行自然形成），并非值列。旧构造把 s1..s4 当值列传入 → 引擎
@@ -340,66 +366,158 @@ class TestSpcCrossVal:
 
 
 # ═══════════════════════════════════════════════════════════
-# 测试 4: 过程能力 — 对比 R 手动公式
+# 测试 4: 过程能力 — 组内σ/整体σ 手工公式（独立复算，非 R）
 # ═══════════════════════════════════════════════════════════
 
 
 class TestCapabilityCrossVal:
-    """R 参考: Cp = (USL-LSL)/(6σ), Cpk = min((USL-μ)/(3σ), (μ-LSL)/(3σ))"""
+    """参考实现：Cp/Cpk 的**手工公式**（非 R 输出——本机无 R，见文件头说明）。
 
-    def test_cp_cpk_values(self):
+    审查 2026-09-24（第三轮复核 A1/P1-4）：本类原先的 docstring 写
+    `R 参考: Cp = (USL-LSL)/(6σ), ...`，且 `test_cp_cpk_values` 用
+    **整体 σ**（`data.std(ddof=1)`）作为期望值去校验引擎的 **Cp**。
+    但引擎的 Cp 用**组内 σ**（移动极差法 `mean(MR)/1.128`）——两者是
+    **不同估计量**（Cp vs Pp）。实测（8 组带漂移数据，n=200）两口径相对差
+    可达 177%~239%，该断言只是靠 `abs(...)<0.1` 的宽松容差 + iid 数据下
+    "组内 σ 恰好接近整体 σ"才通过——**是同义反复，不是验证**。
+
+    现改为按各自口径分别对账：
+        Pp  ← 整体 σ（ddof=1）
+        Cp  ← 组内 σ（MR 法，d2=1.128）
+    """
+
+    @staticmethod
+    def _within_sigma(data):
+        """组内 σ 的独立复算：mean(|diff|)/d2，d2=1.128（n=2 移动极差）。"""
+        mr = np.abs(np.diff(np.asarray(data, dtype=float)))
+        return float(mr.mean() / 1.128)
+
+    def test_cp_uses_within_sigma_mr_method(self):
+        """Cp 必须与**组内 σ**（MR 法）对账，容差 1e-6。"""
         data = _make_capability_data()
-        df = pd.DataFrame({"y": data})
         usl, lsl = 11.5, 8.5
         r = orchestrate(
             AnalysisRequest(
                 task="process_capability",
-                data=df,
+                data=pd.DataFrame({"y": data}),
                 target_col="y",
                 feature_cols=[],
                 params={"usl": usl, "lsl": lsl},
             )
         )
         assert r.status == "ok"
-        # 审查 2026-09-06 F-D3：旧代码 `if cp is not None` 条件断言在 Cp 缺失/None
-        # 时静默跳过（mutation 实证）→ 改键索引 + float 转换：键缺失或 None 直接报错
-        cp = float(r.metadata["cp"])
-        cpk = float(r.metadata["cpk"])
-        # 手动计算
-        sigma = data.std(ddof=1)
-        mu = data.mean()
-        expected_cp = (usl - lsl) / (6 * sigma)
-        expected_cpk = min((usl - mu) / (3 * sigma), (mu - lsl) / (3 * sigma))
-        assert abs(cp - expected_cp) < 0.1, f"Cp: {cp} vs {expected_cp}"
-        assert abs(cpk - expected_cpk) < 0.1, f"Cpk: {cpk} vs {expected_cpk}"
+        sigma_within = self._within_sigma(data)
+        expected_cp = (usl - lsl) / (6 * sigma_within)
+        assert float(r.metadata["cp"]) == pytest.approx(expected_cp, rel=1e-9), (
+            f"Cp={r.metadata['cp']} 与组内σ口径期望 {expected_cp} 不符"
+        )
 
-    def test_capability_ci_exists(self):
-        """过程能力应报告 95% CI"""
+    def test_pp_uses_overall_sigma(self):
+        """Pp 必须与**整体 σ**（ddof=1）对账——与 Cp 的口径区分开。"""
         data = _make_capability_data()
-        df = pd.DataFrame({"y": data})
+        usl, lsl = 11.5, 8.5
         r = orchestrate(
             AnalysisRequest(
                 task="process_capability",
-                data=df,
+                data=pd.DataFrame({"y": data}),
+                target_col="y",
+                feature_cols=[],
+                params={"usl": usl, "lsl": lsl},
+            )
+        )
+        expected_pp = (usl - lsl) / (6 * data.std(ddof=1))
+        assert float(r.metadata["pp"]) == pytest.approx(expected_pp, rel=1e-9)
+
+    def test_cpk_matches_within_sigma_formula(self):
+        """Cpk = min((USL−μ)/(3σ_within), (μ−LSL)/(3σ_within))。"""
+        data = _make_capability_data()
+        usl, lsl = 11.5, 8.5
+        r = orchestrate(
+            AnalysisRequest(
+                task="process_capability",
+                data=pd.DataFrame({"y": data}),
+                target_col="y",
+                feature_cols=[],
+                params={"usl": usl, "lsl": lsl},
+            )
+        )
+        sigma_within = self._within_sigma(data)
+        mu = float(data.mean())
+        expected = min((usl - mu) / (3 * sigma_within), (mu - lsl) / (3 * sigma_within))
+        assert float(r.metadata["cpk"]) == pytest.approx(expected, rel=1e-9)
+
+    def test_cp_and_pp_differ_when_data_is_autocorrelated(self):
+        """回归防线：自相关数据下 Cp ≠ Pp（若两者相等，说明口径被混用了）。
+
+        这条断言的价值在于**主动构造两口径必须分歧的场景**——
+        原先用整体 σ 校验 Cp 的写法，恰恰在 iid 数据上无法暴露口径错误。
+        """
+        rng = np.random.default_rng(3)
+        n = 200
+        drift = np.linspace(-1.2, 1.2, n)
+        data = pd.Series(10.0 + drift + rng.normal(0, 0.25, n))
+        r = orchestrate(
+            AnalysisRequest(
+                task="process_capability",
+                data=pd.DataFrame({"y": data}),
                 target_col="y",
                 feature_cols=[],
                 params={"usl": 11.5, "lsl": 8.5},
             )
         )
         assert r.status == "ok"
-        # 检查 CI 存在（审查 2026-08-19 #3.2：键缺失即通过的弱断言已改硬断言）
-        assert "cp_ci" in r.metadata or "cpk_ci" in r.metadata, (
-            f"应报告过程能力 CI，metadata 键: {list(r.metadata.keys())}"
+        cp, pp = float(r.metadata["cp"]), float(r.metadata["pp"])
+        assert cp != pytest.approx(pp, rel=0.05), (
+            f"自相关数据下 Cp({cp:.3f}) 与 Pp({pp:.3f}) 应显著不同——相等说明组内σ与整体σ被混为一谈"
         )
+        assert cp > pp, "自相关（漂移）时组内σ < 整体σ，故 Cp > Pp"
+
+    def test_cp_cpk_values_legacy_tolerance_removed(self):
+        """旧断言（整体σ + abs<0.1）已删除——此处确认它不会悄悄回来。"""
+        data = _make_capability_data()
+        sigma_overall = data.std(ddof=1)
+        sigma_within = self._within_sigma(data)
+        # iid 数据下两者接近但不相等；若某天完全相等，说明 MR 法被替换成了整体 σ
+        assert sigma_within != pytest.approx(sigma_overall, rel=1e-12), (
+            "组内σ与整体σ在本数据上不应完全相同（同一估计量则口径区分失效）"
+        )
+
+    def test_capability_ci_exists_and_is_ordered(self):
+        """过程能力应报告 95% CI，且区间有序、包含点估计。
+
+        审查 2026-09-24（第三轮复核 P0-3）：原断言为
+        `"cp_ci" in metadata or "cpk_ci" in metadata` —— 任一存在即通过，
+        是弱断言；且当时 CI 用的自由度（n−1）与 σ 估计量（MR 法）不匹配，
+        CI 过窄约 28%。现补强为：存在 + 有序 + 包住点估计。
+        """
+        data = _make_capability_data()
+        r = orchestrate(
+            AnalysisRequest(
+                task="process_capability",
+                data=pd.DataFrame({"y": data}),
+                target_col="y",
+                feature_cols=[],
+                params={"usl": 11.5, "lsl": 8.5},
+            )
+        )
+        assert r.status == "ok"
+        for key in ("cp_ci", "cpk_ci"):
+            lo, hi = r.metadata[key]
+            assert lo is not None and hi is not None, f"{key} 不应为 None"
+            assert 0 <= lo < hi, f"{key} 区间应有序且下限非负，实际 ({lo}, {hi})"
+        cp_lo, cp_hi = r.metadata["cp_ci"]
+        assert cp_lo < float(r.metadata["cp"]) < cp_hi, "Cp 点估计应落在其 CI 内"
+        cpk_lo, cpk_hi = r.metadata["cpk_ci"]
+        assert cpk_lo <= float(r.metadata["cpk"]) < cpk_hi, "Cpk 点估计应落在其 CI 内"
 
 
 # ═══════════════════════════════════════════════════════════
-# 测试 5: Gage R&R — 对比 R MSA 包
+# 测试 5: Gage R&R — AIAG 均值-极差法手工公式（独立复算，非 R MSA 包）
 # ═══════════════════════════════════════════════════════════
 
 
 class TestGageRRCrossVal:
-    """R 参考: gageRR(y, data=df, part='part', operator='operator')"""
+    """参考实现：AIAG 均值-极差法方差分量手工公式（非 R MSA 包）。"""
 
     def test_gage_rr_components(self):
         """Gage R&R 应分解方差分量"""

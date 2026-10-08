@@ -417,3 +417,59 @@ def test_src_summarized_dir_contents_are_exempt(tmp_path):
     root = build_repo(tmp_path)
     problems = verify_docs.check_subdir_undeclared(root, strict=True)
     assert not any("src/ok.py" in p for p in problems), problems
+
+
+# ── 第三轮复核 P3-3 附带发现（2026-09-24）：新建目录的第一个文件漏网 ──────────
+def test_first_file_in_brand_new_code_dir_is_detected(tmp_path):
+    """**新建目录**下的第一个 .py 必须被检出。
+
+    修复前 `_recursive_dirs` 只覆盖"已声明至少一个子项"的目录 ——
+    新目录是空的，于是它的第一个文件永远漏网。
+    实测复现：新增 `tests/golden/test_spc_msa_golden.py` 时本检查无任何输出。
+    """
+    root = build_repo(tmp_path)
+    # 目录树里**没有任何** tests/golden 条目
+    newdir = root / "tests" / "brand_new"
+    newdir.mkdir(parents=True)
+    (newdir / "test_first.py").write_text("def test_x():\n    assert 1\n", encoding="utf-8")
+
+    problems = verify_docs.check_subdir_undeclared(root, strict=True)
+    assert any("tests/brand_new/test_first.py" in p for p in problems), (
+        f"新目录下的第一个 .py 应被要求登记，实际 problems={problems}"
+    )
+
+
+def test_new_dir_non_py_asset_is_not_noisy(tmp_path):
+    """对照：新目录下的**非 .py** 资产不报（避免 images/ 类汇总资产产生噪音）。"""
+    root = build_repo(tmp_path)
+    newdir = root / "tests" / "assets"
+    newdir.mkdir(parents=True)
+    (newdir / "data.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (newdir / "figure.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    problems = verify_docs.check_subdir_undeclared(root, strict=True)
+    assert not any("tests/assets/" in p for p in problems), (
+        f"新目录下的非 .py 资产不应产生噪音，实际 problems={problems}"
+    )
+
+
+def test_declared_new_dir_file_is_not_flagged(tmp_path):
+    """登记后不得误报（先红后绿的另一半）。"""
+    root = build_repo(tmp_path)
+    tree = TREE_OK.replace(
+        "├── tests/",
+        "├── tests/\n│   └── golden/\n│       └── test_g.py",
+    )
+    (root / "docs" / "governance" / "project-structure.md").write_text(tree, encoding="utf-8")
+    d = root / "tests" / "golden"
+    d.mkdir(parents=True)
+    (d / "test_g.py").write_text("def test_x():\n    assert 1\n", encoding="utf-8")
+
+    problems = verify_docs.check_subdir_undeclared(root, strict=True)
+    assert not any("test_g.py" in p for p in problems), problems
+
+
+def test_code_recursive_roots_excludes_docs(tmp_path):
+    """范围约束：docs/ 下的 .py 不适用该新规则（避免对参考脚本产生噪音）。"""
+    assert "docs" not in verify_docs._CODE_RECURSIVE_ROOTS
+    assert {"src", "tests", "scripts", "benchmarks"} <= verify_docs._CODE_RECURSIVE_ROOTS

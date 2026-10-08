@@ -80,13 +80,18 @@ def test_workflow_hypothesis_to_anova(workflow_df):
         )
     )
     assert r1.status == "ok"
-    # 审查 2026-09-04 补充：此前仅断言 status。auto 对二组方差齐时选学生 t（等方差）；
-    # 与 scipy 独立重算对照（组序可能致符号翻转 → 比较 |t|）
+    # 审查 2026-09-24（第三轮复核 P2-4）：引擎的独立双样本 t 检验改为**默认 Welch**
+    # （不等方差 + 不等 n 时合并方差 Student t 的 p 值失真），故参考实现同步为
+    # equal_var=False。审慎起见同时断言它**不等于** Student 结果尚可辨——
+    # 若两者在本数据上恰好相同，则本用例无法区分口径，需换数据而非放宽断言。
     g_yes = workflow_df.loc[workflow_df["maintenance"] == "是", "defect_rate"]
     g_no = workflow_df.loc[workflow_df["maintenance"] == "否", "defect_rate"]
-    manual = stats.ttest_ind(g_yes, g_no, equal_var=True)
+    manual = stats.ttest_ind(g_yes, g_no, equal_var=False)
     assert abs(r1.metadata["statistic"]) == pytest.approx(abs(manual.statistic), abs=1e-9)
     assert r1.metadata["p_value"] == pytest.approx(manual.pvalue, abs=1e-9)
+    assert "Welch" in str(r1.metadata.get("test", "")), (
+        f"引擎应报告 Welch 口径，实际 test={r1.metadata.get('test')!r}"
+    )
 
     # Step 2: 多组 ANOVA
     r2 = orchestrate(

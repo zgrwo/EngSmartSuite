@@ -536,26 +536,28 @@ def test_survival_minimal():
 
 def test_bootstrap_ci_ci_level_out_of_range():
     """审查 2026-08-19 #1.3：ci_level 越界应返回中文错误而非崩溃/荒谬输出。"""
-    from smartsuite.engine.exploratory import bootstrap_ci
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame({"v": np.random.normal(0, 1, 50)})
+    # P4 步骤③（第二十五轮）：参数校验改抛异常 → 经编排层取用户可见结果
     req = AnalysisRequest(
         task="bootstrap_ci", data=df, target_col="v", params={"ci_level": 1.5, "n_bootstrap": 200}
     )
-    result = bootstrap_ci(req)
+    result = orchestrate(req)
     assert result.status == "error"
     assert any("ci_level" in m for m in result.messages)
 
 
 def test_median_ci_ci_level_out_of_range():
     """审查 2026-08-19 #1.3：median_ci 的 ci_level=2 不得输出 "200% CI"。"""
-    from smartsuite.engine.exploratory import median_ci
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame({"v": np.random.normal(0, 1, 50)})
+    # P4 步骤③（第二十轮）：median_ci 参数校验改抛异常 → 经编排层取用户可见结果
     req = AnalysisRequest(task="median_ci", data=df, target_col="v", params={"ci_level": 2})
-    result = median_ci(req)
+    result = orchestrate(req)
     assert result.status == "error"
     assert any("ci_level" in m for m in result.messages)
 
@@ -574,34 +576,36 @@ def test_median_ci_valid_level_still_works():
 
 def test_power_analysis_effect_size_zero_rejected():
     """审查 2026-08-19 #1.4：effect_size=0 应返回中文错误而非 statsmodels ValueError。"""
-    from smartsuite.engine.root_cause import power_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     df = pd.DataFrame({"v": [1.0]})
+    # P4 步骤③：参数校验改抛异常 → 经编排层取用户可见结果
     req = AnalysisRequest(
         task="power_analysis",
         data=df,
         target_col="v",
         params={"effect_size": 0, "test_type": "ttest"},
     )
-    result = power_analysis(req)
+    result = orchestrate(req)
     assert result.status == "error"
-    assert any("effect_size" in m for m in result.messages)
+    assert any("effect_size" in m or "效应量" in m for m in result.messages), result.messages
 
 
 def test_power_analysis_string_p0_p1_rejected():
     """审查 2026-08-19 #1.4：字符串 p0/p1 应返回中文错误而非 TypeError。"""
-    from smartsuite.engine.root_cause import power_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     df = pd.DataFrame({"v": [1.0]})
+    # P4 步骤③：参数校验改抛异常 → 经编排层取用户可见结果
     req = AnalysisRequest(
         task="power_analysis",
         data=df,
         target_col="v",
         params={"test_type": "proportion", "p0": "0.3", "p1": "oops"},
     )
-    result = power_analysis(req)
+    result = orchestrate(req)
     assert result.status == "error"
-    assert any("p0/p1" in m for m in result.messages)
+    assert any("p0" in m or "p1" in m or "比例" in m for m in result.messages), result.messages
 
 
 def test_power_analysis_string_n_groups_convertible():
@@ -644,20 +648,36 @@ def test_power_analysis_proportion_mode_works():
 
 
 def test_anomaly_grubbs_string_params_rejected():
-    """审查 2026-08-19 #1.4：grubbs 分支字符串参数应返回中文错误而非 TypeError。"""
-    from smartsuite.engine.detection import anomaly_detect
+    """审查 2026-08-19 #1.4：grubbs 分支字符串参数应返回中文错误而非 TypeError。
+
+    审查 2026-09-24（P4 步骤③，第二十四轮）修正断言：
+    `max_outliers="5"` 是**数字字符串**，`Integer` 会正常强转为 5（既有行为 ——
+    原 `int("5")` 也一样成功），故它不是"错误参数"。
+    真正该被拒的是 `alpha="oops"`（无法解析的数值）。
+    原用例把两者混在一起断言，靠的是 alpha 先失败 —— 现在仍应通过，
+    但**顺便钉住"数字字符串被接受"**这条既有兼容性。
+    """
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(3)
     df = pd.DataFrame({"v": np.random.normal(0, 1, 30)})
+    base = {"method": "grubbs", "max_outliers": "5"}
+
+    # ① 非数字 alpha → 拒绝
     req = AnalysisRequest(
-        task="anomaly_detect",
-        data=df,
-        target_col="v",
-        params={"method": "grubbs", "alpha": "oops", "max_outliers": "5"},
+        task="anomaly_detect", data=df, target_col="v", params={**base, "alpha": "oops"}
     )
-    result = anomaly_detect(req)
+    result = orchestrate(req)
     assert result.status == "error"
     assert any("alpha" in m for m in result.messages)
+
+    # ② 数字字符串 → 接受（CLI/YAML 传字符串的兼容性，必须保持）
+    ok = orchestrate(
+        AnalysisRequest(
+            task="anomaly_detect", data=df, target_col="v", params={**base, "alpha": "0.05"}
+        )
+    )
+    assert ok.status == "ok", f"数字字符串应被强转接受: {ok.messages}"
 
     req2 = AnalysisRequest(
         task="anomaly_detect",
@@ -1111,11 +1131,12 @@ def test_kruskal_continuous_fallback_rejected():
 
 def test_trend_forecast_string_steps_rejected():
     """Round-2 #A3b：forecast_steps 字符串/非法值不得 TypeError。"""
-    from smartsuite.engine.detection import trend_forecast
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(7)
     df = pd.DataFrame({"y": np.random.normal(0, 1, 30)})
-    r = trend_forecast(
+    # P4 步骤③（第二十一轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="trend_forecast", data=df, target_col="y", params={"forecast_steps": "abc"}
         )
@@ -1126,7 +1147,7 @@ def test_trend_forecast_string_steps_rejected():
 
 def test_doe_analysis_string_factor_3levels():
     """Round-2 #A3c：>=3 水平字符串因子不得 TypeError 崩溃。"""
-    from smartsuite.engine.doe_opt import doe_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame(
@@ -1135,7 +1156,8 @@ def test_doe_analysis_string_factor_3levels():
             "y": np.random.normal(0, 1, 30),
         }
     )
-    r = doe_analysis(
+    # P4 步骤③（第二十一轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(task="doe_analysis", data=df, target_col="y", feature_cols=["f"])
     )
     assert r.status in ("ok", "error"), f"doe_analysis 崩溃: {r.status}"
@@ -1357,7 +1379,15 @@ def test_gage_rr_av_matches_anova():
     )
     assert r.status == "ok", f"gage_rr 失败: {r.messages}"
     av = r.metadata.get("av")
-    assert av is not None and av > 0, "AV 应可计算"
+    assert isinstance(av, float) and av > 0, f"AV 应可计算，实际 {av!r}"
+
+    # 审查 2026-09-24（P2-1）：现在引擎自带 ANOVA 方差分解，
+    # 可直接用它的操作员分量作为 AV 的对照（比经 statsmodels 转算更直接）。
+    anova_sigma_op = float(np.sqrt(r.metadata["anova_variance_components"]["operator"]))
+    assert abs(av - anova_sigma_op) / anova_sigma_op < 0.25, (
+        f"AV={av:.4f} 与引擎内 ANOVA 操作员分量 {anova_sigma_op:.4f} 偏差过大"
+    )
+
     import statsmodels.api as sm
     from statsmodels.formula.api import ols
 
@@ -1397,10 +1427,11 @@ def test_power_analysis_achieved_n_groups_string():
 
 def test_power_analysis_effect_size_nan_rejected():
     """Round-2 #A2f：effect_size='nan' 不得穿透顶层校验。"""
-    from smartsuite.engine.root_cause import power_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     df = pd.DataFrame({"v": [1.0]})
-    r = power_analysis(
+    # P4 步骤③：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="power_analysis",
             data=df,
@@ -1409,16 +1440,17 @@ def test_power_analysis_effect_size_nan_rejected():
         )
     )
     assert r.status == "error"
-    assert any("有限" in m or "effect" in m.lower() for m in r.messages)
+    assert any("有限" in m or "effect" in m.lower() for m in r.messages), r.messages
 
 
 def test_decision_tree_max_depth_zero_rejected():
     """Round-2 #A2g：max_depth=0 应返回中文错误而非 sklearn ValueError。"""
-    from smartsuite.engine.root_cause import decision_tree_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame({"x1": np.random.normal(0, 1, 30), "y": np.random.normal(0, 1, 30)})
-    r = decision_tree_analysis(
+    # P4 步骤③（第二十二轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="decision_tree",
             data=df,
@@ -1477,11 +1509,12 @@ def test_process_capability_constant_data_rejected():
 
 def test_anomaly_method_whitelist():
     """Round-2 #A2p：未知 method 不得静默按 Z-score 执行。"""
-    from smartsuite.engine.detection import anomaly_detect
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(2)
     df = pd.DataFrame({"v": np.random.normal(0, 1, 30)})
-    r = anomaly_detect(
+    # P4 步骤③（第二十四轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(task="anomaly_detect", data=df, target_col="v", params={"method": "bogus"})
     )
     assert r.status == "error"
@@ -1490,11 +1523,12 @@ def test_anomaly_method_whitelist():
 
 def test_spc_nonparametric_side_whitelist():
     """Round-2 #A2p：未知 side 不得静默按双侧执行。"""
-    from smartsuite.engine.spc_monitor import spc_nonparametric
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(2)
     df = pd.DataFrame({"y": np.random.normal(0, 1, 30)})
-    r = spc_nonparametric(
+    # P4 步骤③（第二十三轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="spc_nonparametric",
             data=df,
@@ -1509,11 +1543,12 @@ def test_spc_nonparametric_side_whitelist():
 
 def test_bootstrap_statistic_whitelist():
     """Round-2 #A2p：未知 statistic 不得静默按 mean 执行。"""
-    from smartsuite.engine.exploratory import bootstrap_ci
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(2)
     df = pd.DataFrame({"v": np.random.normal(0, 1, 30)})
-    r = bootstrap_ci(
+    # P4 步骤③（第二十五轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="bootstrap_ci", data=df, target_col="v", params={"statistic": "variance"}
         )
@@ -1710,7 +1745,7 @@ def test_power_analysis_p0_equals_p1_rejected():
 
 def test_doe_numeric_levels_sorted_numerically():
     """P3：二水平数字字符串因子（如 '200'/'220'）应按数值序编码（效应符号正确）。"""
-    from smartsuite.engine.doe_opt import doe_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     # '200' 水平均值低，'220' 水平均值高 → 效应应为正
@@ -1720,7 +1755,8 @@ def test_doe_numeric_levels_sorted_numerically():
             "y": np.concatenate([np.random.normal(10, 1, 10), np.random.normal(14, 1, 10)]),
         }
     )
-    r = doe_analysis(
+    # P4 步骤③（第二十一轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(task="doe_analysis", data=df, target_col="y", feature_cols=["温度"])
     )
     assert r.status == "ok", f"doe 失败: {r.messages}"
@@ -1735,7 +1771,7 @@ def test_doe_numeric_levels_sorted_numerically():
 
 def test_doe_alpha_range_validated():
     """P3：doe_analysis 的 alpha 越界不得输出全因子显著。"""
-    from smartsuite.engine.doe_opt import doe_analysis
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame(
@@ -1744,7 +1780,8 @@ def test_doe_alpha_range_validated():
             "y": np.random.normal(0, 1, 30),
         }
     )
-    r = doe_analysis(
+    # P4 步骤③（第二十一轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="doe_analysis", data=df, target_col="y", feature_cols=["f"], params={"alpha": 2.0}
         )
@@ -1755,7 +1792,7 @@ def test_doe_alpha_range_validated():
 
 def test_lasso_l1_ratio_range_validated():
     """P3：lasso l1_ratio 越界不得静默按纯 Lasso/ElasticNet 执行。"""
-    from smartsuite.engine.doe_opt import lasso_regression
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(1)
     df = pd.DataFrame(
@@ -1765,7 +1802,8 @@ def test_lasso_l1_ratio_range_validated():
             "y": np.random.normal(0, 1, 30),
         }
     )
-    r = lasso_regression(
+    # P4 步骤③（第二十四轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="lasso_regression",
             data=df,
@@ -1775,11 +1813,19 @@ def test_lasso_l1_ratio_range_validated():
         )
     )
     assert r.status == "error"
-    assert any("l1_ratio" in m for m in r.messages)
+    # 文案给出中文标签（「L1 比率 (ElasticNet)」）或参数名其一即可
+    assert any("l1_ratio" in m or "L1 比率" in m for m in r.messages), r.messages
 
 
 def test_spc_attribute_np_chart_uses_n_col():
-    """P3：np 图提供 n_col 时应使用样本量列（此前用行数）。"""
+    """P3：np 图提供 n_col 时应使用样本量列（此前用行数）。
+
+    审查 2026-09-24（第三轮复核 P2-6）：本用例原用**变样本量** [20, 40] 作为数据，
+    但 np 图的常数控制限只在样本量相等时成立 —— 引擎现已对此拒绝。
+    本用例的**真实意图**是"n_col 被使用（而非行数）"，故改为等样本量
+    （n_col=20，而每组行数=2，两者不同 → 仍能区分用的是哪一个）。
+    不等样本量的拒绝行为由 tests/engine/test_attribute_sample_size.py 覆盖。
+    """
     from smartsuite.engine.spc_monitor import attribute_chart
 
     np.random.seed(3)
@@ -1787,7 +1833,8 @@ def test_spc_attribute_np_chart_uses_n_col():
         {
             "x": np.repeat(range(1, 11), 2),
             "y": np.random.binomial(20, 0.1, 20),
-            "batch_size": np.repeat([20, 40], 10),  # 变样本量
+            # 等样本量 20；每组行数为 2 —— 若引擎误用行数，p̄ 会算成 count/2 > 1 而报错
+            "batch_size": np.repeat([20], 20),
         }
     )
     r = attribute_chart(
@@ -1800,6 +1847,18 @@ def test_spc_attribute_np_chart_uses_n_col():
         )
     )
     assert r.status == "ok", f"np 图失败: {r.messages}"
+    # 证明用的是 n_col(=20) 而非行数(=2)：np 图中心线 = 各子组不良数的均值
+    # （子组 = 同一 x 下的聚合，每组 2 行 → count 为两行之和）
+    counts = df.groupby("x")["y"].sum()
+    assert r.metadata["cl"] == pytest.approx(float(counts.mean()), rel=1e-9), (
+        f"np 图中心线应为子组不良数均值，实际 {r.metadata['cl']}"
+    )
+    # 若引擎误用行数(2)当样本量，p̄ = Σcount/(10×2) = 1.7 > 1 → sqrt(负) → UCL 为 NaN。
+    # 故 UCL 有限且 > CL 即证明 n_col 被正确采纳。
+    ucl = float(r.tables["control_stats"]["UCL"].iloc[0])
+    assert np.isfinite(ucl) and ucl > r.metadata["cl"], (
+        f"UCL 应有限且大于中心线（用行数会得 NaN）: UCL={ucl}, CL={r.metadata['cl']}"
+    )
 
     from smartsuite.engine.root_cause import power_analysis
 

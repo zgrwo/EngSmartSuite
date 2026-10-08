@@ -1751,12 +1751,13 @@ def test_proportion_ci_custom_ci_level():
 
 def test_proportion_ci_invalid_ci_level():
     """比例置信区间: ci_level 超出 (0,1) 应返回 error。"""
-    from smartsuite.engine.root_cause import proportion_ci
+    from smartsuite.services.orchestrator import orchestrate
 
     df = pd.DataFrame({"y": [1] * 10 + [0] * 10})
 
+    # P4 步骤③（第二十二轮）：参数校验改抛异常 → 经编排层取用户可见结果
     req = AnalysisRequest(task="proportion_ci", data=df, target_col="y", params={"ci_level": 1.5})
-    result = proportion_ci(req)
+    result = orchestrate(req)
     assert result.status == "error"
     assert "ci_level" in result.messages[0]
 
@@ -1794,13 +1795,14 @@ def test_distribution_summary_custom_bins():
 
 def test_distribution_summary_invalid_bins():
     """分布特征摘要: bins 为负数应返回 error。"""
-    from smartsuite.engine.root_cause import distribution_summary
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(42)
     df = pd.DataFrame({"y": np.random.normal(0, 1, 100)})
 
+    # P4 步骤③（第二十一轮）：参数校验改抛异常 → 经编排层取用户可见结果
     req = AnalysisRequest(task="distribution_summary", data=df, target_col="y", params={"bins": -5})
-    result = distribution_summary(req)
+    result = orchestrate(req)
     assert result.status == "error"
     assert "bins" in result.messages[0]
 
@@ -2024,14 +2026,15 @@ def test_spc_xbar_i_chart_violation_visible():
 
 def test_spc_ewma_l_invalid_rejected():
     """审查 #2.8：EWMA 的 L<=0 应报错而非 30/30 全违规 status=ok。"""
-    from smartsuite.engine.spc_monitor import ewma_chart
+    from smartsuite.services.orchestrator import orchestrate
 
     np.random.seed(3)
     df = pd.DataFrame({"y": np.random.normal(0, 1, 30)})
+    # P4 步骤③（第二十三轮）：参数校验改抛异常 → 经编排层取用户可见结果
     req = AnalysisRequest(
         task="spc_ewma", data=df, target_col="y", feature_cols=[], params={"lam": 0.2, "L": 0}
     )
-    result = ewma_chart(req)
+    result = orchestrate(req)
     assert result.status == "error"
     assert any("L" in m for m in result.messages)
 

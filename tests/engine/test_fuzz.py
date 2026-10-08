@@ -151,7 +151,10 @@ def test_capability_inverted_specs():
     req = AnalysisRequest(
         task="process_capability", data=df, target_col="val", params={"usl": 8.0, "lsl": 12.0}
     )  # 倒置
-    result = process_capability_analysis(req)
+    # 审查 2026-09-24（P4 步骤③）：参数校验抛异常 → 经编排层取用户可见结果
+    from smartsuite.services.orchestrator import orchestrate
+
+    result = orchestrate(req)
     _assert_no_crash(result, "process_capability", "inverted specs")
 
 

@@ -56,7 +56,9 @@ def test_auto_subgroup_empty_df_guarded():
     assert isinstance(df_out, pd.DataFrame)
 
 
-# ── C-2: _validate_output_path 异常应转 OutputError（reporter try 内）──
+# ── C-2: _prepare_output_path 异常应转 OutputError（reporter try 内）──
+# 审查 2026-09-24 P1-2：原 `_validate_output_path` 已改名 `_prepare_output_path`
+# （旧名承诺了未实现的目录校验）；异常→中文 OutputError 的契约不变。
 def test_to_html_makedirs_failure_raises_outputerror(monkeypatch):
     from smartsuite.services import reporter
 

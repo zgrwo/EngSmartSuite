@@ -12,6 +12,8 @@ import pytest
 import pandas as pd
 
 from smartsuite.core.contracts import AnalysisRequest
+from smartsuite.engine.capability import process_capability_analysis
+from smartsuite.services.orchestrator import orchestrate
 
 
 def _mk(task, df, y, feats=None, params=None):
@@ -24,13 +26,10 @@ def _mk(task, df, y, feats=None, params=None):
 
 
 def test_capability_spec_limits_reject_inf():
-    from smartsuite.engine.capability import process_capability_analysis
-
     np.random.seed(0)
     df = pd.DataFrame({"v": np.random.normal(50, 2, 100)})
-    r = process_capability_analysis(
-        _mk("process_capability", df, "v", params={"usl": "inf", "lsl": "-inf"})
-    )
+    # 审查 2026-09-24（P4 步骤③）：参数校验改抛异常，用户可见结果由编排层产出
+    r = orchestrate(_mk("process_capability", df, "v", params={"usl": "inf", "lsl": "-inf"}))
     assert r.status == "error", (
         f"inf 规格限应报错，实际 status={r.status}, cp={r.metadata.get('cp')}"
     )
@@ -38,26 +37,22 @@ def test_capability_spec_limits_reject_inf():
 
 
 def test_capability_spec_limits_reject_nan():
-    from smartsuite.engine.capability import process_capability_analysis
-
     np.random.seed(0)
     df = pd.DataFrame({"v": np.random.normal(50, 2, 100)})
-    r = process_capability_analysis(
-        _mk("process_capability", df, "v", params={"usl": 100, "lsl": "nan"})
-    )
+    # 审查 2026-09-24（P4 步骤③）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(_mk("process_capability", df, "v", params={"usl": 100, "lsl": "nan"}))
     assert r.status == "error", "lsl=nan 应报错，不应产出 cp=nan/cpk 荒谬值"
     assert any("LSL" in m for m in r.messages)
 
 
 def test_capability_target_invalid_is_error_not_silent():
-    from smartsuite.engine.capability import process_capability_analysis
-
     np.random.seed(0)
     df = pd.DataFrame({"v": np.random.normal(50, 2, 100)})
+    # 审查 2026-09-24（P4 步骤③）：参数校验改抛异常 → 经编排层取用户可见结果
     for bad in ("nan", "inf", "abc"):
-        r = process_capability_analysis(_mk("process_capability", df, "v", params={"target": bad}))
+        r = orchestrate(_mk("process_capability", df, "v", params={"target": bad}))
         assert r.status == "error", f"target={bad!r} 应报错（不再静默置 None）"
-    # 合法规格限 + 目标值仍正常
+    # 合法规格限 + 目标值仍正常（直接调引擎：合法输入不抛异常）
     r = process_capability_analysis(
         _mk("process_capability", df, "v", params={"usl": 56, "lsl": 44, "target": 50})
     )
@@ -152,7 +147,18 @@ def test_gage_rr_2operator_small_sample_av_matches_anova():
     )
     assert r.status == "ok", r.messages
     av = r.metadata.get("av")
-    assert av is not None and av > 0
+    assert isinstance(av, float) and av > 0, f"AV 应可计算，实际 {av!r}"
+
+    # 审查 2026-09-24（P2-1）：引擎现自带 ANOVA 方差分解，用它做直接对账。
+    # 本用例主题是「d2* 修正后 AV 不再高估」，故断言 AV 与 ANOVA 操作员分量
+    # 同量级，且**不得显著高于**它 —— 高估正是本用例要防的回归。
+    anova_sigma_op = float(np.sqrt(r.metadata["anova_variance_components"]["operator"]))
+    assert av == pytest.approx(anova_sigma_op, rel=0.15), (
+        f"AV={av:.4f} 与 ANOVA 操作员分量 {anova_sigma_op:.4f} 偏差过大（d2* 口径回归？）"
+    )
+    assert av <= anova_sigma_op * 1.15, (
+        f"AV={av:.4f} 明显高于 ANOVA 分量 {anova_sigma_op:.4f} —— 这是本用例要防的高估回归"
+    )
 
     from statsmodels.formula.api import ols
 
@@ -216,12 +222,13 @@ def _doe_req(method, n_runs):
 
 
 def test_doe_design_n_runs_zero_rejected():
-    from smartsuite.engine.doe_opt import doe_design
+    from smartsuite.services.orchestrator import orchestrate
 
+    # P4 步骤③（第二十七轮）：参数校验改抛异常 → 经编排层取用户可见结果
     for method in ("fractional_factorial", "plackett_burman"):
-        r = doe_design(_doe_req(method, 0))
+        r = orchestrate(_doe_req(method, 0))
         assert r.status == "error", f"{method} n_runs=0 不应静默使用默认值"
-        assert any("n_runs" in m for m in r.messages)
+        assert any("n_runs" in m or "指定运行数" in m for m in r.messages), r.messages
 
 
 def test_doe_design_n_runs_none_uses_default():

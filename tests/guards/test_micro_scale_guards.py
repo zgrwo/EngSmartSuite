@@ -375,7 +375,12 @@ def test_to_html_micro_values_not_zeroed(tmp_path):
 
 
 def test_app_js_fmt_cell_num_execution():
-    """E-3：不止 grep 字符串——用 node 实际执行 fmtCellNum 验证量级自适应分支。"""
+    """E-3：不止 grep 字符串——用 node 实际执行 fmtCellNum 验证量级自适应分支。
+
+    审查 2026-09-24（P3-3）：`fmtCellNum` 已迁至 `util.js` 并成为模块导出
+    （`export function`）。本用例相应改为：在 static/ 下全部 JS 中定位该函数，
+    并剥离 `export` 关键字后再交给 `node -e`（脚本模式下 `export` 是语法错误）。
+    """
     import json
     import shutil
     import subprocess
@@ -383,11 +388,15 @@ def test_app_js_fmt_cell_num_execution():
     node = shutil.which("node")
     if node is None:
         pytest.skip("node 不可用（GitHub runner 自带；本地未安装时跳过）")
-    js = _APP_JS.read_text(encoding="utf-8")
-    start = js.index("function fmtCellNum")
+    static = _APP_JS.parent
+    js = "\n".join(p.read_text(encoding="utf-8") for p in sorted(static.glob("*.js")))
+    marker = "function fmtCellNum"
+    assert marker in js, f"未在 static/*.js 中找到 {marker}"
+    start = js.index(marker)
     end = js.index("\n}", start) + 2
+    func = js[start:end]
     script = (
-        js[start:end] + "\nconsole.log(JSON.stringify([fmtCellNum(9.827e-11), fmtCellNum(0.123456),"
+        func + "\nconsole.log(JSON.stringify([fmtCellNum(9.827e-11), fmtCellNum(0.123456),"
         " fmtCellNum(0), fmtCellNum('N/A')]));"
     )
     out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
@@ -403,7 +412,8 @@ def test_app_js_fmt_cell_num_execution():
 def test_grubbs_max_outliers_inf_chinese_error():
     rng = np.random.default_rng(1)
     df = pd.DataFrame({"y": rng.normal(0, 1, 30)})
-    r = anomaly_detect(
+    # P4 步骤③（第二十四轮）：参数校验改抛异常 → 经编排层取用户可见结果
+    r = orchestrate(
         AnalysisRequest(
             task="anomaly_detect",
             data=df,
