@@ -166,6 +166,7 @@ EngSmartSuite/
 │   │   ├── test_capability_ci_coverage.py # 能力指数 CI 的覆盖率检验（MR-σ 有效自由度）
 │   │   ├── test_survival_event_semantics.py # 生存分析事件列语义（文本编码不猜）
 │   │   ├── test_survival_nonfinite.py #  生存分析的非有限值清洗与披露（含污染复现）
+│   │   ├── test_trend_nonfinite.py # 趋势预测的 B1 披露与错误归因回归（审查 P1-2）
 │   │   ├── test_anova_effect_size.py # ANOVA 效应量口径（经典 η² vs 偏 η²，statsmodels 复算）
 │   │   ├── test_welch_ttest.py     #   独立双样本 t 检验的方差假设（Welch + Levene 披露）
 │   │   ├── test_attribute_sample_size.py # 属性图样本量假设（np/c 常数限仅在等 n 时成立）
