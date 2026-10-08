@@ -1,774 +1,59 @@
-// SmartSuite Web UI
-let columnData = [];
-let selectedY = new Set(), selectedX = new Set(), selectedCat = new Set();
-let csrfToken = '';
-const escHtml = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+// app.js — 入口模块：分析执行链与事件委托。
+//
+// 审查 2026-09-24（P3-3）：原为 933 行单文件、20 个顶层全局、11 处内联 onclick。
+// 现拆为：
+//   util.js   无依赖工具（HTML 转义 / 数值展示 / 页内 toast）
+//   api.js    CSRF token 与带 token 的 fetch
+//   state.js  列数据 / Y·X·类别选择 / 上传 / 列渲染
+//   params.js 参数面板（默认值与元数据、控件、因子与请求行编辑器）
+//   app.js    本文件：编排上面四者 + 在**一个根节点**上做事件委托
+//
+// 关键约束（由 tests/guards/test_web_ui_guards.py 断言）：
+//   1. 全项目**不得**再有内联事件处理器 —— 模块化后函数不再是全局，
+//      内联 `onclick="foo()"` 会抛 ReferenceError（点击即坏）；
+//   2. 因此所有交互都走 `data-action` + 根级委托，这也使 CSP 的
+//      `script-src` 得以去掉 `'unsafe-inline'`（本项重构的安全收益）。
 
-// 页内提示（替代原生 alert；3.2s 自动消失，无 DOM 时回退 alert）
-let _toastTimer = null;
-function showToast(msg) {
-  const el = document.getElementById('toast');
-  if (!el) { alert(msg); return; }
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
-}
-// 审查 2026-09-16 B-5：表格数值展示——固定 toFixed(4) 会把微尺度值（<5e-5）整列显示为
-// 0.0000（抵消引擎 round_for_display）；微尺度改用 4 位有效数字科学计数，常规量级行为不变
-function fmtCellNum(v) {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return String(v);
-  if (v === 0) return '0.0000';
-  return Math.abs(v) < 5e-5 ? v.toExponential(3) : v.toFixed(4);
-}
+import { escHtml, fmtCellNum, showToast } from './util.js';
+import { fetchWithCsrf } from './api.js';
+import {
+  autoDetect,
+  clearAll,
+  lastFile,
+  renderCols,
+  selectedCat,
+  selectedX,
+  selectedY,
+  setAll,
+  uploadFile,
+} from './state.js';
+import {
+  addFactorRow,
+  addRequestRow,
+  getParams,
+  hasParams,
+  hydrateParams,
+  paramsLoadFailed,
+  paramsReady,
+  removeFactorRow,
+  removeRequestRow,
+  showParams,
+} from './params.js';
 
-// CSRF token 获取
-async function getCsrfToken(force) {
-  if (csrfToken && !force) return csrfToken;
-  try {
-    const r = await fetch('/api/csrf-token');
-    const d = await r.json();
-    csrfToken = d.token || '';
-  } catch(e) { /* 网络错误时留空 */ }
-  return csrfToken;
-}
-// 审查 2026-08-19 M5（Round-2 接线）：会话过期后 403 → 刷新 token 重试一次
-async function fetchWithCsrf(url, options) {
-  const doFetch = async (token) => {
-    const headers = { 'X-CSRF-Token': token, ...(options.headers || {}) };
-    // 仅对 JSON 字符串 body 设置 Content-Type；
-    // FormData 由浏览器自动生成 multipart boundary，显式设置会破坏上传
-    if (typeof options.body === 'string') headers['Content-Type'] = 'application/json';
-    return fetch(url, { ...options, headers });
-  };
-  let r = await doFetch(await getCsrfToken());
-  if (r.status === 403) {
-    csrfToken = '';
-    const fresh = await getCsrfToken(true);
-    if (fresh) r = await doFetch(fresh);
-  }
-  return r;
-}
-// 页面加载时预取
-getCsrfToken();
-const catKw = ['日期','班次','车间','机台','模具','编号','操作','检验',
-  '原料','类型','批号','冷却','循环','模式','分区','保养','环境',
-  '产品代码','色母','嵌件','首件','外观','尺寸','需返工','报警','换料'];
-const yKw = ['不良','强度','伸长','冲击','粗糙','偏差','波动','效率'];
-
-// File upload
-let lastFile = null;
-
-async function uploadFile(f) {
-  lastFile = f;
-  document.getElementById('filename').textContent = f.name;
-  document.getElementById('shape').textContent = '上传中...';
-  // 审查 2026-08-19 M3：前端预检 50MB，避免 413 HTML 响应导致"网络错误"误报
-  if (f.size > 50 * 1024 * 1024) {
-    showToast('文件超过 50MB 限制，请减少数据量后重试');
-    document.getElementById('filename').textContent = '未选择文件';
-    document.getElementById('shape').textContent = '';
-    document.getElementById('file-input').value = '';
-    lastFile = null;
-    return;
-  }
-  const fd = new FormData(); fd.append('file', f);
-  // ADR-0004：可选显式编码；空值 = 后端自动（BOM → utf-8-sig → utf-8 → gbk）
-  const enc = document.getElementById('encoding').value;
-  if (enc) fd.append('encoding', enc);
-  try {
-    const r = await fetchWithCsrf('/api/upload', { method: 'POST', body: fd });
-    let d = {};
-    try { d = await r.json(); } catch(err) { /* 非 JSON 响应（如 413 HTML） */ }
-    if (!r.ok) {
-      showToast('上传失败: ' + (d.error || (r.status === 413 ? '文件超过 50MB 限制' : '未知错误')));
-      document.getElementById('filename').textContent = '未选择文件';
-      document.getElementById('shape').textContent = '';
-      return;
-    }
-    columnData = d.columns || [];
-    document.getElementById('shape').textContent = d.shape ? `(${d.shape.join(' × ')})` : '';
-    renderCols(); autoDetect();
-    // 数据列变化：参数面板若已打开则刷新（列选择器/反演勾选组跟随新列）
-    if (_pendingTask && document.getElementById('param-panel').style.display !== 'none') {
-      showParams(_pendingTask);
-    }
-  } catch(err) {
-    showToast('上传失败: 网络错误或服务器不可达');
-    document.getElementById('filename').textContent = '未选择文件';
-    document.getElementById('shape').textContent = '';
-  }
-}
-
-document.getElementById('file-input').addEventListener('change', e => {
-  const f = e.target.files[0]; if (!f) return;
-  // 审查 2026-09-21 R1-1：选择**新文件**时把编码复位为「自动识别」。
-  // 否则上一次为某文件选定的编码会跨上传粘滞，把新文件静默读错（实测残留
-  // Big5 声明读 GBK 文件 → 列名 ['蠶瘍','恲僅']、HTTP 200、status=ok）。
-  // 同一文件切换下拉框仍按当前值重传（由下方 encoding 监听承担）。
-  document.getElementById('encoding').value = '';
-  uploadFile(f);
-});
-
-// 切换编码后用同一文件立即重传：否则用户看到乱码列名后必须重新选一次文件
-document.getElementById('encoding').addEventListener('change', () => {
-  if (lastFile) uploadFile(lastFile);
-});
-
-// Column rendering — uses data-* attributes + addEventListener (no inline handlers)
-function renderCols() {
-  document.getElementById('col-list').innerHTML = columnData.map((c, i) => {
-    const safeName = escHtml(c.name);
-    return `
-    <div class="col-row">
-      <span class="col-name" title="${safeName} (${escHtml(c.dtype)}, ${escHtml(c.nunique)} unique, ${escHtml(c.missing)} NA)">${safeName}</span>
-      <input type="checkbox" id="cat${i}" data-col="${safeName}" data-role="cat"
-        ${selectedCat.has(c.name)?'checked':''}>
-      <span class="tag cat">类</span>
-      <input type="checkbox" id="x${i}" data-col="${safeName}" data-role="x"
-        ${selectedX.has(c.name)?'checked':''}>
-      <span class="tag x">X</span>
-      <input type="checkbox" id="y${i}" data-col="${safeName}" data-role="y"
-        ${selectedY.has(c.name)?'checked':''}>
-      <span class="tag y">Y</span>
-    </div>`}).join('');
-
-  // Bind event listeners — avoids XSS via inline handlers
-  columnData.forEach((c, i) => {
-    ['cat', 'x', 'y'].forEach(role => {
-      const cb = document.getElementById(role + i);
-      if (cb) {
-        cb.addEventListener('change', function() {
-          toggle(c.name, role, this.checked);
-        });
-      }
-    });
-  });
-  updateStatus();
-}
-
-function toggle(name, role, on) {
-  const m = role==='y'?selectedY : role==='x'?selectedX : selectedCat;
-  on ? m.add(name) : m.delete(name); updateStatus();
-}
-function updateStatus() {
-  document.getElementById('col-status').textContent =
-    `Y=${selectedY.size} X=${selectedX.size} 类别=${selectedCat.size}`;
-}
-
-function autoDetect() {
-  selectedY.clear(); selectedX.clear(); selectedCat.clear();
-  columnData.forEach(c => {
-    const lo = c.name.toLowerCase();
-    // pandas 3 起字符串列 dtype 报 "str"（与后端 _is_text_dtype 口径一致）
-    const isCat = catKw.some(k => lo.includes(k.toLowerCase()))
-      || ['object','string','str','bool'].includes(c.dtype);
-    if (isCat) selectedCat.add(c.name);
-    if (yKw.some(k => lo.includes(k.toLowerCase()))) { selectedY.add(c.name); return; }
-    if (['float64','int64'].includes(c.dtype) && !isCat) selectedX.add(c.name);
-  });
-  renderCols();
-}
-
-function setAll(role) {
-  columnData.forEach(c => {
-    if (['float64','int64'].includes(c.dtype)) {
-      if (role==='y') selectedY.add(c.name);
-      if (role==='x' && !selectedY.has(c.name)) selectedX.add(c.name);
-    }
-  });
-  renderCols();
-}
-
-function clearAll() { selectedY.clear(); selectedX.clear(); selectedCat.clear(); renderCols(); }
-
-// ── 参数配置：默认值 + 元数据（类型 & 下拉选项） ──
-const TASK_PARAMS = {
-  grid_search:       { ranges: '', direction: 'maximize', n_points: 10 },
-  process_capability:{ usl: '', lsl: '', target: '' },
-  hypothesis_test:   { test: 'ttest_ind', alpha: 0.05, group_col: '', popmean: 0, popmedian: 0 },
-  trend_forecast:    { forecast_steps: 5 },
-  anomaly_detect:    { method: 'iqr', alpha: 0.05, max_outliers: 5 },
-  response_surface:  { direction: 'maximize' },
-  multi_objective:   { objectives: '', weights: '' },
-  inverse_solve:     { model: 'linear', incoming_cols: '', variable_cols: '', fixed_cols: '', output_cols: '', target_cols: '', time_col: '', time_adjustable: 'false', time_min: '', time_max: '', variable_bounds: '', output_weights: '', weight_mode: 'std', reg_lambda: 0.02, attain_tol: 0.5, max_starts: 10, random_state: 42, request_rows: [] },
-  decision_tree:     { max_depth: 5, random_state: 42 },
-  anova:             { alpha: 0.05, interactions: 0 },
-  spc_nonparametric: { side: 'two-sided' },
-  spc_cusum:         { k: 0.5, h: 5.0, group_col: '' },
-  spc_ewma:          { lam: 0.2, L: 2.7, group_col: '' },
-  spc_attribute:     { chart_type: 'p', group_col: '' },
-  power_analysis:    { mode: 'required_n', test_type: 'ttest', effect_size: 0.5, alpha: 0.05, target_power: 0.80, current_n: 30, n_groups: 3, p0: 0.5, p1: 0.6 },
-  bootstrap_ci:      { statistic: 'mean', n_bootstrap: 2000, ci_level: 0.95, random_state: 42 },
-  median_ci:         { ci_level: 0.95 },
-  quantile_regression:{ quantile: 0.5 },
-  tolerance_interval:{ coverage: 0.99, confidence: 0.95, side: 'two-sided' },
-  gage_rr:           { part_col: '', operator_col: '', sigma_multiplier: 5.15, tolerance: '' },
-  spc_xbar:          { group_col: '', usl: '', lsl: '', target: '' },
-  logistic_regression:{ threshold: 0.5 },
-  lasso_regression:  { alpha_lasso: '', l1_ratio: 1.0 },
-  regression:        { model_type: 'linear' },
-  // 审查 2026-08-19 Round-2：min_segment 引擎自适应，前端不再下发
-  change_point:      { n_changepoints: 5 },
-  doe_analysis:      { alpha: 0.05 },
-  doe_design:        { method: 'full_factorial', factors: '', replicates: 1, randomize: 'true', seed: 42, center_points: 3, alpha: 'rotatable', n_runs: '' },
-  variance_test:     { group_col: '', alpha: 0.05 },
-  box_chart:         { mode: 'facet', show_stats: 'true', group_col: '', usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
-  scatter_plot:      { fit: 'none', show_ci: 'true', group_col: '' },
-  correlation:       { method: 'pearson', control_vars: '' },
-  contingency:       { alpha: 0.05 },
-  outlier_consensus: {},
-  roc_analysis:      {},
-  robust_regression: {},
-  survival_analysis: {},
-  cohens_kappa:      {},
-  cronbach_alpha:    {},
-  normality_check:   { alpha: 0.05 },
-  distribution_summary: { bins: 15 },
-  proportion_ci:     { ci_level: 0.95, success_value: '' },
-  vif:               { threshold: 5 },
-};
-
-// 参数元数据：定义类型和下拉选项
-const PARAM_META = {
-  direction: {
-    type: 'select', label: '优化方向',
-    options: [['maximize', '最大化'], ['minimize', '最小化']]
-  },
-  test: {
-    type: 'select', label: '检验方法',
-    // 审查 2026-09-21 E1-2：必须覆盖引擎 _HYPOTHESIS_TEST_TYPES 全集（17 项）。
-    // 原仅 5 项 → 手册 §4.3 承诺的 17 种方法中 12 种在 Web 端不可达
-    // （含手册推荐的 ttest_paired）。一致性由 tests/scripts/test_verify_frontend_params.py 守护。
-    options: [
-      ['ttest_ind', '独立样本 t 检验'],
-      ['ttest_paired', '配对样本 t 检验'],
-      ['ttest_1samp', '单样本 t 检验'],
-      ['mannwhitney', 'Mann-Whitney U 检验（非参数）'],
-      ['wilcoxon_paired', 'Wilcoxon 配对检验'],
-      ['wilcoxon_1samp', 'Wilcoxon 单样本检验'],
-      ['kruskal_wallis', 'Kruskal-Wallis H 检验'],
-      ['kruskal', 'Kruskal-Wallis（旧名 kruskal）'],
-      ['friedman', 'Friedman 检验'],
-      ['mcnemar', 'McNemar 检验'],
-      ['cochran_q', 'Cochran Q 检验'],
-      ['ks', 'KS 双样本检验'],
-      ['mann_kendall', 'Mann-Kendall 趋势检验'],
-      ['jonckheere', 'Jonckheere-Terpstra 趋势检验'],
-      ['cohens_d', "Cohen's d 效应量"],
-      ['correlation', '相关系数检验'],
-      ['auto', '自动选择'],
-    ]
-  },
-  method: {
-    type: 'select', label: '异常检测方法',
-    options: [
-      ['iqr', 'IQR (四分位距法)'], ['zscore', 'Z-Score (标准差法)'],
-      ['isolation_forest', 'Isolation Forest (隔离森林)'], ['grubbs', 'Grubbs 检验'],
-    ]
-  },
-  'method@correlation': {
-    type: 'select', label: '相关方法',
-    options: [
-      ['pearson', 'Pearson (线性相关)'],
-      ['spearman', 'Spearman (秩相关)'],
-      ['kendall', 'Kendall (秩相关)'],
-    ]
-  },
-  side: {
-    type: 'select', label: '检验侧',
-    options: [
-      ['two-sided', '双侧'], ['upper', '单侧上限'], ['lower', '单侧下限']
-    ]
-  },
-
-  // spc_nonparametric: side 参数含义与 tolerance_interval 不同 — 单侧上限=越小越好
-  'side@spc_nonparametric': {
-    type: 'select', label: '控制限方向',
-    options: [
-      ['two-sided', '双侧 (通用品质指标)'],
-      ['upper', '单侧上限 (越小越好: 颗粒度、缺陷率)'],
-      ['lower', '单侧下限 (越大越好: 得率、强度)']
-    ]
-  },
-  chart_type: {
-    type: 'select', label: '控制图类型',
-    options: [
-      ['p', 'p 图 (不良率)'], ['np', 'np 图 (不良数)'],
-      ['c', 'c 图 (缺陷数)'], ['u', 'u 图 (单位缺陷率)']
-    ]
-  },
-  mode: {
-    type: 'select', label: '模式',
-    options: [
-      ['facet', '分面 (各 X₂ 一张子图)'], ['nested', '嵌套 (组合标签如 ABS/否)']
-    ]
-  },
-  model_type: {
-    type: 'select', label: '模型类型',
-    options: [
-      ['linear', '线性回归 (OLS)']
-    ]
-  },
-  statistic: {
-    type: 'select', label: '统计量',
-    options: [
-      ['mean', '均值'], ['median', '中位数'], ['std', '标准差'], ['var', '方差']
-    ]
-  },
-  test_type: {
-    type: 'select', label: '检验类型',
-    // 审查 2026-08-19 Round-2：仅保留引擎支持的 ttest/anova/proportion（移除 chi2/correlation）
-    options: [
-      ['ttest', 't 检验'], ['anova', 'ANOVA'], ['proportion', '比例检验']
-    ]
-  },
-  'mode@power_analysis': {
-    type: 'select', label: '功效分析模式',
-    options: [
-      ['required_n', '计算所需样本量'], ['achieved', '计算实际功效']
-    ]
-  },
-  quantile: {
-    type: 'select', label: '分位数',
-    options: [['0.1','0.1'], ['0.25','0.25'], ['0.5','0.5 (中位数)'], ['0.75','0.75'], ['0.9','0.9']]
-  },
-  group_col:      { type: 'column', label: '分组依据', hint: '按此列分系列，不同值=不同颜色的线' },
-  random_state:   { type: 'number', label: '随机种子', hint: '复现随机性（bootstrap/决策树）' },
-  part_col:       { type: 'column', label: '部件列', hint: '选择部件标识列' },
-  operator_col:   { type: 'column', label: '操作员列', hint: '选择操作员标识列' },
-  fit: {
-    type: 'select', label: '拟合类型',
-    options: [
-      ['none', '无拟合'], ['linear', '线性回归 (OLS)'], ['lowess', 'LOWESS 平滑']
-    ]
-  },
-  show_ci: {
-    type: 'select', label: '置信带',
-    options: [['true', '显示 95% 置信带'], ['false', '隐藏']]
-  },
-  show_stats: {
-    type: 'select', label: '箱体统计标注',
-    options: [['true', '显示 n/均值/标准差/最大/最小'], ['false', '隐藏 (刻度标签显示 n)']]
-  },
-  'method@doe_design': {
-    type: 'select', label: '设计方法',
-    options: [
-      ['full_factorial', '全因子设计'],
-      ['fractional_factorial', '部分因子 2^(k-p)'],
-      ['plackett_burman', 'Plackett-Burman 筛选'],
-      ['taguchi', '田口正交数组'],
-      ['box_behnken', 'Box-Behnken 响应面'],
-      ['ccd', '中心复合设计 (CCD)'],
-    ]
-  },
-  'alpha@doe_design': {
-    type: 'select', label: 'CCD 轴向距离 α',
-    options: [
-      ['rotatable', '旋转性 (2^(k/4))'], ['orthogonal', '正交性'], ['face', '面心 (α=1)']
-    ]
-  },
-  randomize: {
-    type: 'select', label: '随机化',
-    options: [['true', '随机化运行顺序'], ['false', '固定标准顺序']]
-  },
-  // inverse_solve: 工艺参数反解（模型/权重/时间旋钮/时间列）
-  model: {
-    type: 'select', label: '前向模型',
-    options: [
-      ['auto', '自动门控 (CV R² 选优；大数据自动缩减候选)'], ['linear', '线性回归'], ['poly', '二次多项式 Ridge'],
-      ['gpr', '高斯过程 GPR (n≤2000)'], ['gbm', '梯度提升 GBM'], ['rate', '速率物理模型'],
-    ]
-  },
-  weight_mode: {
-    type: 'select', label: '偏差权重口径',
-    options: [['std', '标准差归一化'], ['range', '极差归一化'], ['none', '不加权']]
-  },
-  time_adjustable: {
-    type: 'select', label: '时间是否可调',
-    options: [['false', '固定 (取历史中位数)'], ['true', '可调 (参与寻优)']]
-  },
-  time_col: { type: 'column', label: '时间/时长列', hint: 'rate 模型必需；留空自动识别含 time/时间 的列' },
-};
-
-// 参数标签（中文显示名）
-const PARAM_LABELS = {
-  ranges: '搜索范围', objectives: '目标定义', direction: '优化方向',
-  n_points: '网格点数', usl: '规格上限 (USL)', lsl: '规格下限 (LSL)',
-  test: '检验方法', alpha: '显著性水平 α', interactions: '含两两交互 (0/1)',
-  // 审查 2026-09-21 E1-3：单样本检验的中心参数（ttest_1samp / wilcoxon_1samp）
-  popmean: '检验均值 μ0 (仅单样本 t)', popmedian: '检验中位数 M0 (仅单样本 Wilcoxon)',
-  forecast_steps: '预测步数', method: '异常检测方法', side: '检验侧',
-  k: 'K 值 (松弛因子)', h: 'H 值 (决策区间)', lam: 'λ (平滑系数)',
-  L: 'L (控制限宽度)', chart_type: '控制图类型', mode: '模式',
-  test_type: '检验类型', effect_size: '效应量', statistic: '统计量',
-  n_bootstrap: 'Bootstrap 次数', ci_level: '置信水平', quantile: '分位数',
-  coverage: '覆盖比例', confidence: '置信度', part_col: '部件列',
-  operator_col: '操作员列', group_col: '分组依据', alpha_lasso: 'α (正则化强度)',
-  model_type: '模型类型', min_segment: '最小段长', n_changepoints: '变点数',
-  max_depth: '最大深度',
-  max_outliers: '最多异常点数', control_vars: '控制变量(逗号分隔)', success_value: '成功值', weights: '权重(逗号分隔)',
-  sigma_multiplier: 'Sigma 乘数', tolerance: '公差',
-  target: '目标值', ucl: '控制上限 (UCL)', lcl: '控制下限 (LCL)', cl: '控制中心 (CL)',
-  target_power: '目标功效', l1_ratio: 'L1 比率 (ElasticNet)',
-  current_n: '当前样本量 n (achieved 模式)', n_groups: '组数 k (anova)', p0: '基准比例 (proportion)', p1: '目标比例 (proportion)',
-  fit: '拟合类型', show_ci: '显示置信带', show_stats: '箱体统计标注', threshold: '分类阈值',
-  'threshold@vif': 'VIF 阈值',
-  factors: '因子定义', replicates: '重复次数', randomize: '随机化',
-  seed: '随机种子', center_points: '中心点重复数', n_runs: '运行数',
-  'method@doe_design': '设计方法', 'alpha@doe_design': 'CCD 轴向距离 α',
-  'method@correlation': '相关方法', 'side@spc_nonparametric': '控制限方向',
-  model: '前向模型', incoming_cols: '来料列', variable_cols: '可调参数列',
-  fixed_cols: '固定参数列', output_cols: '输出列',
-  target_cols: '目标列', time_col: '时间/时长列', time_adjustable: '时间是否可调',
-  time_min: '时间下限', time_max: '时间上限', variable_bounds: '参数边界 (JSON)',
-  output_weights: '输出权重 (JSON)', weight_mode: '偏差权重口径', reg_lambda: '正则强度 λ',
-  attain_tol: '达到阈值 (σ)', max_starts: '优化起点数', request_rows: '反演请求行',
-};
-
-const PARAM_HINTS = {
-  ranges: '格式: 料温:180,220; 模具温度:40,80',
-  objectives: '格式: 强度:maximize; 不良率:minimize',
-  incoming_cols: '勾选来料条件列；不勾选则按前缀 incoming/来料 自动识别',
-  variable_cols: '勾选待反解的可调参数列；不勾选则按前缀 variable/变量/可调 识别',
-  fixed_cols: '勾选固定工况列（可选）；不勾选则按前缀 fixed/固定 识别',
-  output_cols: '勾选输出列；不勾选则按前缀 output/输出 识别',
-  target_cols: '可选：目标值列（默认与输出列按后缀/顺序配对）',
-  variable_bounds: '格式: {"注射压力":[50,90]}；留空用各列历史范围',
-  output_weights: '格式: {"拉伸强度":2.0}；留空按等权',
-};
-
-// inverse_solve：列角色勾选 + 反演请求行录入（角色前缀与引擎 DEFAULT_PREFIXES 一致）
-const INVERSE_ROLE_KEYS = ['incoming_cols', 'variable_cols', 'fixed_cols', 'output_cols', 'target_cols'];
-const INVERSE_PREFIXES = {
-  incoming_cols: ['incoming', '来料'],
-  variable_cols: ['variable', '变量', '可调'],
-  fixed_cols: ['fixed', '固定'],
-  output_cols: ['output', '输出'],
-  target_cols: ['target', '目标'],
-};
-
-// ── DOE 因子编辑器（每个因子单独一行：因子名 + 水平）──
-function factorRowHtml(name = '', levels = '') {
-  return `<div class="factor-row">
-    <input class="factor-name" placeholder="因子名" value="${escHtml(name)}">
-    <input class="factor-levels" placeholder="水平(逗号分隔)" value="${escHtml(levels)}">
-    <button type="button" onclick="removeFactorRow(this)" class="btn-sm" title="删除">✕</button>
-  </div>`;
-}
-
-function buildFactorEditor() {
-  return `<div class="param-item">
-    <label class="param-label">因子定义</label>
-    <div class="param-hint">每个因子一行：因子名 + 水平（逗号分隔）。数值水平自动转数字，文本水平原样保留。</div>
-    <div id="factor-editor">${factorRowHtml()}</div>
-    <button type="button" onclick="addFactorRow()" class="btn-sm">+ 添加因子</button>
-  </div>`;
-}
-
-function addFactorRow(name = '', levels = '') {
-  const ed = document.getElementById('factor-editor');
-  if (ed) ed.insertAdjacentHTML('beforeend', factorRowHtml(name, levels));
-}
-
-function removeFactorRow(btn) {
-  const ed = document.getElementById('factor-editor');
-  const rows = ed ? ed.querySelectorAll('.factor-row') : [];
-  if (rows.length <= 1) {
-    // 至少保留一行，清空内容
-    rows[0].querySelector('.factor-name').value = '';
-    rows[0].querySelector('.factor-levels').value = '';
-    return;
-  }
-  btn.closest('.factor-row').remove();
-}
-
-function collectFactors() {
-  const ed = document.getElementById('factor-editor');
-  if (!ed) return [];
-  return [...ed.querySelectorAll('.factor-row')]
-    .map(row => {
-      const name = row.querySelector('.factor-name').value.trim();
-      const levels = row.querySelector('.factor-levels').value
-        .split(',').map(x => {
-          const t = x.trim();
-          return (t !== '' && !isNaN(t)) ? Number(t) : t;
-        }).filter(x => x !== '');
-      return { name, levels };
-    })
-    .filter(f => f.name && f.levels.length >= 2);
-}
-
-// ── inverse_solve：列角色勾选 + 反演请求行录入 ──
-function buildColumnChecks(k, task) {
-  const label = PARAM_LABELS[k + '@' + task] || PARAM_LABELS[k] || k;
-  const hint = PARAM_HINTS[k] || '';
-  if (!columnData.length) {
-    return `<div class="param-item">
-      <label class="param-label">${label}</label>
-      <div class="param-hint">请先上传数据文件</div>
-    </div>`;
-  }
-  // 默认勾选与引擎一致的前缀列（incoming/来料 等）；用户可自行改选
-  const prefixes = (INVERSE_PREFIXES[k] || []).map(p => p.toLowerCase());
-  const boxes = columnData.map(c => {
-    const lo = String(c.name).toLowerCase();
-    const checked = prefixes.some(p => lo.startsWith(p)) ? 'checked' : '';
-    return `<label class="col-check"><input type="checkbox" data-col="${escHtml(c.name)}" ${checked}> <span>${escHtml(c.name)}</span></label>`;
-  }).join('');
-  return `<div class="param-item">
-    <label class="param-label">${label}</label>
-    ${hint ? `<div class="param-hint">${hint}</div>` : ''}
-    <div class="col-checks" id="colchecks_${k}">${boxes}</div>
-  </div>`;
-}
-
-function inverseCheckedCols(k) {
-  const box = document.getElementById('colchecks_' + k);
-  if (!box) return [];
-  return [...box.querySelectorAll('input:checked')].map(cb => cb.dataset.col);
-}
-
-function buildRequestEditor() {
-  return `<div class="param-item">
-    <label class="param-label">反演请求行</label>
-    <div class="param-hint">每行填入来料/固定条件与各输出目标值（目标可填「目标·输出列」，也可填勾选的「目标列」）；可调参数由反解计算，固定列留空按历史中位数。</div>
-    <div id="request-editor"></div>
-    <button type="button" class="btn-sm" onclick="addRequestRow()">+ 添加请求行</button>
-  </div>`;
-}
-
-function requestRowData() {
-  const editor = document.getElementById('request-editor');
-  if (!editor) return [];
-  return [...editor.querySelectorAll('.request-card')].map(card => {
-    const values = {};
-    card.querySelectorAll('input[data-col]').forEach(inp => { values[inp.dataset.col] = inp.value; });
-    return values;
-  });
-}
-
-function requestCardHtml(index, values, incoming, fixed, outputs, targets = []) {
-  const field = (label, col) => `<div class="request-field">
-      <label title="${escHtml(col)}">${escHtml(label)}</label>
-      <input type="number" step="any" data-col="${escHtml(col)}" value="${escHtml(String(values[col] ?? ''))}">
-    </div>`;
-  return `<div class="request-card">
-    <div class="request-head"><span>请求行 ${index + 1}</span>
-      <button type="button" class="btn-sm" onclick="removeRequestRow(this)">✕</button></div>
-    ${incoming.map(col => field(col, col)).join('')}
-    ${fixed.map(col => field('固定·' + col, col)).join('')}
-    ${outputs.map(col => field('目标·' + col, col)).join('')}
-    ${targets.map(col => field('目标列·' + col, col)).join('')}
-  </div>`;
-}
-
-function rebuildRequestTable() {
-  const editor = document.getElementById('request-editor');
-  if (!editor) return;
-  const saved = requestRowData();
-  const incoming = inverseCheckedCols('incoming_cols');
-  const fixed = inverseCheckedCols('fixed_cols');
-  const outputs = inverseCheckedCols('output_cols');
-  const targets = inverseCheckedCols('target_cols');
-  if (!incoming.length || !outputs.length) {
-    editor.innerHTML = '<div class="param-hint">请先勾选「来料列」与「输出列」，再填写请求行。</div>';
-    return;
-  }
-  const rows = saved.length ? saved : [{}];
-  editor.innerHTML = rows.map((values, i) =>
-    requestCardHtml(i, values, incoming, fixed, outputs, targets)).join('');
-}
-
-function addRequestRow() {
-  const editor = document.getElementById('request-editor');
-  if (!editor) return;
-  const incoming = inverseCheckedCols('incoming_cols');
-  const fixed = inverseCheckedCols('fixed_cols');
-  const outputs = inverseCheckedCols('output_cols');
-  const targets = inverseCheckedCols('target_cols');
-  if (!incoming.length || !outputs.length) return;
-  const index = editor.querySelectorAll('.request-card').length;
-  editor.insertAdjacentHTML(
-    'beforeend', requestCardHtml(index, {}, incoming, fixed, outputs, targets));
-  renumberRequestRows();
-}
-
-function removeRequestRow(btn) {
-  const card = btn.closest('.request-card');
-  if (card) {
-    card.remove();
-    renumberRequestRows();
-  }
-}
-
-function renumberRequestRows() {
-  // 删除/新增后重排行号，避免出现重复或跳号（如 1,3,3）
-  const editor = document.getElementById('request-editor');
-  if (!editor) return;
-  editor.querySelectorAll('.request-card .request-head span').forEach((el, i) => {
-    el.textContent = '请求行 ' + (i + 1);
-  });
-}
-
-function collectRequestRows() {
-  const editor = document.getElementById('request-editor');
-  if (!editor) return [];
-  return [...editor.querySelectorAll('.request-card')]
-    .map(card => {
-      const row = {};
-      card.querySelectorAll('input[data-col]').forEach(inp => {
-        const raw = inp.value.trim();
-        if (raw === '') return;
-        const num = Number(raw);
-        row[inp.dataset.col] = isFinite(num) ? num : raw;
-      });
-      return row;
-    })
-    .filter(row => Object.keys(row).length);
-}
-
-// ── 构建参数输入控件 ──
-function buildParamInput(k, v, task) {
-  if (k === 'factors') return buildFactorEditor();
-  if (k === 'request_rows') return buildRequestEditor();
-  if (task === 'inverse_solve' && INVERSE_ROLE_KEYS.includes(k)) return buildColumnChecks(k, task);
-  // 支持 task.key 格式的覆盖查找（如 power_analysis.mode vs box_chart.mode）
-  const meta = PARAM_META[k + '@' + task] || PARAM_META[k];
-  // 标签优先级：任务覆盖 > 通用标签 > PARAM_META.label（如 random_state）> 键名
-  const label = PARAM_LABELS[k + '@' + task] || PARAM_LABELS[k] || meta?.label || k;
-  const hint = PARAM_HINTS[k];
-  const id = `param_${k}`;
-
-  if (meta?.type === 'select') {
-    const opts = meta.options.map(([val, text]) =>
-      `<option value="${val}" ${String(v) === val ? 'selected' : ''}>${text}</option>`
-    ).join('');
-    return `<div class="param-item" id="param-item_${k}">
-      <label class="param-label" for="${id}">${label}</label>
-      <select id="${id}" class="param-select">${opts}</select>
-    </div>`;
-  }
-
-  if (meta?.type === 'column') {
-    const opts = columnData.map(c =>
-      `<option value="${escHtml(c.name)}" ${String(v) === c.name ? 'selected' : ''}>${escHtml(c.name)}</option>`
-    ).join('');
-    return `<div class="param-item" id="param-item_${k}">
-      <label class="param-label" for="${id}">${label}</label>
-      <select id="${id}" class="param-select"><option value="">— 自动 —</option>${opts}</select>
-    </div>`;
-  }
-
-  // 默认：文本/数字输入
-  let inputType = 'text';
-  let step = '';
-  if (typeof v === 'number') { inputType = 'number'; step = v < 1 ? '0.01' : '1'; }
-  return `<div class="param-item" id="param-item_${k}">
-    <label class="param-label" for="${id}">${label}</label>
-    ${hint ? `<div class="param-hint">${hint}</div>` : ''}
-    <input type="${inputType}" id="${id}" value="${v}" step="${step}"
-      class="param-input" placeholder="${hint || ''}">
-  </div>`;
-}
-
-function showParams(task) {
-  const panel = document.getElementById('param-panel');
-  const body = document.getElementById('param-body');
-  const cfg = TASK_PARAMS[task];
-  if (!cfg) { panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
-  body.innerHTML = Object.entries(cfg).map(([k, v]) => buildParamInput(k, v, task)).join('')
-    + `<button onclick="executeAnalysis()" class="btn-run">▶ 运行分析</button>`;
-  if (task === 'doe_design') {
-    // CCD 轴向距离 α 仅中心复合设计使用（引擎只在 ccd 分支读取），按设计方法联动显隐
-    const methodEl = document.getElementById('param_method');
-    const alphaItem = document.getElementById('param-item_alpha');
-    const syncAlpha = () => {
-      if (alphaItem) alphaItem.style.display = (methodEl && methodEl.value === 'ccd') ? '' : 'none';
-    };
-    if (methodEl) methodEl.addEventListener('change', syncAlpha);
-    syncAlpha();
-  }
-  if (task === 'inverse_solve') {
-    // 列角色勾选变化 → 重建请求行编辑器（保留已填数值）
-    INVERSE_ROLE_KEYS.forEach(k => {
-      document.querySelectorAll(`#colchecks_${k} input`).forEach(cb =>
-        cb.addEventListener('change', rebuildRequestTable));
-    });
-    rebuildRequestTable();
-  }
-}
-
-function getParams(task) {
-  const cfg = TASK_PARAMS[task];
-  if (!cfg) return {};
-  const p = {};
-  Object.keys(cfg).forEach(k => {
-    if (k === 'factors') {
-      const factors = collectFactors();
-      if (factors.length) p[k] = factors;
-      return;
-    }
-    if (k === 'request_rows') return;  // 反演请求行由 collectRequestRows 单独收集
-    if (task === 'inverse_solve' && INVERSE_ROLE_KEYS.includes(k)) {
-      // 角色列以勾选列表下发；全不勾选则引擎按前缀自动识别
-      const cols = inverseCheckedCols(k);
-      if (cols.length) p[k] = cols;
-      return;
-    }
-    const el = document.getElementById('param_'+k);
-    if (!el) return;
-    let v = el.value.trim();
-    if (v === '') return;
-
-    if (k === 'ranges') {
-      // 审查 2026-08-19 H1：提示格式为"料温:180,220"（逗号分隔上下限），
-      // 旧解析器按三段冒号拆分产生 [NaN,NaN]；同时拒绝 NaN/Inf 边界
-      try { v = v.split(';').filter(Boolean).reduce((o, s) => {
-        const parts = s.split(':');
-        const ky = (parts[0] || '').trim();
-        const bounds = (parts[1] || '').split(',');
-        const lo = +bounds[0], hi = +bounds[1];
-        if (ky && isFinite(lo) && isFinite(hi) && lo < hi) o[ky] = [lo, hi];
-        return o;
-      }, {}); if (!Object.keys(v).length) return; }
-      catch(e) { return; }
-    } else if (k === 'objectives') {
-      try { v = v.split(';').filter(Boolean).map(s => { const [col, dir] = s.trim().split(':'); return {col:col.trim(), direction:dir?.trim()||'maximize'}; }); if (!v.length) return; }
-      catch(e) { return; }
-    } else if (k === 'weights') {
-      // 逗号分隔权重 → 数值列表（审查 2026-08-19 L1）
-      try { v = v.split(',').map(s => Number(s.trim())).filter(x => isFinite(x)); if (!v.length) return; }
-      catch(e) { return; }
-    } else if (k === 'control_vars') {
-      // 逗号分隔列名 → 列表（审查 2026-08-19 L1）
-      v = v.split(',').map(s => s.trim()).filter(Boolean);
-      if (!v.length) return;
-    } else if (el.tagName === 'INPUT' && !isNaN(v)) {
-      // 审查 2026-08-19 M1：仅对 input 控件做数值转换；
-      // select（列选择器）的值是列名，数字列名被 Number() 后 pandas 查不到
-      v = Number(v);
-    }
-    p[k] = v;
-  });
-  if (task === 'inverse_solve') {
-    const rows = collectRequestRows();
-    if (rows.length) p.request_rows = rows;
-  }
-  return p;
-}
+// ══════════════════════════════════════════════════════════════
+// 分析执行链
+// ══════════════════════════════════════════════════════════════
 
 // Analysis — 两步流程: 有参数→先显示面板, 无参数→直接运行
-let _pendingTask = null;  // 当前等待用户确认参数的任务
-let _running = false;     // 防抖标志
-let _lastRequest = null;  // 最近一次分析请求体（用于分组筛选重取）
-let _activeGroups = new Set();  // 当前激活的分组
-let _allGroups = [];       // 全量分组列表（常驻，不受筛选影响）
-let _pendingGroupFilter = false;  // 是否有待筛选的分组
+let _pendingTask = null; // 当前等待用户确认参数的任务
+let _running = false; // 防抖标志
+let _lastRequest = null; // 最近一次分析请求体（用于分组筛选重取）
+let _activeGroups = new Set(); // 当前激活的分组
+let _allGroups = []; // 全量分组列表（常驻，不受筛选影响）
+let _pendingGroupFilter = false; // 是否有待筛选的分组
 
 async function runAnalysis(task) {
-  if (_running) return;  // 防抖：上一次分析尚未完成
+  if (_running) return; // 防抖：上一次分析尚未完成
   // 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
   const _noTargetNeeded = new Set([
     'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective', 'doe_design',
@@ -795,9 +80,15 @@ async function runAnalysis(task) {
     showToast('请至少选择一个 X 列'); return;
   }
   // 有参数配置 → 第一步: 显示参数面板, 等待用户编辑后点"运行"
-  if (TASK_PARAMS[task]) {
+  // 必须先 await 默认值就绪：`/api/tasks` 是异步的，若用户在响应到达前点了任务，
+  // hasParams() 会返回 false → 面板不显示、直接用引擎默认值开跑（用户以为该任务无参数）。
+  await paramsReady();
+  // 用 hasParams 而非 `TASK_PARAMS[task]`：服务端对无参数任务下发 `{}`，
+  // 而 `!{}` 为 false —— 直接判存在会误显示只有"运行分析"按钮的空面板。
+  if (hasParams(task)) {
     // 如果同一个任务已显示参数面板 → 直接执行（用户已经编辑过参数）
-    if (_pendingTask === task && document.getElementById('param-panel').style.display !== 'none') {
+    const panel = document.getElementById('param-panel');
+    if (_pendingTask === task && !panel.classList.contains('is-hidden')) {
       _pendingTask = null;
       await executeRequest(task);
       return;
@@ -817,7 +108,7 @@ async function executeRequest(task) {
   if (!task) return;
   _pendingTask = null;
   _running = true;
-  document.getElementById('param-panel').style.display = 'none';
+  document.getElementById('param-panel').classList.add('is-hidden');
   document.querySelectorAll('.btn-analysis').forEach(b => b.disabled = true);
   document.getElementById('results').innerHTML =
     '<div class="empty-hint"><div class="spinner"></div> 分析中...</div>';
@@ -832,7 +123,7 @@ async function executeRequest(task) {
     // 可能不同，即使 group_col 同名）→ 重置分组上下文，避免筛选栏残留旧分组
     const groupChanged = String(prevParams.group_col || '') !== String(params.group_col || '');
     const taskChanged = prevReq ? (prevReq.task !== task) : false;
-    _lastRequest = { task, targets: [...selectedY], features: [...selectedX], categoricals: [...selectedCat], params };
+    rememberRequest({ task, targets: [...selectedY], features: [...selectedX], categoricals: [...selectedCat], params });
     _pendingGroupFilter = !!(params.group_col) || (task === 'box_chart');  // 有分组依据时启用筛选栏（box_chart 始终有分组）
     if (!_pendingGroupFilter || groupChanged || taskChanged) { _allGroups = []; _activeGroups.clear(); }  // 无分组/分类列变化/任务切换 → 重置分组上下文
     const r = await fetchWithCsrf('/api/analyze', { method: 'POST', body: JSON.stringify(_lastRequest) });
@@ -843,13 +134,17 @@ async function executeRequest(task) {
       const statusMsg = r.status === 413 ? '请求数据过大（超过服务器限制），请减少数据量或列数'
         : r.status === 502 ? '服务器暂时不可用（502 Bad Gateway），请稍后重试' : '';
       document.getElementById('results').innerHTML =
-        `<div class="empty-hint" style="color:#c62828">${escHtml(d.error || statusMsg || '分析请求失败')}</div>`;
+        `<div class="empty-hint is-error">${escHtml(d.error || statusMsg || '分析请求失败')}</div>`;
       return;
     }
     renderResults(d.results || []);
+    // 分析成功 → 显示导出栏（P5：报告导出入口）。
+    // 报告需要服务端重新执行分析（图表无法经 JSON 往返），故导出用的是
+    // `_lastRequest`（刚成功的那次请求），不是前端的结果对象。
+    setExportBarVisible(true);
   } catch(e) {
     document.getElementById('results').innerHTML =
-      `<div class="empty-hint" style="color:#c62828">错误: ${escHtml(e.message)}</div>`;
+      `<div class="empty-hint is-error">错误: ${escHtml(e.message)}</div>`;
   } finally {
     _running = false;
     document.querySelectorAll('.btn-analysis').forEach(b => b.disabled = false);
@@ -884,7 +179,7 @@ async function refetchWithFilter() {
   else {
     // 审查 2026-08-19 L2：筛选重取失败不再静默
     document.getElementById('results').innerHTML =
-      `<div class="empty-hint" style="color:#c62828">${escHtml(d.error || '筛选重取失败，请重试')}</div>`;
+      `<div class="empty-hint is-error">${escHtml(d.error || '筛选重取失败，请重试')}</div>`;
   }
 }
 
@@ -939,7 +234,7 @@ function renderResults(results) {
     const hdr = '<th></th>' + tbl.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
     const rows = tbl.data.map((row, i) =>
       `<tr><td><b>${escHtml(String(tbl.index[i]||''))}</b></td>${row.map(v =>
-        `<td style="color:${Math.abs(v)>0.2?'#c62828':'#333'}">${typeof v==='number'?v.toFixed(3):escHtml(String(v))}</td>`
+        `<td class="${Math.abs(v)>0.2?'cell-strong':'cell-normal'}">${typeof v==='number'?v.toFixed(3):escHtml(String(v))}</td>`
       ).join('')}</tr>`
     ).join('');
     html += `<div class="result-card">
@@ -986,3 +281,218 @@ function renderResults(results) {
     applyBtn.addEventListener('click', refetchWithFilter);
   }
 }
+
+// ══════════════════════════════════════════════════════════════
+// 事件委托 —— 全部交互的唯一入口
+//
+// 审查 2026-09-24（P3-3）：原实现有 11 处内联 onclick（index.html 6 处、
+// params.js 原属的模板字面量 5 处）。模块化后这些函数不再是全局，
+// 内联写法必然失效；移除它们同时让 CSP 的 script-src 可以收紧。
+//
+// 规则用一个映射表声明：{ 动作名: (元素, 事件) => void }。
+// 由 document 级单一监听派发，动态插入的元素无需重新绑定。
+// ══════════════════════════════════════════════════════════════
+
+const ACTIONS = {
+  // 顶栏：打开文件选择框
+  'pick-file': () => document.getElementById('file-input').click(),
+  // 左栏工具栏
+  'auto-detect': () => autoDetect(),
+  'select-all-y': () => setAll('y'),
+  'select-all-x': () => setAll('x'),
+  'clear-columns': () => clearAll(),
+  // 工作流按钮：按 data-task 发起分析（替代内联 runAnalysis('{{ t }}')）
+  'run-task': (el) => runAnalysis(el.dataset.task),
+  // 参数面板（含动态生成的按钮）
+  'add-factor': () => addFactorRow(),
+  'remove-factor': (el) => removeFactorRow(el),
+  'add-request-row': () => addRequestRow(),
+  'remove-request-row': (el) => removeRequestRow(el),
+  'run-analysis': () => executeAnalysis(),
+  // 报告导出（P5）：按 data-format 请求 /api/export 并触发浏览器下载
+  'export-report': (el) => exportReport(el.dataset.format),
+};
+
+/**
+ * 显示/隐藏导出栏。
+ *
+ * 只在**分析成功**后显示：导出需要服务端重新执行分析，没有可复用的结果时
+ * 点它只会得到 400。
+ */
+function setExportBarVisible(visible) {
+  const bar = document.getElementById('export-bar');
+  // `is-hidden` 用 `!important`，可压过 `.export-bar { display: flex }`
+  if (bar) bar.classList.toggle('is-hidden', !visible);
+}
+
+/**
+ * 记录最近一次分析请求体 —— 报告导出（`/api/export`）据此重跑分析。
+ *
+ * 收敛为函数而非散落的赋值：导出依赖"`_lastRequest` 与屏幕上的结果一致"，
+ * 若有多处各自赋值，很容易出现"报告反映的是上一次的参数"这类难查的错。
+ * 同时它是导出链路**唯一**的注入点，故 `scripts/check_export_flow.mjs`
+ * 能在 Node 里驱动成功路径（无需真浏览器）。
+ */
+export function rememberRequest(req) {
+  _lastRequest = req;
+}
+
+/** 取最近一次分析请求体（`null` 表示尚未成功运行过分析）。 */
+export function lastRequest() {
+  return _lastRequest;
+}
+
+/**
+ * 从 `Content-Disposition` 响应头解析下载文件名；解析不到返回 `''`。
+ *
+ * 抽成导出函数是为了可测：文件名解析是导出链路里**最容易静默出错**的一环
+ * （写错正则 → 下载到一个随机名或无扩展名的文件，用户很难归因）。
+ * 由 `scripts/check_export_flow.mjs` 在 Node 里直接驱动真实实现。
+ *
+ * 兼容 `filename="x.pdf"` 与裸 `filename=x.pdf`，以及 RFC 5987 的
+ * `filename*=UTF-8''x.pdf` 形态。
+ */
+export function parseDownloadFilename(header) {
+  const h = header || '';
+  // RFC 5987 优先：显式带 charset 的形态比裸 filename 更权威。
+  // 它**不带引号**（`filename*=UTF-8''x.pdf`）—— 本实现首版按带引号写，
+  // 被 Node 冒烟用例的这一形态抓出。
+  const rfc5987 = /filename\*=\s*(?:UTF-8|utf-8)''([^;]+)/i.exec(h);
+  if (rfc5987) return rfc5987[1].trim();
+  const quoted = /filename\s*=\s*"([^"]+)"/i.exec(h);
+  if (quoted) return quoted[1];
+  const bare = /filename\s*=\s*([^;\s]+)/i.exec(h);
+  return bare ? bare[1] : '';
+}
+
+/**
+ * 触发浏览器下载一个 Blob，并**立即释放** object URL。
+ *
+ * 不释放会一直占着内存直到页面卸载（大报告可达数 MB）。
+ */
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * 导出报告并下载（P5：`/api/export`）。
+ *
+ * 用 `fetch` + `Blob` 而非直接 `window.location`：前者能拿到失败响应体
+ * （400/500 的 JSON 中文原因）并提示用户，后者只会静默跳到一张错误页。
+ *
+ * `_lastRequest` 是刚成功那次分析的请求体 —— 服务端据此**重跑**分析生成报告
+ * （图表是 matplotlib 对象，无法经 JSON 往返，故不能复用前端结果）。
+ */
+export async function exportReport(format) {
+  if (!_lastRequest) { showToast('请先运行一次分析'); return; }
+  const label = { html: '网页', pdf: 'PDF', ppt: 'PowerPoint', xlsx: 'Excel' }[format] || format;
+  showToast(`正在生成${label}报告…`);
+  try {
+    const r = await fetchWithCsrf('/api/export', {
+      method: 'POST',
+      body: JSON.stringify({ ..._lastRequest, format }),
+    });
+    if (!r.ok) {
+      let d = {};
+      try { d = await r.json(); } catch (err) { /* 非 JSON 响应 */ }
+      showToast(d.error || `导出失败（HTTP ${r.status}）`);
+      return;
+    }
+    // 文件名优先取服务端 Content-Disposition，缺失时用任务名兜底
+    const name = parseDownloadFilename(r.headers.get('Content-Disposition'))
+      || `${_lastRequest.task}.${format}`;
+    downloadBlob(await r.blob(), name);
+    showToast(`${label}报告已下载`);
+  } catch (e) {
+    showToast(`导出失败: ${e.message}`);
+  }
+}
+
+function handleDelegatedClick(event) {
+  const el = event.target.closest('[data-action]');
+  if (!el) return;
+  const fn = ACTIONS[el.dataset.action];
+  if (!fn) return;
+  fn(el, event);
+}
+
+document.addEventListener('click', handleDelegatedClick);
+
+// ══════════════════════════════════════════════════════════════
+// 初始化
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 选择新文件时的处理：复位编码下拉框后上传。
+ *
+ * 审查 2026-09-21 R1-1：必须把编码复位为「自动识别」。否则上一次为某文件
+ * 选定的编码会跨上传粘滞，把新文件静默读错（实测残留 Big5 声明读 GBK 文件
+ * → 列名乱码、HTTP 200、status=ok，用户无从察觉）。
+ *
+ * 提取为具名函数而非内联箭头：便于静态断言直接检查处理器体，
+ * 不受缩进/换行形式影响（tests/services/test_web_app_routes.py 依赖此形状）。
+ */
+function onNewFileSelected(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  document.getElementById('encoding').value = '';
+  uploadFile(f, refreshParamPanelIfOpen);
+}
+
+document.getElementById('file-input').addEventListener('change', onNewFileSelected);
+
+/** 切换编码后用同一文件立即重传：否则用户看到乱码列名后必须重新选一次文件。 */
+function onEncodingChanged() {
+  if (lastFile) uploadFile(lastFile, refreshParamPanelIfOpen);
+}
+
+document.getElementById('encoding').addEventListener('change', onEncodingChanged);
+
+/** 上传后回调：数据列变化时刷新已打开的参数面板（列选择器跟随新列）。 */
+function refreshParamPanelIfOpen() {
+  if (_pendingTask && !document.getElementById('param-panel').classList.contains('is-hidden')) {
+    showParams(_pendingTask);
+  }
+}
+
+// 初始渲染（列清单为空 → 显示"请先加载数据文件"）
+renderCols();
+
+// ══════════════════════════════════════════════════════════════
+// 参数默认值：从服务端加载（P4 步骤④）
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 拉取 `/api/tasks` 并把参数默认值灌入 params.js 缓存。
+ *
+ * 为什么要有这一步：前端原先自己维护一份 42 任务的默认值字典，与后端
+ * `services/task_spec.py::TASK_SPECS` 逐字重复（靠门禁比对维持一致）。
+ * 改由服务端下发后，后端是唯一事实源。
+ *
+ * 失败时给出**明确可见**的提示：此时所有任务都不会显示参数面板，
+ * 用户点任务会直接运行（用引擎默认值）—— 这是可接受的降级，但必须让用户知道
+ * 参数面板不可用，而不是让他以为"这个任务本来就没有参数"。
+ */
+async function loadTaskParams() {
+  try {
+    const r = await fetch('/api/tasks');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!hydrateParams(await r.json())) throw new Error('响应缺少 params 字段');
+  } catch (e) {
+    // 必须解除等待：否则任何 `await paramsReady()` 都会永久挂起，
+    // 表现为"点任务毫无反应"—— 比没有参数面板更糟。
+    paramsLoadFailed();
+    showToast('参数面板暂不可用（任务清单加载失败），分析将使用引擎默认参数');
+    console.error('[smartsuite] /api/tasks 加载失败：', e);
+  }
+}
+
+loadTaskParams();
+

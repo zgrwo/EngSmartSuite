@@ -55,7 +55,16 @@ header .subtitle { font-size: 12px; opacity: 0.7; }
   background: #fff; cursor: pointer; font-size: 12px; font-family: inherit; white-space: nowrap; }
 .btn-analysis:hover { background: #e8eaf6; border-color: var(--accent); }
 
+/* 报告导出栏（P5）：分析成功后出现，样式与左栏工具栏一致 */
+.export-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-top: 1px solid var(--border);
+  background: var(--panel, #fafafa);
+}
+.export-label { font-size: 13px; color: var(--muted); margin-right: 4px; }
+
 /* Results */
+
 .results { flex: 1; overflow-y: auto; padding: 12px; }
 .empty-hint { text-align: center; color: var(--muted); padding: 40px; font-size: 14px; }
 
@@ -170,6 +179,37 @@ table tr:hover td { background: #f0f4ff; }
   font-size: 13px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; }
 .toast.show { opacity: 1; visibility: visible; }
+
+/* 工作流分组的背景色（原为行内 `style="--group-bg: …"` 注入 CSS 变量）。
+   为什么要改成静态 class：CSP3 下 `style-src 'self'` 会**阻止行内 style 属性**，
+   而 `data-*` 属性无法驱动 `background`（CSS3 的 `attr()` 只能用于 `content`）。
+   `GROUP_COLORS` 是**固定 5 项**，故可安全地固化为静态类；
+   一致性由 `scripts/verify_frontend_params.py` 之外的
+   `tests/guards/test_web_ui_guards.py::test_wf_group_colors_match_engine` 守护。 */
+.wf-group[data-group="要因筛选"] { background: #e8f5e9; }
+.wf-group[data-group="信度诊断"] { background: #fff8e1; }
+.wf-group[data-group="建模优化"] { background: #e3f2fd; }
+.wf-group[data-group="过程监控"] { background: #fce4ec; }
+.wf-group[data-group="高级分析"] { background: #f3e5f5; }
+
+/* ── 显示/隐藏工具类（P3-3 续，第二十九轮：style-src 收紧）──────────────
+   原因：`style-src` 原被迫含 `'unsafe-inline'`，因为模板/JS 里有 7 处行内
+   `style="…"`。CSP3 起 `style-src` 的 `'unsafe-inline'` **也覆盖行内属性**，
+   故要收紧它就必须把行内样式全部改为 class。
+
+   `is-hidden` 用 `!important`：它要与 `.export-bar { display: flex }` 这类
+   组件自带的 display 竞争，而不带 `!important` 的工具类会因**选择器权重相同
+   但顺序在前**而失效。 */
+.is-hidden { display: none !important; }
+
+/* 错误提示（原行内 style="color:#c62828"） */
+.empty-hint.is-error { color: #c62828; }
+
+/* 相关系数矩阵：按强度分级着色（原行内 style="color:…"）
+   为什么分两档而非内联：CSP3 下 `style-src 'self'` 会**阻止**行内 style 属性，
+   分档后颜色仍能正确呈现，且不再需要内联。 */
+.cell-strong { color: #c62828; }
+.cell-normal { color: #333; }
 
 /* ── 窄屏（≤900px）：三栏改纵向堆叠，整页可滚动 ── */
 @media (max-width: 900px) {

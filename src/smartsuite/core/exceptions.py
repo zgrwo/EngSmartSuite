@@ -49,6 +49,33 @@ class ConvergenceError(AnalysisError):
     pass
 
 
+class ParamValidationError(AnalysisError):
+    """分析引擎层 — **参数契约校验失败**（阶段 P4，2026-09-24）。
+
+    为什么用异常而不是 `return status="error"`：
+
+    参数校验失败是**预期内的可复用失败**，而每个 `return AnalysisResult(status="error")`
+    都是一处手写早退。实测（第十二轮）全引擎 282 处早退中约 54 处属参数校验、
+    其余约 228 处属依赖数据的检查 —— 若参数校验继续用早退，每迁移一个任务反而
+    **+1** 处早退（`Spec` 的失败分支），架构收口的计数目标永远达不到。
+
+    改抛异常后，由 `orchestrator` 既有的
+    `except SmartSuiteError → build_error_result()` 通路**统一转成结果**，
+    于是每次迁移是 **−N 处早退、0 新增**。
+
+    同时携带结构化信息（`code` / `field_name`），使调用方能按错误码分支处理，
+    而不是解析消息文本 —— 这是 P0-1「禁止错误归因」的机制保障。
+    """
+
+    def __init__(self, message: str, *, code: str = "", field_name: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.field_name = field_name
+
+    def __str__(self) -> str:
+        return str(self.args[0]) if self.args else ""
+
+
 class OutputError(SmartSuiteError):
     """Reporter 层 — 报告输出失败。"""
 

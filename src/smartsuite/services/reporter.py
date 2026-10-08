@@ -6,6 +6,7 @@ import math
 import numbers
 import os
 import warnings
+from typing import Any
 
 from smartsuite.core.contracts import AnalysisResult
 from smartsuite.core.exceptions import OutputError
@@ -17,16 +18,134 @@ _PDF_DPI = 200
 logger = logging.getLogger(__name__)
 
 
-def _validate_output_path(output_path: str) -> str:
-    """验证输出路径安全性: 解析为绝对路径并检查是否在合理目录内。
+#: 导出格式 → (扩展名, MIME 类型)。Web 侧据此设置下载头。
+#: 单一事实源：格式白名单、扩展名、MIME 三者只在这一处定义。
+EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    "html": (".html", "text/html; charset=utf-8"),
+    "pdf": (".pdf", "application/pdf"),
+    "ppt": (".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+    "xlsx": (
+        ".xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ),
+}
 
-    防御性检查 — 当前调用者不暴露用户控制路径, 但作为未来防护。
+
+def export_report(
+    result: AnalysisResult,
+    fmt: str,
+    output_path: str,
+    *,
+    template_path: str | None = None,
+    df: Any = None,
+    target_col: str = "",
+    feature_cols: list[str] | None = None,
+) -> str:
+    """按格式分发到对应 reporter，返回实际写入的路径。
+
+    ## 为什么需要这个分发器（阶段 P5，2026-09-24）
+
+    三个 reporter 签名各异（`to_ppt` 多一个 `template_path`）、`export_workbook`
+    还在另一个模块且需要 DataFrame + 列信息。若让 `web/` 直接分别调用，
+    Web 层就要知道"哪种格式走哪个函数、参数怎么拼"——那是桥接层的职责。
+    故在服务层收一处分发，调用方只传 `(result, fmt, path)`。
+
+    ## 为什么 `xlsx` 需要额外参数
+
+    `to_html`/`to_pdf`/`to_ppt` 都只吃 `AnalysisResult`（图表在 `result.figures`），
+    而 `audit.export_workbook` 是**另一个粒度**：它按 DataFrame + 列信息**自行
+    重跑**全部任务，每个任务写一个 Sheet（这样才能做出多 Sheet 工作簿）。
+    故 `xlsx` 必须显式给 `df` / `target_col` / `feature_cols`；
+    缺失时**明确拒绝**而非抛底层异常。
+
+    Args:
+        result: 分析结果（`html`/`pdf`/`ppt` 用；图表取自 `result.figures`）。
+        fmt: `html` / `pdf` / `ppt` / `xlsx`（不区分大小写）。
+        output_path: 输出文件路径（父目录会自动创建）。
+        template_path: 仅 `ppt` 使用（PPT 模板）。
+        df / target_col / feature_cols: 仅 `xlsx` 使用。
+
+    Raises:
+        OutputError: 格式不支持、`xlsx` 缺列信息、或写入失败。
     """
+    key = (fmt or "").strip().lower()
+    if key not in EXPORT_FORMATS:
+        supported = " / ".join(sorted(EXPORT_FORMATS))
+        raise OutputError(
+            f"不支持的报告格式「{fmt}」，支持: {supported}"
+            "（html=自包含网页报告、pdf=PDF、ppt=PowerPoint、xlsx=多 Sheet 工作簿）"
+        )
+
+    if key == "html":
+        return to_html(result, output_path)
+    if key == "pdf":
+        return to_pdf(result, output_path)
+    if key == "ppt":
+        return to_ppt(result, output_path, template_path)
+
+    # key == "xlsx"
+    if df is None or not target_col:
+        raise OutputError(
+            "导出 Excel 工作簿需要数据与目标列（xlsx 会按列信息自行重跑全部任务，"
+            "每个任务写入独立 Sheet），请检查调用参数"
+        )
+    from smartsuite.services.audit import export_workbook
+
+    return str(export_workbook(df, target_col, feature_cols or [], output_path))
+
+
+def _prepare_output_path(output_path: str) -> str:
+    """把导出目标路径归一化为绝对路径，并**确保其父目录存在**。
+
+    契约：docs/governance/boundary-contract.md（B0 拒绝）
+
+    审查 2026-09-24（第三轮复核 P1-2）：本函数原名 `_validate_output_path`，
+    docstring 写「验证输出路径安全性: 解析为绝对路径并检查是否在合理目录内」，
+    但实现里**没有任何检查、没有拒绝分支**——只做 `abspath` + `makedirs`。
+    函数名与文档都在承诺一件没做的事，属"虚假安全感"：未来若有人加 Web 导出
+    端点，会以为已有路径防护。现改名并如实描述，同时补上真正有用的校验。
+
+    **有意不做目录白名单限制**：三个调用方（`to_pdf`/`to_ppt`/`to_html`）都是
+    CLI 导出入口，目标路径由用户显式给出——把报告写到数据盘或共享盘是合法需求，
+    加白名单会制造无意义的使用障碍。真正的风险面在 Web 上传路径（另有
+    `_upload_dir()` + 命名前缀 + 目录归属校验，与本函数无关）。
+
+    本函数做的事：
+      - 拒绝空/纯空白路径；
+      - 拒绝**目标已是目录**的情形（`--out reports` 而 `reports/` 已存在是最常见的
+        用户失误，原实现要到写文件那一步才炸，报"请检查输出路径是否可写"）；
+      - 拒绝**父路径是文件**的情形（`makedirs` 必然失败）；
+      - 创建缺失的父目录；失败时抛 `OutputError`（中文），不裸抛 `OSError`。
+
+    不保证：不校验符号链接、不校验目录可写性（可写性由真正写入时判定——
+    提前探测会引入 TOCTOU，且平台语义差异大）。
+
+    Raises:
+        OutputError: 路径非法或父目录无法创建。
+    """
+    if not isinstance(output_path, str) or not output_path.strip():
+        raise OutputError("输出路径不能为空，请指定报告文件路径（如 reports/analysis.html）")
+
     abs_path = os.path.abspath(output_path)
-    # 确保目录存在
+
+    if os.path.isdir(abs_path):
+        raise OutputError(
+            f"输出路径「{abs_path}」是一个已存在的目录，无法作为报告文件名。"
+            "请在路径末尾补上文件名（如 reports/analysis.html）。"
+        )
+
     out_dir = os.path.dirname(abs_path)
-    if out_dir:
+    if not out_dir:
+        return abs_path
+    if os.path.exists(out_dir) and not os.path.isdir(out_dir):
+        raise OutputError(
+            f"输出路径的上级「{out_dir}」是一个文件，无法在其下创建目录。请检查输出路径。"
+        )
+    try:
         os.makedirs(out_dir, exist_ok=True)
+    except OSError as e:
+        logger.warning("创建输出目录失败: %s (%s)", out_dir, e)
+        raise OutputError(f"无法创建输出目录「{out_dir}」，请检查路径是否可写") from e
     return abs_path
 
 
@@ -131,7 +250,7 @@ def to_pdf(result: AnalysisResult, output_path: str) -> str:
     try:
         # 审查 2026-09-01 C-2：路径校验移入 try 内——os.makedirs 失败时
         # 转 OutputError 中文消息，不再裸抛 PermissionError/OSError
-        output_path = _validate_output_path(output_path)
+        output_path = _prepare_output_path(output_path)
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.utils import ImageReader
         from reportlab.pdfbase import pdfmetrics
@@ -212,7 +331,7 @@ def to_ppt(result: AnalysisResult, output_path: str, template_path: str | None =
     """生成 PPT 报告。"""
     try:
         # 审查 2026-09-01 C-2：路径校验移入 try 内（同 to_pdf）
-        output_path = _validate_output_path(output_path)
+        output_path = _prepare_output_path(output_path)
         from pptx import Presentation
         from pptx.util import Inches
 
@@ -256,7 +375,7 @@ def to_html(result: AnalysisResult, output_path: str) -> str:
 
     try:
         # 审查 2026-09-01 C-2：路径校验移入 try 内（同 to_pdf/to_ppt）
-        output_path = _validate_output_path(output_path)
+        output_path = _prepare_output_path(output_path)
         html_parts = [
             "<!DOCTYPE html><html lang='zh-CN'><head>",
             "<meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>",

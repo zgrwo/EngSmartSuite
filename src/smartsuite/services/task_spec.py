@@ -64,7 +64,9 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.root_cause.anova:anova_analysis",
         label="ANOVA方差分析",
         group="要因筛选",
-        default_params={"alpha": 0.05, "interactions": 0},
+        # ss_type（P2-3）：2=Type II（默认，引擎原行为）、3=Type III（Minitab/SAS 默认）。
+        # 不平衡设计下两者可给出相反结论，故必须可配且默认保持向后兼容。
+        default_params={"alpha": 0.05, "interactions": 0, "ss_type": 2},
         raw_cat=True,
     ),
     TaskSpec(
@@ -214,6 +216,12 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.doe_opt.optimization:multi_objective_opt",
         label="多目标优化",
         group="建模优化",
+        # 审查 2026-09-24（P4 步骤③，第二十四轮）：**不要**加 `direction`。
+        # 我一度以为引擎读顶层 `direction` 而默认值表漏了，就往这里加了一个 ——
+        # 核对源码后确认：`direction` 是**每个 objective 字典里的键**
+        # （`obj.get("direction", "maximize")`），顶层从无此参数。
+        # 加了会造出一个"前端能设、引擎不看"的假参数（正是本轮在 `regression`
+        # 上发现的那类缺陷）。教训：**"引擎读了 params" ≠ "读的是顶层同名键"**。
         default_params={"objectives": None, "weights": None},
         no_target=True,
     ),
@@ -320,7 +328,16 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.capability:process_capability_analysis",
         label="过程能力Cp/Cpk",
         group="过程监控",
-        default_params={"usl": None, "lsl": None, "target": None},
+        # P2-5（2026-09-24）：组内 σ 口径可显式指定 ——
+        # subgroup_col 按列分组池化（不受行序影响）、subgroup_size 按行序切子组。
+        # 两者均为空时沿用移动极差法（原行为，隐含"行序=时间顺序"假设）。
+        default_params={
+            "usl": None,
+            "lsl": None,
+            "target": None,
+            "subgroup_col": "",
+            "subgroup_size": None,
+        },
     ),
     TaskSpec(
         key="trend_forecast",
@@ -356,7 +373,11 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         group="过程监控",
         default_params={
             "mode": "facet",
-            "show_stats": True,
+            # 第三十轮：`True` → `"true"`。原因：`show_stats` 与 `scatter_plot.show_ci`
+            # 同为布尔开关，现由共享的 `BOOL_SWITCH` 声明（值集是 `"true"`/`"false"`，
+            # 布尔/1/0 经别名归一到字符串）。默认值表必须与 `Spec.defaults()` 一致
+            # （对拍断言强制），故这里也用字符串 —— 语义等价（引擎按 `== "true"` 判）。
+            "show_stats": "true",
             "group_col": None,
             "usl": None,
             "lsl": None,

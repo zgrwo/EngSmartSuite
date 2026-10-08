@@ -122,6 +122,55 @@ def _serialize_table(tbl: pd.DataFrame) -> dict:
     }
 
 
+def prepare_web_request(
+    task: str,
+    df: pd.DataFrame,
+    targets: list[str],
+    features: list[str],
+    categoricals: list[str],
+    params: dict | None = None,
+) -> AnalysisRequest:
+    """把 Web 请求预处理成 `AnalysisRequest`（阶段 P5，2026-09-24）。
+
+    `/api/analyze` 与 `/api/export` 必须走**同一套预处理** —— 否则导出报告里的
+    数值会与屏幕上看到的不一致（那比报错更糟：用户不会怀疑报告）。
+
+    本函数只覆盖**单目标一次分析**所需的预处理（校验 → SPC 子组补齐 → one-hot），
+    不包含 `run_analysis` 的多目标循环与序列化。`run_analysis` 暂未改为调用它
+    （那需要自己的测试防线，见 `tests/web/`）；故加
+    `tests/integration/test_report_export.py::test_prepare_matches_analyze_path`
+    逐字段对拍两者，钉住"不漂移"。
+    """
+    if params is None:
+        params = {}
+    target = targets[0] if targets else ""
+
+    # 数据校验提示不阻塞分析，此处只需触发它（结果由 run_analysis 呈现给用户）
+    try:
+        validate_data(df, target, features)
+    except ValidationError as e:
+        logger.warning("数据校验未通过（不阻塞分析）: %s", e)
+
+    # SPC 缺 group_col 时自动生成子组（与 CLI 共用 services.prepare_spc_subgroup_col）
+    if task in ("spc_cusum", "spc_ewma"):
+        df, params = prepare_spc_subgroup_col(df, params)
+
+    # 审查 2026-08-19 Round-2：preprocess 失败（如 One-Hot 列名冲突 / 缺列）
+    # 转为 ValidationError → 由 Web 层返回 400 中文，而非 500
+    try:
+        df_enc, feat_enc, _imputation_log, _unknown_cat_warnings = preprocess_for_task(
+            df, features, task, categoricals, RAW_CAT_TASKS
+        )
+    except KeyError as e:
+        raise ValidationError(
+            f"数据预处理失败：列「{e}」不存在于数据中，请检查特征/类别列与数据列名是否一致"
+        ) from e
+
+    return AnalysisRequest(
+        task=task, data=df_enc, target_col=target, feature_cols=feat_enc, params=params
+    )
+
+
 def run_analysis(
     task: str,
     df: pd.DataFrame,

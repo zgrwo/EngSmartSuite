@@ -14,7 +14,7 @@
   <span class="subtitle">工艺数据分析工具箱</span>
   <div class="header-right">
     <input type="file" id="file-input" accept=".xlsx,.xlsm,.csv" hidden>
-    <button id="btn-upload" onclick="document.getElementById('file-input').click()">📂 打开数据文件</button>
+    <button id="btn-upload" data-action="pick-file">📂 打开数据文件</button>
     <select id="encoding" title="CSV 文件编码（.xlsx / .xlsm 不受影响）">
       <option value="">自动识别</option>
       <option value="utf-8-sig">UTF-8</option>
@@ -32,17 +32,17 @@
   <aside id="left-panel">
     <div class="panel-header">列定义</div>
     <div class="toolbar">
-      <button onclick="autoDetect()" class="btn-sm">智能识别</button>
-      <button onclick="setAll('y')" class="btn-sm">全选Y</button>
-      <button onclick="setAll('x')" class="btn-sm">全选X</button>
-      <button onclick="clearAll()" class="btn-sm">清空</button>
+      <button data-action="auto-detect" class="btn-sm">智能识别</button>
+      <button data-action="select-all-y" class="btn-sm">全选Y</button>
+      <button data-action="select-all-x" class="btn-sm">全选X</button>
+      <button data-action="clear-columns" class="btn-sm">清空</button>
     </div>
     <div id="col-list" class="col-list">
       <div class="empty-hint">请先加载数据文件</div>
     </div>
     <div id="col-status" class="col-status">Y=0 X=0 类别=0</div>
     <!-- 参数面板（按需显示） -->
-    <div id="param-panel" class="param-panel" style="display:none">
+    <div id="param-panel" class="param-panel is-hidden">
       <div class="panel-header">分析参数</div>
       <div class="param-body" id="param-body"></div>
     </div>
@@ -51,11 +51,11 @@
   <main id="center-panel">
     <div class="workflow">
       {% for group, tasks in task_groups.items() %}
-      <div class="wf-group" style="--group-bg: {{ group_colors[group] }}">
+      <div class="wf-group" data-group="{{ group }}">
         <div class="wf-title">{{ group }}</div>
         <div class="wf-buttons">
           {% for t in tasks %}
-          <button onclick="runAnalysis('{{ t }}')" class="btn-analysis">{{ task_labels[t] }}</button>
+          <button data-action="run-task" data-task="{{ t }}" class="btn-analysis">{{ task_labels[t] }}</button>
           {% endfor %}
         </div>
       </div>
@@ -64,11 +64,19 @@
     <div id="results" class="results">
       <div class="empty-hint">选择分析方法开始</div>
     </div>
+    <!-- 报告导出（P5）：分析成功后才显示；格式由 EXPORT_FORMATS 定义 -->
+    <div id="export-bar" class="export-bar is-hidden">
+      <span class="export-label">导出报告</span>
+      <button data-action="export-report" data-format="html" class="btn-sm">网页 (HTML)</button>
+      <button data-action="export-report" data-format="pdf" class="btn-sm">PDF</button>
+      <button data-action="export-report" data-format="ppt" class="btn-sm">PowerPoint</button>
+      <button data-action="export-report" data-format="xlsx" class="btn-sm">Excel 工作簿</button>
+    </div>
   </main>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<script src="/static/app.js?v=9"></script>
+<script type="module" src="/static/app.js?v=12"></script>
 </body>
 </html>

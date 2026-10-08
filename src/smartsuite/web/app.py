@@ -6,10 +6,13 @@ import functools
 import logging
 import os
 import pathlib
+import re
 import secrets
+import shutil
 import sys
 import tempfile
 import time as _time
+import uuid
 
 import pandas as pd
 
@@ -19,7 +22,7 @@ import pandas as pd
 # tests/guards/test_matplotlib_backend_order.py）
 
 try:
-    from flask import Flask, jsonify, render_template, request, session
+    from flask import Flask, jsonify, make_response, render_template, request, session
 except ImportError:
     print("=" * 60)
     print("  ❌ SmartSuite Web UI 需要 Flask，但未安装。")
@@ -29,18 +32,28 @@ except ImportError:
     print("=" * 60)
     sys.exit(1)
 
+from werkzeug.exceptions import HTTPException
+
 from smartsuite.core.constants import GROUP_COLORS
-from smartsuite.core.exceptions import CsvEncodingError, ValidationError
+from smartsuite.core.exceptions import CsvEncodingError, OutputError, ValidationError
 from smartsuite.services import config
 from smartsuite.services.data_io import read_csv_with_encoding
 from smartsuite.services.orchestrator import (
+    DEFAULT_PARAMS,
     NO_DATA_TASKS,
     NO_TARGET_TASKS,
     TASK_GROUPS,
     TASK_LABELS,
     TASK_REGISTRY,
+    orchestrate,
 )
-from smartsuite.web.api import column_info, run_analysis
+from smartsuite.services.param_labels import (
+    derive_param_hints,
+    derive_param_labels,
+    derive_param_options,
+)
+from smartsuite.services.reporter import EXPORT_FORMATS, export_report
+from smartsuite.web.api import column_info, prepare_web_request, run_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +76,40 @@ def _upload_dir() -> pathlib.Path:
     )
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+def _is_within_upload_dir(path) -> bool:
+    """`path` 是否位于上传目录之内（含目录本身）。用于 session 数据路径的归属校验。
+
+    契约：docs/governance/boundary-contract.md（B0 拒绝）
+
+    审查 2026-09-24（第三轮复核 P3-2）：`/api/upload` 把落盘路径存入 session，
+    `/api/analyze` 据此 `pd.read_parquet`，下一次上传还会 `os.unlink` 该路径——
+    **全程不校验归属**。唯一屏障是 Flask 签名 cookie。这**不是可直接利用的漏洞**
+    （伪造 session 需先拿到 `SECRET_KEY`），而是**纵深防御缺口**：一旦密钥泄露
+    或运维配了弱 `SMARTSUITE_SECRET`，即可读任意 parquet 并**删除任意文件**。
+
+    实现要点：
+      - 两侧都做 `resolve()` 归一化，故 `..`、相对路径、符号链接都被展开后再比较；
+      - 用 `os.path.commonpath` 做**路径段级**比较，而非字符串前缀——
+        `uploads-evil/` 与 `uploads/` 有公共前缀但不同目录，前缀匹配会误放行；
+      - `path` 为 None/空 → False（不可判定即拒绝）。
+
+    有意不做的事：不校验文件是否真实存在（TOCTOU），那是调用方的事；
+    不限制文件名（`_is_own_upload` 负责命名契约）。
+    """
+    if not path or not isinstance(path, (str, os.PathLike)):
+        return False
+    try:
+        upload_root = _upload_dir().resolve()
+        target = pathlib.Path(path).resolve()
+    except (OSError, ValueError):
+        return False
+    try:
+        return os.path.commonpath([str(upload_root), str(target)]) == str(upload_root)
+    except ValueError:
+        # 不同驱动器（Windows）→ commonpath 抛 ValueError → 必然不在同一目录树
+        return False
 
 
 def _is_own_upload(path: pathlib.Path) -> bool:
@@ -157,6 +204,38 @@ def _generate_csrf_token() -> str:
     return token
 
 
+def _csrf_tokens_match(client_token, server_token) -> bool:
+    """CSRF token 恒定时间比较 — 对任意字节序列返回 bool，**永不抛异常**。
+
+    契约：docs/governance/boundary-contract.md（B0 拒绝）
+
+    审查 2026-09-24（第三轮复核 P0-4）：
+    `secrets.compare_digest` 对含非 ASCII 字符的 **str** 抛
+    `TypeError: comparing strings with non-ASCII characters is not supported`
+    （实测 'é' / '中' 均抛）。原实现直接把它放在请求处理路径上、且全项目没有
+    errorhandler → 任意人发一个 `X-CSRF-Token: é` 就能让 /api/analyze 与
+    /api/upload 返回 500 HTML 并刷日志（无需任何凭据）。
+
+    修复要点（两层，缺一不可）：
+      1. 先 `encode("utf-8")` 转 bytes —— compare_digest 对 bytes 不做 ASCII 检查，
+         语义是「任意字节序列的恒定时间比较」，正是我们要的；
+      2. `encode` 本身对含 **孤立代理对**（surrogate）的 str 会抛 UnicodeEncodeError，
+         故整体包在 try 中兜底返回 False。
+
+    注意：不在此处 `strip()`。token 是 hex 串，前后空白应视为不匹配而非容错，
+    否则等于放宽 token 语法，与「恒定时间比较」的初衷相悖。
+    """
+    try:
+        if not isinstance(client_token, str) or not isinstance(server_token, str):
+            return False
+        if not client_token or not server_token:
+            return False
+        return secrets.compare_digest(client_token.encode("utf-8"), server_token.encode("utf-8"))
+    except (UnicodeEncodeError, TypeError, AttributeError):
+        # 孤立代理对 / 非字符串输入 → 视为不匹配（拒绝），不向调用方抛异常
+        return False
+
+
 def require_csrf(f):
     """CSRF 校验装饰器：POST 端点需携带 X-CSRF-Token 头匹配 session token。"""
 
@@ -165,7 +244,7 @@ def require_csrf(f):
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             client_token = request.headers.get("X-CSRF-Token", "")
             server_token = session.get(_CSRF_TOKEN_KEY, "")
-            if not client_token or not secrets.compare_digest(client_token, server_token):
+            if not _csrf_tokens_match(client_token, server_token):
                 return jsonify({"error": "CSRF 校验失败，请刷新页面后重试"}), 403
         return f(*args, **kwargs)
 
@@ -210,15 +289,120 @@ app.config["PERMANENT_SESSION_LIFETIME"] = (
 
 @app.after_request
 def _security_headers(resp):
-    """Round-2 P3：CSP 纵深防御（模板含内联 style/onclick → 需 unsafe-inline）。"""
+    """安全响应头（CSP 纵深防御）。
+
+    审查 2026-09-24（P3-3）：`script-src` 原被迫含 `'unsafe-inline'`，因为模板与
+    JS 模板字面量里有 11 处内联事件处理器（`onclick`）。这些已全部改为
+    `data-action` + 根级事件委托（见 `static/app.js` 的 ACTIONS 表），
+    故**脚本侧的 `unsafe-inline` 已移除**。
+
+    审查 2026-09-24（第二十九轮）：`style-src` 的 `'unsafe-inline'` **也已移除**。
+    原因是 CSP3 起 `style-src` 的 `'unsafe-inline'` 同样覆盖**行内 `style="…"` 属性**
+    —— 要收紧它就必须把行内样式全部改成 class，本轮做了这件事（7 处）：
+
+      - `display:none` × 3 → `.is-hidden`（`!important`，见 style.css 的说明）；
+      - 错误提示色 × 3 → `.empty-hint.is-error`；
+      - 相关系数矩阵按值着色 × 1 → `.cell-strong` / `.cell-normal` 两档；
+      - 工作流分组背景色 × 1 → 5 个静态 `[data-group="…"]` 规则。
+
+    最后一项需要说明：分组色原经 `style="--group-bg: {{ 色值 }}"` 注入 CSS 变量。
+    `data-*` 属性**无法**驱动 `background`（CSS3 的 `attr()` 只能用于 `content`），
+    而 `GROUP_COLORS` 是**固定 5 项**，故安全地固化为静态类 ——
+    一致性由 `tests/guards/test_web_ui_guards.py::test_wf_group_colors_match_engine` 守护。
+
+    两条收紧分别由 `test_csp_allows_no_inline_script` 与
+    `test_csp_allows_no_inline_style` 锁定。
+    """
     resp.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; img-src 'self' data:; "
-        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+        "style-src 'self'; script-src 'self'; "
+        "frame-ancestors 'none'",
     )
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    # 点击劫持纵深：frame-ancestors 已被现代浏览器支持，X-Frame-Options 覆盖旧浏览器
+    resp.headers.setdefault("X-Frame-Options", "DENY")
     return resp
+
+
+# ── API 统一错误契约（审查 2026-09-24 R3-P3-1）──
+# 原状态：全项目零 errorhandler → /api/* 的 404/405/413/500 全部返回 Flask 默认
+# **HTML** 错误页，而业务 4xx 返回 {"error": 中文}。API 消费者需同时处理两种格式，
+# 且 413（超过 MAX_CONTENT_LENGTH）由 WSGI 层抛出，业务代码无法拦截。
+# 现约定：**/api/ 前缀的请求，任何错误都返回 JSON**；页面路由保持 HTML 行为。
+_API_ERROR_PAGES: dict[int, str] = {
+    400: "请求格式不正确",
+    403: "无权访问该资源",
+    404: "请求的接口不存在",
+    405: "请求方法不被支持",
+    413: "请求数据过大（超过服务器限制），请减少数据量或列数",
+    500: "服务器内部错误，请稍后重试",
+}
+
+
+def _wants_json_error() -> bool:
+    """该请求的错误响应是否应为 JSON：仅 /api/ 前缀。"""
+    return request.path.startswith("/api/")
+
+
+def _json_error_response(status: int):
+    """构造 API 错误 JSON 响应；页面路由返回 None 交回 Flask 默认 HTML。"""
+    if not _wants_json_error():
+        return None
+    return jsonify({"error": _API_ERROR_PAGES.get(status, "请求处理失败")}), status
+
+
+@app.errorhandler(400)
+@app.errorhandler(403)
+@app.errorhandler(404)
+@app.errorhandler(405)
+def _handle_client_error(exc):  # pragma: no cover — 装饰器链共用实现
+    """4xx → /api/ 路径返回 JSON，页面路径保留 Flask HTML 行为。"""
+    status = getattr(exc, "code", 400) or 400
+    return _json_error_response(status) or exc
+
+
+@app.errorhandler(413)
+def _handle_request_entity_too_large(exc):
+    """上传体超过 MAX_CONTENT_LENGTH → 413 JSON（而非 WSGI 层 HTML 500/413）。
+
+    实测（复核 A6）：Flask 对超限请求抛 RequestEntityTooLarge，但测试套件
+    从未覆盖该路径（全仓 grep 413 零命中），前端 app.js:82-84 只能靠
+    "r.json() 失败 → 猜状态码" 兜底。
+    """
+    return _json_error_response(413) or exc
+
+
+@app.errorhandler(Exception)
+def _handle_unexpected_error(exc):
+    """未预期异常兜底：API 路径返回 500 JSON（不回显内部细节），页面路径交回 Flask。
+
+    审查 2026-09-24 R3：此前 /api/* 的任何逃逸异常（如非 ASCII CSRF token 的
+    TypeError、上传目录不可用时的 OSError）都渲染成 HTML 500，客户端 JSON 解析
+    失败后只能显示"网络错误"，真实原因与 error_id 全部丢失。
+    """
+    if isinstance(exc, HTTPException):
+        return _json_error_response(exc.code or 500) or exc
+    if not _wants_json_error():
+        raise exc
+    error_id = uuid.uuid4().hex[:8]
+    logger.exception(
+        "API 未预期异常 [error_id=%s]: %s %s, error_type=%s",
+        error_id,
+        request.method,
+        request.path,
+        type(exc).__name__,
+    )
+    return (
+        jsonify(
+            {
+                "error": "服务器内部错误，请稍后重试",
+                "error_id": error_id,
+            }
+        ),
+        500,
+    )
 
 
 @app.before_request
@@ -355,9 +539,15 @@ def upload():
     # 新文件写入成功，更新 session 并清理上一份（本 session 自己的旧文件）
     old_path = session.get("_data_path")
     session["_data_path"] = tmp.name
+    # 审查 2026-09-24（第三轮复核 P3-2）：删除前**必须**校验归属。
+    # 这是本流程最危险的一步——session 可被伪造时会变成"删任意文件"。
+    # 越界时不删除，仅记日志（不打断当前上传，用户已拿到新数据）。
     if old_path and old_path != tmp.name and os.path.exists(old_path):
-        with contextlib.suppress(OSError):
-            os.unlink(old_path)
+        if _is_within_upload_dir(old_path):
+            with contextlib.suppress(OSError):
+                os.unlink(old_path)
+        else:
+            logger.warning("跳过删除上传目录之外的旧数据路径（会话路径越界）: %s", old_path)
     return jsonify({"columns": column_info(df), "shape": list(df.shape)})
 
 
@@ -404,6 +594,11 @@ def analyze():
             df = pd.DataFrame()
         elif not path or not os.path.exists(path):
             return jsonify({"error": "请先上传数据文件"}), 400
+        elif not _is_within_upload_dir(path):
+            # 审查 2026-09-24（第三轮复核 P3-2）：会话路径必须落在上传目录内。
+            # 记 warning 供运维发现异常会话；对用户按"未上传"处理（不泄漏路径细节）。
+            logger.warning("会话数据路径越界，已拒绝读取: %s", path)
+            return jsonify({"error": "数据文件无效，请重新上传数据文件"}), 400
         else:
             # 审查 2026-09-01 S-2：清理线程与读取存在 TOCTOU 窗口，
             # 文件可能在 exists() 后被删除 → FileNotFoundError 专项 400（非裸 500）
@@ -423,10 +618,174 @@ def analyze():
         return jsonify({"error": "分析处理失败，请检查数据格式后重试"}), 500
 
 
+def _load_session_frame(task: str):
+    """读取本会话的数据帧；返回 `(df, error_response)`。
+
+    `/api/analyze` 与 `/api/export` 共用，确保**路径安全校验不漂移**
+    （会话路径必须落在上传目录内 —— 审查 2026-09-24 第三轮复核 P3-2）。
+    无需数据的任务返回空 DataFrame。
+
+    error_response 非 None 时，调用方应直接 `return error_response`。
+    """
+    path = session.get("_data_path")
+    if task in NO_DATA_TASKS:
+        return pd.DataFrame(), None
+    if not path or not os.path.exists(path):
+        return None, (jsonify({"error": "请先上传数据文件"}), 400)
+    if not _is_within_upload_dir(path):
+        logger.warning("会话数据路径越界，已拒绝读取: %s", path)
+        return None, (jsonify({"error": "数据文件无效，请重新上传数据文件"}), 400)
+    try:
+        return pd.read_parquet(path), None
+    except FileNotFoundError:
+        logger.warning("上传数据文件已被清理，请重新上传: %s", path)
+        return None, (jsonify({"error": "上传的数据文件已过期，请重新上传"}), 400)
+
+
+@app.route("/api/export", methods=["POST"])
+@require_csrf
+def export_report_endpoint():
+    """把分析结果导出为报告文件并作为附件下载（阶段 P5，2026-09-24）。
+
+    ## 补的是什么缺口
+
+    `services/reporter.py` 的 `to_html`/`to_pdf`/`to_ppt` 与
+    `audit.export_workbook` 此前**只有 Python API 能用** —— CLI 无导出命令、
+    Web 无导出端点。用户跑完分析**拿不到报告文件**，这是产品级缺口。
+
+    ## 为什么要重跑分析
+
+    报告需要 `AnalysisResult.figures`（matplotlib 对象，无法经 JSON 往返），
+    故不能复用前端已有的 `/api/analyze` 结果。本端点按同一份请求体重新执行分析。
+
+    ## 与 `/api/analyze` 的一致性
+
+    数据读取与路径安全校验**复用 `_load_session_frame()`**（同一实现），
+    避免两处各写一份导致安全校验漂移。
+    """
+    try:
+        # `force=True`：即使客户端没带 `Content-Type: application/json` 也解析。
+        # 不用 `silent=True` —— 那会让"没带 JSON"与"JSON 是空对象"无法区分，
+        # 于是无 CSRF token 的探测请求会先撞上 400（参数缺失）而不是 403（鉴权），
+        # 掩盖真实原因（本端点首版即如此，被 test_export_requires_csrf 抓出）。
+        body = request.get_json(force=True, silent=True)
+        if body is None:
+            return jsonify({"error": "请求体必须是 JSON 对象"}), 400
+        task = body.get("task", "")
+        fmt = body.get("format", "")
+        if not isinstance(task, str) or not task:
+            return jsonify({"error": "缺少分析任务"}), 400
+        if task not in TASK_REGISTRY:
+            return jsonify({"error": f"未知的分析任务「{task}」"}), 400
+        targets = body.get("targets", [])
+        features = body.get("features", [])
+        categoricals = body.get("categoricals", [])
+        params = body.get("params", {})
+        if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+            return jsonify({"error": "targets 必须是字符串列表"}), 400
+        if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
+            return jsonify({"error": "features 必须是字符串列表"}), 400
+        if not isinstance(params, dict):
+            return jsonify({"error": "params 必须是字典"}), 400
+
+        # 格式白名单（与 exporter 的 EXPORT_FORMATS 同源，不在此另列一份）
+        key = fmt.strip().lower() if isinstance(fmt, str) else ""
+        if key not in EXPORT_FORMATS:
+            return jsonify(
+                {"error": f"不支持的报告格式「{fmt}」，支持: " + " / ".join(sorted(EXPORT_FORMATS))}
+            ), 400
+
+        df, err = _load_session_frame(task)
+        if err is not None:
+            return err
+
+        target = targets[0] if targets else ""
+        if not target and task not in NO_TARGET_TASKS:
+            return jsonify({"error": "缺少目标列"}), 400
+        # 与 `/api/analyze` 走**同一套预处理**（`prepare_web_request`）：
+        # 跳过预处理会漏掉 one-hot 冲突等前置校验，让导出报告里的数值与屏幕上
+        # 不一致 —— 那比报错更糟（用户不会怀疑报告）。
+        req = prepare_web_request(task, df, targets, features, categoricals, params)
+        result = orchestrate(req)
+        if result.status != "ok":
+            # 分析本身失败（参数非法等）→ 400 + 中文原因，不得 500
+            return jsonify({"error": "；".join(result.messages) or "分析失败，无法导出"}), 400
+
+        ext, mime = EXPORT_FORMATS[key]
+        # reporter 的三种导出都写**文件路径**（它们同时是 CLI 的导出入口，
+        # 那个契约不该为了 Web 改）。故此处写临时目录、读回内存、随即删目录 ——
+        # 不用 `send_file`：它持有的文件句柄在测试里会以
+        # `PytestUnraisableExceptionWarning: Exception ignored in FileIO` 暴露，
+        # 且临时文件本就不该留下来。
+        tmpdir = tempfile.mkdtemp(prefix="smartsuite_export_")
+        try:
+            out_path = os.path.join(tmpdir, f"{task}{ext}")
+            export_report(
+                result,
+                key,
+                out_path,
+                df=df,
+                target_col=target,
+                feature_cols=features,
+            )
+            with open(out_path, "rb") as fh:
+                payload = fh.read()
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        # 文件名用任务名（用户下载后一眼能认出），并做 ASCII 安全化：
+        # 响应头只能放 latin-1，中文任务名会让 werkzeug 抛 UnicodeEncodeError。
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", task) or "report"
+        resp = make_response(payload)
+        resp.headers["Content-Type"] = mime
+        resp.headers["Content-Disposition"] = f'attachment; filename="{safe_name}{ext}"'
+        resp.headers["Content-Length"] = str(len(payload))
+        return resp
+    except OutputError as e:
+        # 导出层明确的中文拒绝（如 xlsx 缺列信息）→ 400
+        logger.warning("报告导出被拒绝: %s", e)
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.exception("报告导出失败: %s", str(e)[:200])
+        return jsonify({"error": "报告导出失败，请检查数据后重试"}), 500
+
+
 @app.route("/api/tasks")
 def list_tasks():
+    """任务清单 + 标签 + 分组 + **参数默认值**。
+
+    审查 2026-09-24（P4 步骤④）：新增 `params` 键，下发
+    `services/task_spec.py::TASK_SPECS` 派生的 `DEFAULT_PARAMS`。
+
+    目的：消灭前端 `params.js` 里那份**逐字重复**的 `TASK_PARAMS` 字面量。
+    两份默认值必须一致，原先靠 `scripts/verify_frontend_params.py` 每次门禁
+    比对来维持（手工一致性）；改由本端点下发后，后端是唯一事实源，
+    **结构上不可能不一致**。
+
+    无参数的任务下发 `{}`（而非缺失）—— 前端据此决定是否显示参数面板，
+    "缺失"会被误当成"未知任务"。
+    """
     return jsonify(
-        {"tasks": list(TASK_REGISTRY.keys()), "labels": TASK_LABELS, "groups": TASK_GROUPS}
+        {
+            "tasks": list(TASK_REGISTRY.keys()),
+            "labels": TASK_LABELS,
+            "groups": TASK_GROUPS,
+            "params": {task: DEFAULT_PARAMS.get(task, {}) for task in TASK_REGISTRY},
+            # 审查 2026-09-24（P4 步骤④续）：参数标签/提示派生自各任务的
+            # `PARAM_SPEC`（`Opt(..., label=..., hint=...)`），取代前端
+            # `params.js` 里的 `PARAM_LABELS` / `PARAM_HINTS` 两份重复字典。
+            #
+            # 键名用 `param_labels` 而非 `labels` —— 后者已被**任务**标签占用
+            # （见上方 TASK_LABELS），复用会破坏任务按钮渲染。
+            #
+            # 尚未声明 `Spec` 的任务没有对应条目，前端回落到参数名本身
+            # （`|| k`），故本项可先于逐任务迁移完成，中间态不会出现空白标签。
+            "param_labels": derive_param_labels(),
+            "param_hints": derive_param_hints(),
+            # 下拉选项的值 + 显示文案（`Choice` 的 `(值, 文案)` 声明）；
+            # 这是删除前端 PARAM_META（169 行）的前置。
+            "param_options": derive_param_options(),
+        }
     )
 
 
