@@ -1,7 +1,9 @@
 """区间估计与方差检验：比例 CI、方差齐性检验。"""
 
+import contextlib
 import logging
 from math import sqrt
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -57,9 +59,34 @@ def proportion_ci(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 自动识别"成功"标签
+    # 审查 2026-10-09 P2-6：显式传入的 `success_value` 若**不在列的实际取值中**，
+    # 原实现 `int((data == success_val).sum())` 恒得 0 → 点估计 0.0000、
+    # status=ok、messages 为空 —— 合格率/不良率这类质量 KPI 会直出「0%」的错误结论。
+    # 同时修类型敏感：面板（`<select>`/文本框）只能给出字符串，故 `'1'` 必须能命中数值 1。
     success_val = req.params.get("success_value")
+    if isinstance(success_val, str) and success_val.strip() == "":
+        success_val = None  # 空串 = 未提供（与前端"留空"语义一致）
     if success_val is not None:
-        successes = int((data == success_val).sum())
+        candidates: list[Any] = [success_val]
+        s = str(success_val)
+        candidates.append(s)
+        with contextlib.suppress(TypeError, ValueError):
+            f = float(s)
+            candidates.append(f)
+            if f.is_integer():
+                candidates.append(int(f))
+        mask = data.isin(candidates)
+        if not mask.any():
+            _vals = [str(v) for v in unique_vals[:8]]
+            return AnalysisResult(
+                task="proportion_ci",
+                status="error",
+                messages=[
+                    f"参数「成功值」={success_val!r} 未出现在列「{req.target_col}」的实际取值中："
+                    f"{_vals}。请指定一个实际存在的取值，或留空以自动识别。"
+                ],
+            )
+        successes = int(mask.sum())
     else:
         # 尝试常见标签
         for label in ["合格", "是", "pass", "ok", "yes", "true", "success", "通过", "正常", 1, "1"]:

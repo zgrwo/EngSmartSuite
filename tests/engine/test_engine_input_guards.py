@@ -971,3 +971,41 @@ def test_spc_attribute_overflow_scale_limits_rejected():
     r = orchestrate(_req("spc_attribute", df, target="y", params={"chart_type": "c"}))
     assert r.status == "error", f"控制限非有限应显式拒绝：{r.summary[:120]}"
     assert any("控制限" in m for m in r.messages), r.messages
+
+
+# ── 16. proportion_ci 的成功值必须真实存在（审查 2026-10-09 P2-6）──
+
+
+@pytest.mark.parametrize("bad", ["不存在的值", "null", "1"])
+def test_proportion_ci_nonexistent_success_value_rejected(bad):
+    """`success_value` 不在列的实际取值中时必须显式拒绝，而不是静默给出 0%。
+
+    审查 2026-10-09 P2-6：`successes = int((data == success_val).sum())` 对
+    "数据中不存在的成功值" 恒得 0 → 点估计 **0.0000**，`status=ok`、`messages` 为空。
+    合格率/不良率这类质量 KPI 会因此直出「0%」的错误结论。
+    类型也要兼容：真实成功值是数值 `1` 时，前端下拉框/文本框给出的字符串 `'1'`
+    同样应当命中（原实现严格 `==` 比较，`'1'` 不命中 → 静默 0%）。
+    """
+    from smartsuite.services.orchestrator import orchestrate
+
+    df = pd.DataFrame({"y": [1.0] * 24 + [0.0] * 76})
+    r = orchestrate(_req("proportion_ci", df, target="y", params={"success_value": bad}))
+    if bad == "1":
+        # 字符串形态的数值成功值应被正常识别（而非报"不存在"）
+        assert r.status == "ok", r.messages
+        assert r.metadata["p_hat"] == pytest.approx(0.24, abs=1e-9), r.metadata
+        return
+    assert r.status == "error", f"不存在的成功值应显式拒绝，实际 {r.status}：{r.summary}"
+    assert any("成功值" in m for m in r.messages), r.messages
+    assert "0.000" not in r.summary, f"不得输出 0% 的错误结论：{r.summary}"
+
+
+def test_proportion_ci_valid_success_value_still_works():
+    """对照：合法成功值不受影响（防修得过严）。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    df = pd.DataFrame({"y": [1.0] * 24 + [0.0] * 76})
+    for sv in (1, 1.0, "1"):
+        r = orchestrate(_req("proportion_ci", df, target="y", params={"success_value": sv}))
+        assert r.status == "ok", f"success_value={sv!r}: {r.messages}"
+        assert r.metadata["p_hat"] == pytest.approx(0.24, abs=1e-9)
