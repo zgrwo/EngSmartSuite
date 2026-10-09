@@ -7,6 +7,15 @@ name = "smartsuite"
 version = "1.5.1"
 description = "SmartSuite — 工艺数据分析工具箱 (Flask Web UI + CLI + Python API)"
 readme = "README.md"
+# 风险登记（审查 2026-10-09 P3-15）——**只登记，不改取值**（支持面声明属产品决策）：
+#   · `requires-python` **无上限**：CI full 矩阵最高只到 3.14（ci.yml matrix），
+#     而 `uv.lock` 已出现 3.15 标记行 —— 若 3.15 引入破坏性变更，本声明会放行
+#     未经 CI 验证的解释器。
+#   · `.github/dependabot.yml`（pip 生态）只改 `pyproject.toml`，**管不了 `uv.lock`**：
+#     改动依赖后必须人工 `uv lock`；ci.yml quick job 的 `uv lock --check` 是兜底门禁。
+# 建议（择一，须单独决策后执行）：
+#   ① 视需要加上限（如 `,<3.15`）；② 把「dependabot 改动后必须重新锁定」写入
+#   CONTRIBUTING.md，并保留 `uv lock --check` 门禁。
 requires-python = ">=3.10"
 license = "MIT"
 authors = [

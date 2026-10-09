@@ -70,6 +70,24 @@ MANUAL_EXPECTATIONS = {
     },
 }
 
+#: 手册数值检查的**登记总数**（分母守恒，审查 2026-10-09 P1-12）。
+#:
+#: 审查实测（I10b）：把引擎 `correlation` 强制 `status="error"`（CLI/Web 两路径同错）
+#: 后，`manual_checks_total` 只在 `status_a == "ok"` 时自增 —— 分母由 11 静默缩为 10，
+#: 输出仍是 `*** ALL PASSED ***`、exit 0（`11/11` → `10/10`），"总数缩水不可见"。
+#: 现分母取自**登记条目数常量**，不随实际跑通的任务数变化；未产出可核对结果的
+#: 登记任务直接计为失败（见下方 `status_a != "ok"` 分支）。
+MANUAL_CHECKS_TOTAL = len(MANUAL_EXPECTATIONS)
+
+#: 允许 `status != "ok"` 的任务（键 → 理由）。**默认空**：42 个任务在本数据集
+#: （`tests/data/injection_process.xlsx`，seed=42）上必须全部 `status=ok` —— 与
+#: ci.yml「全量一致性校验（42 任务 status=ok 冒烟门禁）」同一口径。
+#:
+#: 审查 2026-10-09 P1-12：此前任一任务整体 error 时 A/B 同错 → status/tables/figures
+#: 三项均无 mismatch → `*** ALL PASSED ***` + exit 0，任务失败完全不可见。
+#: 需长期允许某任务失败时，请在此具名登记**理由**（而不是把门禁调松）。
+ALLOWED_NON_OK_TASKS: dict[str, str] = {}
+
 # ── 全量方法的测试用例定义（随 TASK_REGISTRY，不硬编码总数） ──
 # (task, target_col, feature_cols, categoricals, params)
 TEST_CASES = [
@@ -183,11 +201,16 @@ assert {c[0] for c in TEST_CASES} == set(TASK_REGISTRY), (
     f"多余: {sorted({c[0] for c in TEST_CASES} - set(TASK_REGISTRY))}"
 )
 
+# 分母守恒（审查 2026-10-09 P1-12）：登记了手册期望的任务必须都在 TEST_CASES 里被跑到，
+# 否则它永远不会进入循环、永远不会被计为失败（分母虚高且失败不可见）。
+_unregistered = sorted(set(MANUAL_EXPECTATIONS) - {c[0] for c in TEST_CASES})
+assert not _unregistered, f"MANUAL_EXPECTATIONS 登记的任务不在 TEST_CASES 中: {_unregistered}"
+
 # ── 运行验证 ──
 results = []
 issues = []
 manual_checks_passed = 0
-manual_checks_total = 0
+task_not_ok = 0
 
 for task, target, features, cats, params in TEST_CASES:
     test_name = f"{task}"
@@ -263,11 +286,25 @@ for task, target, features, cats, params in TEST_CASES:
     if not figs_match:
         issues.append(f"FIGS MISMATCH: {test_name}: A={figs_a}, B={figs_b}")
 
+    # ── 任务整体状态门禁（审查 2026-10-09 P1-12）──
+    # A/B 同错时三项 mismatch 均为 0 → 旧口径静默全绿。任务 status 本身必须被断言。
+    if status_a != "ok" and task not in ALLOWED_NON_OK_TASKS:
+        task_not_ok += 1
+        issues.append(
+            f"NOT_OK: {test_name}: status={status_a}（未登记的非 ok 任务不得静默通过；"
+            f"messages={summary_a[:80]!r}）"
+        )
+
     # ── 用户手册值检查 ──
     manual_result = ""
+    if task in MANUAL_EXPECTATIONS and status_a != "ok":
+        # 分母守恒：登记了期望却没产出可核对结果 → 直接计失败（不再缩分母）
+        issues.append(
+            f"MANUAL: {task} 无法核对手册数值（status={status_a}）——"
+            "该任务已登记手册期望，按登记分母计为失败"
+        )
     if task in MANUAL_EXPECTATIONS and status_a == "ok":
         exp = MANUAL_EXPECTATIONS[task]
-        manual_checks_total += 1
 
         if task == "correlation":
             tc = meta_a.get("target_correlations", {})
@@ -401,13 +438,17 @@ status_mismatch = sum(1 for r in results if r["status_a"] != r["status_b"])
 tables_mismatch = sum(1 for r in results if not r["tables_match"])
 figs_mismatch = sum(1 for r in results if not r["figs_match"])
 
-manual_failed = manual_checks_total - manual_checks_passed
+manual_failed = MANUAL_CHECKS_TOTAL - manual_checks_passed
 print(f"  总计: {len(results)} 方法")
 print(f"  ok: {ok_count}  error: {error_count}")
+print(f"  未登记的非 ok 任务: {task_not_ok}  ← 必须为 0（见 ALLOWED_NON_OK_TASKS）")
 print(f"  status 不一致: {status_mismatch}")
 print(f"  tables 不一致: {tables_mismatch}")
 print(f"  figures 不一致: {figs_mismatch}")
-manual_msg = f"  用户手册验证: {manual_checks_passed}/{manual_checks_total} passed"
+manual_msg = (
+    f"  用户手册验证: {manual_checks_passed}/{MANUAL_CHECKS_TOTAL} passed"
+    f"（登记条目数常量，分母守恒）"
+)
 if manual_failed:
     manual_msg += f"（{manual_failed} 项失败）"
 print(manual_msg)
@@ -425,9 +466,17 @@ print("=" * 70)
 # 注：CI consistency job 以 2>&1 | tail -5 调用会掩码退出码——判定依赖 issues 输出
 # 审查 2026-09-01 G-5：收敛容差——表格/图表差异为 0 容差（此前 ≤5 表 / ≤3 图
 # 与"严格"验收声明矛盾，且当前基线实测 0 差异）
+# 审查 2026-10-09 P1-12：补 `task_not_ok`（任务整体 error 时 A/B 同错 → 三项 mismatch
+# 均为 0，旧口径会 `*** ALL PASSED ***` + exit 0）。
 exit_code = (
     1
-    if (status_mismatch > 0 or tables_mismatch > 0 or figs_mismatch > 0 or manual_failed > 0)
+    if (
+        status_mismatch > 0
+        or tables_mismatch > 0
+        or figs_mismatch > 0
+        or manual_failed > 0
+        or task_not_ok > 0
+    )
     else 0
 )
 sys.exit(exit_code)

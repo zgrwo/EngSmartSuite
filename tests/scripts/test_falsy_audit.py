@@ -2,7 +2,8 @@
 
 负向：注入 `if threshold:`（HIGH 风险数值变量）→ FAIL 且 exit=1，findings 点名；
       注入 `params.get(key) or default`（历史 M-4 同族，审查 2026-09-06 F-D2）
-      → HIGH 键名 FAIL，未知键名 MEDIUM 可见不阻断。
+      → 兜底为数值字面量即 HIGH（**与键名无关**，审查 2026-10-09 P1-11）；
+      解析失败（BOM/语法错误）→ HIGH（审查 2026-10-09 P3-10，不得静默跳过）。
 正向：干净目录 → exit=0；
 回归：真实仓库扫描范围（engine + services + web + cli）零 HIGH 守卫。
 
@@ -42,11 +43,9 @@ def demo(params):
 """
 
 
-OR_CODE_MEDIUM = """\
-def demo(params):
-    n = params.get("unknown_key") or 3
-    return n
-"""
+def _or_code(key: str, fallback: str) -> str:
+    """构造 `params.get(<key>) or <fallback>` 样本。"""
+    return f'def demo(params):\n    n = params.get("{key}") or {fallback}\n    return n\n'
 
 
 def _setup_scan_dirs(tmp_path, monkeypatch, file_code):
@@ -105,15 +104,132 @@ def test_negative_injection_or_default_exits_1(tmp_path, monkeypatch):
 
 
 def test_or_default_unknown_key_medium_not_blocking(tmp_path, monkeypatch):
-    """未知键名的 `or` 回退 → MEDIUM（可见不阻断），gate 依旧 exit=0。"""
-    sample = _setup_scan_dirs(tmp_path, monkeypatch, OR_CODE_MEDIUM)
+    """未知键名 + 数值字面量兜底 → **仍判 HIGH**（审查 2026-10-09 P1-11）。
+
+    这条替代了原先的 "未知键 → MEDIUM 放行" 断言：旧判据按参数键名白名单
+    （`HIGH_RISK_KEYS`）分级，同形换键即可绕过（实测 I7-B：把 `n_runs` 换成
+    `n_bootstrap` → EXIT=0 假绿）。键名可随意改名，不能作判据。
+    """
+    sample = _setup_scan_dirs(tmp_path, monkeypatch, _or_code("unknown_key", "3"))
     code, out = _run_main_expect_exit()
-    assert code == 0
+    assert code == 1, f"`or 3` 兜底应判 HIGH（与键名无关）: {out}"
     findings = falsy_audit.audit_file(sample)
     assert any(
-        f.get("kind") == "or_default" and f["var"] == "unknown_key" and f["risk"] == "MEDIUM"
+        f.get("kind") == "or_default" and f["var"] == "unknown_key" and f["risk"] == "HIGH"
         for f in findings
-    ), f"未知键 or 回退应记 MEDIUM: {findings}"
+    ), f"未知键 or 3 应记 HIGH: {findings}"
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["n_runs", "n_bootstrap", "contamination", "zzz_renamed_key", "max_depth", "p0"],
+)
+def test_or_default_numeric_literal_is_high_regardless_of_key(tmp_path, monkeypatch, key):
+    """**等价形态换键名必须同样 HIGH**（审查 2026-10-09 P1-11 核心用例）。
+
+    判据是兜底表达式的类型/语义来源（数值字面量 → 0 必为合法值 → HIGH），
+    与 `get("…")` 的键名完全无关 —— 键名参数化即为此而设。
+    """
+    sample = _setup_scan_dirs(tmp_path, monkeypatch, _or_code(key, "2000"))
+    code, out = _run_main_expect_exit()
+    assert code == 1, f'params.get("{key}") or 2000 必须 FAIL: {out}'
+    assert "HIGH:   1" in out
+    findings = falsy_audit.audit_file(sample)
+    assert any(
+        f.get("kind") == "or_default" and f["var"] == key and f["risk"] == "HIGH" for f in findings
+    ), f"findings 应点名 {key} 为 HIGH: {findings}"
+
+
+@pytest.mark.parametrize("fallback", ['""', "[]", "{}", "set()"])
+def test_or_default_container_fallback_downgraded(tmp_path, monkeypatch, fallback):
+    """字符串/容器字面量兜底可降级（不承载「0 是合法值」语义）→ LOW，exit=0。"""
+    sample = _setup_scan_dirs(tmp_path, monkeypatch, _or_code("encoding", fallback))
+    code, _ = _run_main_expect_exit()
+    assert code == 0, f"`or {fallback}` 应降级为 LOW"
+    findings = falsy_audit.audit_file(sample)
+    or_findings = [f for f in findings if f.get("kind") == "or_default"]
+    assert or_findings and all(f["risk"] == "LOW" for f in or_findings), or_findings
+
+
+@pytest.mark.parametrize("fallback", ["None", "2**k", "default_value", "0.05", "other.get('k')"])
+def test_or_default_non_container_fallback_is_high(tmp_path, monkeypatch, fallback):
+    """非容器/字符串兜底一律 HIGH：`None`、表达式、变量、浮点字面量、二次取值。"""
+    sample = _setup_scan_dirs(tmp_path, monkeypatch, _or_code("cfg", fallback))
+    code, out = _run_main_expect_exit()
+    assert code == 1, f"`or {fallback}` 必须判 HIGH: {out}"
+    findings = falsy_audit.audit_file(sample)
+    assert any(f.get("kind") == "or_default" and f["risk"] == "HIGH" for f in findings), findings
+
+
+@pytest.mark.parametrize("name", ["sample_count", "n_bootstrap_runs", "pooled_sigma", "p_value"])
+def test_if_numeric_semantic_name_is_high(tmp_path, monkeypatch, name):
+    """`if <name>:` 一路同理：**数值语义词元**命中即 HIGH，不依赖逐个名字枚举。"""
+    sample = _setup_scan_dirs(
+        tmp_path, monkeypatch, f"def demo({name}):\n    if {name}:\n        pass\n"
+    )
+    code, out = _run_main_expect_exit()
+    assert code == 1, f"if {name}: 应判 HIGH（数值语义）: {out}"
+    findings = falsy_audit.audit_file(sample)
+    assert any(
+        f["kind"] == "if_truthy" and f["var"] == name and f["risk"] == "HIGH" for f in findings
+    ), findings
+
+
+def test_if_boolean_prefix_wins_over_numeric_token(tmp_path, monkeypatch):
+    """布尔语义先判：`is_rate` 不得被 `rate` 词元误报为 HIGH（判据优先级守卫）。"""
+    sample = _setup_scan_dirs(
+        tmp_path, monkeypatch, "def demo(is_rate):\n    if is_rate:\n        pass\n"
+    )
+    code, _ = _run_main_expect_exit()
+    assert code == 0
+    findings = falsy_audit.audit_file(sample)
+    assert all(f["risk"] != "HIGH" for f in findings), findings
+
+
+CONTAINER_ANNOTATED_CODE = """\
+def demo() -> None:
+    skipped_sigma: list[str] = []
+    zero_sigma: set[int] = set()
+    if skipped_sigma:
+        pass
+    if zero_sigma:
+        pass
+"""
+
+NUMERIC_ANNOTATED_CODE = """\
+def demo() -> None:
+    threshold: float = 0.0
+    n_runs: int = 0
+    if threshold:
+        pass
+    if n_runs:
+        pass
+"""
+
+
+def test_container_annotation_downgrades_numeric_token(tmp_path, monkeypatch):
+    """**类型来源优先于名称启发式**：注解 `list[str]` / `set[int]` → 不判 HIGH。
+
+    实测 false positive（2026-10-09）：Batch 4 的 `skipped_sigma: list[str]`
+    （σ 不可估计的**归因文案列表**）名字含词元 `sigma`，被语义词元规则误报为 HIGH，
+    使真实仓库审计转红。注解是硬信息，故先查注解表。
+    """
+    sample = _setup_scan_dirs(tmp_path, monkeypatch, CONTAINER_ANNOTATED_CODE)
+    code, out = _run_main_expect_exit()
+    assert code == 0, f"容器注解变量不应判 HIGH: {out}"
+    findings = falsy_audit.audit_file(sample)
+    assert all(f["risk"] != "HIGH" for f in findings), findings
+    assert {f["var"] for f in findings} == {"skipped_sigma", "zero_sigma"}
+
+
+def test_numeric_annotation_still_high(tmp_path, monkeypatch):
+    """**反面守卫**：注解是数值类型（float/int）时仍必须 HIGH —— 注解不得成为免死金牌。"""
+    sample = _setup_scan_dirs(tmp_path, monkeypatch, NUMERIC_ANNOTATED_CODE)
+    code, out = _run_main_expect_exit()
+    assert code == 1, f"数值注解变量必须仍判 HIGH: {out}"
+    findings = falsy_audit.audit_file(sample)
+    highs = {f["var"] for f in findings if f["risk"] == "HIGH"}
+    assert highs == {"threshold", "n_runs"}, findings
 
 
 def test_clean_dir_exits_0(tmp_path, monkeypatch):
@@ -196,3 +312,51 @@ def test_iter_scan_files_excludes_pycache(tmp_path, monkeypatch):
     scanned = {p.name for p in falsy_audit._iter_scan_files()}
     assert "ok.py" in scanned
     assert "stale.py" not in scanned
+
+
+# ── P3-10（2026-10-09 审查）：解析失败不得静默跳过 ────────────────────────────
+
+
+def test_bom_file_is_still_audited(tmp_path, monkeypatch):
+    """带 BOM 的 .py：`utf-8` 读取会 `SyntaxError` → 旧行为**静默跳过**。
+
+    改 `utf-8-sig` 后必须正常审计：注入的 HIGH 模式仍被拦截（不得因 BOM 失明）。
+    """
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    sample = scan_dir / "bom_sample.py"
+    sample.write_bytes(b"\xef\xbb\xbf" + NESTED_CODE.encode("utf-8"))
+    monkeypatch.setattr(falsy_audit, "ROOT", tmp_path)
+    monkeypatch.setattr(falsy_audit, "SCAN_PATHS", [scan_dir])
+
+    findings = falsy_audit.audit_file(sample)
+    assert not any(f["kind"] == "parse_error" for f in findings), (
+        f"BOM 不应导致解析失败: {findings}"
+    )
+    assert any(f["risk"] == "HIGH" and f["var"] == "threshold" for f in findings), findings
+
+    code, out = _run_main_expect_exit()
+    assert code == 1, f"带 BOM 文件里的 HIGH 模式必须被拦截: {out[:400]}"
+
+
+def test_unparsable_file_is_reported_not_skipped(tmp_path, monkeypatch):
+    """语法错误的文件 → 解析失败必须**计入 findings（HIGH）**并点名，exit=1。
+
+    旧行为 `except (SyntaxError, UnicodeDecodeError): return findings` 使该文件
+    完全消失在报告里，而报告仍打印「✅ 审计通过：零 HIGH 风险」—— 未审计 ≠ 无风险。
+    """
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    sample = scan_dir / "broken.py"
+    sample.write_text("def demo(:\n    pass\n", encoding="utf-8")
+    monkeypatch.setattr(falsy_audit, "ROOT", tmp_path)
+    monkeypatch.setattr(falsy_audit, "SCAN_PATHS", [scan_dir])
+
+    findings = falsy_audit.audit_file(sample)
+    assert len(findings) == 1 and findings[0]["kind"] == "parse_error"
+    assert findings[0]["risk"] == "HIGH", "解析失败必须是 HIGH（否则门禁仍放行）"
+
+    code, out = _run_main_expect_exit()
+    assert code == 1, f"存在未审计文件时门禁必须 FAIL: {out[:400]}"
+    assert "broken.py" in out, f"输出应点名无法解析的文件: {out[:400]}"
+    assert "无法解析" in out

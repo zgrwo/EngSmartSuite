@@ -348,14 +348,42 @@ jobs:
         # vulture 不在 extras 中，用 uv run --with 临时叠加（不写入锁文件）
         # 仅采信 vulture 输出格式行（path:line:），隔离 uv 安装噪声
         # （2026-09-19 CI 实测：uv 进度输出混入 filtered → 假死代码）
+        #
+        # 审查 2026-10-09 P3-9：原实现 `output=$(...) || true` **丢掉了退出码**，
+        # 只看输出行 —— uv 装不上/网络失败、vulture 路径不存在（rc=1）、参数错
+        # （rc=2）时输出里没有 `path:line:` 格式行，filtered 为空 → 打印
+        # 「无死代码」并 exit 0，**工具崩溃被当成"合格"**。
+        # 现按退出码判读（本机 vulture 2.16 实测：0=无发现 / 1=输入非法 /
+        # 2=参数错 / 3=发现死代码）：非 0 且无法解释为已知误报即 FAIL；
+        # `uv run --quiet` 关掉 uv 自身的进度输出，使任何残留输出都可疑。
         run: |
-          output=$(uv run --with vulture vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" 2>&1) || true
-          filtered=$(printf '%s\n' "$output" | grep -E '^[^ :]+:[0-9]+:' | grep -v "unused variable 'cls'" || true)
-          if [ -n "$filtered" ]; then
-            echo "$filtered"
+          set +e
+          output=$(uv run --quiet --with vulture vulture src/smartsuite/ --min-confidence=90 --exclude="*/tests/*,*/__pycache__/*" 2>&1)
+          rc=$?
+          set -e
+          findings=$(printf '%s\n' "$output" | grep -E '^[^ :]+:[0-9]+:' || true)
+          real=$(printf '%s\n' "$findings" | grep -v "unused variable 'cls'" || true)
+          if [ -n "$real" ]; then
+            echo "❌ 发现死代码（vulture rc=$rc）："
+            printf '%s\n' "$real"
             exit 1
           fi
-          echo "Vulture: 无死代码（已过滤 Pydantic cls 误报）"
+          if [ "$rc" -eq 0 ]; then
+            echo "Vulture: 无死代码 ✅"
+          elif [ "$rc" -eq 3 ]; then
+            # rc=3 表示"有发现"，此时必须能解析出发现行 —— 否则是判读失败（例如
+            # 输出格式变化），**不得**默认成"只剩已知误报"
+            if [ -z "$findings" ]; then
+              echo "❌ vulture 报有发现（rc=3）但输出无可解析的发现行——判读失败，不得视为通过："
+              printf '%s\n' "$output"
+              exit 1
+            fi
+            echo "Vulture: 仅 Pydantic classmethod validator 的 cls 误报（rc=3，已过滤）"
+          else
+            echo "❌ vulture/uv 异常退出（rc=$rc）——工具失败不得当作「无死代码」："
+            printf '%s\n' "$output"
+            exit 1
+          fi
 
       - name: 依赖安全审计
         run: uv run --with pip-audit pip-audit

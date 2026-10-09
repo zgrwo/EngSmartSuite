@@ -28,6 +28,14 @@ permissions:
   contents: write
   pull-requests: write
 
+# 审查 2026-10-09 P2-13：原先无 concurrency —— 连续两次 main push 可并发跑
+# release-please（重复/竞态 release PR）。与 ci.yml/docs.yml/benchmarks.yml 对齐。
+# `cancel-in-progress: false`：发版过程**不得**被后续 push 打断（中断可能留下
+# 已建 tag 却无产物的半成品，正是 v1.2.5/v1.2.6 空发事故的形态）。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-please:
     # tag 推送也触发本 workflow，release-please 只在 main 分支运行
@@ -58,6 +66,36 @@ jobs:
         with:
           python-version: "3.11"
 
+      # 审查 2026-10-09 P2-13：版本链断言原先只在手工路径（build-artifacts）；
+      # 自动路径仅靠 release-please extra-files 的**结构性**保证。现两条路径
+      # 跑同一段断言（tag == pyproject == manifest），失败即中止，不产出错版产物。
+      - name: 校验 tag 与版本链一致（tag == pyproject == manifest）
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import tomllib
+
+          tag = os.environ["TAG_NAME"].lstrip("v")
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          manifest = json.load(open(".release-please-manifest.json", encoding="utf-8"))
+          root_version = manifest.get(".") or next(iter(manifest.values()))
+          print(f"自动路径版本链: tag={tag} pyproject={version} manifest={root_version}")
+          problems = []
+          if tag != version:
+              problems.append(f"tag {tag} != pyproject {version}")
+          if version != root_version:
+              problems.append(f"pyproject {version} != manifest {root_version}")
+          if problems:
+              print("[FAIL] 版本链不一致：" + "；".join(problems), file=sys.stderr)
+              sys.exit(1)
+          print("OK: tag == pyproject == manifest")
+          PY
+
       - name: 构建 wheel 与 sdist
         if: steps.release.outputs.release_created == 'true'
         run: |
@@ -76,6 +114,10 @@ jobs:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 审查 2026-10-09 P2-13：job 级最小权限收敛 —— 本 job 只需写 Release 资产，
+    # 不需要仓库顶层授予的 pull-requests: write（发版 PR 由 release-please job 处理）
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -85,8 +127,31 @@ jobs:
 
       # 审查 2026-09-06 F-D7：手工发布的 Release 绕过 release-please 版本推导，
       # 可能使 tag 偏离版本链四向量（pyproject==CHANGELOG==manifest==tag）——构建前显式校验
-      - name: 校验 tag 与 pyproject 版本一致
-        run: python -c "import os, tomllib; tag = os.environ['GITHUB_REF_NAME'].lstrip('v'); ver = tomllib.load(open('pyproject.toml','rb'))['project']['version']; print(f'tag={tag} pyproject={ver}'); assert tag == ver, f'release tag {tag} != pyproject version {ver}'"
+      - name: 校验 tag 与版本链一致（tag == pyproject == manifest）
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import tomllib
+
+          tag = os.environ["TAG_NAME"].lstrip("v")
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          manifest = json.load(open(".release-please-manifest.json", encoding="utf-8"))
+          root_version = manifest.get(".") or next(iter(manifest.values()))
+          print(f"手工路径版本链: tag={tag} pyproject={version} manifest={root_version}")
+          problems = []
+          if tag != version:
+              problems.append(f"tag {tag} != pyproject {version}")
+          if version != root_version:
+              problems.append(f"pyproject {version} != manifest {root_version}")
+          if problems:
+              print("[FAIL] 版本链不一致：" + "；".join(problems), file=sys.stderr)
+              sys.exit(1)
+          print("OK: tag == pyproject == manifest")
+          PY
 
       - name: 构建 wheel 与 sdist
         run: |

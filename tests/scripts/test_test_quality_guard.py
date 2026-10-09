@@ -22,6 +22,25 @@ def _write(root: Path, rel: str, content: str) -> Path:
     return p
 
 
+def _weak_problems(tests_dir: Path) -> list[str]:
+    """弱断言族两条检查的合并输出（陈旧豁免判据的入参）。"""
+    return guard.check_weak_asserts(tests_dir) + guard.check_status_only_asserts(tests_dir)
+
+
+def _set_registry(monkeypatch, mapping: dict[str, set[str]]) -> None:
+    """整体替换具名豁免表（含派生索引）。
+
+    必须**整体替换**而非 `setitem`：`check_stale_exemptions` 对**整张表**判定
+    "是否仍命中"，在 tmp 测试目录上残留仓库真实登记会让它们全被判为陈旧。
+    """
+    monkeypatch.setattr(guard, "WEAK_ASSERT_EXEMPT", mapping)
+    monkeypatch.setattr(
+        guard,
+        "_WEAK_EXEMPT_KEYS",
+        {(f, n) for f, names in mapping.items() for n in names},
+    )
+
+
 # ── 弱断言检测 ───────────────────────────────────────────────
 
 
@@ -351,26 +370,30 @@ def test_actual_call_via_attribute_detected(tmp_path):
 # ── WARN 计数上限（审查 #P1-7）───────────────────────────────
 
 
-def test_max_warn_exceeded_fails(tmp_path, capsys):
+def test_max_warn_exceeded_fails(tmp_path, capsys, monkeypatch):
     root = tmp_path / "repo"
     _write(
         root,
         "tests/engine/test_demo.py",
         "def test_ok_only():\n    r = compute()\n    assert r.status == 'ok'\n",
     )
+    # 本用例只验 WARN 上限逻辑：清空具名豁免表，避免仓库真实登记在 tmp 目录上
+    # 全被判为「陈旧豁免」而干扰 rc 判定
+    _set_registry(monkeypatch, {})
     rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests"), "--max-warn", "0"])
     out = capsys.readouterr().out
     assert rc == 1, f"WARN 超上限应 FAIL: {out[-200:]}"
     assert "超过上限" in out
 
 
-def test_max_warn_within_limit_passes(tmp_path, capsys):
+def test_max_warn_within_limit_passes(tmp_path, capsys, monkeypatch):
     root = tmp_path / "repo"
     _write(
         root,
         "tests/engine/test_demo.py",
         "def test_ok_only():\n    r = compute()\n    assert r.status == 'ok'\n",
     )
+    _set_registry(monkeypatch, {})
     rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests"), "--max-warn", "1"])
     assert rc == 0
 
@@ -512,3 +535,102 @@ def test_status_only_bare_still_flagged(tmp_path):
     """对照：无助手调用的纯状态断言仍须报。"""
     problems = _run_status_check(tmp_path, STATUS_ONLY_NO_HELPER)
     assert any("test_invariant" in p for p in problems), problems
+
+
+# ── 陈旧豁免（审查 2026-10-09 P3-4，FAIL）────────────────────
+
+
+def test_stale_exemption_is_flagged(tmp_path, monkeypatch):
+    """登记了豁免、但该测试**已不再产生弱断言** → FAIL 点名（不是静默留存）。
+
+    实测（2026-10-09）：64 条登记里有 2 条属此类（`tests/core/test_param_spec.py`
+    的两条，因 P1-1 补了 `== "字面量"` 强断言识别而失效）。
+    """
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(
+        root,
+        "tests/engine/test_demo.py",
+        "def test_strengthened():\n    r = compute()\n    assert r.value == 42\n",
+    )
+    _set_registry(monkeypatch, {"tests/engine/test_demo.py": {"test_strengthened"}})
+    monkeypatch.setattr(guard, "ROOT", root)
+    problems = guard.check_stale_exemptions(_weak_problems(tests))
+    assert any("陈旧豁免" in p and "test_strengthened" in p for p in problems), problems
+
+
+def test_live_exemption_is_not_flagged(tmp_path, monkeypatch):
+    """**反面守卫**：仍在命中的豁免不得被误报为陈旧（否则豁免表会被迫清空）。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(
+        root,
+        "tests/engine/test_demo.py",
+        "def test_accepts_value():\n    r = compute()\n    assert r.status == 'ok'\n",
+    )
+    _set_registry(monkeypatch, {"tests/engine/test_demo.py": {"test_accepts_value"}})
+    monkeypatch.setattr(guard, "ROOT", root)
+    assert guard.check_stale_exemptions(_weak_problems(tests)) == []
+
+
+def test_all_exemptions_still_bite_on_disk():
+    """真实仓库：全部具名豁免必须**仍在命中**（陈旧豁免即 FAIL）。"""
+    tests = ROOT / "tests"
+    problems = guard.check_stale_exemptions(_weak_problems(tests))
+    assert problems == [], f"存在陈旧豁免（测试已加强/改名，条目须删除）: {problems}"
+
+
+def test_stale_exemption_fails_main(tmp_path, monkeypatch, capsys):
+    """陈旧豁免必须使 `main()` 返回 1（FAIL 而非 WARN，不得只提示）。"""
+    root = tmp_path / "repo"
+    _write(
+        root,
+        "tests/engine/test_demo.py",
+        "def test_strengthened():\n    r = compute()\n    assert r.value == 42\n",
+    )
+    _set_registry(monkeypatch, {"tests/engine/test_demo.py": {"test_strengthened"}})
+    monkeypatch.setattr(guard, "ROOT", root)
+    rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests")])
+    out = capsys.readouterr().out
+    assert rc == 1, f"陈旧豁免应 FAIL: {out[-300:]}"
+    assert "陈旧豁免" in out
+
+
+# ── 解析失败不静默（审查 2026-10-09 P3-10，FAIL）─────────────
+
+
+def test_unparsable_test_file_flagged(tmp_path):
+    """语法错误的测试文件 → FAIL 点名（旧行为静默跳过，文件完全不参与检查）。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    _write(root, "tests/engine/test_broken.py", "def test_x(:\n    pass\n")
+    problems = guard.check_parse_failures(tests)
+    assert len(problems) == 1 and problems[0].startswith("[FAIL]")
+    assert "test_broken.py" in problems[0] and "无法解析" in problems[0]
+
+
+def test_bom_test_file_is_parsed(tmp_path):
+    """带 BOM 的测试文件不得被误报为解析失败（读取用 utf-8-sig）。"""
+    root = tmp_path / "repo"
+    tests = root / "tests"
+    p = tests / "engine" / "test_bom.py"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"\xef\xbb\xbf" + b"def test_ok():\n    assert 1 == 1\n")
+    assert guard.check_parse_failures(tests) == []
+    # 且该文件里的测试必须真的被解析出来（不是"没报错但也没扫到"）
+    assert [n for n, _ in guard._extract_test_methods(p)] == ["test_ok"]
+
+
+def test_parse_failure_fails_main(tmp_path, capsys):
+    """解析失败必须使 `main()` 返回 1。"""
+    root = tmp_path / "repo"
+    _write(root, "tests/engine/test_broken.py", "def test_x(:\n    pass\n")
+    rc = guard.main(["--src", str(root / "src"), "--tests", str(root / "tests")])
+    out = capsys.readouterr().out
+    assert rc == 1, f"解析失败应 FAIL: {out[-300:]}"
+    assert "无法解析" in out
+
+
+def test_real_repo_tests_all_parse():
+    """真实仓库：tests/ 下不得有无法解析的 .py（BOM/语法/编码）。"""
+    assert guard.check_parse_failures(ROOT / "tests") == []

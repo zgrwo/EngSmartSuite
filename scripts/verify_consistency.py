@@ -63,6 +63,42 @@ def section(title):
     checks.append(f"\n{'=' * 60}\n  {title}\n{'=' * 60}")
 
 
+# ── 结果表/metadata 取值守卫（审查 2026-10-09 P3-13）────────────────────────
+# 注入实测：把引擎 correlation 打成失败后，本脚本在第 3 节直接以未捕获
+# `KeyError: 'correlation_matrix'` + Python traceback 结束。虽非假绿，但违背项目红线
+# 「错误信息使用中文工艺术语、不暴露 traceback」（治理脚本同样适用）。
+# 现要求：取值前先断言存在性，缺失即 `check(..., False, "缺少 xxx 表")` 点名。
+
+
+def _need_tables(pairs, label):
+    """取 `(result, 表名, 任务名)` 列表中的表；任一缺失 → 登记 FAIL 并返回 None。
+
+    缺失时**不抛异常**：登记一条 FAIL（含任务名、表名、status 与首条消息）后返回 None，
+    调用方据此跳过该条数值断言（断言条数仍为 1，不虚增分母）。
+    """
+    missing = []
+    for res, name, task in pairs:
+        if res.tables.get(name) is None:
+            first_msg = res.messages[0] if res.messages else "无消息"
+            missing.append(f"{task}.tables['{name}']（status={res.status}：{first_msg[:60]}）")
+    if missing:
+        check(label, False, "缺少结果表: " + "、".join(missing))
+        return None
+    return [res.tables[name] for res, name, _task in pairs]
+
+
+def _need_meta(pairs, label):
+    """取 `(result, 键, 任务名)` 列表中的 metadata 值；任一缺失 → 登记 FAIL 并返回 None。"""
+    missing = []
+    for res, key, task in pairs:
+        if key not in res.metadata:
+            missing.append(f"{task}.metadata['{key}']（status={res.status}）")
+    if missing:
+        check(label, False, "缺少 metadata 字段: " + "、".join(missing))
+        return None
+    return [res.metadata[key] for res, key, _task in pairs]
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ============================================================
@@ -345,18 +381,41 @@ r1 = orchestrate(
 r2 = orchestrate(
     AnalysisRequest(task="correlation", data=d2, target_col="y", feature_cols=["x1", "x2"])
 )
-check(
+_corr_pair = _need_tables(
+    [(r1, "correlation_matrix", "correlation"), (r2, "correlation_matrix", "correlation")],
     "Same input -> same correlation matrix",
-    np.allclose(r1.tables["correlation_matrix"].values, r2.tables["correlation_matrix"].values),
 )
+if _corr_pair is not None:
+    check(
+        "Same input -> same correlation matrix",
+        np.allclose(_corr_pair[0].values, _corr_pair[1].values),
+    )
 check("Same input -> same summary", r1.summary == r2.summary)
-r1r2 = orchestrate(
-    AnalysisRequest(task="regression", data=d1, target_col="y", feature_cols=["x1", "x2"])
-).metadata["r_squared"]
-r2r2 = orchestrate(
-    AnalysisRequest(task="regression", data=d2, target_col="y", feature_cols=["x1", "x2"])
-).metadata["r_squared"]
-check("Same input -> same R2", abs(r1r2 - r2r2) < 1e-10)
+_r2_pair = _need_meta(
+    [
+        (
+            orchestrate(
+                AnalysisRequest(
+                    task="regression", data=d1, target_col="y", feature_cols=["x1", "x2"]
+                )
+            ),
+            "r_squared",
+            "regression",
+        ),
+        (
+            orchestrate(
+                AnalysisRequest(
+                    task="regression", data=d2, target_col="y", feature_cols=["x1", "x2"]
+                )
+            ),
+            "r_squared",
+            "regression",
+        ),
+    ],
+    "Same input -> same R2",
+)
+if _r2_pair is not None:
+    check("Same input -> same R2", abs(_r2_pair[0] - _r2_pair[1]) < 1e-10)
 
 # ============================================================
 section("4. Error Handling & Edge Cases")
@@ -482,8 +541,21 @@ r = orchestrate(
         task="correlation", data=pd.DataFrame({"x": x, "y": y}), target_col="y", feature_cols=["x"]
     )
 )
-val = r.tables["correlation_matrix"].loc["y", "x"]
-check(f"Known strong correlation r~0.9: detected r={val:.3f} > 0.8", abs(val) > 0.8)
+_known = _need_tables(
+    [(r, "correlation_matrix", "correlation")],
+    "Known strong correlation r~0.9: correlation_matrix 可用",
+)
+if _known is not None:
+    try:
+        val = float(_known[0].loc["y", "x"])
+    except (KeyError, TypeError, ValueError) as exc:
+        check(
+            "Known strong correlation r~0.9",
+            False,
+            f"correlation_matrix 取不到 ['y','x'] 交叉项（{type(exc).__name__}: {exc}）",
+        )
+    else:
+        check(f"Known strong correlation r~0.9: detected r={val:.3f} > 0.8", abs(val) > 0.8)
 
 g1 = pd.DataFrame({"g": "A", "v": np.random.normal(100, 5, 30)})
 g2 = pd.DataFrame({"g": "B", "v": np.random.normal(115, 5, 30)})
@@ -496,11 +568,16 @@ r = orchestrate(
         params={"group_col": "g"},
     )
 )
-check(
+_p_val = _need_meta(
+    [(r, "p_value", "hypothesis_test")],
     "Known significant difference: detected p<0.01",
-    r.metadata["p_value"] < 0.01,
-    f"p={r.metadata['p_value']:.6f}",
 )
+if _p_val is not None:
+    check(
+        "Known significant difference: detected p<0.01",
+        _p_val[0] < 0.01,
+        f"p={_p_val[0]:.6f}",
+    )
 
 # ============================================================
 section("8. Test Suite (pytest)")

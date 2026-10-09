@@ -125,25 +125,22 @@ EXEMPT_FUNCS = {
 #
 # 计数口径：`--max-warn N` 比对的是**豁免后**的剩余条数；
 # 原始条数（含豁免）始终打印在摘要里，避免「豁免」变成「看不见」。
+#
+# ⚠️ 基线现状（2026-10-09 Batch 6 实测，`python scripts/test_quality_guard.py`）：
+# 豁免后 WARN **14 条**，而 `.github/workflows/quality.yml` 传的上限仍是 **12**
+# → quality gate 处于**必红**状态。审查报告 P3-4 写的「12 == 上限 12，零余量」是
+# 批次 1–5 合入**之前**的快照；批次新增的负向注入测试（多为"退化输入不得抛异常"
+# 类，断言天然偏弱）把 WARN 一路推高（同日复测已达 21，且仍在增长）。
+# 上限字面量在 quality.yml（不属本脚本），需在那里按新实测口径上调或消减 WARN。
+#
+# 本脚本另设一条**不依赖数字**的防腐线：`check_stale_exemptions` ——
+# 具名豁免若已不再命中任何弱断言即 FAIL（测试被加强后条目必须删除，
+# 否则清单会积累无效条目，掩盖"这条到底还需不需要豁免"）。
 WEAK_ASSERT_EXEMPT: dict[str, set[str]] = {
-    "tests/core/test_param_spec.py": {
-        # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
-        #
-        # 为什么不补效果断言（2026-10-09 实测）：这类测试的数据是 N(0,1)，
-        # 其中**没有能让参数产生差异的东西** ——
-        #   · 无离群值 → `grubbs`/`zscore`/`iqr` 都返回 0 个异常；
-        #   · 单因子设计 → `interactions` 本就无作用（数学正确）；
-        #   · 平衡设计 → `ss_type` II/III 的 F 值相同（教科书结论）；
-        #   · `n_points` 不影响最优解（实测 5 与 25 同解）。
-        # 故「改参数看结果是否不同」不可能成立。
-        # 能加的都加了：参数回报（`metadata['method']`）、上界语义
-        # （`anomaly_count <= max_outliers`）、p/F 一致关系、结果可核对。
-        #
-        # 这是**经审定的豁免**，不是忽略 —— 清单具名到测试函数，
-        # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
-        "test_finite_rejects_non_finite",
-        "test_finite_reports_not_numeric_with_distinct_code",
-    },
+    # 2026-10-09 P3-4：原先此处登记过 `tests/core/test_param_spec.py` 的两条
+    # （`test_finite_rejects_non_finite` / `test_finite_reports_not_numeric_with_distinct_code`），
+    # 守卫补上 `== "字面量"` 强断言识别（P1-1）后它们已被判为强断言、豁免不再命中 ——
+    # 条目**已删除**（陈旧豁免由 `check_stale_exemptions` 拦下，不再静默留存）。
     "tests/core/test_param_specs_common.py": {
         # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
         #
@@ -403,6 +400,68 @@ WEAK_ASSERT_EXEMPT: dict[str, set[str]] = {
 #: 扁平化索引，供逐条扣减用。
 _WEAK_EXEMPT_KEYS = {(f, n) for f, names in WEAK_ASSERT_EXEMPT.items() for n in names}
 
+#: 从 problems 文本反解「被标记为弱断言」的 (文件, 测试) —— 判定陈旧豁免用。
+#: 只认弱断言族的三类文案（弱断言/恒真断言/守卫架空），不误吞命名/布局类 FAIL。
+_WEAK_FLAG_RE = re.compile(r"^\[(?:WARN|EXEMPT)\] (?P<file>.+?):(?P<name>\w+) ")
+_WEAK_FLAG_KINDS = ("弱断言", "恒真断言", "守卫架空")
+
+
+def _flagged_weak_keys(problems: list[str]) -> set[tuple[str, str]]:
+    """从弱断言检查的输出中解析出实际命中的 (文件, 测试) 对（POSIX 分隔符）。"""
+    keys: set[tuple[str, str]] = set()
+    for p in problems:
+        if not any(kind in p for kind in _WEAK_FLAG_KINDS):
+            continue
+        m = _WEAK_FLAG_RE.match(p)
+        if m:
+            keys.add((m.group("file").replace("\\", "/"), m.group("name")))
+    return keys
+
+
+def check_stale_exemptions(weak_problems: list[str]) -> list[str]:
+    """**陈旧豁免**检查（审查 2026-10-09 P3-4，FAIL）。
+
+    `WEAK_ASSERT_EXEMPT` 是「经审定的例外」，不是永久免死金牌：测试被加强（例如
+    补了 `== "字面量"` 强断言识别）后条目已不再命中任何弱断言，却仍留在清单里 ——
+    清单会积累无效条目，掩盖"这条到底还需不需要豁免"，也使下一次评审无法判断
+    豁免表的真实规模。
+
+    实测（2026-10-09）：64 条登记里有 **2 条**属此类
+    （`tests/core/test_param_spec.py` 的两条，因 P1-1 修复而失效）。
+
+    入参是 `check_weak_asserts` + `check_status_only_asserts` 的输出 —— 直接复用
+    它们**实际**判定的结果，避免在此重复一套判据（两套判据必然漂移）。
+    """
+    live = _flagged_weak_keys(weak_problems)
+    stale = sorted(key for key in _WEAK_EXEMPT_KEYS if key not in live)
+    return [
+        f"[FAIL] {rel}:{name} 具名豁免已**不再命中**任何弱断言（陈旧豁免）——"
+        "该测试已被加强或已改名/删除，请从 WEAK_ASSERT_EXEMPT 移除该条目"
+        for rel, name in stale
+    ]
+
+
+def check_parse_failures(tests_dir: Path) -> list[str]:
+    """测试文件解析失败 → FAIL（审查 2026-10-09 P3-10：不得静默跳过）。
+
+    旧实现（`_extract_test_methods` 等处的 `except (OSError, SyntaxError): return []`）
+    让带 BOM / 语法错误的文件**完全不参与任何检查**（不进弱断言、命名、缺测分母），
+    而门禁仍打印 `[OK] 测试质量守卫通过`。读取统一改 `utf-8-sig` 后仍失败者，
+    必须在此点名。
+    """
+    problems: list[str] = []
+    if not tests_dir.is_dir():
+        return problems
+    for p in sorted(tests_dir.rglob("*.py")):
+        try:
+            ast.parse(p.read_text(encoding="utf-8-sig"))
+        except (OSError, SyntaxError, UnicodeDecodeError) as e:
+            problems.append(
+                f"[FAIL] {_rel(p)} 无法解析（{type(e).__name__}: {e}）——"
+                "该文件不参与任何检查（弱断言/命名/缺测全空过），门禁不得静默跳过"
+            )
+    return problems
+
 
 def is_weak_exempt(rel: str, name: str) -> bool:
     """该 (文件, 测试) 是否在具名豁免清单内。"""
@@ -420,7 +479,7 @@ def _rel(path: Path) -> str:
 def _extract_test_methods(path: Path) -> list[tuple[str, str]]:
     """解析 Python 测试文件，返回 [(方法名, 方法源码)]。"""
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8-sig")
         tree = ast.parse(text)
     except (OSError, SyntaxError):
         return []
@@ -521,7 +580,7 @@ def _asserting_helpers(path: Path) -> set[str]:
     断言行，就会把这类用例误报为「仅状态/弱断言」（实测 7 处同类 WARN）。
     """
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
     except (OSError, SyntaxError):
         return set()
     names: set[str] = set()
@@ -743,7 +802,7 @@ def _collect_tested_names(tests_dir: Path) -> set[str]:
     tested: set[str] = set()
     for p in tests_dir.rglob("test_*.py"):
         try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+            tree = ast.parse(p.read_text(encoding="utf-8-sig", errors="replace"))
         except (OSError, SyntaxError):
             continue
         imported = _src_imported_names(tree)
@@ -779,7 +838,7 @@ def _collect_tested_method_names(tests_dir: Path) -> set[str]:
     tested: set[str] = set()
     for p in tests_dir.rglob("test_*.py"):
         try:
-            tree = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+            tree = ast.parse(p.read_text(encoding="utf-8-sig", errors="replace"))
         except (OSError, SyntaxError):
             continue
         for node in ast.walk(tree):
@@ -803,7 +862,7 @@ def check_missing_tests(src_dir: Path, tests_dir: Path) -> list[str]:
         if p.name.startswith("__") and p.name != "__init__.py":
             continue
         try:
-            tree = ast.parse(p.read_text(encoding="utf-8"))
+            tree = ast.parse(p.read_text(encoding="utf-8-sig"))
         except (OSError, SyntaxError):
             continue
         for node, is_method in _iter_public_funcs(tree):
@@ -817,7 +876,7 @@ def check_missing_tests(src_dir: Path, tests_dir: Path) -> list[str]:
 def _has_local_defs(path: Path) -> bool:
     """__init__.py 是否含直接定义的函数/类（区别于纯 re-export）。"""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
     except (OSError, SyntaxError):
         return False
     return any(
@@ -842,10 +901,15 @@ def main(argv: list[str] | None = None) -> int:
     tests_dir = ROOT / args.tests
 
     problems: list[str] = []
-    problems += check_weak_asserts(tests_dir)
-    problems += check_status_only_asserts(tests_dir)
+    # 弱断言族（两条）先行 —— 陈旧豁免判据直接复用它们的**实际**判定结果
+    weak_problems: list[str] = []
+    weak_problems += check_weak_asserts(tests_dir)
+    weak_problems += check_status_only_asserts(tests_dir)
+    problems += weak_problems
+    problems += check_stale_exemptions(weak_problems)
     problems += check_naming(tests_dir)
     problems += check_test_layout(tests_dir)
+    problems += check_parse_failures(tests_dir)
     problems += check_missing_tests(src_dir, tests_dir)
 
     if not problems:

@@ -5,7 +5,7 @@
 
 输出：
     - `if x:` 模式（x 为纯变量名）与 `params.get("k") or 默认` BoolOp 模式
-    - 风险分级：HIGH（数值变量/数值参数键）/ MEDIUM（可能为 0 的变量、未知键 or 回退）/ LOW（布尔/列表）
+    - 风险分级：HIGH（`or` 兜底为数值/表达式；`if` 的名为数值语义）/ MEDIUM / LOW（布尔、容器、字符串兜底）
     - 修复建议
 
 验收标准：零 HIGH 风险警告
@@ -14,6 +14,16 @@
 （历史 M-4：doe_opt `n_runs=0` 被 `or 2**k` 静默替换）与 services/web/cli 全在盲区
 （审查注入实证：注入 `req.params.get("contamination") or 1` → 审计 PASS）。
 现补 BoolOp 扫描 + 范围扩展至 services/web/cli。
+
+审查 2026-10-09 P1-11：分级原先按 **硬编码参数键名白名单**（`HIGH_RISK_KEYS`）——
+同形注入只把键名由 `n_runs` 换成 `n_bootstrap`（`params.get("n_bootstrap") or 2000`），
+风险即由 HIGH 降为 MEDIUM、门禁 exit 0 放行。键名是**可随意改名**的表层信息，
+不能作判据；现改按**兜底表达式的类型/语义来源**判定（见 `_classify_or_fallback`），
+`if <name>:` 一路同理（见 `_numeric_tokens`：按语义词元而非逐个键名白名单）。
+
+审查 2026-10-09 P3-10：读文件用 `utf-8` 时，带 BOM 的 .py 会 `SyntaxError` 而被
+`except … : return findings` **静默跳过**（不计入任何分母，报告仍称"零 HIGH 风险"）。
+现改 `utf-8-sig` 读取，且解析失败**计入 findings（HIGH）**——未审计 ≠ 无风险。
 """
 
 import ast
@@ -66,90 +76,243 @@ SAFE_PATTERNS = {
     "norm_warn",
 }
 
-# 高风险变量名（数值型，0 是有效值）
-HIGH_RISK_NAMES = {
+# 数值语义词元：变量名按 `_` 切分后，任一整词命中即认为「0 是合法取值」→ HIGH。
+#
+# 审查 2026-10-09 P1-11：判据必须是**语义来源**，不能是逐个键名白名单 ——
+# 旧的 `HIGH_RISK_KEYS` / `HIGH_RISK_NAMES` 是精确名集合，同形换名即逃逸。
+# 词元表覆盖了旧集合的全部语义（threshold/alpha/usl/n_runs/contamination/
+# sigma_multiplier/power/level/confidence/lam/max_iter/decimals/quantile/ratio/
+# prob/depth/popmean/p0/p1… → value/val/threshold/…/level/confidence/iter/…），
+# 且对新名字同样生效（如 `sample_count` / `n_bootstrap` 的 `count` 词元）。
+#
+# 整词匹配（非子串）是刻意的：`means` 不命中 `mean`、`values` 不命中 `value`、
+# `zero_width` 不命中 `width`（后者未收录）—— 避免把集合/说明性变量误报为数值。
+#
+# 歧义词元（`var` 可能是变量/variance、`effect` 可能是 effect_size/说明文字）**不入表**：
+# 实测 `skipped_zero_var`（零方差特征名列表）与 `effect_ci_note`（说明文字）会因此被
+# 误报为 HIGH。这类歧义名保留旧的精确名口径收益有限，且 false positive 会让人关掉门禁。
+_NUMERIC_TOKENS = {
+    "count",
+    "counts",
+    "occurrences",
     "threshold",
     "value",
-    "count",
-    "effect_size",
-    "statistic",
-    "sigma",
+    "val",
     "mean",
+    "median",
     "std",
-    "var",
+    "stdev",
+    "variance",
+    "sigma",
+    "se",
+    "sem",
+    "statistic",
+    "stat",
     "cp",
     "cpk",
+    "ppk",
     "ppm",
     "tolerance",
     "offset",
     "shift",
-    "weibull_shape",
-    "weibull_scale",
-}
-
-# 高风险 params 键名（0 是有效值——历史 M-4：doe_opt n_runs=0 被 `or 2**k` 静默替换）
-HIGH_RISK_KEYS = {
-    "threshold",
-    "alpha",
-    "usl",
-    "lsl",
-    "target",
-    "n_runs",
-    "contamination",
-    "sigma_multiplier",
+    "scale",
+    "shape",
+    "rate",
+    "ratio",
     "power",
+    "alpha",
+    "beta",
     "level",
     "confidence",
-    "ci_level",
-    "lam",
-    "max_iter",
-    "iterations",
-    "min_samples",
-    "decimals",
-    "epsilon",
-    "quantile",
-    "ratio",
-    "rate",
     "prob",
+    "pvalue",
+    "quantile",
+    "epsilon",
+    "eps",
+    "lambda",
+    "lam",
+    "iter",
+    "iters",
+    "iterations",
     "depth",
-    "max_depth",
-    "max_outliers",
+    "runs",
+    "samples",
+    "sample",
+    "replicates",
+    "reps",
+    "seed",
+    "multiplier",
+    "mult",
+    "contamination",
+    "size",
+    "length",
+    "gap",
+    "span",
+    "step",
+    "steps",
+    "lag",
+    "horizon",
+    "weight",
+    "score",
+    "freq",
+    "sum",
+    "min",
+    "max",
+    "avg",
+    "decimals",
     "popmean",
     "popmedian",
     "p0",
     "p1",
-    "sigma_mult",
 }
 
 
-def classify_risk(var_name: str) -> str:
-    """根据变量名推断风险等级。"""
+def _numeric_tokens(name: str) -> bool:
+    """变量名是否含**数值语义词元**（整词匹配，0 是合法取值 → HIGH）。
+
+    审查 2026-10-09 P1-11：`if <name>:` 一路与 `or` 兜底同理 —— 判据按语义，
+    不按逐个名字枚举（枚举表可被"同形换名"绕过）。
+    """
+    return bool(set(name.lower().split("_")) & _NUMERIC_TOKENS)
+
+
+#: 容器/文本注解前缀：`if x:` 判「非空」是正确用法，不该报 HIGH。
+#: 这是 `if <name>:` 判据的**类型来源** —— 语义词元只是名称启发式，注解是硬信息。
+_CONTAINER_ANNOTATIONS = (
+    "list",
+    "dict",
+    "set",
+    "tuple",
+    "frozenset",
+    "str",
+    "Sequence",
+    "Mapping",
+    "Iterable",
+    "DataFrame",
+    "Series",
+)
+
+
+def _annotation_types(tree: ast.AST) -> dict[str, str]:
+    """收集带类型注解的变量 → 注解源码（`skipped_sigma: list[str]` → `"list[str]"`）。
+
+    实测 false positive（2026-10-09，Batch 4 的 `skipped_sigma: list[str]`）：
+    该变量是「σ 不可估计的归因文案列表」，名字含词元 `sigma`，被 `if skipped_sigma:`
+    的语义词元规则误报为 HIGH。注解 `list[str]` 明确它是容器 —— 类型来源优先于
+    名称启发式，故先查本表。
+    """
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            out.setdefault(node.target.id, _call_src(node.annotation))
+    return out
+
+
+def classify_risk(var_name: str, annotations: dict[str, str] | None = None) -> str:
+    """根据**语义来源**推断 `if <name>:` 的风险等级。
+
+    判据优先级（先硬信息、后启发式）：
+      1. **类型注解**：`list[...]` / `dict[...]` / `str` 等容器/文本 → LOW；
+      2. 布尔语义名（`is_`/`has_`/`cols`…）→ LOW（防 `is_rate` 被 `rate` 词元误报）；
+      3. 数值语义词元 → HIGH（0 是合法取值）；
+      4. 都不命中 → 旧口径（短名 MEDIUM / 其余 LOW，可见不阻断）。
+    """
     name_lower = var_name.lower()
-    # 高风险：已知数值变量
-    if name_lower in HIGH_RISK_NAMES:
-        return "HIGH"
-    # 安全：布尔/集合模式
+    annotation = (annotations or {}).get(var_name, "")
+    if annotation.startswith(_CONTAINER_ANNOTATIONS):
+        return "LOW"
+    # 安全：布尔/集合模式（前缀或整名）
     for prefix in SAFE_PATTERNS:
         if name_lower.startswith(prefix) or name_lower == prefix.rstrip("_"):
             return "LOW"
+    # 高风险：数值语义词元（0 是合法取值）
+    if _numeric_tokens(name_lower):
+        return "HIGH"
     # 中风险：其他单字母或短名
     if len(name_lower) <= 2:
         return "MEDIUM"
     return "LOW"
 
 
-def classify_or_key(key: str) -> str:
-    """`X.get(key) or 默认` 模式按**参数键名**分级：数值键 HIGH，其余 MEDIUM（可见不阻断）。"""
-    if key.lower() in HIGH_RISK_KEYS or key.lower() in HIGH_RISK_NAMES:
-        return "HIGH"
-    return "MEDIUM"
+#: 可降级的 `or` 兜底字面量类型：字符串/容器。这类兜底不承载「0 是合法值」的语义
+#: （`x or ""` / `x or []` 是把空值归一，与数值语义无关）。
+_SAFE_FALLBACK_LITERALS = (str, bytes, list, tuple, dict, set, frozenset)
+
+
+def _is_safe_fallback(node: ast.AST) -> bool:
+    """兜底表达式是否为字符串/容器**字面量**（含 `[]`/`{}`/`()` 与空构造调用）。"""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, _SAFE_FALLBACK_LITERALS)
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        # `set()` / `list()` / `dict()` / `tuple()` 空构造
+        return node.func.id in ("set", "list", "dict", "tuple")
+    return False
+
+
+def classify_or_fallback(fallback: ast.AST) -> str:
+    """`X.get("k") or <兜底>` 的分级判据：**看兜底表达式的类型/语义来源**，与键名无关。
+
+    审查 2026-10-09 P1-11（实测 I7-B）：旧判据按 `HIGH_RISK_KEYS` 匹配**参数键名**，
+    同形注入仅把 `n_runs` 换成 `n_bootstrap`（`params.get("n_bootstrap") or 2000`）
+    即由 HIGH 降为 MEDIUM、门禁 exit 0。键名可随意改名，不能作判据。
+
+    新判据（结构判据）：
+      · 兜底为字符串/容器字面量（`""` / `[]` / `{}` / `set()`）→ LOW：安全归一；
+      · **其余一律 HIGH**：数值字面量（`or 8` / `or 2000` / `or 0.05`）、`None`、
+        任意表达式（`or 2**k` / `or default`）——`.get()` 拿到 0/0.0/False 时都会被
+        静默替换，这正是历史 M-4 与本次 I7-B 的形态。
+    """
+    if _is_safe_fallback(fallback):
+        return "LOW"
+    return "HIGH"
+
+
+def _call_src(node: ast.AST) -> str:
+    """取节点源码（失败时回退占位，保证报告不因展示层异常中断）。"""
+    try:
+        return ast.unparse(node)
+    except Exception:  # noqa: BLE001 — 展示用，任何 unparse 失败都不应中断门禁
+        return "<?>"
+
+
+def _rel_path(filepath: Path) -> str:
+    """输出相对路径；位于 ROOT 外时回退绝对路径（防 relative_to ValueError）。"""
+    try:
+        return str(filepath.relative_to(ROOT))
+    except ValueError:
+        return str(filepath)
+
+
+def _parse_error_finding(filepath: Path, exc: Exception) -> dict:
+    """解析失败登记为 HIGH（审查 2026-10-09 P3-10：不得静默跳过）。
+
+    未审计的文件**不等于**「零 HIGH 风险」：带 BOM 或语法错误的文件此前被
+    `except …: return findings` 吞掉，报告仍打印「✅ 审计通过」。
+    """
+    return {
+        "file": _rel_path(filepath),
+        "line": int(getattr(exc, "lineno", 0) or 0),
+        "var": "",
+        "risk": "HIGH",
+        "kind": "parse_error",
+        "code": f"{type(exc).__name__}: {exc}",
+    }
 
 
 def _or_default_findings(node: ast.BoolOp, filepath: Path, source: str) -> list[dict]:
-    """识别 `X.get("k") or 默认` 模式（历史 M-4 同族，审查 2026-09-06 F-D2）。"""
+    """识别 `X.get("k") or 默认` 模式（历史 M-4 同族，审查 2026-09-06 F-D2）。
+
+    分级按**兜底表达式**（BoolOp 的最后一个操作数）的类型判定，与 `get` 的键名无关
+    （审查 2026-10-09 P1-11）。
+    """
     findings = []
     if not isinstance(node.op, ast.Or):
         return findings
+    fallback = node.values[-1]
+    fallback_src = _call_src(fallback)
+    risk = classify_or_fallback(fallback)
     seen: set[tuple[int, str]] = set()
     for operand in node.values:
         if not (isinstance(operand, ast.Call) and isinstance(operand.func, ast.Attribute)):
@@ -166,11 +329,12 @@ def _or_default_findings(node: ast.BoolOp, filepath: Path, source: str) -> list[
         seen.add(dedup)
         findings.append(
             {
-                "file": str(filepath.relative_to(ROOT)),
+                "file": _rel_path(filepath),
                 "line": node.lineno,
                 "var": key,
-                "risk": classify_or_key(key),
+                "risk": risk,
                 "kind": "or_default",
+                "fallback": fallback_src,
                 "code": source.splitlines()[node.lineno - 1].strip(),
             }
         )
@@ -178,15 +342,21 @@ def _or_default_findings(node: ast.BoolOp, filepath: Path, source: str) -> list[
 
 
 def audit_file(filepath: Path) -> list[dict]:
-    """审计单个文件中的 `if x:` 与 `x.get("k") or 默认` 模式。"""
+    """审计单个文件中的 `if x:` 与 `x.get("k") or 默认` 模式。
+
+    解析失败（BOM / 语法错误 / 编码）不再静默跳过，而是登记为 HIGH（P3-10）。
+    """
     findings = []
     try:
-        source = filepath.read_text(encoding="utf-8")
+        # `utf-8-sig`：带 BOM 的 UTF-8 与无 BOM 的 UTF-8 都能正确解码
+        # （审查 2026-10-09 P3-10）
+        source = filepath.read_text(encoding="utf-8-sig")
         tree = ast.parse(source)
-    except (SyntaxError, UnicodeDecodeError):
-        return findings
+    except (SyntaxError, UnicodeDecodeError, OSError) as e:
+        return [_parse_error_finding(filepath, e)]
 
     lines = source.splitlines()
+    annotations = _annotation_types(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.If):
             test = node.test
@@ -196,10 +366,10 @@ def audit_file(filepath: Path) -> list[dict]:
                 # 排除 self/cls/__ 开头
                 if var_name.startswith(("self", "cls", "__")):
                     continue
-                risk = classify_risk(var_name)
+                risk = classify_risk(var_name, annotations)
                 findings.append(
                     {
-                        "file": str(filepath.relative_to(ROOT)),
+                        "file": _rel_path(filepath),
                         "line": node.lineno,
                         "var": var_name,
                         "risk": risk,
@@ -256,8 +426,12 @@ def main():
         print("── HIGH 风险（必须修复）──")
         for f in high:
             if f.get("kind") == "or_default":
-                print(f'  {f["file"]}:{f["line"]}  .get("{f["var"]}") or …')
+                print(f'  {f["file"]}:{f["line"]}  .get("{f["var"]}") or {f.get("fallback", "…")}')
                 print("    → 建议: 显式判空（is not None / isinstance），0/空串是有效取值")
+            elif f.get("kind") == "parse_error":
+                print(f"  {f['file']}:{f['line']}  文件无法解析（未审计）")
+                print(f"    → {f['code']}")
+                print("    → 建议: 修正编码/语法（门禁不得静默跳过未审计文件）")
             else:
                 print(f"  {f['file']}:{f['line']}  if {f['var']}:")
                 print(f"    → 建议: if {f['var']} is not None:")
