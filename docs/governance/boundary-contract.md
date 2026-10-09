@@ -84,34 +84,40 @@ E_<域>_<原因>
 
 ## 边界清单（B0–B3 全量）
 
-> 状态：`✅已规范` = 现有行为已符合契约；`⚠待规范` = 本轮计划要改。
+> 状态：`✅已规范` = 现有行为已符合契约；`⚠部分规范` = 行为已达标但**代号/覆盖范围**未达标（备注写明差什么）；`⚠待规范` = 本轮计划要改。
+>
+> ⚠️ **码列口径（2026-10-10 如实化）**：码列写**实现实际发出的码**；实现只发中文消息、不产出机器码的行，
+> 码列写「（无机器码：仅中文消息 + `messages`）」，**不留查无对应物的码名**。
+> `✅已规范` 只留给「**行为 + 机器码都真实存在**」的行 —— 有行为无码 = `⚠部分规范`（不是 `✅`）。
+> 由 `tests/scripts/test_boundary_contract_table.py` 机械校验（`✅` 行声明的码必须在 `src/`/`scripts/`
+> 里存在字面量；该表已无待收口项）。
 
 | # | 退化输入 | 级别 | 期望行为 | `code` | 现状 |
 |---|---|---|---|---|---|
 | 1 | `±Inf` 混入目标列 | B1 | 剔除 + 披露数量与列名 | `E_DATA_NON_FINITE_DROPPED` | ✅已规范（`_guard` 唯一执行点，2026-10-09 全覆盖） |
 | 2 | 参数为非有限值（`k=nan`、`h=inf`） | B0 | 拒绝 + 指出参数名与实际值 | `E_PARAM_NON_FINITE` | ✅已规范（声明式参数契约 `core/param_spec.py` 的 `Finite` 校验统一拒绝；引擎级另有 `_guard.check_finite_param`。实测 9/9：`spc_cusum k=nan`、`spc_cusum h=inf`、`spc_ewma lam=nan`、`process_capability usl=inf`、`normality_check alpha=nan`、`box_chart usl=inf`、`bootstrap_ci ci_level=nan`、`tolerance_interval coverage=inf`、`gage_rr sigma_multiplier=nan` 全部 `status=error` 且点名参数与实际值，2026-10-09 收尾实测） |
-| 3 | 子组 n ≥ 380（c4 溢出） | B3 | 走对数域稳定路径；若仍不可行则 B0 | `E_NUMERIC_GAMMA_OVERFLOW` | ✅已规范（**原登记"当前崩溃 + 误报"已过期**：实现在 `spc_charts/we_rules.py::c4()`，`n ≥ 380` 走对数域。2026-10-09 实测 `c4(379)=0.9993388`、`c4(380)=0.9993406`、`c4(400)=0.9993736`、`c4(500)=0.9994991`、`c4(2000)=0.9998749` 全部有限且 ∈(0,1]） |
-| 4 | 子组大小不一致 | B0/B2 | 拒绝并给拆分建议，或按 nᵢ 加权 / 最小 n 口径估计，**须显式声明** | `E_DESIGN_UNEQUAL_SUBGROUP` | ✅已规范（**原登记"当前静默取 min(n)"实测不成立**：`spc_xbar` 取 min(n) 的同时在 `messages` 与图表标题标注「子组大小不一致…控制限基于最小子组大小估计」，`metadata.subgroup_size` 如实回报最小 n；`spc_attribute` 的 np/c 图 **B0 拒绝**并建议改 p/u 图；p/u 图逐点变限（不降级）；`process_capability(subgroup_col=)` 按 nᵢ−1 自由度池化、含单观测子组时拒绝，`subgroup_size` 的非整数倍余数披露。由 `test_boundary_contract.py::TestUnequalSubgroupIsDisclosed` 钉住） |
+| 3 | 子组 n ≥ 380（c4 溢出） | B3 | 走对数域稳定路径；若仍不可行则 B0 | —（无需发码） | ✅已规范（**原登记"当前崩溃 + 误报"已过期**：实现在 `spc_charts/we_rules.py::c4()`，`n ≥ 380` 走对数域。2026-10-10 实测 `c4(379)=0.9993388437702773`、`c4(380)=0.9993405876665566`、`c4(400)=0.999373630491164`、`c4(500)=0.9994991238119261`、`c4(2000)=0.9998749452926604` 全部有限且 ∈(0,1]。**本行不需要错误码**：c4 走的是**正常计算路径**（对数域稳定式）——既没有拒绝（B0），也没有降级到次路径（B2/B3），不存在可挂码的「处置」；原码列那个码名在 `src/` 全仓零命中，属**多余声明**，2026-10-10 退役见下方注 **㊀**） |
+| 4 | 子组大小不一致 | B0/B2 | 拒绝并给拆分建议，或按 nᵢ 加权 / 最小 n 口径估计，**须显式声明** | （无机器码：仅中文消息 + `messages`） | ⚠部分规范（**行为已达标**（披露/拒绝成立），**仅缺机器码**）。**原登记"当前静默取 min(n)"实测不成立**：`spc_xbar` 取 min(n) 的同时在 `messages` 与图表标题标注「子组大小不一致…控制限基于最小子组大小估计」，`metadata.subgroup_size` 如实回报最小 n；`spc_attribute` 的 np/c 图 **B0 拒绝**并建议改 p/u 图；p/u 图逐点变限（不降级）；`process_capability(subgroup_col=)` 按 nᵢ−1 自由度池化、含单观测子组时拒绝，`subgroup_size` 的非整数倍余数披露。由 `test_boundary_contract.py::TestUnequalSubgroupIsDisclosed` 钉住。**2026-10-10 复测**：`spc_xbar`（子组 8/12）`status=ok`、`messages` 为「⚠ 子组大小不一致: 子组大小不一致，最小n=8。控制限基于最小子组大小估计。」、`metadata.subgroup_size=8`，但 `metadata` 里**没有** `boundary_codes`；`spc_attribute` 的 np 图 `status=error` + 中文消息，同样无码。根因见下方注 **㊂**） |
 | 5 | 目标列唯一值 ≤ 1（常量列） | B0 | 拒绝 + 说明"无变异" | `E_DATA_CONSTANT_COLUMN` | ✅已规范（`_guard.degenerate_column_code` **单一实现**：门禁判据在修复前源码上命中 **19 处**手写 `nunique(...) <= 1` 判据 → **17 处收口**、2 处具名例外（判的是计数而非观测列：子组大小一致性 `spc_charts/xbar_r.py:151`、设计单元平衡性 `root_cause/anova.py`）；三级口径（常量 / 整列为空 / 有效观测不足）由 `degenerate_column_reason` 统一出文案，源码级门禁 `test_boundary_contract.py::TestDegenerateColumnAttributionSSOT`，2026-10-09 收尾） |
 | 6 | 有效样本量 < 方法下限 | B0 | 拒绝 + 给出该方法的**具体**最小 n | `E_DATA_INSUFFICIENT_N` | ⚠待规范（**部分达标**，2026-10-09 实测：`spc_cusum`「每组至少需要 5 个点」、`bootstrap_ci`/`median_ci`「至少5个点」、`process_capability`「至少需要 3 个观测值」均给出**具体**下限；但 `spc_ewma`/`trend_forecast`/`normality_check`/`regression` 在 n=3 时 `status=ok` 且**无任何下限提示** —— 这些方法没有登记最小 n，用户无从判断样本是否够用。逐函数各自判的现状仍在） |
 | 7 | 列存在但全为 NaN | B0 | 拒绝 + 明确"整列为空"（区别于"样本不足"） | `E_DATA_EMPTY_COLUMN` | ✅已规范（`_guard.degenerate_column_code`，2026-10-09 P2-3；公开发布后全库判据统一走它） |
-| 8 | 事件列文本 2 值，语义不明 | B0 | 拒绝 + 要求显式声明失效值 | `E_DESIGN_EVENT_AMBIGUOUS` | ✅已规范（`reliability.py::survival_analysis`：取值不在已知词汇内时拒绝并给两条可执行路径。2026-10-09 实测：事件列 `['B','A']` → `status=error`「事件列「e」的文本取值 ['B', 'A'] 语义不明确…① 用参数 event_value 显式声明失效标记…② 改为 0/1 编码」；`['失效','未失效']`/`['是','否']` 语义明确故正常放行） |
-| 9 | 事件列数值非 {0,1} | B0 | 拒绝 + 列出实际取值 | `E_DESIGN_EVENT_ENCODING` | ✅已规范（`reliability.py:696-707`） |
-| 10 | 因子水平数 > 200 | B0 | 拒绝 + 建议改回归或分箱 | `E_SCALE_TOO_MANY_LEVELS` | ✅已规范（`anova.py:74-85`） |
-| 11 | 行数 > 100k / 列数 > 500 | B0 | 拒绝（Web 层） | `E_SCALE_ROWS` / `E_SCALE_COLS` | ✅已规范（`config.py`） |
+| 8 | 事件列文本 2 值，语义不明 | B0 | 拒绝 + 要求显式声明失效值 | （无机器码：仅中文消息 + `messages`） | ⚠部分规范（**行为已达标**（拒绝成立），**仅缺机器码**）。`reliability.py::_resolve_event_value`（`:1164-1170`）取值不在已知词汇内时拒绝。2026-10-10 实测：事件列 `['B','A']` → `status=error`，消息为「事件列「e」的文本取值 ['B', 'A'] 语义不明确，无法判断哪一个代表「失效」。请任选一种方式修正：① 用参数 event_value 显式声明失效标记（如 event_value='B'）；② 将事件列改为 0/1 数值编码（1=失效，0=删失）；③ 改用语义明确的值，如「是/否」「Yes/No」「失效/删失」」（**三条**可执行路径，原登记写"两条"）；`['失效','未失效']`/`['是','否']` 语义明确故正常放行。`metadata.boundary_codes=None` —— 无码。根因见下方注 **㊂**） |
+| 9 | 事件列数值非 {0,1} | B0 | 拒绝 + 列出实际取值 | （无机器码：仅中文消息 + `messages`） | ⚠部分规范（**行为已达标**（拒绝成立），**仅缺机器码**）。实现在 `reliability.py:1393-1404`（原登记 `:696-707` 已过期）。2026-10-10 实测：事件列 `[1,2]` → `status=error`「事件列「e」的数值编码必须为 0/1（1=失效，0=删失），当前取值: [1, 2]。若为其他编码，请先转换为 0/1，或改用「是/否」文本列。」；`metadata.boundary_codes=None` —— 无码） |
+| 10 | 因子水平数 > 200 | B0 | 拒绝 + 建议改回归或分箱 | （无机器码：仅中文消息 + `messages`） | ⚠部分规范（**行为已达标**（拒绝成立），**仅缺机器码**）。实现在 `root_cause/anova.py:185-196`（原登记 `:74-85` 实际是 `_parse_ss_type`，行号已过期）。2026-10-10 实测：201 水平因子 → `status=error`「因子列水平数过多，ANOVA 按因子处理会生成数千个分组，无法分析: 「f」(201 个水平)。若为连续变量请改用 regression 分析，或先对数据分箱。」；`metadata.boundary_codes=None` —— 无码） |
+| 11 | 行数 > 100k / 列数 > 500 | B0 | 拒绝（Web 层） | （无机器码：仅中文消息 —— Web 层 HTTP 400 响应体，不进 `messages`） | ⚠部分规范（**行为已达标**（拒绝成立），**仅缺机器码**）。阈值定在 `services/config.py:22/25`（`MAX_DATA_ROWS` / `MAX_DATA_COLS`），拒绝在 `web/app.py:497`（CSV 分支）与 `:523-530`（通用分支）：HTTP 400 + 中文文案「数据行数 (N) 超过限制 (100000行)，请减少数据量」/「数据列数 (N) 超过限制 (500列)，请减少列数」。2026-10-10 实测 `pytest tests/services/test_upload_limits.py -q -p no:randomly` → 5 passed（含 100_000 行通过 / 100_001 行拒绝的边界用例） |
 | 12 | 微尺度数据（~1e-10） | B3 | 用相对阈值判决；展示走 `round_for_display` | — | ✅已规范（`test_micro_scale_guards.py`） |
 | 13 | UTF-16/Big5 无 BOM | B0 | 拒绝 + 要求转 UTF-8 或显式声明编码 | — | ✅已规范（`data_io.py`，ADR-0004） |
 | 14 | 混合 dtype 列 → parquet | B1 | 转 string + 披露 | — | ✅已规范（`_parquet_safe`） |
 | 15 | 上传文件被清理线程删除（TOCTOU） | B0 | 专项 400（非裸 500） | — | ✅已规范（`app.py:408`） |
-| 16 | `PPF` 失败回退经验分位数 | B2 | 回退 + **图表标题标注** | `E_NUMERIC_PPF_FALLBACK` | ✅已规范（提交 `716bce9`：`spc_charts/nonparametric.py:142-160` 把回退写进 `messages`、`:302-303` 在**图表标题**加「⚠ 控制限=经验分位数（PPF 不可用）」、`:355` 暴露机器可读回退标记） |
+| 16 | `PPF` 失败回退经验分位数 | B2 | 回退 + **图表标题标注** | （无机器码：仅中文消息 + `messages`） | ⚠部分规范（**行为已达标**（三处披露成立），**仅缺机器码**）。提交 `716bce9`：`spc_charts/nonparametric.py:142-160` 把回退写进 `messages`、`:306` 在**图表标题**加「⚠ 控制限=经验分位数（PPF 不可用）」、`:357-360` 暴露机器可读标记。**2026-10-10 实测**（注入尾部 PPF 失败）：`status=ok`、`messages` 为「⚠ 拟合分布 PPF 在尾部不可用（…），已回退为**经验分位数**——控制限不再是理论分布限（尾部差异最大）…」、`metadata.ppf_fallback=True`，但 `metadata.boundary_codes=[]` —— **有机器可读标记、没有错误码**；根因见下方注 **㊂**） |
 | 17 | Box-Cox 变换失败 | B2 | 用原尺度 + 披露（当前已披露 ✅） | — | ✅已规范（`capability.py:212`） |
-| 18 | 正态性两处判据不一致（SW p<0.01 vs `sw or ad`） | B3 | 统一判据或标注口径 | `E_NUMERIC_NORMALITY_RULE` | ✅已规范（判决口径已单一：`root_cause/distribution.py` 以 Shapiro-Wilk p>α 为**唯一**判据，Anderson-Darling 在表内单元格（`:358`）与 summary（`:391-392`）**两处**标注「仅作参考，不参与判决」，超出临界值表时写成开区间；2026-10-09 实测 summary 原文即「判据: Shapiro-Wilk p>α；Anderson-Darling 仅作参考，不参与判决」） |
-| 19 | 数值溢出（通用） | B0 | 拒绝 + **指出哪个参数/数据的量级** | `E_NUMERIC_OVERFLOW` | ⚠待规范（**部分达标**，2026-10-09 实测 ×1e300：`_guard.check_magnitude` 已接线 12 处（`doe.py`/`response_surface.py`/`regression.py`/`anomaly.py`/`trend.py`/`cusum.py`/`ewma.py`/`nonparametric.py`/`outlier.py`/`distribution.py`×2/`inference.py`）→ 这些任务给出「量级」+「单位换算/中心化」建议；但 `bootstrap_ci`/`median_ci`/`spc_xbar`/`box_chart`/`survival_analysis`/`grid_search`/`scatter_plot`/`tolerance_interval`/`cronbach_alpha`/`cohens_kappa`/`proportion_ci` 在 ×1e300 下仍 `status=ok` **且无任何量级披露**（结论不可信）；`gage_rr`/`lasso_regression`/`decision_tree` 由 orchestrator 兜底为「数值溢出/数据格式或数值范围」泛化文案（不是引擎主动归因）；`spc_attribute` 给出「总体不良率=6e98」这类**误导性**数值。原登记的「误报『极端值』」字样已从消息中消失，但量级归因仍未全覆盖） |
+| 18 | 正态性两处判据不一致（SW p<0.01 vs `sw or ad`） | B3 | 统一判据或标注口径 | —（无需发码） | ✅已规范（判决口径已单一：`root_cause/distribution.py` 以 Shapiro-Wilk p>α 为**唯一**判据（`:326`），Anderson-Darling 在表内单元格（`:367`）与 summary（`:399-401`）**两处**标注「仅作参考，不参与判决」，超出临界值表时写成开区间；2026-10-10 实测 summary 原文即「判据: Shapiro-Wilk p>α；Anderson-Darling 仅作参考，不参与判决」）。**本行不需要错误码**：该行原本登记的是**两处判据不一致**这一致性缺陷，口径统一后**不再有边界处置**（既非拒绝也非降级/近似），没有对象可挂码 —— 原码列那个码名在 `src/` 全仓零命中，属**已无对象的多余声明**，2026-10-10 退役见下方注 **㊀**） |
+| 19 | 数值溢出（通用） | B0 | 拒绝 + **指出哪个参数/数据的量级** | `E_SCALE_EXTREME_MAGNITUDE` | ⚠部分规范（**部分达标**；**原登记的码名 `E_NUMERIC_OVERFLOW` 是错的** —— 实现在 `_guard.check_magnitude`，实际发的是 `E_SCALE_EXTREME_MAGNITUDE`（`_guard.py:364`），2026-10-10 更正）。**2026-10-10 实测 ×1e300**（口径：`tests/guards/test_boundary_disclosure.py` 的 `_base_frame()` 把 `y`/`x1`/`x2`/`x3` 放大 1e300，逐任务跑 `orchestrate`，40 个有数据任务）：`check_magnitude` 已接线 **16/42 个任务**（`TASK_SPECS` 口径，统计命令见下方注 **㊁**）→ 这 16 个任务 `status=error` 且消息含「量级」+「单位换算/中心化」建议；**另 19 个任务仍 `status=ok` 且无任何量级披露**（结论不可信）：`bootstrap_ci`/`box_chart`/`change_point`/`cohens_kappa`/`contingency`/`cronbach_alpha`/`grid_search`/`hypothesis_test`/`logistic_regression`/`median_ci`/`multi_objective`/`proportion_ci`/`roc_analysis`/`scatter_plot`/`spc_attribute`/`spc_xbar`/`survival_analysis`/`tolerance_interval`/`vif`；另 5 个报错但归因**不是**量级（`anova`/`correlation`/`inverse_solve` 为其它原因，`gage_rr`/`decision_tree` 由 orchestrator 兜底为「数值溢出/数据格式或数值范围」泛化文案，不是引擎主动归因）。原登记的「误报『极端值』」字样已从消息中消失，但量级归因仍未全覆盖） |
 | 20 | 多组 log-rank（>2 组） | B2 | 静默不做的现状 → 明确披露"未做" | `E_DESIGN_LOGRANK_SKIPPED` | ✅已规范（提交 `716bce9`：`reliability.py:1497-1499` 生成「分组数为 N（> 2），本次**未做** log-rank 组间比较」的说明，`:1637-1643` 作为 B2 处置并入 `messages` 与 `boundary_codes`，`metadata.logrank_skipped_reason` 同时给出机器可读原因） |
-| 21 | **量级上界**（`log10 max|s| > 150`，`Σy²` 溢出为 Inf） | B0 | 拒绝 + 点名量级 + 建议单位换算/中心化 | `E_SCALE_EXTREME_MAGNITUDE` | ✅已规范（`_guard.check_magnitude`，2026-10-09 P1-4；10 个任务接线） |
+| 21 | **量级上界**（`log10 max(abs(s)) > 150`，`Σy²` 溢出为 Inf） | B0 | 拒绝 + 点名量级 + 建议单位换算/中心化 | `E_SCALE_EXTREME_MAGNITUDE` | ⚠部分规范（守卫与码**都真实存在**（`_guard.check_magnitude`，`:364`；`E_SCALE_EXTREME_MAGNITUDE`），但**执行点只接在 16/42 个任务上** —— 2026-10-10 实测（统计命令见下方注 **㊁**），「已实现」≠「已全覆盖」（R2BD-07 口径）；未接线任务清单见 #19 行的实测。原登记写"10 个任务"是**低报**） |
 | 22 | 结果表渗出 inf/nan（出口保洁） | B0 | 出口后置断言：表内非有限即拒绝 | `E_NUMERIC_OUTPUT_NON_FINITE` / `E_NUMERIC_MODEL_DEGENERATE` | ⚠部分规范（**实现在，接线未覆盖**：`_guard.check_tables_finite` 已实现并有出口断言，但**仅 7/42 个任务接入** —— `doe_analysis` / `regression` / `lasso_regression` / `robust_regression` / `quantile_regression` / `response_surface` / `process_capability`；其余 35 个任务尚无出口保洁，实测反例：`process_capability` ×1e153 曾如实渗出 `inf` 且 `status=ok`（R2BD-01 已修）。接入清单与本行状态由 `test_boundary_contract.py::TestCheckTablesFiniteCoverageIsDeclared` **双向钉住**，2026-10-09 收尾） |
 | 23 | 切片/分组后的退化列（全 NaN / 单有效值） | B0 | 归因优先级：整列为空 → 样本不足 → 常量 → 非有限 → 兜底（**与 `_guard.degenerate_column_code` 的实现同序，改动须同步**） | `E_DATA_EMPTY_COLUMN` / `E_DATA_INSUFFICIENT_N` / `E_DATA_CONSTANT_COLUMN` | ✅已规范（`_guard.degenerate_column_code` 单一实现 + `degenerate_column_reason` 单一文案源；17 处手写判据收口，2026-10-09 收尾。顺序台账曾与实现**互相颠倒**（R2BD-09），现由 `test_boundary_contract.py::TestAttributionOrderMatchesGuard` 逐序比对） |
-| 24 | 分组列 / 子组列名不存在于数据中 | B0 | 拒绝 + 列出可用列 | `E_DESIGN_COLUMN_NOT_FOUND` | ✅已规范（`spc_cusum`/`spc_ewma`/`spc_xbar` 已前置校验，2026-10-09 P2-4） |
+| 24 | 分组列 / 子组列名不存在于数据中 | B0 | 拒绝 + 列出可用列 | （无机器码：仅中文消息 + `messages`） | ⚠部分规范（**行为已达标**（前置校验 + 拒绝成立），**仅缺机器码**）。三处前置校验：`spc_charts/cusum.py:57-65`、`spc_charts/ewma.py:58-65`、`spc_charts/xbar_r.py:64/79`。2026-10-10 实测：三者传 `group_col='不存在的列'` 均 `status=error`「分组列「不存在的列」不存在于数据中。可用列: ['y']」，`metadata.boundary_codes=None` —— 无码） |
 | 25 | 反解建模的特征列退化（历史中整列为空 / 常量 / 单观测） | B1 | 剔除该列 + 披露**列名与真实原因** | `E_DATA_EMPTY_COLUMN` / `E_DATA_INSUFFICIENT_N` / `E_DATA_CONSTANT_COLUMN` | ✅已规范（`inverse/_models.py::_fit_forward` 经 `first_degenerate_reason` 归因后写入 `BoundaryReport` → `messages` + `metadata.boundary_codes`；此前只写 `logger.warning`，2026-10-09 收尾） |
 | 26 | 反解 auto 候选因规模被削减（n≥500 / poly 展开超限） | B2 | 走次路径 + 披露跳过了哪些候选 | `E_SCALE_AUTO_CANDIDATE_SKIPPED` | ✅已规范（`inverse/_models.py::_auto_candidates` 的说明此前仅入日志，现并入报告；2026-10-09 收尾） |
 | 27 | 来料/输出无法按后缀配对 → 共用 / 顺序配对 | B2 | 回退 + 披露配对明细 | `E_DESIGN_PAIRING_FALLBACK` | ✅已规范（`inverse/_models.py::_fit_rate_forward`；配对方式决定每个输出用哪一列来料，2026-10-09 收尾） |
@@ -119,7 +125,7 @@ E_<域>_<原因>
 | 29 | 速率模型逐输出剔除含缺失/非有限特征的行 | B1 | 剔除 + 点名**输出列**与行数 | `E_DATA_INCOMPLETE_ROWS_DROPPED` | ✅已规范（`inverse/_models.py::_fit_rate_forward`；各输出实际参与拟合的行数可能不同。此前仅 `logger.warning`，2026-10-09 收尾） |
 | 30 | 投票制任务中某个方法不可用（IsolationForest 初始化/拟合失败） | B2 | 走剩余方法 + **披露未参与的方法名与投票成员数变化** | `E_NUMERIC_METHOD_UNAVAILABLE` | ✅已规范（`detection/outlier.py::outlier_consensus`：原实现只写 `logger.debug` 且把该列照常渲染为「否」，用户无法分辨「未运行」与「未发现」（审查 2026-10-09 R2BD-04）。现四处可见：`messages` + `boundary_codes` + 结果表该列写「未参与」+ `metadata.voting_methods` 回报成员数；日志升为 WARNING。由 `tests/engine/test_outlier_consensus_degradation.py` 钉住） |
 
-> 状态列口径：`✅已规范` = 代码已实现且有用例钉住；`⚠待规范` = 契约已登记但实现未达标。
+> 状态列口径：`✅已规范` = 代码已实现且有用例钉住；`⚠部分规范` = 行为达标但代号或覆盖范围未达标；`⚠待规范` = 契约已登记但实现未达标。
 > 上表 21–24 为 2026-10-09 发版前全量审查的修复轮新增/收口项；
 > **25–29 为同日发版前收尾轮新增**（`inverse/_models.py` 的日志级降级收口为可见处置）。
 >
@@ -133,6 +139,43 @@ E_<域>_<原因>
 > `test_boundary_contract.py::TestCheckTablesFiniteCoverageIsDeclared` 双向钉住 ——
 > 数字来源即该用例的 AST 实测（对每个 `TaskSpec.func_path` 的函数体扫描 `check_tables_finite` 调用），
 > 不另抄一份会过期的计数。
+>
+> ---
+>
+> **㊀ 已退役码名（2026-10-10，不得再声明）** —— 第二轮审查实测：下列 11 个码在 `src/` + `scripts/`
+> **零命中**（AST 扫描字符串字面量），行内却写着它们 ⇒ 「声明超前」。处理见对应行的码列：
+> ① **多余声明 / 已无对象**（行为走正常路径或不存在处置，无需发码）：#3、#18（已标 `—（无需发码）`）；
+> ② **行为达标但未挂码**（只有中文消息）：#4、#8、#9、#10、#11（两个）、#16、#24 —— 现标
+> `（无机器码：仅中文消息 + messages）` + `⚠部分规范`；
+> ③ **码名写错**：#19 的 `E_NUMERIC_OVERFLOW` → 实际是 `E_SCALE_EXTREME_MAGNITUDE`（已更正）。
+> 退役清单（仅供追溯，**不代表契约要求实现发出它们**）：`E_NUMERIC_GAMMA_OVERFLOW`、
+> `E_DESIGN_UNEQUAL_SUBGROUP`、`E_DESIGN_EVENT_AMBIGUOUS`、`E_DESIGN_EVENT_ENCODING`、
+> `E_SCALE_TOO_MANY_LEVELS`、`E_SCALE_ROWS`、`E_SCALE_COLS`、`E_NUMERIC_PPF_FALLBACK`、
+> `E_NUMERIC_NORMALITY_RULE`、`E_NUMERIC_OVERFLOW`、`E_DESIGN_COLUMN_NOT_FOUND`。
+>
+> **㊁ 量级守卫接线数的统计命令**（#19/#21 的数字来源，防再次漂移）—— 「已接线 N/42 个任务」的
+> 定义是「`TASK_SPECS` 里 `func_path` 指向的函数体中出现 `check_magnitude` 调用」，与 #22 的
+> `TestCheckTablesFiniteCoverageIsDeclared` 同一口径（AST，非字符串匹配）：
+>
+> ```bash
+> # ① 调用点与所在文件（2026-10-10 实测：17 处调用 / 12 个文件；另有 1 行是 _guard.py 的定义）
+> #    注意必须滤掉定义行，否则会把 1 处 def 计成调用（实测 18 vs 17）
+> grep -rn "check_magnitude(" src/smartsuite/engine --include=*.py | grep -v "def check_magnitude"
+> # ② 任务归属（2026-10-10 实测输出 16 / 42）
+> python -c "import ast,pathlib;from smartsuite.services.task_spec import TASK_SPECS as T;f=lambda s:next(n for n in ast.walk(ast.parse((pathlib.Path('src')/(s.func_path.split(':')[0].replace('.','/')+'.py')).read_text(encoding='utf-8'))) if isinstance(n,ast.FunctionDef) and n.name==s.func_path.split(':')[1]);w=[s.key for s in T if any(isinstance(c,ast.Call) and getattr(c.func,'id',None)=='check_magnitude' for c in ast.walk(f(s)))];print(len(w),'/',len(T))"
+> ```
+>
+> **㊂ B0 拒绝路径缺机器码（系统性缺口，本轮只登记不改）** —— 根因：`AnalysisResult` **没有顶层
+> `code` 字段**，`_guard` 产出的 `BoundaryIssue(level="B0", code=...)` 在调用方普遍被写成
+> `messages=[issue.detail]`，**码在此处被丢弃**；唯一出口是 `metadata["boundary_codes"]`，而它
+> **不是所有调用方都会填**。2026-10-10 实测：16 个已接线量级守卫的任务里，只有 12 个把码带到
+> `metadata["boundary_codes"]`（`doe_analysis`/`regression`/`lasso_regression`/`robust_regression`/
+> `quantile_regression`/`response_surface`/`process_capability`/`normality_check`/`outlier_consensus`/
+> `spc_cusum`/`spc_ewma`/`spc_nonparametric`），另 4 个（`anomaly_detect`/`distribution_summary`/
+> `trend_forecast`/`variance_test`）`metadata` **整为空**（`'boundary_codes' in metadata` 为 False）——
+> 即「量级」字样在消息里，码却完全拿不到。故契约 B0 行要求「`status="error"` + `code` + …」时，
+> **多数 B0 拒绝路径实际上拿不到机器码**：上游只能靠中文字串匹配分流。改进项已登记进
+> [improvement-plan.md](improvement-plan.md)（属公共契约变更，需单独评审，本轮不做）。
 
 ## 契约的执行点
 

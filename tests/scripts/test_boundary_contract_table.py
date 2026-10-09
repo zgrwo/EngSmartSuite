@@ -14,7 +14,8 @@
 ## 本文件的判据（不改文档、只加门禁）
 
 ① **结构**：状态表必须可解析；每行级别 ⊆ {B0,B1,B2,B3}（含 `B0/B2` 双级别写法）、
-   处置非空、状态列取值 ⊆ {✅已规范, ⚠待规范}、编号唯一且连续 1..N；
+   处置非空、状态列取值 ⊆ {✅已规范, ⚠部分规范, ⚠待规范}、编号唯一且连续 1..N；
+   每行**恰好 6 格**（转义竖线 `\\|` 不算分隔符 —— 判据与 Markdown 一致）；
 ② **状态列 ↔ 源码**（核心）：`✅已规范` 行声明的**错误码**必须在
    `src/**` 或 `scripts/**` 的字符串字面量里真实存在 —— 文档承诺的"已规范"
    必须能在代码里找到对应物。找不到的进 `PENDING_CODE_NOT_EMITTED`（**只减不增**、
@@ -22,17 +23,24 @@
 ③ **反向腐烂**：`PENDING_CODE_NOT_EMITTED` 里的代码若已在源码出现（被修好了）
    而登记项没删，同样 FAIL —— 防止"登记表变成永久豁免"。
 
-## 本轮实测结论（重要）
+## 实测结论（2026-10-09 首次建表 → 2026-10-10 收口）
 
-29 行里 **23 个不同错误码**，其中 **11 个**（`E_NUMERIC_GAMMA_OVERFLOW`、
+**2026-10-09**：29 行里 **23 个不同错误码**，其中 **11 个**（`E_NUMERIC_GAMMA_OVERFLOW`、
 `E_DESIGN_UNEQUAL_SUBGROUP`、`E_DESIGN_EVENT_AMBIGUOUS`、`E_DESIGN_EVENT_ENCODING`、
 `E_SCALE_TOO_MANY_LEVELS`、`E_SCALE_ROWS`、`E_SCALE_COLS`、`E_NUMERIC_PPF_FALLBACK`、
 `E_NUMERIC_NORMALITY_RULE`、`E_NUMERIC_OVERFLOW`、`E_DESIGN_COLUMN_NOT_FOUND`）
-在**整仓源码 + 测试 + 脚本里一次都没出现过**（只在本契约文档与审查报告里），
+在 `src/` + `scripts/` 里**一次都没出现过**（只在本契约文档与审查报告里），
 而它们所在行的状态列是 `✅已规范`（`_guard.check_magnitude` 实际发的是
 `E_SCALE_EXTREME_MAGNITUDE`，`data_io` 的编码拒绝与 `anova.py` 的水平数拒绝
 则未挂 `code`）。这 11 条是**文档与实现的漂移**（不是本门禁的误报），
-故按"只减不增"登记为待收口项 —— 收口动作属契约/实现侧，不在本轮范围。
+当时按"只减不增"登记为待收口项。
+
+**2026-10-10 收口**（第二轮审查文档债）：漂移**在契约侧**按如实口径修掉 ——
+有码的写真实码名、无码的写「（无机器码：仅中文消息 + `messages`）」并把状态降为
+`⚠部分规范`、无需发码的写「—（无需发码）」。于是"`✅已规范` 但源码无码"的行
+**归零**，`PENDING_CODE_NOT_EMITTED` **清空**（基线 0），本条②③判据继续生效：
+下一次漂移仍会被 `test_no_unregistered_missing_code` 当场点名，而**不得**再用登记表豁免。
+另：#21 的裸 `|` 转义缺陷（B0 在渲染里消失）同轮修复，`KNOWN_STRUCTURAL_DEFECTS` 一并清空。
 ⚠️ 这些码出现在**文档字符串**里的情形已单独统计（`code` 可读性），
 不影响"字面量存在"判定。
 """
@@ -57,16 +65,13 @@ STATUS_PENDING = "⚠"
 
 #: 已存在的**表格结构缺陷**（`(行号, 实际格子数)`），只减不增。
 #:
-#: 实测（审查 2026-10-09 G-8 新增门禁时发现）：#21 的边界描述里 `max|s|` 的裸 `|`
-#: 被 Markdown 当列分隔符 ⇒ 该行 8 格、级别列渲染成 `s`、**B0 在渲染结果里消失**。
-#: 修法：`max\|s\|`。`boundary-contract.md` 属同事在改的文档，本轮只报不改，
-#: 故登记为具名例外（新增缺陷 FAIL、修好不删登记也 FAIL）。
-KNOWN_STRUCTURAL_DEFECTS: dict[tuple[int, int], str] = {
-    (21, 8): (
-        "`log10 max|s| > 150` 的裸 `|` 未转义 ⇒ 级别列显示为 `s`（B0 不可见）；"
-        "建议改成 `max\\|s\\|`（属文档修复，已报给文档负责人）"
-    ),
-}
+#: 2026-10-10（第二轮审查文档债收口）：**当前为空** —— 唯一的登记项 `(21, 8)` 已修：
+#: 该行边界描述里的 `log10 max|s| > 150` 裸 `|` 被 Markdown 当列分隔符 ⇒ 该行 8 格、
+#: 级别列渲染成 `s`、**B0 在渲染结果里整个消失**。修法 `max\|s\|`（GFM 转义竖线），
+#: 同时把 `_cells()` 改成**只按未转义的 `|` 切分** —— 原实现用 `line.split("|")`，
+#: 会把正确转义的 `\|` 也当分隔符，于是"修好了登记也删不掉"（判据与 Markdown 规则不一致）。
+#: 机制保留：日后若真出现新的结构缺陷，同样必须先修文档、**不得**往这里加新条目。
+KNOWN_STRUCTURAL_DEFECTS: dict[tuple[int, int], str] = {}
 
 #: `✅已规范` 行声明、但**源码里查无此字面量**的错误码（审查 2026-10-09 实测 10 条）。
 #:
@@ -75,51 +80,42 @@ KNOWN_STRUCTURAL_DEFECTS: dict[tuple[int, int], str] = {
 #: 修好一条（源码出现该码）就必须从本表删除，否则 `test_no_stale_pending_code` FAIL。
 #: 新增一条即代表文档又漂了一处 —— 那正是本门禁要拦的，故新漂移**不得**往这里加。
 #:
-#: ⚠️ 不收录 `⚠待规范` 行里的码（如 #19 的 `E_NUMERIC_OVERFLOW`）：那些行**自己**
-#: 已声明未达标，无需重复登记（登记它们等于把"文档已承认的缺口"记成"门禁缺口"）。
-PENDING_CODE_NOT_EMITTED_BASELINE = 10
+#: ⚠️ 不收录 `⚠待规范` / `⚠部分规范` 行里的码：那些行**自己**已声明未达标，
+#: 无需重复登记（登记它们等于把"文档已承认的缺口"记成"门禁缺口"）。
+#:
+#: **2026-10-10：已清空**（基线同步下调为 0）。原 10 条不是被豁免，而是**在契约侧收口**：
+#: 码列改为如实口径 —— 有码的写真实码名（#19 的 `E_NUMERIC_OVERFLOW` → 实际是
+#: `E_SCALE_EXTREME_MAGNITUDE`）、没码的写「（无机器码：仅中文消息 + `messages`）」并把
+#: 状态列从 `✅已规范` 降为 `⚠部分规范`、无需发码的写「—（无需发码）」（#3 / #18）。
+#: 于是"状态列声称有码而源码无码"的行归零 —— 本表不再需要任何豁免条目。
+PENDING_CODE_NOT_EMITTED_BASELINE = 0
 
-PENDING_CODE_NOT_EMITTED: dict[str, str] = {
-    "E_NUMERIC_GAMMA_OVERFLOW": (
-        "#3 子组 n ≥ 380：实测实现走对数域稳定路径（`c4()` 全部有限），"
-        "但源码里**不存在**该码 —— 行内自述「原登记『当前崩溃 + 误报』已过期」，"
-        "该码属遗留声明"
-    ),
-    "E_DESIGN_UNEQUAL_SUBGROUP": (
-        "#4 子组大小不一致：实际处置是 messages + 图表标题披露（B2 降级语义），"
-        "并未产出该码；契约把它写成 `E_DESIGN_UNEQUAL_SUBGROUP` 属声明超前"
-    ),
-    "E_DESIGN_EVENT_AMBIGUOUS": (
-        "#8 事件列文本 2 值语义不明：实测 `reliability.py::survival_analysis` 确实"
-        "拒绝并给两条可执行路径，但**未挂 code**（只有中文消息）"
-    ),
-    "E_DESIGN_EVENT_ENCODING": "#9 事件列数值非 {0,1}：同上，拒绝成立但无 code 字段",
-    "E_SCALE_TOO_MANY_LEVELS": "#10 因子水平数 > 200：`anova.py` 拒绝成立但无 code",
-    "E_SCALE_ROWS": "#11 行数 > 100k：`config.py` 层拒绝，未使用该码",
-    "E_SCALE_COLS": "#11 列数 > 500：同上",
-    "E_NUMERIC_PPF_FALLBACK": (
-        "#16 PPF 回退：实测把回退写进 messages / 图表标题 / metadata 标记，"
-        "但码名不是这个（文档声明的码在源码中不存在）"
-    ),
-    "E_NUMERIC_NORMALITY_RULE": "#18 正态性判据统一：口径已单一，未产出该码",
-    "E_DESIGN_COLUMN_NOT_FOUND": (
-        "#24 分组/子组列名不存在：实测 `spc_cusum`/`spc_ewma`/`spc_xbar` 已前置校验"
-        "并拒绝，但**整仓无该码字面量**（只有中文消息）"
-    ),
-}
+PENDING_CODE_NOT_EMITTED: dict[str, str] = {}
+
+
+#: 列分隔符 = **未转义**的 `|`。Markdown 里 `\|` 是转义竖线（渲染成 `|`），**不是**分隔符；
+#: 2026-10-10 #21 修复时发现原实现用 `line.split("|")`，把 `log10 max\|s\| > 150` 里的
+#: 转义竖线也当分隔符 ⇒ 正确转义的行仍被判成 8 格、于是"修好了登记也删不掉"。
+_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 
 
 def _cells(line: str) -> list[str]:
-    return [c.strip() for c in line.strip().strip("|").split("|")]
+    """拆 Markdown 表格行 → 单元格文本（`\\|` 不分隔，且还原为 `|`）。"""
+    parts = _CELL_SPLIT_RE.split(line.strip())
+    if parts and not parts[0].strip():
+        parts = parts[1:]
+    if parts and not parts[-1].strip():
+        parts = parts[:-1]
+    return [c.strip().replace("\\|", "|") for c in parts]
 
 
 def parse_contract_rows(contract: Path = CONTRACT) -> list[dict]:
     """解析「边界清单」状态表 → 每行 {num, level, disposition, codes, status, raw_cells}。
 
-    ⚠️ 表格里**存在结构缺陷行**（实测 #21：边界描述里的裸 `|` 没转义 ⇒ Markdown 把它
-    当成列分隔符，该行变成 8 格、级别列显示成 `s`，**B0 从渲染出的表格里消失**）——
-    审查 2026-10-09 G-8 顺带发现。故解析按**原始格**返回，级别/码/状态各自用正则
-    从整行里认，不依赖固定列号；结构缺陷本身由
+    表格里**曾**有一处结构缺陷行（#21 的裸 `|` 未转义 ⇒ Markdown 当成列分隔符，该行
+    8 格、级别列显示成 `s`、**B0 从渲染出的表格里消失**；2026-10-10 已按 `max\\|s\\|`
+    修好，登记同步清空）。故解析按**原始格**返回，级别/码/状态各自用正则从整行里认，
+    不依赖固定列号；格子数本身由
     `TestContractTableStructure::test_every_row_has_six_cells` 单独判红。
     """
     rows: list[dict] = []
@@ -255,20 +251,20 @@ class TestContractTableStructure:
             if not (r["status"].startswith(STATUS_OK) or r["status"].startswith(STATUS_PENDING))
         ]
         assert not bad, (
-            f"状态列取值不在 {{✅已规范, ⚠待规范}} 内（元素为 行号/实际值/该行格子数）: {bad}"
+            f"状态列取值不在 {{✅已规范, ⚠部分规范, ⚠待规范}} 内"
+            f"（元素为 行号/实际值/该行格子数）: {bad}"
         )
 
     def test_every_row_has_six_cells(self):
         """每行必须是 6 格（编号/边界/级别/处置/错误码/状态）。
 
-        实测缺陷（审查 2026-10-09 G-8 新增门禁时发现）：#21 的边界描述里写了
-        `log10 max|s| > 150` —— **裸 `|` 未转义**，Markdown 把它当列分隔符 ⇒
+        实测缺陷（审查 2026-10-09 G-8 新增门禁时发现，2026-10-10 修复）：#21 的边界
+        描述里写了 `log10 max|s| > 150` —— **裸 `|` 未转义**，Markdown 把它当列分隔符 ⇒
         该行变成 8 格、级别列被挤成 `s`、**B0 在渲染结果里消失**。
-        修法：`max\\|s\\|`（反斜杠转义）。
+        修法：`max\\|s\\|`（反斜杠转义，GFM 渲染为 `|`）。
 
-        ⚠️ `boundary-contract.md` 属同事在改的文档（本轮不改文档），故该缺陷按
-        `KNOWN_STRUCTURAL_DEFECTS` 登记为**只减不增**的具名例外：新增缺陷即 FAIL，
-        修好一条必须删登记（`test_known_defects_are_still_present`）。
+        ⚠️ 修好后 `KNOWN_STRUCTURAL_DEFECTS` 里的登记**必须删除**（该表只减不增，
+        由 `test_known_defects_are_still_present` 反向判红）—— 本轮已清空。
         """
         bad = {(r["num"], r["n_cells"]) for r in parse_contract_rows() if r["n_cells"] != 6}
         unexpected = bad - set(KNOWN_STRUCTURAL_DEFECTS)
@@ -276,6 +272,18 @@ class TestContractTableStructure:
             f"以下状态表行出现**新的**格子数异常（元素为 行号/实际格子数）: "
             f"{sorted(unexpected)}。多数情况是单元格里混入了未转义的 `|`"
             "（Markdown 会把它当列分隔符）"
+        )
+
+    def test_escaped_pipe_is_not_a_cell_separator(self):
+        """`\\|` 是 Markdown 的**转义竖线**，不是列分隔符（#21 缺陷的判据本身要正确）。
+
+        ⚠️ 这条判据曾经是错的：`_cells` 用 `line.split("|")`，把 `max\\|s\\|` 也切成
+        3 段 ⇒ 文档按 GFM 正确转义后，门禁仍报"8 格" —— 于是登记项永远删不掉
+        （"修好了也 FAIL"）。判据必须与 Markdown 的转义规则一致。
+        """
+        cells = _cells("| 21 | `log10 max\\|s\\| > 150` | B0 | 处置 | `E_X` | ✅已规范 |")
+        assert cells == ["21", "`log10 max|s| > 150`", "B0", "处置", "`E_X`", "✅已规范"], (
+            f"转义竖线被当成了列分隔符（或未还原为 `|`）: {cells}"
         )
 
     def test_known_defects_are_still_present(self):
@@ -288,7 +296,7 @@ class TestContractTableStructure:
         """两种状态都必须真实存在（否则"状态列受控"是空判据）。"""
         statuses = [r["status"] for r in parse_contract_rows()]
         assert any(s.startswith(STATUS_OK) for s in statuses), "没有 ✅已规范 行"
-        assert any(s.startswith(STATUS_PENDING) for s in statuses), "没有 ⚠待规范 行"
+        assert any(s.startswith(STATUS_PENDING) for s in statuses), "没有 ⚠（部分/待）规范 行"
 
 
 class TestDeclaredCodesExistInSource:

@@ -652,6 +652,7 @@ python scripts/verify_manual_claims.py
 | 2026-09-24 | **验收判据的修正（重要）** | 第十二轮实测揭示：**`status="error"` 计数不是本阶段合适的进度指标**。全引擎 282 处早退中，只有约 **54** 处是参数校验类（可迁 `Spec`），其余约 228 处是**依赖数据**的检查（样本量/常量列/结构），且每次迁移还 **+1** 处 `Spec` 早退。算术上 `<80` 在"早退式"架构下**不可达**。已在计划 §六 显式改写验收判据，并指明正道：让迁移后的任务**抛 `SmartSuiteError`** 由编排层统一转结果（`orchestrator.py` 已有完整通路），那样每次迁移 **−N 且 0 新增** | 判据修正为：参数校验手写重复 54 → 0、五份平行字典删除、早退计数降为**参考指标**、新增方法注册 8 步 → 1 步。**记录原因**：原判据是未做迁移时的估算；实测构成后才看清主体是数据相关检查。计划允许被实测修正，但必须**显式改写并说明原因**，不得默默放过 |
 
 | 2026-09-24 | **P4 步骤③ 续：验证"抛异常式迁移"通路（第十三轮）** | 新增 `core/exceptions.py::ParamValidationError`（携带 `code` / `field_name`）与 `Spec.validate_or_raise()`；两个已迁移任务改用之，各自的 `Spec` 失败早退**归零**。`build_error_result` 对参数错误**原样呈现精确文案**（不加"分析执行失败:"前缀 —— 参数错误是用户可直接修正的输入问题，不是执行失败），并把提示换成 **"请修正上述参数后重试"**（原先"如问题持续出现，请联系开发者"是错误指引）。**端到端实测**：引擎抛 `ParamValidationError(code=E_PARAM_NOT_NUMERIC, field=usl)` → 编排层产出 `status=error` + 三条消息（精确文案 / 修正提示 / 错误编号） | 迁移对拍文件改为**双层验证**：引擎层 `pytest.raises(ParamValidationError)`、编排层 `status=="error"`。受影响的既有回归防线 6 项（`test_capability_subgroups` 2、`test_capability_spc_guards` 3、`test_fuzz` 1）改走编排层 —— 那也正是 Web/CLI 的真实路径，比直接调引擎更贴近用户。**全量 1967 passed** |
+| 2026-10-10 | **第二轮审查登记的文档债清空（发版前最后一批）** | ① `boundary-contract.md` 边界清单 11 行的**码列/状态列改如实口径**：#3/#18 的码名**无对象**（行为走正常路径 / 一致性缺陷已统一）→ 码列 `—（无需发码）`；#4/#8/#9/#10/#11/#16/#24 **有行为无码** → 码列「（无机器码：仅中文消息 + `messages`）」+ 状态由 `✅已规范` **降为 `⚠部分规范`**（✅ 只留给"行为 + 机器码都真实存在"的行）；#19 码名更正为 **`E_SCALE_EXTREME_MAGNITUDE`**（原写 `E_NUMERIC_OVERFLOW`，全仓零命中）；#21 的绝对值竖线补 GFM 转义（`\|`；原为裸竖线，被 Markdown 当列分隔符 ⇒ 该行 8 格、**B0 在渲染里整个消失**）；#19/#21 的覆盖数字按实测改为 **16/42 个任务**并**在同处写明统计命令**。② 门禁 `tests/scripts/test_boundary_contract_table.py`：`PENDING_CODE_NOT_EMITTED` **10 → 0**（基线同步 0）、`KNOWN_STRUCTURAL_DEFECTS` **1 → 0**，并把 `_cells()` 改为**只按未转义的竖线切分** —— 原实现按单字符 `str.split` 切分，会把**正确转义**的行仍判成 8 格，于是"修好了登记也删不掉"（判据与 Markdown 规则不一致）。③ §4.4 排列重要性 4 条 CLAIM 补**列绑定捕获**：它们与同行「综合重要性」列**同值**，旧口径下改排列列会被兄弟列掩盖（P1-5 原型）。④ **暴露的遗留缺口**已另行登记（见下方「遗留改进项：B0 拒绝路径缺机器码」） | `pytest tests/scripts/test_boundary_contract_table.py -q -p no:randomly` → **20 passed / exit 0**；`pytest tests/scripts/test_manual_claims_freshness.py -q -p no:randomly` → **30 passed**；**负向注入自证**（真手册 §4.4 排列重要性 0.194→0.999，综合列保持 0.194）→ `python scripts/manual_claims_freshness.py` **exit 1** 且点名「冷却时间 perm」；**兄弟值互换**（冷却时间 ↔ 熔体温度）→ **exit 1** 点名两条；注入后 sha256 与注入前**逐位一致**（自动还原）。其余门禁全 exit 0：`verify_manual_claims.py` / `manual_claims_freshness.py` / `verify_docs.py --strict` / `mkdocs build --strict` / `test_quality_guard.py --max-warn 0` |
 | 2026-09-24 | **发现并钉住一处"两层语义差异"（有意，非缺陷）** | `usl=""`（空串）在两层行为不同：编排层经 `_normalize_empty_params`（审查 2026-09-19 E11）把空串替换为该参数的**默认值**（`usl` 默认 `None`）→ 不报错，这正是"Web 表单清空输入框"的语义；而引擎层直接调用则 `float(')` 失败 → `NOT_NUMERIC` → 抛异常。两者都对，因为**表单语义归一是编排层职责**，引擎只认规范值。已用两条互为对照的用例分别钉住，避免日后有人"修"掉其中一层 | 该差异最初表现为我的一条测试失败（`usl=' 应被拒绝，实际 ok`），追查后确认是**我的测试断言错层**，不是引擎缺陷。这正是"先验证再断言"的价值 |
 **P1-5 的处置**：README 对 Box-Cox 的描述已在此前批次改为"仅 Python API/CLI 参数，未接入 Web 面板"，
 并在「已知限制」中写明能力边界 —— 属"改承诺使其与实际一致"，不做无用户价值的面板接入。
@@ -723,6 +724,57 @@ docs: 修正 Gage R&R/Box-Cox/Weibull 的能力声明
 | 3 | **P5** 前端报告导出入口 | `web/` | ✅ **后端与端点已完成**（第十八轮）。⚠️ **剩余**：前端"导出报告"按钮（用户目前需手动 POST `/api/export`，实际不可用） |
 | 3b | **三个待决策项** | `engine/` + `core/` | ✅ **已决（第三十轮）**：`regression.model_type` = 文档化的**保留参数**（非缺陷，只修文案）；`gage_rr.tolerance` = 文档已承诺 `%P/T` → **补实现**；`show_ci`/`show_stats` = 修 `Choice` 的别名表达力缺口（非给引擎打补丁） |
 | 4 | **P5.3 前端余项** | `web/` | ✅ **真浏览器路径已落地（第 41 轮）**：Playwright 仍装不了（未装且需下载 Chromium），但**改用系统已装的 Edge** + CDP（`--remote-debugging-port`，Node 22+ 内置 `WebSocket`，**零依赖**）—— 真浏览器验证的核心诉求（JS 真执行 / CSP 生效 / ESM 加载 / DOM 真变）同样达成。新增 `scripts/check_browser_smoke.mjs` + `tests/scripts/test_browser_smoke.py`：实测 51 个任务入口元素渲染、动态内联脚本**被 CSP 拦截**、浏览器内走完 `csrf → upload → analyze`（严格线性数据 **R²=1**、2 表格 1 图表）、DOM 确实变更、**0 条 JS 异常 / 0 条 CSP 违规**；并产出真实渲染截图。原有的 Node + DOM 桩半运行时冒烟**保留**（两者互补：桩抓模块逻辑，真浏览器抓渲染与接线） |
+| 5 | **B0 拒绝路径缺机器码**（2026-10-10 新登记，见下节） | `core/contracts.py::AnalysisResult` + `engine/_guard.py` 的全部 B0 出口 | 每条 B0 分支都能指到具体 `E_*` 码（或具名豁免 + 理由），且契约声明的码 ⊆ 实际发出的码；端到端 CLI/Web 差分所得 `code` 一致 |
+
+### 遗留改进项：B0 拒绝路径缺机器码（2026-10-10 登记，**本轮不做**）
+
+> 来源：第二轮审查文档债清算暴露的**系统性缺口**（不是某一行的疏漏）。
+> 契约侧现状与根因见 [boundary-contract.md](boundary-contract.md) 的注 **㊂**。
+
+**现状（全部实测，2026-10-10）**
+
+`AnalysisResult` **没有顶层 `code` 字段**。`engine/_guard.py` 的 `check_magnitude` /
+`check_n` / `check_non_constant` / `check_finite_param` / `check_tables_finite` 等
+执行点会产出 `BoundaryIssue(level="B0", code="E_…")`，但调用方普遍把处置写成
+`messages=[issue.detail]` —— **码在这一步被丢弃**；唯一出口是
+`metadata["boundary_codes"]`，而它并非所有调用方都会填。
+
+| 观测项 | 实测值 | 口径 / 命令 |
+|---|---|---|
+| 按量级 B0 拒绝且消息含「量级」的任务（= `check_magnitude` 已接线） | **16 / 42** | `TASK_SPECS.func_path` 函数体 AST 扫描（见 boundary-contract 注 ㊁ 的命令） |
+| 其中把码透出到 `metadata["boundary_codes"]` 的 | **12 / 16** | 逐任务跑 ×1e300，读 `metadata.get("boundary_codes")` |
+| 其中 `metadata` **整为空**（`'boundary_codes' in metadata` 为 `False`）的 | **4 / 16** | `anomaly_detect` / `distribution_summary` / `trend_forecast` / `variance_test` |
+| 在 ×1e300 下仍 `status=ok` 且无量级披露（结论不可信）的任务 | **19 / 40** | 同上口径，清单见契约 #19 行 |
+| 契约写了码、实现只发中文消息（本轮已把契约改如实）的行 | **9 行** | #4 / #8 / #9 / #10 / #11（两码）/ #16 / #24 |
+
+**影响**
+
+契约 B0 行要求「`status="error"` + `code` + 中文工艺术语 + 可执行建议」，但**多数 B0
+拒绝路径实际拿不到机器码**。上游（Web / CLI / 自动化流水线 / 报告导出）无法按码分流，
+只能对中文文案做**子串匹配** —— 文案一改，上游分流就**静默失效**；也无法做「按错误码
+统计边界拒绝」这类可观测性。这不是本轮文档修复能解决的问题：本轮只是**让契约别再声称
+有码**，码本身的缺口仍在。
+
+**建议修法**（两条，需单独评审后择一或并行）
+
+1. **给 `AnalysisResult` 加顶层 `code: str = ""`**（`core/contracts.py`），并在 `_guard`
+   的每个 B0 出口统一回填（含 `BoundaryReport.codes()` 的单一取值口）。
+   收益：上游有稳定契约；代价：**公共契约变更** —— 序列化格式、`/api/analyze` 响应、
+   既有调用方、`docs/specification/api-reference.md`（签名唯一信源）都要同步。
+2. **不动契约，先把出口做齐**：所有 B0 分支一律填 `metadata["boundary_codes"]`
+   （先把那 4 个 `metadata` 为空的任务补齐）。成本低、无破坏性，可作为第 1 条的前置步骤。
+
+**为什么本轮不做**
+
+属**公共契约变更**：`AnalysisResult` 是 engine ↔ services ↔ web ↔ CLI 的共享结构，
+改它要同步 api-reference（签名基线）、前端与既有测试；且本轮目标是"清空第二轮审查登记的
+文档债"，把文档修复扩成跨层契约改造会让范围与风险都失控。故本轮**只登记、不改实现** ——
+按本计划的纪律，"本轮不修"必须写成具名条目，而不是留在文档里当一个看不见的缺口。
+
+**将来做时的验收建议**：① 源码级门禁 —— `src/smartsuite/engine` 里每条 `status="error"`
+的 B0 分支都能指到码或具名豁免（理由 ≥20 字）；② 契约 ↔ 实现**双向**钉住
+（声明的码必须真发出、发出的码必须已登记）；③ 端到端差分：同一退化输入经 CLI 与 Web
+得到的 `code` 逐位一致（复用测试第 ④ 层差分框架）。
 
 ### P3-3 完成记录（2026-09-24）
 

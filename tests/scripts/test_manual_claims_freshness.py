@@ -355,6 +355,60 @@ def test_process_capability_real_manual_is_fresh():
     assert freshness.check_manual_freshness(_read_manual_text(), _PC_CLAIMS) == []
 
 
+#: §4.4 排列重要性 4 条 CLAIM（快照值与 `verify_manual_claims.py` 的 `rpt(...)`
+#: 调用**同源**）。2026-10-10 第二轮 P1-5 同类补漏：此前**只有行锚点、没有逐值捕获**。
+_DT_PERM_CLAIMS = [
+    ("decision_tree", "冷却时间 perm", 0.194),
+    ("decision_tree", "熔体温度 perm", 0.106),
+    ("decision_tree", "模具温度 perm", 0.049),
+    ("decision_tree", "注射压力 perm", 0.004),
+]
+
+#: 手册 §4.4 `feature_importance` 表的两行原文（列序：因子|Gini|排列|排列 std|综合）。
+#: 第 3 列与第 5 列**同值** —— 只改第 3 列时第 5 列会掩盖，故必须逐列捕获。
+_DT_PERM_ROWS = {
+    "冷却时间": "| 冷却时间 | 0.463 | 0.194 | ±0.011 | 0.194 |",
+    "熔体温度": "| 熔体温度 | 0.330 | 0.106 | ±0.012 | 0.106 |",
+}
+
+
+def test_decision_tree_perm_real_manual_is_fresh():
+    """基线：真实手册 §4.4 的 4 条排列重要性快照逐值一致 → 零问题。"""
+    assert freshness.check_manual_freshness(_read_manual_text(), _DT_PERM_CLAIMS) == []
+
+
+def test_decision_tree_perm_tamper_not_masked_by_combined_importance_column():
+    """负向注入①（P1-5 原型）：只把「排列重要性」列 0.194 → 0.999。
+
+    同行第 5 列「综合重要性」仍是 0.194 —— 没有列绑定时该 token 仍会被锚点行命中，
+    篡改被兄弟列掩盖（门禁 exit 0）。加了逐列捕获后必须点名 FAIL。
+    """
+    text = _read_manual_text()
+    assert _DT_PERM_ROWS["冷却时间"] in text, (
+        "手册 §4.4 feature_importance 表行已变化，请更新本用例快照"
+    )
+    tampered = text.replace(
+        _DT_PERM_ROWS["冷却时间"], "| 冷却时间 | 0.463 | 0.999 | ±0.011 | 0.194 |"
+    )
+    problems = freshness.check_manual_freshness(tampered, _DT_PERM_CLAIMS)
+    assert len(problems) == 1, f"应恰好 1 条（同行综合列的 0.194 不得掩盖）: {problems}"
+    assert "冷却时间 perm" in problems[0], f"问题应点名该 CLAIM: {problems}"
+
+
+def test_decision_tree_perm_sibling_swap_is_detected():
+    """负向注入②：兄弟值互换（冷却时间 0.194 ↔ 熔体温度 0.106）→ 两行都必须点名。"""
+    text = _read_manual_text()
+    for row in _DT_PERM_ROWS.values():
+        assert row in text, f"手册 §4.4 feature_importance 表行已变化，请更新快照: {row}"
+    swapped = text.replace(
+        _DT_PERM_ROWS["冷却时间"], "| 冷却时间 | 0.463 | 0.106 | ±0.011 | 0.106 |"
+    ).replace(_DT_PERM_ROWS["熔体温度"], "| 熔体温度 | 0.330 | 0.194 | ±0.012 | 0.194 |")
+    problems = freshness.check_manual_freshness(swapped, _DT_PERM_CLAIMS)
+    assert len(problems) == 2, f"互换后两行都错位，应报 2 条: {problems}"
+    assert any("冷却时间 perm" in p for p in problems), problems
+    assert any("熔体温度 perm" in p for p in problems), problems
+
+
 def test_unanchored_claim_fails_even_when_value_exists_in_section():
     """P1-5 核心规则：**未登记锚点的 CLAIM 一律 FAIL**，不得回退整章 token 存在性。
 
@@ -393,6 +447,9 @@ def test_real_registered_claims_have_anchors():
         ("process_capability", "Cp (meta.cp)"),
         ("process_capability", "Cpk (meta.cpk)"),
     ]
+    # 2026-10-10：§4.4 的 4 条「排列重要性」也必须**逐值捕获** —— 它们与同行
+    # 「综合重要性」列同值，无列绑定就会被兄弟列掩盖（见上方两个负向注入用例）。
+    expected += [(analysis, name) for analysis, name, _ in _DT_PERM_CLAIMS]
     missing = [key for key in expected if key not in freshness.ANCHOR_PATTERNS]
     assert missing == [], f"以下 CLAIM 缺锚点，门禁会整片 FAIL: {missing}"
     missing_cap = [key for key in expected if key not in freshness.VALUE_CAPTURE_PATTERNS]
