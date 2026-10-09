@@ -180,6 +180,7 @@ def _recursive_dirs(dirs: set[str], declared: set[str]) -> set[str]:
 def check_links(root: Path, doc_files: list[str]) -> list[str]:
     problems: list[str] = []
     link_re = re.compile(r"\[[^\]]*\]\(([^)#\s]+)(?:\s+\"[^\"]*\")?\)")
+    pending: list[tuple[str, str, Path]] = []
     for doc in doc_files:
         path = root / doc
         if not path.exists():
@@ -191,9 +192,19 @@ def check_links(root: Path, doc_files: list[str]) -> list[str]:
                 continue
             if "{{" in target:
                 continue  # 占位符链接：初始化替换前无法验证
-            resolved = (path.parent / target).resolve()
-            if not resolved.exists():
-                problems.append(f"[断链] {doc} -> {target}")
+            pending.append((doc, target, (path.parent / target).resolve()))
+
+    # 批量判定「目标是否入库」：一次 git 调用，避免逐链接起子进程
+    ignored = _git_ignored_paths(root, [resolved for _, _, resolved in pending])
+    for doc, target, resolved in pending:
+        if not resolved.exists():
+            problems.append(f"[断链] {doc} -> {target}")
+        elif resolved in ignored:
+            # 审查 2026-10-09 P0-9：本地存在 ≠ 干净检出存在。
+            problems.append(
+                f"[未入库链接] {doc} -> {target}"
+                "（目标被 .gitignore 忽略：本地存在，但 CI/新克隆中不存在）"
+            )
     return problems
 
 
@@ -589,11 +600,15 @@ def check_undeclared(root: Path, strict: bool) -> list[str]:
     return problems
 
 
-def _git_ignored_files(root: Path, paths: list[Path]) -> set[str]:
-    """返回被 .gitignore 忽略的文件名集合（本地生成产物不要求登记目录树）。
+def _git_ignored_paths(root: Path, paths: list[Path]) -> set[Path]:
+    """返回**被 .gitignore 忽略**的路径集合（`resolve()` 后便于精确比较）。
 
-    非 git 仓库（如测试用迷你仓库）或 git 不可用时返回空集——
-    此时所有文件都要求登记，保证严格模式在 CI checkout 中生效。
+    非 git 仓库（如测试用迷你仓库）或 git 不可用时返回空集 ——
+    此时不做豁免，保证严格模式在 CI checkout 中生效。
+
+    审查 2026-10-09 P0-9：断链检查原先只判 `Path.exists()`，于是
+    「本地存在、但被 .gitignore 忽略、不入库」的目标会被判为 OK，
+    CI 干净检出一跑就红（`docs/user-manual/09-*.md` 链到 `logs/` 即此例）。
     """
     if not paths:
         return set()
@@ -612,11 +627,20 @@ def _git_ignored_files(root: Path, paths: list[Path]) -> set[str]:
         return set()
     if r.returncode not in (0, 1):
         return set()
-    return {
-        Path(line).name
-        for line in r.stdout.decode("utf-8", "replace").split("\x00")
-        if line.strip()
-    }
+    ignored: set[Path] = set()
+    for line in r.stdout.decode("utf-8", "replace").split("\x00"):
+        if not line.strip():
+            continue
+        try:
+            ignored.add(Path(line).resolve())
+        except OSError:
+            continue
+    return ignored
+
+
+def _git_ignored_files(root: Path, paths: list[Path]) -> set[str]:
+    """返回被 .gitignore 忽略的文件名集合（本地生成产物不要求登记目录树）。"""
+    return {p.name for p in _git_ignored_paths(root, paths)}
 
 
 def check_subdir_undeclared(root: Path, strict: bool) -> list[str]:

@@ -86,6 +86,43 @@ def test_check_links_skips_http_and_anchor(tmp_path):
     assert verify_docs.check_links(root, ["README.md"]) == []
 
 
+def test_check_links_reports_gitignored_target(tmp_path, monkeypatch):
+    """链接指向「被 .gitignore 忽略的本地产物」→ 必须报「未入库链接」。
+
+    复现 2026-10-09 审查 P0-9：`docs/user-manual/09-result-verification.md:47` 链到
+    `../../logs/reports/verify-round3/R3-复核清单.md`。该目标在开发者本机存在，
+    故只判 `Path.exists()` 的旧实现判为 OK；但 `logs/` 被 `.gitignore` 忽略、不入库
+    → CI 干净检出中必为断链，`quality.yml`/`docs.yml` 双红。
+
+    判据必须是「目标是否入库」，而不只是「目标此刻是否存在」。
+    """
+    root = build_repo(tmp_path)
+    (root / "logs").mkdir()
+    (root / "logs" / "report.md").write_text("# 本地产物\n", encoding="utf-8")
+    (root / "docs" / "governance" / "note.md").write_text(
+        "[清单](../../logs/report.md)\n", encoding="utf-8"
+    )
+    # 模拟 .gitignore 覆盖该目标（真实实现在无 git 的迷你仓库里返回空集）
+    monkeypatch.setattr(
+        verify_docs,
+        "_git_ignored_paths",
+        lambda r, paths: {Path(p).resolve() for p in paths},
+        raising=False,
+    )
+    problems = verify_docs.check_links(root, ["docs/governance/note.md"])
+    assert any("未入库" in p for p in problems), problems
+
+
+def test_check_links_tracked_target_is_not_flagged(tmp_path, monkeypatch):
+    """入库的链接目标不得被误报（防修得过于激进）。"""
+    root = build_repo(tmp_path)
+    (root / "docs" / "governance" / "note.md").write_text(
+        "[规范](../specification/api-reference.md)\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(verify_docs, "_git_ignored_paths", lambda r, paths: set(), raising=False)
+    assert verify_docs.check_links(root, ["docs/governance/note.md"]) == []
+
+
 # ── 向量 2：反引号根路径 ──────────────────────────────────────
 
 
