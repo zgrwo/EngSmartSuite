@@ -627,6 +627,38 @@ rpt("inverse_solve", "模具温度系数", -0.007928, round(iv_coef_mold, 6), 5e
 rpt("inverse_solve", "LOO R²", -0.002, round(iv_loo_r2, 4), 0.001)
 
 p()
+p("--- 5.3 / 5.4 分布特征与正态性（审查 2026-10-09 P0-10 新增）---")
+# 背景：手册 §5.3 的偏度/峰度曾长期写 0.61/0.48（实测 0.898/1.881），§5.4 曾写
+# 「2/2 列满足正态性」（实测 raw 1/2、web 0/2）—— 两处都不在上述任何 CLAIM 的覆盖内，
+# 故 35 条 CLAIM 全绿也拦不住。此处补登记，把它们纳入手册新鲜度门禁。
+_df53, _ = preprocess_numeric(df_raw, [])
+_res53 = orchestrate(
+    AnalysisRequest(
+        task="distribution_summary", data=_df53, target_col=C_DEF, feature_cols=[], params={}
+    )
+)
+_d53 = (_res53.metadata or {}).get("descriptive") or {}
+rpt("distribution_summary", "偏度", 0.898, round(float(_d53.get("偏度", float("nan"))), 4), 0.001)
+rpt("distribution_summary", "峰度", 1.881, round(float(_d53.get("峰度", float("nan"))), 4), 0.001)
+
+_df54, _feat54 = preprocess_numeric(df_raw, [C_MELT])
+_res54 = orchestrate(
+    AnalysisRequest(
+        task="normality_check",
+        data=_df54,
+        target_col=C_DEF,
+        feature_cols=_feat54,
+        params={},
+    )
+)
+# 手册 §5.4 明确取 **Web 口径**（缺失值中位数填充后 n=1000）：实测「0/2 列满足正态性」
+_nt = _res54.tables.get("normality_results")
+_n_normal = 0
+if _nt is not None and "正态性" in _nt.columns:
+    _n_normal = sum(1 for v in _nt["正态性"].tolist() if str(v).startswith("正态"))
+rpt("normality_check", "满足正态列数(web 口径)", 0, _n_normal, 0.5)
+
+p()
 p("=" * 100)
 p("VERIFICATION COMPLETE")
 p("=" * 100)

@@ -28,16 +28,23 @@
 新增分析函数
   → ① engine/ 实现 (AnalysisRequest) -> AnalysisResult
   → ② engine/__init__.py 导出
-  → ③ services/orchestrator.py → TASK_REGISTRY 注册
-  → ④ DEFAULT_PARAMS 添加默认参数
-  → ⑤ TASK_LABELS + TASK_GROUPS 添加条目
-  → ⑥ `/api/tasks` 下发 → 前端 `params.js` 接收（`app.js` 只读，无副本字典）
-  → ⑦ templates/ 创建 YAML 模板
-  → ⑧ 测试：test_correctness + test_invariants
-  → ⑨ specification/api-reference.md 更新
-  → ⑩ user-manual/ 更新（五段式）
-  → ⑪ skill.md 决策树更新（如引入新场景）
+  → ③ services/task_spec.py — 在 TASK_SPECS 追加**一条** TaskSpec
+       （唯一注册点：key / func_path / label / group / default_params / raw_cat /
+         no_target / no_data / y_only / x_optional）
+       列需求（`y_only` / `x_optional` / `no_target`）**只在此声明一次**
+  → ④ `/api/tasks` 下发 → 前端 `params.js` 接收（`app.js` 只读，无副本字典、不做任务特判）
+  → ⑤ templates/ 创建 YAML 模板
+  → ⑥ 测试：test_correctness + test_invariants
+  → ⑦ specification/api-reference.md 更新
+  → ⑧ user-manual/ 更新（五段式）+ 决策树更新（如引入新场景）
 ```
+
+> 🔴 **③ 是唯一注册点**（审查 2026-09-19 B1）。`TASK_REGISTRY` / `DEFAULT_PARAMS` /
+> `TASK_LABELS` / `TASK_GROUPS` / `RAW_CAT_TASKS` / `NO_TARGET_TASKS` / `NO_DATA_TASKS` /
+> `Y_ONLY_TASKS` / `X_OPTIONAL_TASKS` 全部由 `derive(TASK_SPECS)` 派生 ——
+> `orchestrator.py` 里**不存在**可手改的任务字面量集合（`LazyTaskRegistry` 是只读 `Mapping`），
+> 去改它技术上不可行。审查时若发现 `orchestrator.py` 出现任务字面量集合，**即为回退**
+> （见 [ai-review-prompt.md](ai-review-prompt.md) 第 3.3 节）。
 
 ## 数字一致性
 
@@ -48,5 +55,5 @@
 
 - [ ] 变更内容属于该文档的职责范围
 - [ ] 未在其他文档中重复定义同一信息
-- [ ] 8 步注册已完成（如为新增分析函数，注册见 `services/task_spec.py`）
+- [ ] 8 步注册已完成（如为新增分析函数，注册**只**改 `services/task_spec.py::TASK_SPECS` 一处）
 - [ ] 数字/计数与 api-reference.md 一致

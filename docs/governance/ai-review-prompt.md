@@ -80,12 +80,18 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 `RAW_CAT_TASKS` / `NO_TARGET_TASKS` / `NO_DATA_TASKS` 共 7 个名字全部由 `derive()` 派生。
 审查时若发现 `orchestrator.py` 里出现任务字面量集合，即为回退。
 
-**前端列约束三集合**（`web/static/app.js` 的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 常量——行号易漂移，按常量名定位；引擎函数每次改动后必核对，陷阱 2）：
-- `_noTargetNeeded`：完全无需 Y 列（vif/cohens_kappa/cronbach_alpha/power_analysis/multi_objective/doe_design…）
-- `_yOnlyTasks`：仅需 Y 列（process_capability/trend_forecast/distribution_summary/proportion_ci/spc_cusum…）
-- `_xOptionalTasks`：X 列可选回退（spc_xbar/spc_attribute/normality_check/anomaly_detect…）
+**前端列约束（单一来源）**：任务的列需求只在 `TaskSpec` 里声明一次（`services/task_spec.py`），
+由 `derive()` 派生并经 `/api/tasks` 下发，前端 `params.js` 只读、`app.js` 不做任务特判：
+- `y_only=True`：仅需 Y 列（process_capability/trend_forecast/distribution_summary/proportion_ci/spc_cusum…）
+- `x_optional=True`：X 列可选回退（spc_xbar/spc_attribute/normality_check/anomaly_detect…）
+- `no_target=True`：完全无需 Y 列（vif/cohens_kappa/cronbach_alpha/power_analysis/multi_objective/doe_design…）
 
-任务注册完整性由 `ci.yml` consistency job 的集合断言（REGISTRY=DEFAULT_PARAMS=LABELS=GROUPS 全部来自 `derive(TASK_SPECS)`）+ `engine __all__` 覆盖 + `verify_frontend_params.py`（静态解析 app.js TASK_PARAMS ↔ DEFAULT_PARAMS 键集，2026-09-06 E4/G4 起）+ `verify_cross_consistency.py`（运行时交叉验证 + 手册 CLAIM）强制。
+> ⚠️ 2026-09-19 之后，`app.js` 里的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 三份手写集合**已消灭**，
+> 且被 `tests/guards/test_task_requirements_ssot.py` 的 `_BANNED` 列为禁名 ——
+> **审查时若发现这三个标识符的赋值/声明形态，即为回退**（注释里说明"原先是什么"是允许的）。
+> 同步链的**唯一动作**是在 `TaskSpec` 声明 `y_only` / `x_optional`。
+
+任务注册完整性由 `ci.yml` consistency job 的集合断言（REGISTRY=DEFAULT_PARAMS=LABELS=GROUPS 全部来自 `derive(TASK_SPECS)`）+ `engine __all__` 覆盖 + `tests/guards/test_task_requirements_ssot.py`（任务列需求单一来源 + 前端禁名）+ `verify_frontend_params.py`（当前口径：前端**不得**出现 `TASK_PARAMS` 字面量，且必须真实调用 `hydrateParams`）+ `verify_cross_consistency.py`（运行时交叉验证 + 手册 CLAIM）强制。
 
 ### 3.4 哨兵契约 L1-L5 与 NaN/Inf/None 守卫
 
@@ -108,7 +114,8 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 
 - 数据流转含 `services/data_io.preprocess_data`（**返回多个值的元组解包——历史的 4+ 解包错误**，改动必须核对全部调用方）。
 - ①②③ 层由 hypothesis 属性测试加固（`tests/engine/test_property_invariants.py`：量纲缩放不变量 / falsy 0 / 退化输入随机搜索，2026-09-19 起）。
-- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率以当轮实测为准（2026-09-19 实测 89.67%；门禁 `--cov-fail-under=85`，quality.yml 已于 2026-09-19 前置到 PR）；测试质量守卫基线 WARN ≤ 10（quality.yml `--max-warn 10`，2026-09-22 由 14 收紧）。
+- 数值正确性与 CLI 冒烟由脚本强制（见 4.2）。覆盖率以当轮实测为准（2026-09-19 实测 89.67%；门禁 `--cov-fail-under=85`，quality.yml 已于 2026-09-19 前置到 PR）；测试质量守卫基线 **WARN ≤ 12**（`quality.yml:56` 的 `--max-warn 12`，2026-09-22 由 14 收紧；`scripts/verify_all.py` 同为 12）。
+  > ⚠️ **以 `.github/workflows/quality.yml` 的实际参数为准，勿在模板中写死阈值**。本行在审查 2026-10-09 P1-1 前写的是 `--max-warn 10`，与 CI 实际值不一致 —— 照模板判读会得出与 CI 相反的结论。审查时用 `Select-String -Path .github\workflows\quality.yml -Pattern 'max-warn'` 现取。
 
 ### 3.6 治理红线与历史陷阱速查
 
@@ -120,7 +127,7 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 | 依赖版本 | Python ≥3.10；ruff 版本以 pyproject.toml 为准（0.16.8，经 uv.lock 锁定）；CI 矩阵 3.10–3.14 × 3 OS（3.12/3.13 排除 macOS） |
 
 **高频复发模式**（逐条做被动排查，历史见 [AGENTS.md](../../AGENTS.md) 历史经验表）：
-① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）；⑫ **数据列 ±Inf 未清洗**（穿透 `dropna()`：scipy 返回 NaN p 值被表述为「未发现显著差异」/ matplotlib·sklearn 抛未捕获异常，2026-09-22 发现 2/3，入口统一走 `_utils.drop_non_finite[_rows]`）。
+① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）；⑫ **数据列 ±Inf 未清洗**（穿透 `dropna()`：scipy 返回 NaN p 值被表述为「未发现显著差异」/ matplotlib·sklearn 抛未捕获异常，2026-09-22 发现 2/3，入口统一走 `engine/_guard.py` 的 `clean_series` / `clean_frame` + `BoundaryReport`）。
 
 **smartsuite-dev 技能 7 大陷阱速查**（详见 [smartsuite-dev.md](../../skills/smartsuite-dev.md)）：
 1. PALETTE 嵌套键错误（`anomaly` 无 `secondary`；访问即 KeyError 被 orchestrator 误翻译成"缺列"）
@@ -178,7 +185,7 @@ codegraph node -f <文件> --symbols-only   # 文件模式：符号表 + depende
 ```
 
 必须回答并写进报告：
-- 变更**引擎函数**的调用者：orchestrator 注册？其他引擎函数？`engine/__init__.py` 导出？前端 `_noTargetNeeded/_yOnlyTasks/_xOptionalTasks` 是否有该任务？templates/ 是否有对应 YAML？
+- 变更**引擎函数**的调用者：`TASK_SPECS` 是否登记（唯一注册点）？其他引擎函数？`engine/__init__.py` 导出？该任务的 `TaskSpec` 列需求（`y_only`/`x_optional`/`no_target`）是否与实际读取的 `target_col`/`feature_cols` 一致？templates/ 是否有对应 YAML？
 - **数据处理链**：`preprocess_data` / `safe_float` / `_utils.py` 的改动对所有引擎函数的连锁影响（全库共享 → 先跑全量引擎测试）。
 - **测试覆盖面**：codegraph 标 `⚠️ no covering tests found` 的符号 = 高风险点，核对是否落入四层防线的哪一层。
 - **文档契约**：是否触碰 api-reference / user-manual/（五段式）/ project-structure 目录树（verify_docs 强制）/ 术语表 context.md。

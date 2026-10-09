@@ -9,6 +9,8 @@ user-manual/（按章拆页）——审查注入 2a 实证：手册值 −0.050�
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "scripts" / "manual_claims_freshness.py"
 mod = importlib.util.spec_from_file_location("manual_claims_freshness", SPEC)
@@ -107,21 +109,53 @@ def test_dual_table_intact_passes():
 
 
 def test_unicode_minus_and_thousands_normalized():
-    """手册使用 Unicode 减号/千分位逗号 → 归一化后应匹配（防误报）。"""
-    text = "### 4.1 相关性分析 (`correlation`)\n\n| 值 |\n| −1,234.5678 | 0.0500 |\n"
-    claims = [("correlation", "大数", -1234.5678), ("correlation", "小数", 0.05)]
+    """手册使用 Unicode 减号/千分位逗号 → 归一化后应匹配（防误报）。
+
+    锚点取真实的明细表行结构（排名 + 因子名），数值故意写成千分位 + Unicode 减号。
+    """
+    text = (
+        "### 4.1 相关性分析 (`correlation`)\n\n"
+        "| 排名 | 因子 | Pearson r | p 值 |\n"
+        "| 1 | 注射压力 | −1,234.5678 | 0.117 |\n"
+        "| 2 | 模具温度 | 0.0500 | 0.118 |\n"
+    )
+    claims = [
+        ("correlation", "注射压力 r", -1234.5678),
+        ("correlation", "模具温度 r", 0.05),
+    ]
     problems = freshness.check_manual_freshness(text, claims)
     assert problems == [], f"Unicode 减号/千分位应被归一化: {problems}"
 
 
-def test_range_string_claims_checked_per_number():
-    """字符串区间 claim（VIF "~1.002-1.004"）逐数字校验。"""
-    text = "### 4.5 VIF (`vif`)\n\nVIF ≈ 1.002-1.004，无明显共线性。\n"
-    claims = [("vif", "区间", "~1.002-1.004")]
+def test_string_range_claim_checked_per_number_on_anchor_line():
+    """字符串区间 CLAIM 在**锚点行内**逐数字校验。
+
+    取 §7.5 Cp 行（同时含点估计 1.279 与 CI 上端 1.335）作区间字符串的来源。
+    """
+    text = (
+        "### 7.5 过程能力 Cp/Cpk (`process_capability`)\n\n"
+        "| 指标 | 值 | 95%CI |\n"
+        "| Cp (短期能力) | 1.279 | [1.223, 1.335] |\n"
+    )
+    claims = [("process_capability", "Cp (meta.cp)", "1.279-1.335")]
     assert freshness.check_manual_freshness(text, claims) == []
-    tampered = text.replace("1.004", "1.040")
+    tampered = text.replace("1.335", "1.435")
     problems = freshness.check_manual_freshness(tampered, claims)
     assert len(problems) == 1, f"区间端点漂移应报: {problems}"
+
+
+def test_unanchored_range_string_claim_fails():
+    """P1-5：无锚点的区间字符串 CLAIM 同样一律 FAIL。
+
+    这正是审查注入的原形（§4.5 泛化字符串 "~1.002-1.004"）：旧实现回退全章，
+    端点 1.004→1.040 漂移漏拦。
+    """
+    text = "### 4.5 VIF 共线性诊断 (`vif`)\n\nVIF ≈ 1.002-1.004，无明显共线性。\n"
+    claims = [("vif", "区间", "~1.002-1.004")]
+    problems = freshness.check_manual_freshness(text, claims)
+    assert len(problems) == 1 and "未登记行锚点" in problems[0], problems
+    tampered = text.replace("1.004", "1.040")
+    assert len(freshness.check_manual_freshness(tampered, claims)) == 1
 
 
 def test_spaced_operator_minus_negative_claim():
@@ -148,6 +182,50 @@ def _read_manual_text() -> str:
     ]
     assert parts, "未找到 docs/user-manual/[0-9]*.md 章节文件"
     return "\n".join(parts)
+
+
+class TestSection531And54ClaimsAreGated:
+    """§5.3 偏度/峰度 与 §5.4 正态性列数必须纳入 CLAIM 门禁（审查 2026-10-09 P0-10）。
+
+    这三处正是历史漂移点：§5.3 曾长期写 0.61/0.48（实测 0.898/1.881）、
+    §5.4 曾写「2/2 列满足正态性」（实测 raw 1/2、web 0/2）。此前它们
+    **不在任何 CLAIM 覆盖内**，故 35 条 CLAIM 全绿也拦不住。
+    """
+
+    CLAIMS = [
+        ("distribution_summary", "偏度", 0.898),
+        ("distribution_summary", "峰度", 1.881),
+        ("normality_check", "满足正态列数(web 口径)", 0),
+    ]
+
+    def test_real_manual_is_fresh(self):
+        assert freshness.check_manual_freshness(_read_manual_text(), self.CLAIMS) == []
+
+    @pytest.mark.parametrize(
+        "old,new,expect",
+        [
+            ("偏度=0.898，峰度=1.881", "偏度=0.618，峰度=1.881", "偏度"),
+            ("偏度=0.898，峰度=1.881", "偏度=0.898，峰度=0.481", "峰度"),
+            ("0/2 列满足正态性（Shapiro-Wilk", "2/2 列满足正态性（Shapiro-Wilk", "满足正态列数"),
+        ],
+    )
+    def test_tamper_is_caught(self, old, new, expect):
+        text = _read_manual_text()
+        tampered = text.replace(old, new)
+        assert tampered != text, f"注入未命中，用例前提不成立：{old!r}"
+        problems = freshness.check_manual_freshness(tampered, self.CLAIMS)
+        assert any(expect in p for p in problems), problems
+
+    def test_unmapped_analysis_is_not_silently_skipped(self):
+        """未登记章节映射的 analysis 必须点名 FAIL，而不是静默跳过（P1-5 收口）。
+
+        旧实现在 `SECTION_BY_ANALYSIS.get(analysis) is None` 时直接 `continue`
+        —— 新增 CLAIM 时最容易踩：值登记了、映射忘了，门禁看起来全绿。
+        """
+        problems = freshness.check_manual_freshness(
+            _read_manual_text(), [("no_such_analysis_zz", "某值", 1.0)]
+        )
+        assert any("未登记章节映射" in p for p in problems), problems
 
 
 def test_real_manual_sections_locatable():
@@ -213,3 +291,119 @@ def test_inverse_near_coefficient_swap_detected():
     assert len(problems) == 2, f"互换应检出两条: {problems}"
     assert any("熔体温度系数" in p for p in problems)
     assert any("模具温度系数" in p for p in problems)
+
+
+# ── P1-5 回归（2026-10-09 发版前审查）：vif / process_capability 锚点 ──────────
+# 旧实现两处假绿：
+#   ① ANCHOR_PATTERNS 缺 vif 条目 → 回退整章 token；§4.5 有 2 行同为 1.004，
+#      改一行被兄弟行掩盖；
+#   ② 缺 process_capability 条目 → 回退整章；§7.5 解读行「Cp=1.28」（2 位舍入）
+#      落在快照 1.279 的容差内，表格被改仍判「新鲜」。
+# 两处注入实测均为「0 问题未拦截」。
+
+_VIF_CLAIMS = [
+    ("vif", "VIF 熔体温度", 1.004),
+    ("vif", "VIF 模具温度", 1.002),
+    ("vif", "VIF 注射压力", 1.003),
+    ("vif", "VIF 冷却时间", 1.004),
+]
+
+_PC_CLAIMS = [
+    ("process_capability", "Cp (meta.cp)", 1.279),
+    ("process_capability", "Cpk (meta.cpk)", 0.923),
+]
+
+
+def test_vif_brother_row_does_not_mask_tamper():
+    """P1-5 负向注入①：真实手册 §4.5 「熔体温度 1.004 → 1.040」。
+
+    冷却时间同为 1.004，旧实现「无锚点 → 全章 token 存在性」由兄弟行兜住 → 0 报告。
+    """
+    text = _read_manual_text()
+    assert any("| 熔体温度 | 1.004 |" in line for line in text.splitlines()), (
+        "手册 §4.5 的 vif_table 行结构已变化，请更新本用例的快照"
+    )
+    tampered = text.replace("| 熔体温度 | 1.004 |", "| 熔体温度 | 1.040 |")
+    problems = freshness.check_manual_freshness(tampered, _VIF_CLAIMS)
+    assert len(problems) == 1, f"应恰好 1 条（兄弟行 1.004 不得掩盖）: {problems}"
+    assert "VIF 熔体温度" in problems[0]
+    assert "4.5" in problems[0], "问题应指明章节"
+
+
+def test_vif_real_manual_is_fresh():
+    """P1-5 基线：真实手册 §4.5 与 4 条 VIF 快照逐行一致 → 零问题。"""
+    assert freshness.check_manual_freshness(_read_manual_text(), _VIF_CLAIMS) == []
+
+
+def test_process_capability_row_tamper_not_masked_by_rounded_prose():
+    """P1-5 负向注入②：真实手册 §7.5 「Cp 1.279 → 1.100」。
+
+    解读行「Cp=1.28」（2 位舍入）落在快照 1.279 的容差内，旧的全章回退因此判「新鲜」。
+    """
+    text = _read_manual_text()
+    assert "| Cp (短期能力) | 1.279 |" in text, "手册 §7.5 的数值结果表行已变化，请更新本用例的快照"
+    assert "Cp=1.28" in text, "遮蔽值（解读行的 2 位舍入）不存在时本用例失去意义"
+    tampered = text.replace("| Cp (短期能力) | 1.279 |", "| Cp (短期能力) | 1.100 |")
+    problems = freshness.check_manual_freshness(tampered, _PC_CLAIMS)
+    assert len(problems) == 1, f"应恰好 1 条（解读行 1.28 不得掩盖）: {problems}"
+    assert "Cp (meta.cp)" in problems[0]
+    assert "7.5" in problems[0], "问题应指明章节"
+
+
+def test_process_capability_real_manual_is_fresh():
+    """P1-5 基线：真实手册 §7.5 与 Cp/Cpk 快照一致 → 零问题。"""
+    assert freshness.check_manual_freshness(_read_manual_text(), _PC_CLAIMS) == []
+
+
+def test_unanchored_claim_fails_even_when_value_exists_in_section():
+    """P1-5 核心规则：**未登记锚点的 CLAIM 一律 FAIL**，不得回退整章 token 存在性。
+
+    本用例的快照值 1.2415 确实就在该章节正文里 —— 旧实现会判「新鲜」，
+    正是「同章近值/低精度展示掩盖漂移」的入口。
+    """
+    text = "### 7.6 趋势预测 (`trend_forecast`)\n\nRMSE=1.2415，数据无趋势。\n"
+    assert "1.2415" in text, "快照值必须确实存在于章节内，否则测不到「回退」行为"
+    claims = [("trend_forecast", "临时 CLAIM", 1.2415)]
+    problems = freshness.check_manual_freshness(text, claims)
+    assert len(problems) == 1, f"无锚点必须 FAIL 而不是回退全章: {problems}"
+    assert "未登记行锚点" in problems[0]
+    assert "临时 CLAIM" in problems[0]
+
+
+def test_unanchored_claim_fails_with_anchor_registration_hint():
+    """FAIL 文案须给出补救方向（补锚点到 ANCHOR_PATTERNS），否则维护者只能猜。"""
+    text = "### 7.6 趋势预测 (`trend_forecast`)\n\nRMSE=1.2415。\n"
+    problems = freshness.check_manual_freshness(text, [("trend_forecast", "临时值", 1.2415)])
+    assert "ANCHOR_PATTERNS" in problems[0]
+
+
+def test_real_registered_claims_have_anchors():
+    """锚点登记完备性：门禁会产出的 CLAIM 必须都有锚点。
+
+    新规则下「无锚点 = FAIL」，若漏登记会让 `verify_manual_claims.py` 整片报错。
+    VIF 的 CLAIM 名取自 `claims_gate.VIF_MANUAL_CLAIMS`（同一快照来源）。
+    """
+    import sys
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from claims_gate import VIF_MANUAL_CLAIMS
+
+    expected = [("vif", f"VIF {name}") for name in VIF_MANUAL_CLAIMS]
+    expected += [
+        ("process_capability", "Cp (meta.cp)"),
+        ("process_capability", "Cpk (meta.cpk)"),
+    ]
+    missing = [key for key in expected if key not in freshness.ANCHOR_PATTERNS]
+    assert missing == [], f"以下 CLAIM 缺锚点，门禁会整片 FAIL: {missing}"
+    missing_cap = [key for key in expected if key not in freshness.VALUE_CAPTURE_PATTERNS]
+    assert missing_cap == [], f"以下 CLAIM 缺逐值捕获（会被同线近值掩盖）: {missing_cap}"
+
+
+def test_anchors_only_for_known_sections():
+    """一致性守卫：锚点的 analysis 必须登记在 SECTION_BY_ANALYSIS 中（否则永不生效）。"""
+    unknown = sorted({a for a, _ in freshness.ANCHOR_PATTERNS} - set(freshness.SECTION_BY_ANALYSIS))
+    assert unknown == [], f"锚点指向未登记的章节: {unknown}"
+    unknown_cap = sorted(
+        {a for a, _ in freshness.VALUE_CAPTURE_PATTERNS} - {a for a, _ in freshness.ANCHOR_PATTERNS}
+    )
+    assert unknown_cap == [], f"逐值捕获必须在锚点行内使用，缺锚点: {unknown_cap}"

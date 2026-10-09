@@ -272,6 +272,7 @@ EngSmartSuite/
 │       ├── test_browser_smoke.py         #   真浏览器冒烟（Edge + CDP）的 pytest 包装
 │       ├── test_truth_coverage.py        #   真值覆盖率门禁的包装 + 扫描器自证
 │       ├── test_python_probe.py          #   跨平台解释器探测自测（P0-11 回归防线）
+│       ├── test_new_task.py              #   新增方法脚手架（generate/--check）自测
 │       └── test_ci_layer_coverage.py    #   PR 门禁覆盖守卫（测试目录/文件须接入 quick job）
 │
 ├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）

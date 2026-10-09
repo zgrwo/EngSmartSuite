@@ -41,18 +41,25 @@ pytest tests/ -q
 □ 1. src/smartsuite/engine/xxx.py — 实现 (AnalysisRequest) -> AnalysisResult
 □ 2. src/smartsuite/engine/__init__.py — 导出函数名
 □ 3. src/smartsuite/services/task_spec.py — 在 TASK_SPECS 追加**一条** TaskSpec
-     （key/func_path/label/group/default_params/raw_cat/no_target/no_data）：
+     （key/func_path/label/group/default_params/raw_cat/no_target/no_data/y_only/x_optional）：
      TASK_REGISTRY / DEFAULT_PARAMS / TASK_LABELS / TASK_GROUPS / RAW_CAT_TASKS /
-     NO_TARGET_TASKS / NO_DATA_TASKS 共 7 个结构全部由 `derive()` 自动派生
-     （审查 2026-09-19 B1 之前，这 7 处需手工同步且含 3 处 append/add 补丁）
-□ 4. web/static/app.js — TASK_PARAMS 添加参数默认值
+     NO_TARGET_TASKS / NO_DATA_TASKS / Y_ONLY_TASKS / X_OPTIONAL_TASKS 共 9 个结构
+     全部由 `derive(TASK_SPECS)` 自动派生
+     （审查 2026-09-19 B1 之前，其中 7 处需手工同步且含 3 处 append/add 补丁）
+□ 4. src/smartsuite/services/task_spec.py — 在同一条 TaskSpec 上声明列需求
+     （`y_only=True` 仅需 Y 列 / `x_optional=True` X 列可选 / `no_target=True` 无需 Y 列）
+     —— 这是**唯一动作**：前端不再有任何列约束集合，`/api/tasks` 自动下发
 □ 5. templates/ — 创建 YAML 模板
 □ 6. tests/ — 至少覆盖 correctness + invariants 两层
 □ 7. docs/specification/api-reference.md — 更新 API 参考
 □ 8. docs/user-manual/ + skills/analysis-decision-tree.md — 手册（五段式，方法章位于 04–08）与决策树（如引入新场景）
 ```
 
-> 第 3 步是唯一一处「注册」：不要再去改 `orchestrator.py` 里的集合——它们已无字面量。
+> 第 3/4 步是唯一一处「注册」：列需求在 `TaskSpec` 里**声明**，其余结构由 `derive()` 派生。
+> 不要再去改 `orchestrator.py` 里的集合——它们已无字面量（`LazyTaskRegistry` 是只读 `Mapping`，
+> 技术上改不动）；也**不要**在 `web/static/app.js` 里新建 `_noTargetNeeded` / `_yOnlyTasks` /
+> `_xOptionalTasks` 这类集合——这三个标识符已被 `tests/guards/test_task_requirements_ssot.py`
+> 列为禁名（出现即为回退）。
 
 ## 代码规范
 

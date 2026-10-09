@@ -55,6 +55,53 @@
 | 23 | **GBK 控制台输出乱码**（Windows 终端默认 GBK，UTF-8 中文输出乱码） | 脚本入口 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`（本仓 scripts/ 统一约定） |
 | 24 | **pytest-current junction 残留**（Windows 上嵌套 pytest 会话的 `pytest-of-<user>/pytest-current` junction 清理阶段 PermissionError → sessionfinish 报错、进程退出码 1，verify_all/CI 误判失败） | 嵌套 pytest 与 verify_all 调用显式加 `--basetemp` 隔离；或清理 `%TEMP%\pytest-of-zgrwo` 残留目录 |
 
+## 测试口径陷阱：pytest 的 `filterwarnings = ["error"]` **不作用于生产运行时**
+
+| # | 陷阱 | 正确做法 |
+|---|------|----------|
+| 27 | **`pyproject.toml` 的 `filterwarnings = ["error", ...]` 只在 pytest 生效**；生产（Web / CLI）不会把 numpy/scipy/pandas 的 `RuntimeWarning` 升为异常 → 同一退化输入在两条口径下走**不同代码路径**，断言「不得给出错误结论」的守卫**空过**（假绿） | 断言退化输入结论的用例**显式声明生产口径**（见下例）；引擎侧能就地窄静默的就地静默，使两条口径行为一致 |
+
+> **来源：2026-10-09 发版前全量审查（P0-3 / P0-6）。**
+> 与 `skills/smartsuite-dev.md` 的**陷阱 10**（第三方库告警在 `filterwarnings=error` 下被 `except Exception` 吞成业务错误）是**同一族、方向相反**的失效模式：
+> 陷阱 10 是「pytest 更严 → 库告警变异常 → 真实数值结果被吞成业务错误」；
+> 本条是「pytest 更严 → 异常兜底提前接管 → 生产里的**错误结论**反而没被断言看见」。
+> 本条属**工具链**（测试运行器口径）而非统计语义，故登记在此；与陷阱 10 只做链接、不复制。
+
+### 现象：同一输入，两条口径两种结果
+
+| 输入 | 生产口径（默认 warnings） | pytest 口径（`error`） | 后果 |
+|---|---|---|---|
+| `spc_cusum` + 1 个 `+Inf` | `status=error`「所有分组标准差均为零（**常量数据**）」—— **错误归因** | `status=error`「未归类的异常…错误编号」，**不含「常量」** | 断言「不得含『常量』」的守卫**空过** |
+| `normality_check` 强右偏数据 ×1e155 | `status=ok`「**1/1 列满足正态性**」—— **静默错误结论** | `status=error`「未归类的异常」 | 断言「不得声称正态」的用例**空过** |
+| `variance_test` 数据整体 ×1e300 | `status=ok`「方差不齐 (p=nan)」 | 异常兜底 | 同上 |
+| `spc_attribute` 全 `1.7e308` → c̄ 溢出 | `status=ok`「CL=inf…0/100 超限」 | 异常兜底 | 同上 |
+
+### 处置（本仓库既有风格）：用例显式声明生产口径
+
+```python
+# 断言「退化输入下不得给出错误结论」的用例，必须放宽到生产口径 ——
+# 否则 pytest 把库告警升成异常 → 走 orchestrator 的异常兜底 →
+# 用例想验的那个分支**根本没被执行**，断言在空跑中通过。
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning")
+def test_xxx_degenerate_verdict_is_not_definitive():
+    """……docstring 必须写明**为什么必须放宽**：本用例验的是结论文案/判定，
+    不是告警；不放宽就会走异常兜底分支而假绿。删掉这两行 = 悄悄废掉本用例。"""
+```
+
+- 放宽**只针对具体告警消息 + 类别**（`ignore:<消息前缀>:<类别>`），不得 `ignore` 一把梭 —— 那会连真实缺陷一起静音。
+- **docstring 必须写明理由**，否则下一个人会当成"为了过测试而放宽"删掉它。
+- 现有示例：`tests/guards/test_micro_scale_guards.py`（`test_hedges_g_zero_variance_warns_not_silent` 等）、
+  `tests/engine/test_engine_input_guards.py` 的第 14 / 15 节（`variance_test` 量级溢出判决、计数型控制图控制限必须有限）。
+
+### 更彻底的做法（**建议，本轮不做**）
+
+1. **引擎内部就地窄静默**预期内的退化输入告警，从根上消除"两条路径"——
+   `src/smartsuite/engine/_utils.py` 的 `shapiro_p()` 已是范例：它在
+   `warnings.catch_warnings()` 内 `simplefilter("ignore", RuntimeWarning)` 后调 scipy，
+   并把不可判定一律**向上传播 `NaN`**（静默告警 ≠ 掩盖问题）。新写退化输入路径时优先照此办理。
+2. 关键退化场景增加一组「**在生产 warnings 口径下运行**」的用例（`simplefilter("default")` 上下文内复跑），把生产口径本身纳入回归。
+
 ## 提交前自查
 
 ```bash
@@ -69,3 +116,4 @@ python scripts/test_quality_guard.py     # 测试弱断言/缺测/命名
 - 新踩坑并验证修复后，**立即追加到本表**（附真实案例与正确做法）
 - 语言级陷阱只在 `skills/smartsuite-dev.md` 维护（本表只留工具链问题，禁止双写）
 - 项目专属坑位（统计语义/业务规则）写入 `AGENTS.md`「历史经验」，不放本文件
+- 表中编号历史上出现过重复（如两个 21）；新增请取**当前最大值 +1**，不要重排既有编号（引用会失效）

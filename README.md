@@ -132,6 +132,12 @@ python -m smartsuite.cli run templates/example_normality_check.yaml --input data
 python -m smartsuite.cli run templates/example_process_capability.yaml --input process.csv
 ```
 
+> ⚠️ **示例中的 `templates/*.yaml` 需在源码目录运行**：根级 `templates/` 只在源码仓库（与 sdist）里，
+> `pip install` 装的 **wheel 不含**它（`pyproject.toml` 的 package-data 只声明了 `smartsuite.web` 的
+> 前端模板与静态资源；`MANIFEST.in` 的 `graft templates` 只作用于 sdist）。
+> 用 wheel 时请自备同格式的 YAML 文件（`run` 只接受模板路径这一个位置参数，没有 `--task` 之类的替代开关；
+> 格式见 [templates/README.md](templates/README.md)），或直接用下面的 Python API 调用。
+
 ### Python API（编程调用）
 
 ```python

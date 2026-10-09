@@ -142,6 +142,7 @@ class AnalysisResult:
 - **params**: `bins` (15) — 直方图分箱数
 - **返回**: `descriptive_stats`, `distribution_fits`
 - **图**: 直方图 + 多元分布拟合曲线
+- **口径（偏度/峰度）**: 偏差校正估计量（**G1/G2**），等价 `pandas.Series.skew()/kurtosis()`、`scipy.stats.skew/kurtosis(..., bias=False)`、Excel `SKEW`/`KURT`、Minitab 的 **Adjusted** 口径。**峰度是超额峰度（正态基准 = 0）**。与 scipy **默认** `bias=True`（矩估计）不同，差异随 n 减小而放大（同一列实测：n=50 时峰度相对差 27.5%，n=1000 时 0.8%）。引用本表数值时必须写明口径。详见 [minitab-alignment.md](../governance/minitab-alignment.md)。
 
 ### normality_check
 - **Task Key**: `normality_check`
@@ -149,6 +150,7 @@ class AnalysisResult:
 - **params**: `alpha` (0.05) — 显著性水平（同时影响 S-W 和 A-D 判定）
 - **返回**: `normality_results` (含偏度/峰度/建议变换)
 - **图**: Q-Q 子图矩阵
+- **口径（偏度/峰度）**: 同 `distribution_summary` —— 偏差校正估计量（`bias=False`，Minitab Adjusted 口径），峰度为超额峰度（正态基准 = 0）。
 
 ### power_analysis
 - **Task Key**: `power_analysis`

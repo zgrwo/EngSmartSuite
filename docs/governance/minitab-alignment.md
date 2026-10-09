@@ -23,6 +23,34 @@
 > 的验证。上表 A/B/C 三种都是**与公开规范/公式**对账，不是与 Minitab 软件对账。
 > 这与本项目对 R 的处理一致（无 R 环境 → 退化为独立第二实现并如实标注）。
 
+### 口径补充：描述性统计的偏度/峰度 = Minitab 的 **Adjusted** 口径
+
+适用任务：`distribution_summary`（`descriptive_stats` 表）与 `normality_check`（`normality_results` 表）。
+之前本表未列此条，而两处口径**确实不同**，故补上（审查 2026-10-09 P2-7）。
+
+| 口径 | 本引擎 | pandas | Excel | scipy（**默认**） | Minitab |
+|:---|:---|:---|:---|:---|:---|
+| 偏度 | `bias=False`（G1） | `Series.skew()` 同 | `SKEW` 同 | `skew(bias=True)` 不同 | **Adjusted** 同 |
+| 峰度（超额，正态基准 = 0） | `bias=False`（G2） | `Series.kurtosis()` 同 | `KURT` 同 | `kurtosis(bias=True)` 不同 | **Adjusted** 同 |
+
+**两种估计量的差随 n 减小而放大**（同一列取前 n 行、两种口径对比实测）：
+
+| n | 偏度 `bias=False` | 偏度 `bias=True` | 相对差 | 峰度 `bias=False` | 峰度 `bias=True` | 相对差 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 50 | 0.834728 | 0.809475 | 3.12% | 0.993085 | 0.778871 | **27.50%** |
+| 137 | 0.809928 | 0.801033 | 1.11% | 1.029730 | 0.949053 | 8.50% |
+| 1000 | 0.897880 | 0.896532 | 0.15% | 1.880867 | 1.865482 | 0.82% |
+
+> **结论**：本引擎与 **Minitab（Adjusted）/ pandas / Excel** 一致，与 **scipy 默认**不一致。
+> 报告或对账时**必须写明用的是哪一个** —— 小样本下峰度相对差可达两位数百分比，
+> 足以让"与 scipy 对不上"被误判成缺陷。
+> 口径来源：`root_cause/distribution.py` 的 `distribution_summary()`（`descriptive_stats` 的
+> `偏度`/`峰度` 两行取 `Series.skew()` / `Series.kurtosis()`）与 `normality_check()`（同名变量）。
+> 钉住用例：`tests/engine/test_task_truth_assertions.py` 的
+> `test_normal_check_rejects_grossly_non_normal_data` —— 38 个 0 + 2 个 100 的数据断言
+> 偏度 `= 4.292`（实测 `bias=False` = 4.292145，而 `bias=True` = 4.129483，差 3.9%），
+> 即该用例锁的正是**偏差校正口径**（改口径会立刻红）。
+
 ## 二、过程能力（`process_capability`）
 
 Minitab 的「能力分析（正态）」输出与引擎对照：

@@ -31,6 +31,52 @@ _Avoid_: 配置文件、preset、recipe
 
 _Avoid_: 控制器、调度器、router
 
+### 任务声明 (TaskSpec)
+`services/task_spec.py` 中 `TASK_SPECS` 的**一条**记录：任务键、引擎函数路径、中文标签、分组、默认参数与列需求标记。**新增/修改分析方法的唯一注册点**。
+
+_Avoid_: 任务配置、注册项、task 字典
+
+### 参数契约 (ParamSpec / `Spec`)
+`core/param_spec.py` 里**一个任务的参数契约**：字段声明（`Req` 必填 / `Opt` 可选，校验器 `Finite` / `Integer` / `Choice` / `Text` / `Custom`）+ 跨字段规则（`CrossRule`）+ 校验入口（`validate_or_raise`）。同时是 Web 参数面板**标签/提示/下拉选项**的派生来源（`services/param_labels.py` → `/api/tasks`），是"参数默认值与渲染方式不再由前端手写"的依据。
+
+_Avoid_: 参数表、参数校验器（只指校验器那一半）
+
+### 单一来源 (SSOT, single source of truth)
+每个事实只在一处定义，其余由代码**派生**或文档**链接引用**。本项目最典型的三处：任务注册（`TaskSpec` → `derive()`）、参数面板（各任务的 `Spec` → `/api/tasks` → 前端只读）、文档数字（`api-reference.md` 为签名与计数唯一信源）。
+
+_Avoid_: 主副本、基准表（口语可用，正式文档用"单一来源"）
+
+### 派生 (derive)
+`services/task_spec.py::derive(TASK_SPECS)` —— 从 `TaskSpec` 序列一次生成 `TASK_REGISTRY` / `DEFAULT_PARAMS` / `TASK_LABELS` / `TASK_GROUPS` / `RAW_CAT_TASKS` / `NO_TARGET_TASKS` / `NO_DATA_TASKS` / `Y_ONLY_TASKS` / `X_OPTIONAL_TASKS` 共 9 个结构。**禁止手改**这些结构（`LazyTaskRegistry` 是只读 `Mapping`）。
+
+_Avoid_: 同步、自动生成（口径太宽）
+
+## 边界处理术语（B0–B3）
+
+> 完整定义见 [boundary-contract.md](boundary-contract.md)（**唯一**边界级别定义处，此处只登记术语，不复制表格）。
+
+### 边界契约 (boundary contract)
+退化**输入**（含 ±Inf 的列、常量列、超大子组、歧义编码）应按**拒绝/清洗/降级/近似**哪一档处置、以及**用户必须看到什么**的约定。与值级哨兵语义（[sentinel-contract.md](sentinel-contract.md) 的 L1–L5）互补、不重叠。
+
+_Avoid_: 输入校验规范、异常处理策略
+
+### B0–B3（处置级别）
+退化**输入**的处置必须显式分级（**定义与清单唯一出处**：[boundary-contract.md](boundary-contract.md)）：
+**B0 拒绝**（无法给出有意义结果 → `status="error"` + `code` + 中文工艺术语 + 可执行建议）、
+**B1 清洗**（可安全移除后继续 → 必须披露移除的**数量与列名**）、
+**B2 降级**（主路径不可用、存在等价次路径 → 走次路径 + **结果与图表标注降级**）、
+**B3 近似**（无精确解 → 计算 + **标注所用口径**）。
+
+_Avoid_: 错误等级、严重度分级（B0 不是"最严重的错误"，而是"必须拒绝"）
+
+### 输入守卫 (`engine/_guard.py`)
+边界契约的**唯一执行点**。引擎函数**不得**再手写清洗/校验循环，必须经 `_guard` 的入口原语
+（`clean_series` / `clean_frame` / `check_*` / `explain_undefined_sigma`，**完整清单与签名见
+[boundary-contract.md](boundary-contract.md) 的「契约的执行点」表** —— 该表是唯一列表，此处不复制），
+再把 `BoundaryReport.messages()` 追加进 `AnalysisResult.messages`。
+
+_Avoid_: 清洗工具、数据预处理（后者指 `services/data_io.py` 的插补/编码，不是边界处置）
+
 ## 分析领域术语
 
 ### 要因分析 (Root Cause)

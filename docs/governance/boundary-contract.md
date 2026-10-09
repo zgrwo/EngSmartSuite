@@ -95,13 +95,24 @@ E_<域>_<原因>
 
 | 函数 | 用途 |
 |---|---|
-| `clean_series(s, column=)` | B1 单列非有限值清洗 |
-| `clean_frame(df, cols)` | B1 多列按行清洗 |
-| `check_n(n, minimum, what=)` | B0 样本量下限 |
-| `check_non_constant(s, what=)` | B0 常量列 |
-| `check_finite_param(value, name)` | B0 参数非有限 |
-| `c4_asymptotic(n)` | B3 超大 n 的 c4 稳定计算 |
-| `BoundaryIssue` / `to_messages(issues)` | 处置记录 → 中文 `messages` |
+| `clean_series(s, column=, report=)` | B1 单列非有限值清洗（入口） |
+| `clean_frame(frame, cols, report=)` | B1 多列按行清洗（入口） |
+| `check_n(n, minimum, what=, report=)` | B0 样本量下限 |
+| `check_non_constant(s, what=, report=)` | B0 常量列 |
+| `check_magnitude(s, what=, report=)` | B0 量级上界（`E_SCALE_EXTREME_MAGNITUDE`：平方和溢出会让判决静默翻转） |
+| `check_finite_param(value, name, report=)` | B0 参数非有限 |
+| `check_tables_finite(tables, what=, code=, report=)` | B0 输出侧后置断言（结果表出现 inf/nan 即拒绝；判据来自 `non_finite_tables`） |
+| `explain_undefined_sigma(values, column=, what=)` | σ 不可估计时的**正确归因**（常量 → 非有限值 → 样本量 → 兜底） |
+| `BoundaryIssue` / `BoundaryReport.messages()` | 处置记录 → 中文 `messages`（`BoundaryReport.codes()` 给机器可读错误码） |
+
+> 本表即 `_guard` 的**全部**对外执行点（`partition_finite` / `non_finite_detail` / `non_finite_tables`
+> 属内部原语与文案构造，不直接调用）。新增执行点时必须同步本表 —— 该表曾失真：登记了全库 0 匹配的
+> `c4_asymptotic(n)` 与 `to_messages(issues)`（审查 2026-10-09 P2-1），同时漏登记真实存在的
+> `explain_undefined_sigma` / `check_magnitude` / `check_tables_finite`。
+
+> **B3 的「超大 n 的 c4 稳定计算」不在 `_guard` 内**：实现在
+> `src/smartsuite/engine/spc_charts/we_rules.py` 的 `c4()`（`n ≥ 380` 走对数域）。
+> 原表此处登记的 `c4_asymptotic(n)` 是全库 0 匹配的失真符号（见上）。
 
 **守卫**：`tests/guards/test_boundary_contract.py` 断言
 (a) 已接入模块遇到退化输入时披露正确；

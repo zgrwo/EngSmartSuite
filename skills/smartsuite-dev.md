@@ -68,42 +68,41 @@ color=PALETTE["spec"]["secondary"]     # 橙色警告线
 color=PALETTE["anomaly"]["primary"]    # 红色异常线
 ```
 
-### 陷阱 2：前端列约束与引擎不一致
+### 陷阱 2：列需求声明与引擎实际使用不一致
 
 **现象**：Web UI 要求选 X 列，但引擎根本不使用 `feature_cols`；或要求选 Y，但引擎不需要 `target_col`。
 
+**根因（2026-09-19 B1 后已收敛）**：任务的列需求**只在 `services/task_spec.py` 的 `TaskSpec` 声明一次**，
+由 `derive()` 派生 → `orchestrator.py` 的 `Y_ONLY_TASKS` / `NO_TARGET_TASKS` / `X_OPTIONAL_TASKS` /
+`RAW_CAT_TASKS` / `NO_DATA_TASKS` → `/api/tasks` 下发 → 前端 `params.js` 只读。
+**唯一动作**是在 `TaskSpec` 上声明 `y_only` / `x_optional`（详见模板 2 第 4 步）。
+
 **检查清单**（每次修改引擎函数签名后必查）：
-1. 该函数使用 `req.target_col` 吗？→ 如果不使用，应加入 `_noTargetNeeded`
-2. 该函数使用 `req.feature_cols` 吗？→ 如果不使用，应加入 `_yOnlyTasks`
-3. 该函数 X 列可选吗？→ 如果是，应加入 `_xOptionalTasks`
-4. 手册协同要求与 `_yOnlyTasks` / `_noTargetNeeded` / `_xOptionalTasks` 一致吗？
+1. 该函数使用 `req.target_col` 吗？→ 如果不使用，应在同一条 `TaskSpec` 声明 `no_target=True`
+2. 该函数使用 `req.feature_cols` 吗？→ 如果不使用，应声明 `y_only=True`
+3. 该函数 X 列可选吗？→ 如果是，应声明 `x_optional=True`
+4. 手册协同要求与这三个声明一致吗？
 
-**关键代码位置**：`app.js` 的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks` 三个 `new Set([...])` 常量（**按常量名定位，勿记行号**——这些行号已多次漂移：2026-09-21 实测为 769/777/787，早期文档写的 501-510 已失效）
-
-```javascript
-// _noTargetNeeded: 完全无需目标列 Y 的任务（仅依赖 X 列或纯参数计算）
-const _noTargetNeeded = new Set([
-    'vif', 'cohens_kappa', 'cronbach_alpha', 'power_analysis', 'multi_objective',
-    'doe_design',  // 审查 2026-09-01 D-4：与 app.js 同步补入（DOE 设计仅依赖参数）
-    'inverse_solve',  // 审查 2026-09-11 R-3：与 app.js:697 同步（反解自管理列角色）
-]);
-
-// _yOnlyTasks: 仅需 Y 列即可运行的任务（无需选择 X 列）
-const _yOnlyTasks = new Set([
-    'process_capability', 'trend_forecast',
-    'power_analysis', 'spc_nonparametric', 'doe_design',  // 审查 2026-09-05 F-drift：与 app.js:511 同步补入
-    'distribution_summary', 'proportion_ci',
-    'bootstrap_ci', 'median_ci', 'tolerance_interval', 'change_point',
-    'spc_cusum', 'spc_ewma',
-    'grid_search',
-    'inverse_solve',  // 审查 2026-09-11 R-3：与 app.js:710 同步
-]);
-
-// _xOptionalTasks: X 列可选的任务（引擎支持 feature_cols[0] 作为 X 轴，但不选时可回退到顺序索引）
-const _xOptionalTasks = new Set([
-    'spc_xbar', 'spc_attribute', 'normality_check', 'anomaly_detect',
-]);
+```python
+# services/task_spec.py — 声明的唯一位置（不是 app.js，也不是 orchestrator.py）
+TaskSpec(
+    key="process_capability",
+    func_path="smartsuite.engine.capability:process_capability_analysis",
+    label="过程能力Cp/Cpk",
+    group="过程监控",
+    default_params={"usl": None, "lsl": None, "target": None, "transform": None,
+                    "subgroup_col": "", "subgroup_size": None},
+    y_only=True,          # 仅需 Y 列（第 2 项）——引擎不读 feature_cols
+    # x_optional=True,    # X 列可选（第 3 项），如 spc_xbar / normality_check
+    # no_target=True,     # 完全无需 Y 列（第 1 项），如 vif / cohens_kappa
+)
 ```
+
+> 🔴 **前端三集合已消灭**：`app.js` 里的 `_noTargetNeeded` / `_yOnlyTasks` / `_xOptionalTasks`
+> 三份手写 `new Set([...])` 常量**已删除**，且被 `tests/guards/test_task_requirements_ssot.py`
+> 的 `_BANNED` 列为禁名（**赋值/声明形态出现即为回退**；注释里说明"原先是什么"是允许的）。
+> 早期文档让读者去 `app.js` 按常量名定位——**那个做法现在会直接踩守卫**。
+> （历史教训：这三个集合曾与后端多次漂移，2026-09-21 实测行号 769/777/787，再早写 501-510 —— 靠行号或手抄集合同步本就是错的。）
 
 ### 陷阱 3：SPC 控制限/规格限颜色约定
 
@@ -351,7 +350,10 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
                                key/func_path/label/group/default_params/raw_cat/no_target/no_data
                                → TASK_REGISTRY / DEFAULT_PARAMS / TASK_LABELS / TASK_GROUPS /
                                  RAW_CAT_TASKS / NO_TARGET_TASKS / NO_DATA_TASKS 自动派生
-□ 4. services/task_spec.py — TaskSpec 声明参数（默认值由 derive() 派生，勿抄到前端）
+□ 4. services/task_spec.py   — 在**同一条** TaskSpec 上声明列需求 y_only / x_optional
+                               （**唯一动作**：这三个布尔值派生 Y_ONLY_TASKS / X_OPTIONAL_TASKS
+                                 并经 /api/tasks 下发；前端三集合已消灭，见陷阱 2）
+                               + 参数默认值写在 default_params（勿抄到前端）
 □ 5. templates/              — 创建 YAML 模板
 □ 6. tests/                  — 至少覆盖 4 层防线中的 2 层（correctness + invariants 必做）
 □ 7. docs/specification/api-reference.md   — 更新 API 参考
@@ -359,7 +361,9 @@ def new_analysis(req: AnalysisRequest) -> AnalysisResult:
 ```
 
 > 审查 2026-09-19 B1：第 3 步曾需同步改 `orchestrator.py` 的 7 组集合（含 3 处
-> append/add 补丁）；现这些名字全部由 `derive()` 派生，**新增任务只改这一处**。
+> append/add 补丁）；现这些名字全部由 `derive(TASK_SPECS)` 派生（共 9 个结构），
+> **新增任务只改 `task_spec.py` 这一处**——`orchestrator.py` 里没有可手改的字面量集合
+> （`LazyTaskRegistry` 是只读 `Mapping`），第 4 步的列需求同样只在 `TaskSpec` 声明。
 
 ### 模板 3：box_chart / SPC 函数新增 USL/LSL/UCL/CL 参数
 
@@ -399,27 +403,42 @@ for key, color, style in [
         _ref_lines.append((val_f, color, style, key.upper()))
 ```
 
-**参数默认值的单一来源**（`app.js` 已无 `TASK_PARAMS` 字典，2026 单一来源重构后前端只读）：
-```javascript
-task_name: { ..., usl: '', lsl: '', ucl: '', lcl: '', cl: '', target: '' },
+**参数默认值的单一来源**（后端 `TaskSpec.default_params` → `DEFAULT_PARAMS` → `/api/tasks` 下发；
+前端**只读**，`app.js` / `params.js` 里已无任务默认值字典）：
+```python
+# services/task_spec.py
+TaskSpec(
+    key="box_chart",
+    ...,
+    default_params={"mode": "facet", "show_stats": "true", "group_col": None,
+                    "usl": None, "lsl": None, "ucl": None, "lcl": None, "cl": None, "target": None},
+)
 ```
 
 ### 模板 4：Web UI 参数面板完整流程
 
-当修改/新增参数时，确保三处一致：
+**修改/新增参数时只改后端 2 处，前端零改动**（2026-09-24 第二十八轮起前端手写平行字典已全部删除）：
 
 ```
-1. TaskSpec(params={...})                      ← 声明参数与默认值（单一来源）
-2. app.js PARAM_META[key] = { type, label, options }    ← 控制渲染方式（可选）
-3. app.js PARAM_LABELS[key] = '中文标签'                  ← 中文显示名（可选）
-4. orchestrator.py DEFAULT_PARAMS[task] = { key: val }  ← Python 端默认值
+1. TaskSpec(default_params={...})   ← 默认值（services/task_spec.py）
+                                       → DEFAULT_PARAMS → /api/tasks 的 params → params.js
+2. 该任务的 Spec 字段声明            ← 类型/标签/提示/下拉选项
+   （smartsuite/core/param_spec.py 的 Req/Opt/Choice；引擎模块内
+     `PARAM_SPECS[task]`，模块独占一个任务时可用模块级 `PARAM_SPEC`）
+                                       → /api/tasks 的 param_labels / param_hints / param_options
+3. 前端：**无需改** —— params.js 从上述接口载荷派生渲染，app.js 只读。
+   手写的 `PARAM_META`（167 行）/ `PARAM_LABELS` / `PARAM_HINTS` **已删除**，
+   重新引入即为回退（`scripts/verify_frontend_params.py` 会拦 TASK_PARAMS 字面量，
+   `tests/guards/test_task_requirements_ssot.py` 会拦列需求集合）。
 ```
 
 **特别注意**：
 - `''` 默认值 → 输入框 `type="text"`，用户可输入非数值 → 引擎必须加 `float()` 防护
 - `number` 默认值 → 输入框 `type="number"`，浏览器约束数值输入
 - `column` 类型（下拉列选择器）→ 默认值为列名，如果数据无此列则选中"自动"选项 → `getParams()` 会跳过空值
-- 参数含义因任务而异时 → 用 `key@task_name` 覆写 `PARAM_META`
+- 参数含义因任务而异时 → 在**各自的 `Spec` 里**声明同名参数的不同 `label`/`Choice`；
+  后端 `services/param_labels.py` 会自动为冲突项下发 `key@task_name` 覆盖键，
+  前端 `paramLabel` / `paramOptions` 优先匹配它（选项**一律**任务级，无全局兜底 —— 见该模块 docstring 的 `mode` 泄漏实例）
 
 ### 模板 5：Web UI 前后端一致性验证
 
@@ -457,7 +476,7 @@ result_b = results_b[0]
 | Gage R&R AV 数值可疑 / d2\* 相关审查 | 索引口径或方向误判（2026-09-05 否证轮教训） | 见陷阱 8：ANOVA 交叉为准，勿用直觉公式改表 |
 | 微尺度(ppb/pico)数据结论翻转 / Web 整列 0.0000 | 绝对 `EPSILON` 判决或展示层固定舍入 | 见陷阱 9：守卫改精确零、判决相对化、展示走 `round_for_display` |
 | 测试报 `DID NOT WARN` / `divide by zero encountered` / 「VIF 计算失败」，同输入脚本却 `status=ok` | 第三方库告警在 `filterwarnings=error` 下升为异常，被 `except Exception` 吞成业务错误（数值表全丢）；同一输入在不同依赖分支发不同告警（statsmodels ≥0.15 条件数 UserWarning / 0.14 FP 除零） | 见陷阱 10：先 `warnings.catch_warnings(record=True)` 定位 `w.filename/w.lineno`，再按消息窄静默 + `np.errstate`；**两个依赖分支都要跑** |
-| 数据列含 ±Inf：p 值为 NaN 却显示「未发现显著差异」/ 任务抛 `supplied range ... is not finite`、`Input y contains infinity` | `dropna()` 不剔除 ±Inf（Inf 非 NaN），scipy 返回 NaN p、matplotlib/sklearn 直接抛错 | 入口调 `_utils.drop_non_finite(data)`（单列）或 `drop_non_finite_rows(frame, cols)`（多列配对），把 `non_finite_note(n, col)` 追加进 `messages`；回归防线 `tests/engine/test_engine_input_guards.py` 第 12/13 节 |
+| 数据列含 ±Inf：p 值为 NaN 却显示「未发现显著差异」/ 任务抛 `supplied range ... is not finite`、`Input y contains infinity` | `dropna()` 不剔除 ±Inf（Inf 非 NaN），scipy 返回 NaN p、matplotlib/sklearn 直接抛错 | 入口走 `engine/_guard.py`：单列 `clean_series(s, column=..., report=report)`、多列配对 `clean_frame(df, cols, report=report)`，再把 `report.messages()` 追加进 `AnalysisResult.messages`（`report.codes()` 给机器可读错误码）；**`_utils.drop_non_finite` / `drop_non_finite_rows` / `non_finite_note` 已删除**，重新引入即为回退。回归防线 `tests/guards/test_boundary_contract.py` + `tests/engine/test_engine_input_guards.py` 第 12/13 节 |
 
 ---
 
