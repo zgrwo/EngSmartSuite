@@ -131,6 +131,59 @@ class TestNoFalsePositivesOnEngineReadKeys:
         assert spec.unknown_fields({"event_col": "e"}, extra_known=known) == ["event_col"]
 
 
+class TestGlobalParamVocabulary:
+    """`global_param_vocabulary()` —— 本产品"存在这个参数名"的判据。
+
+    它决定披露文案的**措辞分级**：键在词汇表里（别的任务会用）→「其他任务会用到该
+    参数名」；不在 →「可能拼写有误」。分级错了就是**错误指控**，故两者都要钉住。
+    """
+
+    def test_is_non_empty_and_cached(self):
+        from smartsuite.services.param_labels import global_param_vocabulary
+
+        vocab = global_param_vocabulary()
+        assert isinstance(vocab, frozenset)
+        assert len(vocab) >= 30, f"词汇表只含 {len(vocab)} 个键 —— 可能收集逻辑失效"
+        # 返回 frozenset 且 lru_cache：同一对象（避免每次调用重建）
+        assert global_param_vocabulary() is vocab
+
+    @pytest.mark.parametrize("key", ["group_col", "usl", "alpha", "method"])
+    def test_common_param_names_are_present(self, key):
+        from smartsuite.services.param_labels import global_param_vocabulary
+
+        assert key in global_param_vocabulary(), f"{key} 是本产品通用参数名，应在词汇表内"
+
+    def test_typo_is_not_in_vocabulary(self):
+        """拼错的键不该进词汇表 —— 否则真拼写错误也会被降级成"不适用"。"""
+        from smartsuite.services.param_labels import global_param_vocabulary
+
+        for typo in ("usll", "lsll", "zzz_not_a_param"):
+            assert typo not in global_param_vocabulary()
+
+    def test_used_for_two_tier_wording_end_to_end(self):
+        """端到端：`anova` 同时收到"别处合法"与"真拼错"的键，措辞必须分开。"""
+        from smartsuite.core.contracts import AnalysisRequest
+        from smartsuite.services.orchestrator import orchestrate
+
+        rng = np.random.default_rng(1)
+        df = pd.DataFrame({"y": rng.normal(0, 1, 60), "g": ["A", "B"] * 30})
+        r = orchestrate(
+            AnalysisRequest(
+                task="anova",
+                data=df,
+                target_col="y",
+                feature_cols=["g"],
+                params={"group_col": "g", "usll": 70},
+            )
+        )
+        assert r.status == "ok", r.messages
+        note = " ".join(r.messages or [])
+        assert "其他任务会用到该参数名" in note, f"group_col 应按「不适用」措辞：{note}"
+        assert "可能拼写有误" in note, f"usll 应按「拼写错误」措辞：{note}"
+        # 两句必须各自对应正确的键，不能串位
+        assert note.index("group_col") < note.index("其他任务会用到该参数名") < note.index("usll")
+
+
 class TestUnknownMessageBuilder:
     """`Spec.unknown_message` 的单元判据。"""
 
