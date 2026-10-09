@@ -1485,9 +1485,21 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     # Log-rank 检验 (分组比较)；group_col == event_col 时分组即事件本身，无比较意义
     logrank_result = None
+    logrank_skipped_reason = ""
     if group_col and group_col != event_col and group_col in sub.columns:
         groups = sub[group_col].unique()
-        if len(groups) == 2:
+        if len(groups) > 2:
+            # 审查 2026-10-09 契约 #20：原实现只写 `if len(groups) == 2:`，**>2 组时
+            # 整段被静默跳过** —— 不计算、不建表、`messages` 里一个字都没有。
+            # 用户看到一张只有 KM 曲线的结果，会以为"引擎比较过了，组间无差异"，
+            # 而事实是**根本没比**。属契约硬性要求 1 禁止的静默降级（B2），
+            # 故显式披露"未做"并给出可执行的替代路径。
+            logrank_skipped_reason = (
+                f"分组数为 {len(groups)}（> 2），本次**未做** log-rank 组间比较："
+                "当前实现仅支持两组比较。如需多组比较，请按组拆分为多次两两分析"
+                "（注意多重比较会抬高假阳性率，建议对 p 值做 Bonferroni 校正）。"
+            )
+        elif len(groups) == 2:
             g1 = sub[sub[group_col] == groups[0]]
             g2 = sub[sub[group_col] == groups[1]]
             # 简化 Log-rank
@@ -1622,6 +1634,16 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             )
         tables["life_percentiles"] = pd.DataFrame(_pct_rows)
 
+    # 契约 #20：多组 log-rank 未做 → B2 降级必须用户可见（置于最前，用户先看到）
+    if logrank_skipped_reason:
+        _report.add(
+            BoundaryIssue(
+                level="B2",
+                code="E_DESIGN_LOGRANK_SKIPPED",
+                detail=f"⚠ {logrank_skipped_reason}",
+            )
+        )
+
     return AnalysisResult(
         task="survival_analysis",
         tables=tables,
@@ -1641,6 +1663,8 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             "b10_life": b10_life,
             "b10_ci": list(b10_ci),
             "logrank_p": logrank_result["p值"] if logrank_result else None,
+            # 契约 #20：多组时明确记录"为什么没做"（机器可读，不依赖中文文案）
+            "logrank_skipped_reason": logrank_skipped_reason,
             # ── 边界处置的机器可读错误码（第 41 轮随 `_guard` 收口兑现）──
             # 原先是手写 list 收集文案，只有中文、没有码 ——
             # 上游对「处置类型」分流只能做子串匹配（脆弱且随文案失效）。

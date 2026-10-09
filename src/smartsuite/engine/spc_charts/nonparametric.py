@@ -139,13 +139,26 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     # ── 2. 用拟合分布 PPF (CDF 逆函数) 计算控制限 ──
     cl = float(dist.median(*args))
 
+    # 契约 #16（审查 2026-10-09）：PPF 失败 → 回退经验分位数属 **B2 降级**，
+    # 必须用户可见。原实现只写 `logger.debug`，而图表标题仍写「拟合=Weibull」——
+    # 用户以为看到的是**理论分布**控制限，实际是经验分位数（两者在尾部差异最大，
+    # 而尾部正是控制限所在）。契约硬性要求 1 明文禁止"只在 debug 日志里说明的降级"。
+    _ppf_fallbacks: list[str] = []
+
     def _ppf(p):
-        """安全 PPF，防止极端值溢出"""
+        """安全 PPF，防止极端值溢出；失败时回退经验分位数并**登记降级**。"""
         try:
             return float(dist.ppf(p, *args))
         except Exception as e:
-            # 审查 2026-xx：PPF 失败静默降级为经验分位数——记录日志，避免用户误以为仍是理论分布限
-            logger.debug("PPF 计算失败，回退经验分位数: %s", e, exc_info=True)
+            if not _ppf_fallbacks:
+                _ppf_fallbacks.append(
+                    f"⚠ 拟合分布 PPF 在尾部不可用（{type(e).__name__}: {e}），"
+                    "已回退为**经验分位数**——控制限不再是理论分布限（尾部差异最大），"
+                    "请结合直方图/样本量判断其稳定性"
+                )
+            logger.warning(
+                "PPF 计算失败，回退经验分位数（B2 降级，已向用户披露）: %s", e, exc_info=True
+            )
             return float(np.percentile(values, p * 100))
 
     if side == "upper":
@@ -286,8 +299,10 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
 
     ax.set_xlabel("序号", fontsize=10)
     ax.set_ylabel(req.target_col, fontsize=10)
+    # 契约 #16：回退发生时**图表标题也必须标注**（用户看的是图，不看 messages）
+    _title_mark = "  ⚠ 控制限=经验分位数（PPF 不可用）" if _ppf_fallbacks else ""
     ax.set_title(
-        f"非参数控制图 — {req.target_col} ({side_note})\nCL={cl:.4f} | {limit_label}",
+        f"非参数控制图 — {req.target_col} ({side_note}){_title_mark}\nCL={cl:.4f} | {limit_label}",
         fontsize=10,
     )
     ax.legend(fontsize=7.5, loc="upper right", ncol=2)
@@ -335,8 +350,10 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=summary,
-        messages=_boundary.messages(),
+        messages=_boundary.messages() + _ppf_fallbacks,
         metadata={
+            # 契约 #16：机器可读的回退标记（上游不必做中文字串匹配）
+            "ppf_fallback": bool(_ppf_fallbacks),
             "cl": cl,
             "ucl": ucl,
             "lcl": lcl,
