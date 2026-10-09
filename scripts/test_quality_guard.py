@@ -64,6 +64,15 @@ _STRONG_ASSERT_RE = re.compile(
     # 否则 `assert r.status == "ok"` 会被算成强断言，守卫自测立刻 4 项转红
     # （我第一版就漏了这个负向断言，被 `tests/scripts/test_test_quality_guard.py` 拦住）。
     r"|[=!]=\s*['\"](?!(?:ok|OK)['\"])"  # == "NOT_FINITE" 等；排除 == "ok"
+    # 2026-10-09 发版前收尾（第 2 处守卫自身漏判）：`assert fn(...) is True/False`
+    # —— 断言与**布尔字面量**比较，是教科书式强断言，但上面两条 `is True/is False`
+    # 分支要求 `is` 紧跟**标识符**（`assert x is True`），带**调用**的形态被漏判。
+    # 实测：`tests/scripts/test_verify_frontend_params.py::test_helper_ignores_comments_and_declarations`
+    # 有 6 条 `fn("…") is False/True` 断言，却仍被报「仅弱断言」。
+    # 与 P1-1（`== "字面量"`）同类：判据漏形态，不是测试弱。
+    r"|assert\s+.*\bis\s+(?:True|False)\b"
+    # 多行断言的续行：`assert (` … 换行后的 `is False`
+    r"|^\s*is\s+(?:True|False)\b"
 )
 # 无意义测试名：test_<纯数字/序号/caseN>
 _BAD_NAME_RE = re.compile(r"test_(?:\d+|case\d+|test\d+|a|b|c|foo|bar|dummy)$")
@@ -214,7 +223,9 @@ WEAK_ASSERT_EXEMPT: dict[str, set[str]] = {
         "test_median_ci_level_valid_boundary_values",
         "test_omitting_params_uses_defaults",
         "test_valid_params_still_work",
-        "test_variance_test_group_col_falls_back_to_feature_cols",
+        # 2026-10-09 发版前收尾：`test_variance_test_group_col_falls_back_to_feature_cols`
+        # 已补真实值断言（n_groups=2 + 与显式 group_col 的 p 值逐值一致），
+        # 不再是弱断言 → 条目**已删除**（陈旧豁免由 `check_stale_exemptions` 拦下）。
     },
     "tests/engine/test_param_migration_batch2.py": {
         # 参数「接受度」类：验的是「该取值被接受并跑通」（`_via(...)` + status）。
@@ -367,7 +378,6 @@ WEAK_ASSERT_EXEMPT: dict[str, set[str]] = {
         # 且只有本清单内的名字会被扣减（新增同类测试不会被自动豁免）。
         "test_alpha_valid",
         "test_center_points_valid",
-        "test_invalid_params_do_not_raise",
         "test_methods_still_work",
         "test_n_runs_valid",
         "test_randomize_accepts_bool_and_string",

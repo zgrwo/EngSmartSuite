@@ -14,7 +14,10 @@ smartsuite-web
 
 > **部署边界**：本工具设计用于**本机单用户**，默认只监听 `127.0.0.1` 且无用户认证。
 > 不建议用 `--host 0.0.0.0` 直接暴露到网络；需要内网共享时请自行加反向代理与鉴权
-> （决策与最小示例见 [ADR-003](../adr/0003-deployment-scope-single-user.md)）。
+> （决策与最小示例见 [ADR-003](https://github.com/zgrwo/EngSmartSuite/blob/main/docs/adr/0003-deployment-scope-single-user.md)）。
+>
+> ℹ️ `docs/adr/` 属**内部决策记录，不随本文档站发布**（`mkdocs.yml` 的 `exclude_docs`），
+> 故上面给的是仓库源码链接而非站内链接。
 
 ### 三步完成分析
 

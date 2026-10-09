@@ -111,12 +111,56 @@ class TestModuleDistribution:
             assert "module.exports" not in code, f"{p.name} 含 CommonJS module.exports"
 
 
+#: 单行字符串字面量（`'…'` / `"…"`，含转义）。**不匹配模板字面量** ——
+#: `` `${v.toFixed(3)}` `` 里的调用是真实代码，抹掉它等于给门禁开后门。
+_LINE_STRING_RE = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+
+
+def bare_tofixed_lines(source: str) -> list[int]:
+    """裸用 `.toFixed(` 的行号（1 起）—— 判据是**逐表达式**，不是"整行是否出现过 fmtCellNum"。
+
+    ## 为什么收紧（审查 2026-10-09 C-5）
+
+    旧判据 `if ".toFixed(" in line and "fmtCellNum" not in line` 是"整行文本"级：
+    只要**同一行**里出现过 `fmtCellNum`，该行的裸 `.toFixed(` 全部豁免 ——
+    豁免口子本身就是绕过路径。注入 I-6b 实测：
+
+        const _bypass = (v) => (typeof v === 'number' ? fmtCellNum(v) : v.toFixed(4));
+
+    旧门禁 **11 passed（假绿）**。
+
+    ## 现行判据：没有"包一层就合法"的写法
+
+    `util.js::fmtCellNum` 是**唯一**的数值展示入口，且它接收的是**数值**；
+    `fmtCellNum(x.toFixed(4))` 等于把字符串喂给数值格式化器（本身即错）。
+    故判据简化为：**除 `util.js`（实现处）外，`.toFixed(` 不得出现**。
+    这比"未被 fmtCellNum 包裹"更强 —— 也不再有可被同行文本豁免的口子。
+    `Math.round` / `toPrecision` 不在判据内（当前全库零使用，扩大判据只会引入噪音）。
+
+    实现刻意保持"逐行"而非写完整 JS 词法器：本项目 5 个模块里出现过
+    含引号的正则字面量（`/filename\\s*=\\s*"([^"]*)"/i`），任何"分字符串状态"
+    的朴素扫描都会在那里吞掉后续整段代码（实测：app.js 尾部 130 行被吞 →
+    注入的裸 `toFixed` 反而**看不见**，属假阴性）。故只做两件可证明安全的事：
+    去掉行注释、抹掉**单行**字符串字面量。
+    """
+    offenders: list[int] = []
+    for lineno, raw in enumerate(source.splitlines(), start=1):
+        code = _LINE_STRING_RE.sub("''", raw.split("//", 1)[0])
+        if ".toFixed(" in code:
+            offenders.append(lineno)
+    return offenders
+
+
 class TestNumericFormattingIsScaleAware:
     """表格数值展示必须走 `fmtCellNum`，不得裸用 `toFixed`（审查 2026-10-09 P1-7）。
 
     `util.js::fmtCellNum` 是量纲感知的（微尺度 <5e-5 改科学计数），而裸 `toFixed(3)`
     会把 `1.23e-9` 渲染成 `0.000` —— 用户看到整列 0（历史 O-1 在 Web 侧的残留）。
     实测：`app.js` 的普通结果表用 `fmtCellNum`，但**相关性合并矩阵**那一处漏改。
+
+    审查 2026-10-09 C-5：判据由"整行含 `fmtCellNum` 即豁免"改为**逐表达式**
+    （见 `bare_tofixed_lines`），并用一组合成用例自证检测器有效 ——
+    否则"门禁可被同行绕过"这类缺陷只能靠人工注入才发现。
     """
 
     def test_no_bare_tofixed_in_table_renderers(self):
@@ -126,11 +170,27 @@ class TestNumericFormattingIsScaleAware:
             # 尺度感知规则的落地）—— 唯一合法例外。
             if p.name == "util.js":
                 continue
-            for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
-                code = line.split("//", 1)[0]
-                if ".toFixed(" in code and "fmtCellNum" not in code:
-                    offenders.append(f"{p.name}:{i} {line.strip()[:90]}")
+            text = p.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            for lineno in bare_tofixed_lines(text):
+                offenders.append(f"{p.name}:{lineno} {lines[lineno - 1].strip()[:90]}")
         assert not offenders, (
             "以下位置裸用 toFixed（微尺度会渲染成 0.000，应改用 util.js 的 fmtCellNum）：\n  "
             + "\n  ".join(offenders)
         )
+
+    def test_detector_catches_same_line_bypass(self):
+        """检测器自证：同行"一处合规 + 一处裸用"必须被抓（注入 I-6b 的形态）。
+
+        若有人把判据改回"整行含 `fmtCellNum` 即豁免"，本用例会 FAIL。
+        """
+        assert bare_tofixed_lines(
+            "const _bypass = (v) => (typeof v === 'number' ? fmtCellNum(v) : v.toFixed(4));"
+        ) == [1], "同行的裸 toFixed 必须被发现"
+        # 模板字面量的**插值表达式**里的裸调用同样算（不得被当字符串抹掉）
+        assert bare_tofixed_lines("const html = `<td>${v.toFixed(3)}</td>`;") == [1]
+        # 注释与字符串字面量里的字样不算
+        assert bare_tofixed_lines("// v.toFixed(3)\nconst s = 'v.toFixed(3)';") == []
+        assert bare_tofixed_lines('const s = "v.toFixed(3)";') == []
+        # 合规：数值展示走 fmtCellNum
+        assert bare_tofixed_lines("const a = fmtCellNum(x); const b = fmtCellNum(y);") == []

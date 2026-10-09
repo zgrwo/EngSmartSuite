@@ -59,10 +59,15 @@ on:
       - "setup_offline.sh"
   workflow_dispatch:
 
-# 自动取消同一 PR 的旧运行，节省 runner 资源
+# 自动取消同一 ref 的旧运行，节省 runner 资源。
+# 审查 2026-10-09 G-14：**按事件区分** —— PR 上取消旧运行是优点（快速反馈），
+# 但 main push 上取消会丢弃正在跑的 `full` 全矩阵（3 OS × 3.10–3.14）结论：
+# 连续两次 push、或第二次只改文档时，第一次的代码矩阵结果被取消且**不会被重跑**
+# ⇒ 发版时可能"拿不到 main 的完整矩阵结论"。对照 release.yml 的
+# `cancel-in-progress: false`（发版不可中断）。故仅 PR 取消。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # 最小权限：本工作流只读仓库内容（Security hardening 最佳实践）
 permissions:
@@ -110,10 +115,31 @@ jobs:
         run: uv sync --frozen --all-extras
 
       # --- 提交规范：PR 内全部 commit 必须符合 Conventional Commits（与 release-please 闭环）---
+      # 审查 2026-10-09 G-9：原先**只有 PR 事件**校验 —— 直推 main 完全不经此门禁
+      # （近 20 个 commit 实测 2 个标题超 72 字符，rc=1，却已落在 main 上）。
+      # 故补 push 分支：用 `github.event.before..HEAD` 取本次 push 新引入的提交。
       - name: 提交规范检查（Conventional Commits）
-        if: github.event_name == 'pull_request'
         run: |
-          base="${{ github.event.pull_request.base.sha }}"
+          set -o pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+            # 首次 push / 分支新建：before 为全 0 ⇒ 无可用基线，无法界定"本次新增"
+            case "$base" in
+              0000000000000000000000000000000000000000|"") base="";;
+            esac
+          else
+            base=""
+          fi
+          if [ -z "$base" ]; then
+            echo "ℹ️ 无可用基线（${{ github.event_name }} 首推/非 PR）——跳过提交规范检查"
+            exit 0
+          fi
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "::error::基线提交 $base 不在本地历史中（checkout fetch-depth 不足？）——拒绝静默跳过"
+            exit 1
+          fi
           count=0
           for sha in $(git rev-list --no-merges "$base..HEAD"); do
             count=$((count + 1))
@@ -124,7 +150,7 @@ jobs:
               exit 1
             fi
           done
-          echo "✅ 全部 $count 个提交符合规范"
+          echo "✅ 全部 $count 个提交符合规范（基线 ${base:0:7}）"
 
       - name: 模块导入验证
         # 审查 2026-09-21 G-8：原先只 print 计数、无断言——导入失败当然会红，
@@ -441,4 +467,16 @@ jobs:
         run: uv run python scripts/verify_frontend_params.py
 
       - name: 全量交叉验证（Web ↔ CLI ↔ 手册 CLAIM）
-        run: set -o pipefail && uv run python scripts/verify_cross_consistency.py 2>&1 | tail -5
+        # 审查 2026-10-09 G-13：原写作 `set -o pipefail && … | tail -5` ——
+        # 退出码语义**正确**（pipefail 在管道前生效，python 非零 ⇒ 步骤红），
+        # 但 `tail -5` 把失败明细全部丢掉：42 个任务里哪个 status 不一致、
+        # 哪张表/图有差异都看不到，一次失败要本地复跑 30 秒才能定位。
+        # 现改为：成功时只回显尾部 5 行（日志短），失败时打印尾部 80 行明细。
+        run: |
+          set -o pipefail
+          uv run python scripts/verify_cross_consistency.py > /tmp/xc.log 2>&1 || {
+            echo "❌ verify_cross_consistency 失败——尾部 80 行明细（完整日志见上方 job 输出）："
+            tail -80 /tmp/xc.log
+            exit 1
+          }
+          tail -5 /tmp/xc.log

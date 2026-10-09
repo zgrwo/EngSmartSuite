@@ -160,13 +160,16 @@ EngSmartSuite/
 │   │   ├── test_hypothesis_doe_capability.py # 假设检验/DOE/过程能力 回归
 │   │   ├── test_inverse.py         #   工艺参数反解（角色/建模/求解/可达/端到端）
 │   │   ├── test_inverse_package_parity.py # 工艺参数反解子包拆分组装对照
+│   │   ├── test_inverse_boundary_disclosure.py # 反解降级披露（B1/B2：剔除的行/列与 boundary_codes）
 │   │   ├── test_engine_bootstrap.py #  引擎包根初始化（MATPLOTLIB_FONT_PATH 分支）
 │   │   ├── test_engine_input_guards.py # 引擎输入防护（审查修复钉死）
 │   │   ├── test_boundary_guard.py  #   边界处理原语单测（_guard.py 的 B0–B3 行为）
 │   │   ├── test_param_overflow_guard.py # 参数解析的溢出/静默兜底（P1-3/P1-8 回归防线）
 │   │   ├── test_capability_ci_coverage.py # 能力指数 CI 的覆盖率检验（MR-σ 有效自由度）
 │   │   ├── test_survival_event_semantics.py # 生存分析事件列语义（文本编码不猜）
+│   │   ├── test_survival_multigroup_logrank.py # 多组（>2）log-rank 未做的 B2 披露（契约 #20）
 │   │   ├── test_survival_nonfinite.py #  生存分析的非有限值清洗与披露（含污染复现）
+│   │   ├── test_ppf_fallback_visibility.py # PPF 回退经验分位数的用户可见性（契约 #16）
 │   │   ├── test_trend_nonfinite.py # 趋势预测的 B1 披露与错误归因回归（审查 P1-2）
 │   │   ├── test_anova_effect_size.py # ANOVA 效应量口径（经典 η² vs 偏 η²，statsmodels 复算）
 │   │   ├── test_welch_ttest.py     #   独立双样本 t 检验的方差假设（Welch + Levene 披露）
@@ -188,7 +191,14 @@ EngSmartSuite/
 │   │   ├── test_param_migration_batch8.py # 批量迁移对拍第八批（doe_design/inverse_solve/regression，含步骤④前置断言）
 │   │   ├── test_param_spec_gaps.py   # 参数契约表达力缺口（Choice 非字符串别名 / 保留参数文案 / %P/T 补实现）
 │   │   ├── test_anova_ss_type.py   #   ANOVA Type II/III 平方和（不平衡设计 + 编码正确性，P2-3）
-│   │   └── test_spc_hypothesis_basics.py # SPC/假设检验基础覆盖
+│   │   ├── test_spc_hypothesis_basics.py # SPC/假设检验基础覆盖
+│   │   ├── test_capability_magnitude_guard.py # 能力指数量级上界守卫（1e154 σ=inf 伪造指标 / 1e160 溢出逃逸，R2BD-01）
+│   │   ├── test_regression_nonfinite_guard.py # 回归族 ±Inf 清洗与披露（OLS/Lasso/稳健，R2BD-02）
+│   │   ├── test_scatter_plot_nonfinite_guard.py # scatter_plot 的 ±Inf 清洗与披露（R2BD-11）
+│   │   ├── test_vif_nonfinite_guard.py # vif_analysis 的 ±Inf 清洗/披露/不归因错（R2BD-03）
+│   │   ├── test_hypothesis_grouped_disclosure.py # 分组检验 ±Inf 披露同名同量（R2BD-08）
+│   │   ├── test_outlier_consensus_degradation.py # outlier_consensus 的 IsoForest 降级用户可见（R2BD-04）
+│   │   └── test_cleaning_index_invariance.py # 清洗路径索引不变式（pd.concat 索引重复/不连续不得改变结论，2026-10-10 用户级回归）
 │   ├── services/                   #   服务层单元测试（原 test_services/）
 │   │   ├── __init__.py
 │   │   ├── test_orchestrator.py
@@ -276,7 +286,12 @@ EngSmartSuite/
 │       ├── test_truth_coverage.py        #   真值覆盖率门禁的包装 + 扫描器自证
 │       ├── test_python_probe.py          #   跨平台解释器探测自测（P0-11 回归防线）
 │       ├── test_new_task.py              #   新增方法脚手架（generate/--check）自测
-│       └── test_ci_layer_coverage.py    #   PR 门禁覆盖守卫（测试目录/文件须接入 quick job）
+│       ├── test_ci_layer_coverage.py    #   PR 门禁覆盖守卫（测试目录/文件须接入 quick job）
+│       ├── test_workflow_hardening.py   #   CI 门禁不得被静默 defuse（continue-on-error 负向校验，G-4）
+│       ├── test_workflow_permissions.py #   workflow 权限收敛/触发面/扫描器锁版本（G-11/G-14/G-16）
+│       ├── test_gate_floor_pinning.py   #   门禁下限的独立钉桩（防"期望值取自被测实现"，G-5）
+│       ├── test_boundary_contract_table.py # 边界契约状态表 × 源码错误码存在性（G-8，不改文档）
+│       └── test_verify_cross_consistency.py # verify_cross_consistency 手册覆盖度门禁自测（G-7）
 │
 ├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）
 │   └── test_benchmarks.py          #   3 任务 × 3 规模端到端基准（非 tests/ 防线）
@@ -325,7 +340,7 @@ EngSmartSuite/
 │
 ├── skills/                         # AI Skill 定义
 │   ├── README.md                   #   技能目录说明
-│   ├── smartsuite-dev.md           #   7 大陷阱 + 5 套修复模板
+│   ├── smartsuite-dev.md           #   10 大陷阱 + 5 套修复模板
 │   ├── analysis-decision-tree.md   #   分析方法决策树
 │   ├── architecture-reviewer.md    #   架构审查
 │   ├── refactoring-guardian.md     #   重构守卫

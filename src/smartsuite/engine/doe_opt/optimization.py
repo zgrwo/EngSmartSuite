@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Integer, Opt, Spec
-from smartsuite.engine._guard import BoundaryReport, clean_frame
+from smartsuite.engine._guard import BoundaryReport, clean_frame, degenerate_column_reason
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import is_positive_finite, round_for_display
 
@@ -150,12 +150,14 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 审查 2026-08-19 #2.6：常量目标列时 CV R² 恒为 1.000、最优参数无意义
+    # 收尾轮（契约 #5）：判据与文案统一走 `_guard` 三级归因（原先手写 nunique 判据）
     _target_series = df[req.target_col]
-    if _target_series.nunique(dropna=True) <= 1:
+    _degenerate = degenerate_column_reason(_target_series, what=f"目标列「{req.target_col}」")
+    if _degenerate is not None:
         return AnalysisResult(
             task="grid_search",
             status="error",
-            messages=[f"目标列「{req.target_col}」为常量列，网格搜索最优参数无意义"],
+            messages=[f"{_degenerate}，网格搜索最优参数无意义"],
         )
 
     try:

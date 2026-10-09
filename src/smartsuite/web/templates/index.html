@@ -77,14 +77,22 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<!-- ⚠️ 缓存版本化的**范围**（审查 2026-10-09 P3-5，本轮只记录、不改行为）：
+<!-- 缓存版本化的**范围**（审查 2026-10-09 P3-5；注释已按 A-2 更正为**现状**）：
      下面只有**入口**带 `?v=12`；而 ESM 子模块之间的 import（`app.js` → `./util.js`、
-     `./api.js`、`./params.js`、`./state.js`）用的是**无版本 URL**，浏览器按 URL
-     独立缓存 —— 于是下一轮只改 `params.js` 时，老用户可能继续跑旧面板
-     （`Ctrl+Shift+R` 才能刷掉；本轮无实害，因为这 5 个模块全部是新增/重写）。
-     正确修法：服务端注入构建标识（`url_for('static', filename='app.js', v=BUILD_ID)`
-     并把同一标识传播到子模块的 import URL），涉及 `web/app.py`（不在本批文件所有权内），
-     故本轮只在此登记风险。详见 logs/reports/2026-10-09-release-prep-full-review.md 的 P3-5。 -->
+     `./api.js`、`./params.js`、`./state.js`）是**静态 specifier**，写在 JS 源码里 ——
+     版本号**注不进去**（模板只能改入口那一行）。故"只改 params.js 的那一轮、
+     老用户继续跑旧面板"这个风险**已由服务端釜底抽薪**：
+     `src/smartsuite/web/app.py` 的 `app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0`
+     使静态资源一律 `Cache-Control: no-cache, max-age=0` + `ETag`，入口与 4 个子模块
+     全部退化为条件请求（未变 → 304，变了 → 立刻生效）。
+     实测（Flask test client，2026-10-10）：8 个 URL
+     （app.js?v=12 / app.js / util.js / params.js / state.js / api.js / style.css /
+     favicon.svg）全部 `no-cache, max-age=0` + `ETag`，`If-None-Match` 复请求 → 304。
+     回归防线：tests/guards/test_web_ui_guards.py::TestStaticAssetsAreNotStronglyCached
+     （正向：禁用强缓存；反向：入口 `?v=` 不得被当作"够了"而删掉 no-cache）。
+     故 `?v=12` 现在是**装饰性**的第一道保险（对中间层/代理的强缓存仍有用），
+     真正的保障在 app.py 的配置项 —— **不要**因为"看到这里只有入口带版本号"
+     就删掉它。 -->
 <script type="module" src="/static/app.js?v=12"></script>
 </body>
 </html>

@@ -222,13 +222,48 @@ def check_n(
     return issue
 
 
-def _degenerate_column_code(s: pd.Series) -> str | None:
+def degenerate_column_code(s: pd.Series) -> str | None:
     """退化列的**单一**归因实现（顺序不可颠倒）：空列 → 样本不足 → 常量 → 有变异。
 
     抽出来的理由（审查 2026-10-09 P2-3）：`check_non_constant` 与
     `explain_undefined_sigma` 对**同一输入**曾给出矛盾错误码
     （全 NaN 列：前者「常量列（无变异）」/ 后者「有效观测不足 2 个」）——
     同文件两处各写一份判据，就必然漂移。
+
+    2026-10-09 发版前收尾（契约 #5「各模块不一致」）：本函数由模块私有名
+    `_degenerate_column_code` **升为公开入口** —— 门禁判据在修复前的源码上命中
+    **19 处**「常量列/无变异」手写判据（`nunique(dropna=True) <= 1` 一族）：
+    **17 处**改走此处，**2 处**具名登记为例外（子组大小一致性 `xbar_r.py:151`、
+    设计单元平衡性 `anova.py` —— 判的是**计数**而非观测列），见
+    `tests/guards/test_boundary_contract.py::TestDegenerateColumnAttributionSSOT`
+    的源码级门禁。判据等价性：`code is not None`
+    ⟺ `nunique(dropna=True) <= 1`（n_valid=0 → nunique=0；n_valid=1 → nunique=1），
+    故这次统一是**纯归因收口，不改变任何分支走向**。
+
+    ⚠️ 返回 `None` 表示"有变异"，可安全估计标准差。
+
+    ## 已知的口径边界：全 `±Inf` 列（审查 2026-10-09 R2BD-10，P3，**当前不可达**）
+
+    `n_valid` 用 `s.notna()` 计数，而 `notna(+Inf) == True` —— 故「有效观测」在此处
+    的定义是"**非缺失**"（与 `partition_finite` 的 `np.isfinite` 不同）。后果：
+
+    | 输入 | 本函数返回 | 是否与真实阻断原因一致 |
+    | :--- | :--- | :--- |
+    | `[+inf, +inf, +inf]` | `E_DATA_CONSTANT_COLUMN`（"常量列…标准差为 0"） | ❌ 真实阻断原因是 `±Inf` |
+    | `[+inf]` | `E_DATA_INSUFFICIENT_N` | ❌ 真实阻断原因是 `±Inf` |
+    | `[1, 2, +inf]` | `None` → 由 `explain_undefined_sigma` 报非有限值 | ✅ |
+
+    **为什么不改**（实测证据，2026-10-09 收尾轮）：`explain_undefined_sigma` 在
+    `src/` 里只有 3 个调用点（`spc_charts/{cusum,ewma,xbar_r}.py`），三处都在**分组之前**
+    按列清洗（`clean_series` / `clean_frame`）→ 全 `±Inf` 的分组早已退化为**空分组**，
+    走"有效数据不足"分支（归因正确且 `±Inf` 已披露）。端到端实测「整组全 +Inf」
+    /「整列全 +Inf」/「仅剩一组正常」三种形态 × 三个任务，`messages` 均**不含**
+    「常量」或「标准差为 0」，含 `E_DATA_NON_FINITE_DROPPED` 披露。
+    该函数也不在 `engine.__all__` 与 `services/bridge.py` 的导出面上，无外部调用者。
+    ⇒ 按"不能给出对抗验证的发现降级为观察项"的规则记 P3；若将来有调用方在清洗**之前**
+    分组（如新增按分组的 SPC 任务），此处必须改为"含 `±Inf` 时优先报
+    `E_DATA_NON_FINITE_BLOCKS_SIGMA`"（`n_finite_valid < 2` 与 `n_inf > 0` 可分，
+    不会破坏 `[5.0, NaN]` → 样本不足 这一已固化的顺序）。
     """
     n_valid = int(s.notna().sum())
     if n_valid == 0:
@@ -237,6 +272,48 @@ def _degenerate_column_code(s: pd.Series) -> str | None:
         return "E_DATA_INSUFFICIENT_N"
     if s.nunique(dropna=True) <= 1:
         return "E_DATA_CONSTANT_COLUMN"
+    return None
+
+
+#: 三级归因的**唯一文案源**（`degenerate_column_code` → 原因短语模板）。
+#: `{label}` = 调用方给的定位语（如 `目标列「厚度」`），`{n}` = 有效观测数。
+_DEGENERATE_REASON: dict[str, str] = {
+    "E_DATA_EMPTY_COLUMN": "{label}整列为空（没有任何有效观测）",
+    "E_DATA_INSUFFICIENT_N": "{label}有效观测不足 2 个（当前 {n} 个）",
+    "E_DATA_CONSTANT_COLUMN": "{label}为常量列（无变异）",
+}
+
+
+def degenerate_column_reason(s: pd.Series, *, what: str = "") -> str | None:
+    """退化列的**原因短语**（唯一文案源）；正常列返回 `None`。
+
+    为什么需要它（契约 #5「各模块不一致」）：各模块原本自己拼「常量列（方差为 0）」
+    「常量列（标准差为 0）」「方差为零」等**同一件事的多种说法**，且都把
+    「整列为空」（n_valid=0）与「只有 1 个有效观测」一并说成"常量列" ——
+    用户按"常量列"去排查一个空列永远查不到原因（错误归因，契约硬性要求 2）。
+
+    调用方**只负责拼接本方法的后果语**（如"无法估计回归系数"），
+    原因部分一律来自此处；这样"为什么退化"只有一个来源。
+    """
+    code = degenerate_column_code(s)
+    if code is None:
+        return None
+    return _DEGENERATE_REASON[code].format(label=what or "数据", n=int(s.notna().sum()))
+
+
+def first_degenerate_reason(frame: pd.DataFrame, cols, *, label: str = "特征列") -> str | None:
+    """首个退化列的**原因短语**（`{label}「列名」` 定位）；全部正常返回 `None`。
+
+    供"逐列检查、遇到第一个退化列即拒绝"的调用方使用（`regression` / `vif` /
+    `correlation`）—— 这些地方原先各自手写
+    `[c for c in cols if df[c].nunique(dropna=True) <= 1]`，
+    只拿到列名，于是**原因**由各模块自己编（全 NaN 列也被说成"常量列"）。
+    这里返回的是 `degenerate_column_reason` 的归因，故三级口径与全库一致。
+    """
+    for c in cols:
+        reason = degenerate_column_reason(frame[c], what=f"{label}「{c}」")
+        if reason is not None:
+            return reason
     return None
 
 
@@ -256,13 +333,13 @@ def check_non_constant(
     ⚠️ 原实现把**全 NaN 列**也判为「常量列（无变异）」——与同模块
     `explain_undefined_sigma` 对同一输入给的「有效观测不足 2 个」自相矛盾，
     且用户按"常量列"去排查一个空列永远查不到原因（审查 2026-10-09 P2-3）。
-    现两处共用 `_degenerate_column_code`，结构上不可能再漂移。
+    现两处共用 `degenerate_column_code`，结构上不可能再漂移。
 
     注意与 `check_degenerate_numeric` 的分工：本函数**只**判列内容，
     不对 NaN 化的统计量做推断（避免把「含 Inf 导致 σ=NaN」误判为常量）。
     """
     label = what or "目标列"
-    code = _degenerate_column_code(s)
+    code = degenerate_column_code(s)
     if code is None:
         return None
     if code == "E_DATA_EMPTY_COLUMN":
@@ -466,10 +543,14 @@ def explain_undefined_sigma(
     就会把用户引向错误的排查方向。
     """
     label = what or (f"「{column}」" if column else "数据")
-    # 归因优先级与 `check_non_constant` **共用同一实现**（`_degenerate_column_code`）：
+    # 归因优先级与 `check_non_constant` **共用同一实现**（`degenerate_column_code`）：
     # 常量 → 样本量（有效观测 < 2）→ 非有限值 → 兜底
-    code = _degenerate_column_code(values)
+    code = degenerate_column_code(values)
     if code == "E_DATA_CONSTANT_COLUMN":
+        # ⚠️ 全 `±Inf` 列会落到这里（`notna(+Inf)` 为真 ⇒ 被当作"有效观测"），
+        # 文案说"标准差为 0"在数值上也是假的（`σ([inf,inf,inf])` 是 NaN）。
+        # 当前**不可达**：3 个生产调用点都在分组前清洗过（理由与证据见
+        # `degenerate_column_code` docstring 末节，审查 2026-10-09 R2BD-10）。
         return BoundaryIssue(
             level="B0",
             code=code,

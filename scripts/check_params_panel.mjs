@@ -180,7 +180,35 @@ check(params.paramsHydrated() === true, 'paramsHydrated() 应为 true');
   check(/COLUMN_PARAMS/.test(src), 'COLUMN_PARAMS（列选择器表）应保留');
 }
 
-// ── 断言 6：默认值往返（渲染 → 浏览器取值 → getParams → 引擎可接受）──
+// ── 浏览器取值语义（模块级：断言 6/7/8 共用）────────────────────
+/** 按浏览器语义取控件当前值：select 取 selected（无则首个）option 的 value。 */
+function browserValueOf(html) {
+  const sel = html.match(/<select[^>]*>([\s\S]*?)<\/select>/);
+  if (sel) {
+    const opts = [...sel[1].matchAll(/<option value="([^"]*)"([^>]*)>/g)];
+    if (!opts.length) return { tag: 'SELECT', value: '' };
+    const chosen = opts.find((o) => /\bselected\b/.test(o[2])) ?? opts[0];
+    return { tag: 'SELECT', value: chosen[1] };
+  }
+  const inp = html.match(/<input[^>]*\bvalue="([^"]*)"/);
+  return { tag: 'INPUT', value: inp ? inp[1] : '' };
+}
+
+/** 该下拉框里**显式**带 `selected` 的 option 值；无则 `null`（= 浏览器会隐式选首项）。 */
+function explicitlySelected(html) {
+  const sel = html.match(/<select[^>]*>([\s\S]*?)<\/select>/);
+  if (!sel) return null;
+  const chosen = [...sel[1].matchAll(/<option value="([^"]*)"([^>]*)>/g)].filter((o) =>
+    /\bselected\b/.test(o[2]),
+  );
+  return chosen.length === 1 ? chosen[0][1] : null;
+}
+
+// ── 断言 6：默认值往返（渲染 → 浏览器取值 → getParams → **必须等于声明默认值**）──
+// 审查 2026-10-09 C-4：原判据只有"载荷被 Spec 接受"（Python 侧）—— 那是**必要不充分**：
+// `Choice` 掉一个空选项后下发的 `boxcox` 也是合法选项，Spec 自然接受，于是"面板把默认值
+// 悄悄换成了别的值"整条链全绿（注入 I-2 实测 23 passed + node OK）。本断言把它补上：
+// **未经用户编辑时，面板回读值必须与 `DEFAULT_PARAMS[task]` 逐键相等**。
 // 审查 2026-10-09 P0-1：旧断言只覆盖"渲染出来的 HTML 长什么样"，**没有一条**覆盖
 // 「渲染出的默认值能被原样读回并送给引擎」。于是 `value="${v}"` 把 `None` 默认值
 // 写成了字面量 `null`：`getParams` 只丢空串（`:484`），`isNaN('null')` 为真
@@ -188,22 +216,37 @@ check(params.paramsHydrated() === true, 'paramsHydrated() 应为 true');
 // （7 个硬报错：usl/lsl/group_col 无法解析；2 个静默错数：proportion_ci 0.0000、
 // lasso R² 0.785 vs 0.981）。
 {
-  /** 按浏览器语义取控件当前值：select 取 selected（无则首个）option 的 value。 */
-  function browserValueOf(html) {
-    const sel = html.match(/<select[^>]*>([\s\S]*?)<\/select>/);
-    if (sel) {
-      const opts = [...sel[1].matchAll(/<option value="([^"]*)"([^>]*)>/g)];
-      if (!opts.length) return { tag: 'SELECT', value: '' };
-      const chosen = opts.find((o) => /\bselected\b/.test(o[2])) ?? opts[0];
-      return { tag: 'SELECT', value: chosen[1] };
-    }
-    const inp = html.match(/<input[^>]*\bvalue="([^"]*)"/);
-    return { tag: 'INPUT', value: inp ? inp[1] : '' };
-  }
-
   const badLiteral = [];
   const typeDrift = [];
+  const defaultDrift = [];
   let roundtripped = 0;
+
+  /**
+   * 「面板回读值 == 声明默认值」的比较口径（与 Python 侧
+   * `tests/scripts/test_params_panel.py::_same_default` 保持同一语义）。
+   *
+   * 归一化：`None`/`''`/空数组 = 「未下发」（引擎落回自己的默认值，与哨兵等价）；
+   * 布尔按小写字符串比（`<input>` 里 `true` 是文本）；两侧都是数就按数比
+   * （`<select>` 只能发字符串，`2` 与 `"2"` 必须视为同一个值）。
+   */
+  const _empty = (v) =>
+    v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+  const _canon = (v) => {
+    if (_empty(v)) return null;
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    return v;
+  };
+  function sameDefault(declared, sent) {
+    const a = _canon(declared);
+    const b = _canon(sent);
+    if (a === null || b === null) return a === null && b === null;
+    const ta = String(a).trim();
+    const tb = String(b).trim();
+    const na = Number(ta);
+    const nb = Number(tb);
+    if (ta !== '' && tb !== '' && Number.isFinite(na) && Number.isFinite(nb)) return na === nb;
+    return String(a) === String(b);
+  }
 
   for (const task of Object.keys(PAYLOAD.params)) {
     const cfg = PAYLOAD.params[task] || {};
@@ -234,6 +277,15 @@ check(params.paramsHydrated() === true, 'paramsHydrated() 应为 true');
       if (tags[k] === 'INPUT' && typeof v === 'number' && k in sent && typeof sent[k] !== 'number') {
         typeDrift.push(`${task}.${k}: 默认 ${v}(number) → 下发 ${JSON.stringify(sent[k])}(${typeof sent[k]})`);
       }
+      // C-4 核心判据：**未经用户编辑**时，回读值必须与声明默认值等价。
+      // `k in sent` 为假 = 面板没下发该键 → 只有"声明值本身就是空哨兵"才允许
+      // （引擎会落回自己的默认值）；非空默认值没被下发同样是漂移。
+      if (!sameDefault(v, k in sent ? sent[k] : null)) {
+        defaultDrift.push(
+          `${task}.${k}: 声明默认值 ${JSON.stringify(v)}(${typeof v}) → 面板回读 ` +
+            (k in sent ? `${JSON.stringify(sent[k])}(${typeof sent[k]})` : '「未下发」'),
+        );
+      }
     }
   }
 
@@ -244,6 +296,12 @@ check(params.paramsHydrated() === true, 'paramsHydrated() 应为 true');
       `${badLiteral.length > 8 ? ` …共 ${badLiteral.length} 处` : ''}`,
   );
   check(typeDrift.length === 0, `数值默认值被字符串化：${typeDrift.slice(0, 8).join('; ')}`);
+  check(
+    defaultDrift.length === 0,
+    `面板回读值与声明默认值不一致（Web 默认流程会跑出与 CLI/手册不同的参数）：\n      ` +
+      defaultDrift.slice(0, 8).join('\n      ') +
+      `${defaultDrift.length > 8 ? `\n      …共 ${defaultDrift.length} 处` : ''}`,
+  );
   console.log(`  · 往返覆盖 ${roundtripped} 个键`);
 
   // 审查 2026-10-09 P1-2：把回读结果落盘，供 Python 侧断言「面板能发出的载荷，
@@ -268,10 +326,80 @@ check(params.paramsHydrated() === true, 'paramsHydrated() 应为 true');
   }
 }
 
+// ── 断言 7：非首项默认值必须**显式** `selected`（审查 2026-10-09 C-2）──────
+// 缺陷机制：`String(v) === val` 中 `val` 是 JSON 里的**数字**（`Choice((0,…),(1,…))`），
+// 跨类型恒假 → `<select>` 里**没有任何 option 带 `selected`** → 浏览器按规范隐式选首项。
+// 当前两个数值 `Choice` 的默认值恰好都是首项，故该缺陷**静默潜伏**（注入 I-1 实测：
+// 把 `anova.interactions` 默认 0→1 后，面板仍下发 "0"，而 46 passed + node OK 全绿）。
+//
+// 本断言不依赖具体默认值：对每个有选项的参数，把**末项与第二项**当默认值渲染一遍，
+// 断言该项真的带上了 `selected`。首项无需断言（浏览器语义下恒真）。
+{
+  const notSelected = [];
+  let probed = 0;
+  for (const [key, opts] of Object.entries(PAYLOAD.param_options || {})) {
+    if (!Array.isArray(opts) || opts.length < 2) continue;
+    const at = key.lastIndexOf('@');
+    const name = key.slice(0, at);
+    const task = key.slice(at + 1);
+    for (const pick of [opts[1], opts[opts.length - 1]]) {
+      const val = pick[0];
+      probed += 1;
+      const html = params.buildParamInput(name, val, task);
+      if (!html.includes('<select')) continue; // 该键在此任务下不是下拉框（列选择器等）
+      const chosen = explicitlySelected(html);
+      if (chosen !== String(val)) {
+        notSelected.push(
+          `${key}: 默认值 ${JSON.stringify(val)}(${typeof val}) → ` +
+            (chosen === null ? '无任何 option 带 selected（浏览器将隐式选首项）' : `选中的是 ${JSON.stringify(chosen)}`),
+        );
+      }
+    }
+  }
+  check(probed > 0, '未枚举到任何多选项参数（断言将恒真，扫描器失效）');
+  check(
+    notSelected.length === 0,
+    `下拉框未显式选中声明的默认值（数值型候选会静默下发首项）：\n      ` +
+      notSelected.slice(0, 8).join('\n      '),
+  );
+  console.log(`  · 下拉框默认值显式选中探测 ${probed} 次`);
+}
+
+// ── 断言 8：自由文本参数里的哨兵字面量必须**原样下发**（审查 2026-10-09 C-3）──
+// P0-1 的兜底把 `'null'`/`'undefined'`/`'NaN'` 当"未填"丢弃，但那是**数据字面量**：
+// `proportion_ci.success_value='null'`（用户想算列中文本为 `null` 的占比）被吞掉后
+// 引擎落回"首个类别"，实测 16.67% 静默变成 83.33% 且 status=ok / messages=[]。
+// 渲染侧已由 `value="${v ?? ''}"` 根治，故这里钉住"用户真填的字面量必须原样发出"。
+// 回读结果落盘，供 Python 侧做**端到端**断言（面板载荷 → 引擎 → 16.67%）。
+{
+  params.hydrateParams({
+    params: { proportion_ci: { success_value: 'null' } },
+    param_labels: { success_value: '成功取值' },
+  });
+  elements.clear();
+  const html = params.buildParamInput('success_value', 'null', 'proportion_ci');
+  const { tag, value } = browserValueOf(html);
+  const node = el('param_success_value');
+  node.tagName = tag;
+  node.value = value;
+  const sent = params.getParams('proportion_ci');
+  check(value === 'null', `渲染侧应保住 'null' 字面量，实际 ${JSON.stringify(value)}`);
+  check(
+    sent.success_value === 'null',
+    `自由文本参数中的 'null' 必须是数据（不得被当哨兵丢弃），实际 ${JSON.stringify(sent)}`,
+  );
+  const sentinelPath = process.env.SMARTSUITE_SENTINEL_DUMP;
+  if (sentinelPath) {
+    writeFileSync(sentinelPath, JSON.stringify(sent), 'utf8');
+    console.log(`  · 哨兵字面量回读已落盘 ${sentinelPath}`);
+  }
+  params.hydrateParams(PAYLOAD); // 还原真实载荷，避免影响后续/后续运行者
+}
+
 // ── 输出 ────────────────────────────────────────────────────────
 if (problems.length) {
   console.error('FAIL: 参数面板冒烟未通过');
   for (const p of problems) console.error('  - ' + p);
   process.exit(1);
 }
-console.log('OK: 参数面板冒烟通过（真实加载 params.js + 后端真实载荷 + 6 组断言）');
+console.log('OK: 参数面板冒烟通过（真实加载 params.js + 后端真实载荷 + 8 组断言）');

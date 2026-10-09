@@ -512,7 +512,11 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         # 但面板不渲染该键，Web 用户无法主动指定分组列（只能靠 X 列的第 2 列碰运气）。
         # 引擎语义核对：`params.get("group_col")` 得 `None` 时**继续走** `feature_cols[1]`
         # 回退（实测：`group_col=None` 与不传逐字相同；传真实列名才多出 Log-rank 行）。
-        default_params={"group_col": None},
+        #
+        # F11：`event_value` 同类缺口 —— 引擎读它、错误消息还指引用户设置它，
+        # 但面板键集里没有 ⇒ Web 用户看不到控件。默认 `None` = 未指定
+        # （引擎按 `is not None` 判空，`None` 与不传逐字等价）。
+        default_params={"group_col": None, "event_value": None},
         raw_cat=True,
     ),
 )
@@ -561,7 +565,7 @@ class LazyTaskRegistry(Mapping[str, TaskFunc]):
 
 @dataclass(frozen=True)
 class DerivedRegistry:
-    """`derive()` 的产物：6 组派生结构 + 注册表。"""
+    """`derive()` 的产物：注册表 + 8 组派生结构（共 **9** 个字段，即下面列出的 9 项）。"""
 
     registry: LazyTaskRegistry
     labels: dict[str, str]
@@ -577,8 +581,13 @@ class DerivedRegistry:
 def derive(specs: Sequence[TaskSpec]) -> DerivedRegistry:
     """从 TaskSpec 序列派生全部注册结构。
 
-    单一事实源的兑现点：新增一条 spec，7 个结构自动同步；重复键直接报错，
+    单一事实源的兑现点：新增一条 spec，**9 个字段**（注册表 + 8 组派生结构，
+    即 `DerivedRegistry` 的 9 个字段）自动同步；重复键直接报错，
     避免「后写覆盖先写」的静默丢失。
+
+    数字来源（防漂移，改结构时请重跑）：
+        python -c "import dataclasses; from smartsuite.services.task_spec import DerivedRegistry;
+                   print(len(dataclasses.fields(DerivedRegistry)))"   # → 9
     """
     labels: dict[str, str] = {}
     groups: dict[str, list[str]] = {}

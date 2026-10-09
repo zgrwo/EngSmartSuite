@@ -14,9 +14,16 @@ from smartsuite.engine._constants import (
     CPK_GOOD,
     CPK_MINIMUM,
 )
-from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, check_non_constant, clean_series
+from smartsuite.engine._guard import (
+    BoundaryIssue,
+    BoundaryReport,
+    check_magnitude,
+    check_non_constant,
+    check_tables_finite,
+    clean_series,
+)
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import shapiro_p
+from smartsuite.engine._utils import disp, shapiro_p
 
 logger = logging.getLogger(__name__)
 
@@ -357,12 +364,34 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     # Round-2 #A2n：常量数据 → Cp/Cpk/Pp 全 None 且 status=ok，误导
     # 第三十五轮：改由 `_guard.check_non_constant` 判定（B0），
     # 使"常量列"这一拒绝与其它模块**同源**（此前各模块手写各自的判据与文案）。
+    # 发版前收尾（契约 #5）：文案也改成用 issue 的归因 —— 原先一律写
+    # 「常量列（标准差为 0）」，而**整列为空**与**只有 1 个有效观测**同样会走到
+    # 这里，用户按"常量"去查一个空列永远查不到原因（错误归因，硬性要求 2）。
     _const_issue = check_non_constant(data, what="目标列")
     if _const_issue is not None:
         return AnalysisResult(
             task="process_capability",
             status="error",
-            messages=["目标列为常量列（标准差为 0），过程能力无法估计。"],
+            messages=[f"{_const_issue.detail}，过程能力分析无法进行。"],
+        )
+
+    # ── 量级上界（B0）：审查 2026-10-09 R2BD-01（P0）──
+    # 本任务原先**既无** `check_magnitude` **也无** `check_tables_finite`，
+    # 而失效形态与其余任务不同：`np.std` 的中间量溢出 ⇒ `sigma_overall = inf`
+    # 走 `sigma_overall > 0` 的**真**分支 ⇒ `Ppk/Pp/Cpm` 静默变成 `0.000`，
+    # 而 `status=ok` + 「判定: 勉强」照常输出；再往上（×1e160）`(mu-target)**2`
+    # 在 Python float 域抛 `OverflowError` **逃出引擎**（红线违规）。
+    # 实测阈值与数据有关：×1e150 起静默错、×1e154 σ=inf、×1e160 崩。
+    #
+    # 位置：放在 `check_non_constant` **之后** —— 常量列无论量级都会先被判「常量列」，
+    # 那是更具体的归因（单位换算救不了常量列）；把量级判据前移会引入新的错误归因，
+    # 正是本契约硬性要求 2 要防的事。
+    if check_magnitude(data, what=f"目标列「{req.target_col}」", report=report) is not None:
+        return AnalysisResult(
+            task="process_capability",
+            status="error",
+            messages=report.messages(),
+            metadata={"boundary_codes": report.codes()},
         )
 
     # ── 参数校验（阶段 P4 步骤②③：声明式 Spec + 抛异常式传播）──
@@ -429,6 +458,23 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
                     detail="⚠ Box-Cox 变换失败（数据必须全部为正值），使用原始数据分析",
                 )
             )
+
+    # ── 变换后量级复检（B0）：同一条 R2BD-01 机制的残留可达路径 ──
+    # 入口那次 `check_magnitude` 看的是**原始数据**；Box-Cox 的 MLE 功率变换
+    # `(x^λ−1)/λ` 在 λ>1 时会把量级放大若干数量级（实测 ×1e145 原始数据未触发守卫，
+    # 变换后 σ 达 1e122、`Σ(x−μ)²` 溢出 ⇒ `sigma_overall=inf` ⇒ `Ppk=Pp=Cpm=0.000`
+    # 且 `status=ok`、判定照常输出）。**量级守卫必须作用在实际参与计算的数组上**，
+    # 故变换生效后复检一次（`boxcox_lambda is not None` 即"变换确实生效且未回退"）。
+    if boxcox_lambda is not None and (
+        check_magnitude(data, what=f"目标列「{req.target_col}」（Box-Cox 变换后）", report=report)
+        is not None
+    ):
+        return AnalysisResult(
+            task="process_capability",
+            status="error",
+            messages=report.messages(),
+            metadata={"boundary_codes": report.codes()},
+        )
 
     norm_warn = _normality_warning(data)
     if norm_warn and transform != "boxcox":
@@ -546,27 +592,32 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         cpk_val = None
 
     # Pp/Ppk (长期/整体) — 单侧公差仅计算 Ppk
+    # 判据与上面的 Cp/Cpk **同口径**（`np.isfinite(...) and > 0`）：审查 2026-10-09
+    # R2BD-01 的静默机制正是 `sigma_overall > 0` 对 `inf` 为真 ⇒ 走"正常"分支
+    # 算出 `Ppk=0.000`。技能陷阱 9 规则 1：防零除只认精确零/非有限，不得用
+    # `> 0` 这类比较把 `inf` 放行（NaN 同理，`NaN > 0` 恒假会静默变 None）。
+    _sigma_ok = np.isfinite(sigma_overall) and sigma_overall > 0
     pp = (
         float((usl - lsl) / (6 * sigma_overall))
-        if usl is not None and lsl is not None and sigma_overall > 0
+        if usl is not None and lsl is not None and _sigma_ok
         else None
     )
     if usl is not None and lsl is not None:
         ppk_val = (
             float(min((usl - mu) / (3 * sigma_overall), (mu - lsl) / (3 * sigma_overall)))
-            if sigma_overall > 0
+            if _sigma_ok
             else None
         )
     elif usl is not None:
-        ppk_val = float((usl - mu) / (3 * sigma_overall)) if sigma_overall > 0 else None
+        ppk_val = float((usl - mu) / (3 * sigma_overall)) if _sigma_ok else None
     elif lsl is not None:
-        ppk_val = float((mu - lsl) / (3 * sigma_overall)) if sigma_overall > 0 else None
+        ppk_val = float((mu - lsl) / (3 * sigma_overall)) if _sigma_ok else None
     else:
         ppk_val = None
 
     # Cpm (Taguchi 能力指数, 需双侧公差)
     cpm = None
-    if usl is not None and lsl is not None and target is not None and sigma_overall > 0:
+    if usl is not None and lsl is not None and target is not None and _sigma_ok:
         tau = np.sqrt(sigma_overall**2 + (mu - target) ** 2)
         cpm = float((usl - lsl) / (6 * tau)) if tau > 0 else None
 
@@ -651,14 +702,18 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     capability_df = pd.DataFrame(capability_rows)
 
     # ── 描述统计表 ──
+    # 展示口径（审查 2026-10-09 C-1/R2BD-06）：均值/整体σ/组内σ 都带**数据量纲**
+    # → 走共享展示格式化器 `disp`。原 `f"{mu:.4f}"` 在 ×1e-9 下把三格全吞成
+    # `0.0000`，而**同一张表**的 USL/LSL（`str(usl)`）却是 `1.45e-08` —— 两套口径。
+    # 偏度/峰度是无量纲形状量，保留 `:.4f`（AC 报告 C-1 的量纲无关量白名单）。
     desc_df = pd.DataFrame(
         {
             "统计量": ["样本量", "均值", "整体σ", "组内σ", "偏度", "峰度", "USL", "LSL", "目标值"],
             "值": [
                 str(n),
-                f"{mu:.4f}",
-                f"{sigma_overall:.4f}",
-                f"{within_sigma:.4f}",
+                disp(mu),
+                disp(sigma_overall),
+                disp(within_sigma),
                 f"{float(data.skew()):.4f}",
                 f"{float(data.kurtosis()):.4f}",
                 str(usl) if usl is not None else "未指定",
@@ -692,12 +747,18 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
         pdf_fit,
         color=PALETTE["data"]["primary"],
         linewidth=2,
-        label=f"正态拟合 (μ={mu:.3f}, σ={sigma_overall:.3f})",
+        # 图内文本同样带量纲 → `disp`（审查 2026-10-09 C-1：×1e-9 时
+        # 图例写成「正态拟合 (μ=0.000, σ=0.000) | 均值=0.0000」）
+        label=f"正态拟合 (μ={disp(mu, 3)}, σ={disp(sigma_overall, 3)})",
     )
 
     # 规格限
     ax.axvline(
-        mu, color=PALETTE["center"]["primary"], linestyle="-", linewidth=2, label=f"均值={mu:.4f}"
+        mu,
+        color=PALETTE["center"]["primary"],
+        linestyle="-",
+        linewidth=2,
+        label=f"均值={disp(mu)}",
     )
     if lsl is not None:
         ax.axvline(
@@ -753,12 +814,31 @@ def process_capability_analysis(req: AnalysisRequest) -> AnalysisResult:
     summary_parts.append(f"判定: {judge}")
     summary = "；".join(summary_parts)
 
+    # ── 出口保洁（B0）：结果表渗出 ±Inf 即拒绝（审查 2026-10-09 R2BD-07/#22）──
+    # 与 `doe_analysis` / `response_surface` / `quantile_regression` 同口径：
+    # 入口管"进来的数据"，出口管"出去的结果"，两者共同保证非有限值
+    # 既不静默进、也不静默出。
+    #
+    # ⚠️ 覆盖范围如实声明：本任务两张结果表的"值"列都是**预格式化字符串**
+    # （`f"{mu:.4f}"` / `str(usl)`），`non_finite_tables` 只扫数值列
+    # （`select_dtypes(np.number)`），故对**当前**表结构 `check_tables_finite`
+    # 是结构性无效的——它此刻拦不住已经变成字符串的 `"inf"`。
+    # 本轮 P0 的实际拦截点是上面的 `check_magnitude`（×1e150 以上全部 B0），
+    # 这里接线是为了 ① 与同批任务口径一致；② 未来任何数值列一旦加入即自动受保护。
+    # 让出口断言对**字符串值列**也生效需要 `non_finite_tables` 增加字符串扫描，
+    # 那属 `_guard` 的公共契约变更，不在本轮范围内（已登记）。
+    _tables = {"capability_indices": capability_df, "descriptive_stats": desc_df}
+    if check_tables_finite(_tables, what="过程能力分析结果", report=report) is not None:
+        return AnalysisResult(
+            task="process_capability",
+            status="error",
+            messages=report.messages(),
+            metadata={"boundary_codes": report.codes()},
+        )
+
     return AnalysisResult(
         task="process_capability",
-        tables={
-            "capability_indices": capability_df,
-            "descriptive_stats": desc_df,
-        },
+        tables=_tables,
         figures=[fig],
         summary=summary,
         metadata={

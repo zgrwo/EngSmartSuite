@@ -22,10 +22,16 @@ from smartsuite.core.param_specs_common import (
     TARGET,
     USL,
 )
-from smartsuite.engine._guard import BoundaryReport, clean_frame, clean_series
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    clean_frame,
+    clean_series,
+    degenerate_column_reason,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     _adjust_xlabels,
+    disp,
     round_for_display,
 )
 
@@ -146,8 +152,10 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
         edgecolor="white",
         alpha=0.7,
     )
+    # 中位数/CI 端点带**数据量纲** → 共享展示格式化器 `disp`
+    # （审查 2026-10-09 C-1/R2BD-06：×1e-9 时图例、表、摘要三处全为 `0.0000`）
     ax.axvline(
-        median, color=PALETTE["center"]["primary"], linewidth=2, label=f"中位数={median:.4f}"
+        median, color=PALETTE["center"]["primary"], linewidth=2, label=f"中位数={disp(median)}"
     )
     ax.axvline(lower, color=PALETTE["anomaly"]["primary"], linestyle="--", linewidth=1.5)
     ax.axvline(
@@ -155,7 +163,7 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
         color=PALETTE["anomaly"]["primary"],
         linestyle="--",
         linewidth=1.5,
-        label=f"{ci_level * 100:.0f}% CI: [{lower:.4f}, {upper:.4f}]",
+        label=f"{ci_level * 100:.0f}% CI: [{disp(lower)}, {disp(upper)}]",
     )
     ax.axvspan(lower, upper, alpha=0.1, color=PALETTE["anomaly"]["primary"])
     ax.set_xlabel(req.target_col, fontsize=10)
@@ -171,9 +179,9 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
                 {
                     "指标": ["中位数", "CI下限", "CI上限", "置信水平", "样本量", "方法"],
                     "值": [
-                        f"{median:.4f}",
-                        f"{lower:.4f}",
-                        f"{upper:.4f}",
+                        disp(median),
+                        disp(lower),
+                        disp(upper),
                         f"{ci_level:.0%}",
                         str(n),
                         "二项分布符号检验",
@@ -182,7 +190,9 @@ def median_ci(req: AnalysisRequest) -> AnalysisResult:
             )
         },
         figures=[fig],
-        summary=f"中位数={median:.4f}, {ci_level * 100:.0f}% CI: [{lower:.4f}, {upper:.4f}]",
+        summary=(
+            f"中位数={disp(median)}, {ci_level * 100:.0f}% CI: [{disp(lower)}, {disp(upper)}]"
+        ),
         metadata={
             "median": median,
             "ci_lower": lower,
@@ -280,21 +290,24 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
         density=True,
     )
     ax.axvline(
-        orig_stat, color=PALETTE["center"]["primary"], linewidth=2, label=f"点估计={orig_stat:.4f}"
+        orig_stat,
+        color=PALETTE["center"]["primary"],
+        linewidth=2,
+        label=f"点估计={disp(orig_stat)}",
     )
     ax.axvline(
         ci_lower_pct,
         color=PALETTE["anomaly"]["primary"],
         linestyle="--",
         linewidth=1.5,
-        label=f"{ci_level * 100:.0f}% CI下限={ci_lower_pct:.4f}",
+        label=f"{ci_level * 100:.0f}% CI下限={disp(ci_lower_pct)}",
     )
     ax.axvline(
         ci_upper_pct,
         color=PALETTE["anomaly"]["primary"],
         linestyle="--",
         linewidth=1.5,
-        label=f"{ci_level * 100:.0f}% CI上限={ci_upper_pct:.4f}",
+        label=f"{ci_level * 100:.0f}% CI上限={disp(ci_upper_pct)}",
     )
     ax.axvspan(ci_lower_pct, ci_upper_pct, alpha=0.1, color=PALETTE["anomaly"]["primary"])
     ax.set_xlabel(f"{statistic} ({req.target_col})", fontsize=10)
@@ -308,10 +321,11 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
     fig.tight_layout()
 
     ci_width = ci_upper_pct - ci_lower_pct
+    # 点估计/CI 端点/宽度都带**数据量纲** → `disp`（审查 2026-10-09 C-1/R2BD-06）
     summary = (
-        f"{statistic} = {orig_stat:.4f}, "
+        f"{statistic} = {disp(orig_stat)}, "
         f"{ci_level * 100:.0f}% Bootstrap CI: "
-        f"[{ci_lower_pct:.4f}, {ci_upper_pct:.4f}] (宽度={ci_width:.4f})"
+        f"[{disp(ci_lower_pct)}, {disp(ci_upper_pct)}] (宽度={disp(ci_width)})"
     )
 
     return AnalysisResult(
@@ -330,10 +344,10 @@ def bootstrap_ci(req: AnalysisRequest) -> AnalysisResult:
                     ],
                     "值": [
                         statistic,
-                        f"{orig_stat:.4f}",
-                        f"{ci_lower_pct:.4f}",
-                        f"{ci_upper_pct:.4f}",
-                        f"{ci_width:.4f}",
+                        disp(orig_stat),
+                        disp(ci_lower_pct),
+                        disp(ci_upper_pct),
+                        disp(ci_width),
                         str(n_boot),
                         str(n),
                     ],
@@ -750,12 +764,25 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     # （审查 2026-08-19 #1.2：'DataFrame' has no attribute 'unique' 崩溃）
     cols_needed = list(dict.fromkeys([y_col, x_col] + ([group_col] if has_groups else [])))
 
-    sub = req.data[cols_needed].dropna()
+    # ── 边界处置（B1）：±Inf 清洗 + 披露（审查 2026-10-09 R2BD-11）──
+    # 原实现只 `.dropna()` —— **±Inf 不是 NaN**，会原样进入散点与拟合：
+    # 实测 `n_points` 仍为 60（NaN 情形为 57，即"与干净数据逐字相同"），
+    # 且 `fit="linear"` 时 `LinearRegression().fit` 抛
+    # `ValueError: Input y/X contains infinity` **未捕获逃出引擎**（红线）。
+    # `clean_frame` 的清洗列**只取数值列**（y/x）：混入字符串分组列会让
+    # `to_numpy(dtype=float)` 抛错 → `_guard` 静默返回原帧（清洗失效）；
+    # 分组列的 NaN 仍由随后的 `.dropna()` 按既有的全列缺失语义处理。
+    _boundary = BoundaryReport()
+    sub, _n_non_finite = clean_frame(
+        req.data[cols_needed], list(dict.fromkeys([y_col, x_col])), report=_boundary
+    )
+    sub = sub.dropna()
     if len(sub) < 3:
         return AnalysisResult(
             task="scatter_plot",
             status="error",
-            messages=[f"有效数据不足(至少3个点, 当前{len(sub)}个)"],
+            messages=[f"有效数据不足(至少3个点, 当前{len(sub)}个)"] + _boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
         )
 
     # ── 参数提取 ──
@@ -832,11 +859,16 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
     r_squared = None
     eq_text = ""
     if fit_type == "linear" and len(x_all) >= 3:
-        if y_all.size and np.unique(y_all).size <= 1:
+        # 收尾轮（契约 #5）：判据与文案统一走 `_guard` 三级归因
+        # （原先手写 `np.unique(y_all).size <= 1`，只报"常量"）
+        _degenerate = (
+            degenerate_column_reason(pd.Series(y_all), what="目标列") if y_all.size else None
+        )
+        if _degenerate is not None:
             return AnalysisResult(
                 task="scatter_plot",
                 status="error",
-                messages=["目标列为常量，无法拟合线性趋势（R² 无意义，避免 0/0 假 R²=1）"],
+                messages=[f"{_degenerate}，无法拟合线性趋势（R² 无意义，避免 0/0 假 R²=1）"],
             )
         # OLS 线性回归
         X_mat = x_all.reshape(-1, 1)
@@ -951,5 +983,8 @@ def scatter_plot(req: AnalysisRequest) -> AnalysisResult:
             "fit_type": fit_type,
             "r_squared": r_squared,
             "groups": [str(g) for g in all_group_names if g != "_default"],
+            # 审查 2026-10-09 R2BD-11：±Inf 的处置必须到达机器可读出口
+            "boundary_codes": _boundary.codes(),
         },
+        messages=_boundary.messages(),
     )

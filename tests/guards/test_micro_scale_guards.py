@@ -16,6 +16,7 @@
 """
 
 import math
+import re
 import warnings
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.engine import (
     anomaly_detect,
+    bootstrap_ci,
     box_chart,
     cronbach_alpha,
     cusum_chart,
@@ -35,9 +37,11 @@ from smartsuite.engine import (
     gage_rr,
     grid_search,
     hypothesis_test,
+    median_ci,
     outlier_consensus,
     regression_analysis,
     spc_nonparametric,
+    survival_analysis,
     tolerance_interval,
     trend_forecast,
     xbar_r_chart,
@@ -936,3 +940,330 @@ def test_outlier_consensus_isolation_vote_scale_invariant():
     t_macro = r_macro.tables.get("consensus") or next(iter(r_macro.tables.values()))
     t_micro = r_micro.tables.get("consensus") or next(iter(r_micro.tables.values()))
     assert len(t_macro) == len(t_micro), "异常共识条数随量纲变化"
+
+
+# ── C-1 / R2BD-06（2026-10-09 二轮全量审查）：微尺度**展示通道**不得塌缩 ──────
+# 报告：logs/reports/2026-10-09-review-r2-ac.md 的 C-1（P1）、
+#      logs/reports/2026-10-09-review-r2-bd.md 的 R2BD-06（P2）。
+#
+# 缺陷形态：×1e-9 时 `summary`、图例/标题、以及"先格式化再放进表"的字符串单元格
+# 走 `f"{x:.4f}"` 手写定点格式 → 整段吞成 `0.0000`；而**同一次分析**的数值列
+# （`round_for_display`）已是科学计数 → 用户看到两套互相矛盾的数值口径。
+#
+# 断言口径：任一用户可见文本通道都不得出现 `0.0000` / `0.000`。选用数据（n=60、
+# μ≈5e-9）上没有任何统计量真值为 0，故"零值"不是竞争解释；同时逐任务把 summary
+# 里抽出的数值与 `metadata` 的**真值**对拍（跨通道一致性，不依赖具体量级）。
+#
+# 回归防线对应实现：`engine/_utils.disp`（与 `round_for_display` 共用
+# `_is_micro_scale` 阈值，见该函数 docstring）。
+_MICRO_SCALE = 1e-9
+
+
+def _micro_frame(seed: int = 2, n: int = 60) -> pd.DataFrame:
+    """微尺度（ppb 级）工艺数据：μ≈5e-9、σ≈1e-9，形态与常规量级完全同构。"""
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame({"y": (5.0 + rng.standard_normal(n)) * _MICRO_SCALE})
+
+
+def _req(task: str, df: pd.DataFrame, params: dict | None = None) -> AnalysisRequest:
+    return AnalysisRequest(task=task, data=df, target_col="y", feature_cols=[], params=params or {})
+
+
+def _capability_micro(df: pd.DataFrame):
+    """过程能力：规格限/目标值必须与数据同比缩放，否则指标本身无意义。"""
+    return orchestrate(
+        AnalysisRequest(
+            task="process_capability",
+            data=df,
+            target_col="y",
+            feature_cols=[],
+            params={
+                "usl": 8.0 * _MICRO_SCALE,
+                "lsl": 2.0 * _MICRO_SCALE,
+                "target": 5.0 * _MICRO_SCALE,
+            },
+        )
+    )
+
+
+_MICRO_RUNNERS = {
+    "distribution_summary": lambda df: distribution_summary(_req("distribution_summary", df)),
+    "spc_xbar": lambda df: xbar_r_chart(_req("spc_xbar", df)),
+    "spc_nonparametric": lambda df: spc_nonparametric(_req("spc_nonparametric", df)),
+    "trend_forecast": lambda df: trend_forecast(_req("trend_forecast", df)),
+    "tolerance_interval": lambda df: tolerance_interval(
+        _req("tolerance_interval", df, {"coverage": 0.99, "confidence": 0.95})
+    ),
+    "process_capability": _capability_micro,
+    "median_ci": lambda df: median_ci(_req("median_ci", df)),
+    "bootstrap_ci": lambda df: bootstrap_ci(_req("bootstrap_ci", df, {"n_bootstrap": 200})),
+}
+
+
+def _visible_texts(res) -> list[str]:
+    """收集一个 `AnalysisResult` 的**全部用户可见文本通道**（summary / 表 / 图）。"""
+    out = [f"summary: {res.summary}"]
+    for name, frame in (res.tables or {}).items():
+        for col in frame.columns:
+            for value in frame[col].tolist():
+                out.append(f"{name}.{col}={value}")
+    for fig in res.figures or []:
+        for ax in fig.axes:
+            out.extend([ax.get_title(), ax.get_xlabel(), ax.get_ylabel()])
+            legend = ax.get_legend()
+            if legend is not None:
+                out.extend(t.get_text() for t in legend.get_texts())
+            out.extend(t.get_text() for t in ax.texts)
+    return out
+
+
+@pytest.mark.parametrize("task", sorted(_MICRO_RUNNERS))
+def test_micro_scale_display_has_no_collapsed_zero(task):
+    """×1e-9 下 summary / 表字符串单元格 / 图内文本均不得被吞成 `0.0000`。
+
+    修复前实测（`disp` 接入之前）：
+      distribution_summary: `y: μ=0.000, M=0.000, σ=0.000, CV=19.8%。`
+      spc_xbar:            `X-bar CL=0.0000, UCL=0.0000, LCL=0.0000`
+                           `control_limits` 整行 5 格全 `0.0000`
+      spc_nonparametric:   `CL(P50)=0.0000, UCL=0.0000, LCL=0.0000`（图标题/图例同）
+      trend_forecast:      `RMSE=0.0000`；表内 `RMSE/MAE/斜率/截距` 全 `0.0000`
+      tolerance_interval:  `99% 总体以 95% 置信度落在 [0.0000, 0.0000]`（表 + 图例同）
+    """
+    res = _MICRO_RUNNERS[task](_micro_frame())
+    assert res.status == "ok", res.messages
+    bad = [t for t in _visible_texts(res) if "0.0000" in t or "0.000" in t]
+    assert not bad, f"{task} 在 ×{_MICRO_SCALE:g} 下展示塌缩为 0（固定小数位吞没微尺度值）: {bad}"
+
+
+#: task → (summary 中抽取数值的正则, metadata 真值路径)
+_MICRO_SUMMARY_PROBES: dict[str, tuple[str, str]] = {
+    "distribution_summary": (r"μ", "descriptive.均值"),
+    "spc_xbar": (r"CL", "xbar_mean"),
+    "spc_nonparametric": (re.escape("CL(P50)"), "cl"),
+    "trend_forecast": (r"RMSE", "rmse"),
+    "median_ci": (r"中位数", "median"),
+    "bootstrap_ci": (r"mean", "point_estimate"),
+}
+
+
+def _metadata_value(res, path: str) -> float:
+    cur = res.metadata
+    for part in path.split("."):
+        cur = cur[part]
+    return float(cur)
+
+
+def _summary_number(summary: str, pattern: str) -> float:
+    """按正则从 summary 抽取数值（`pattern` 须含一个捕获组；分隔符写法各任务不同）。"""
+    match = re.search(pattern + r"\s*[:=]?\s*([-+]?[0-9.]+(?:[eE][-+]?\d+)?)", summary)
+    assert match is not None, f"summary 中未找到模式「{pattern}」：{summary}"
+    return float(match.group(1))
+
+
+@pytest.mark.parametrize("task", sorted(_MICRO_SUMMARY_PROBES))
+def test_micro_scale_summary_matches_metadata_value(task):
+    """summary 里抽出的数值必须与 `metadata` 真值一致（跨通道一致性，量级无关）。
+
+    这条把"两套口径"直接钉死：无论实现怎么改，摘要显示的数值与机器可读出口
+    必须是同一个数。修复前 `spc_xbar` 的摘要 CL 为 0.0，而 `metadata["xbar_mean"]`
+    是 5.08e-9 —— 两者相差 5×10⁹ 倍却同时呈现给用户。
+    """
+    pattern, path = _MICRO_SUMMARY_PROBES[task]
+    res = _MICRO_RUNNERS[task](_micro_frame())
+    assert res.status == "ok", res.messages
+    shown = _summary_number(res.summary, pattern)
+    assert shown == pytest.approx(_metadata_value(res, path), rel=1e-3), (
+        f"{task} 摘要 {pattern}={shown} 与 metadata[{path}]={_metadata_value(res, path)} 不一致"
+    )
+
+
+def test_tolerance_interval_summary_bounds_match_metadata():
+    """容许区间的摘要区间端点必须随量纲缩放且与 `metadata` 一致（C-1 同族）。"""
+    res = _MICRO_RUNNERS["tolerance_interval"](_micro_frame())
+    assert res.status == "ok", res.messages
+    match = re.search(r"\[([-+0-9.eE]+), ([-+0-9.eE]+)\]", res.summary)
+    assert match is not None, f"summary 中未找到区间：{res.summary}"
+    lower, upper = float(match.group(1)), float(match.group(2))
+    assert lower == pytest.approx(float(res.metadata["lower"]), rel=1e-3)
+    assert upper == pytest.approx(float(res.metadata["upper"]), rel=1e-3)
+    assert lower > 0.0 and upper > lower, f"微尺度区间被压平：{res.summary}"
+
+
+def test_disp_formats_micro_scale_as_scientific_and_keeps_macro_unchanged():
+    """共享展示格式化器 `disp` 的契约（`round_for_display` 的文本侧同源实现）。"""
+    from smartsuite.engine._utils import disp
+
+    # 微尺度 → 有效数字（科学计数），不再被固定小数位吞成 0
+    assert disp(5.079471251645309e-09) == "5.079e-09"
+    assert disp(-1.2345e-13) == "-1.234e-13"
+    # 常规量级 → 与此前 `f"{x:.4f}"` 逐字一致（既有显示不受影响）
+    assert disp(10.347291) == "10.3473"
+    assert disp(0.123456) == "0.1235"
+    # 真值 0 与不可判定值有明确显示语义，不得与"被吞掉"混淆
+    assert disp(0.0) == "0.0000"
+    assert disp(float("nan")) == "N/A"
+    assert disp(float("inf")) == "+∞" and disp(float("-inf")) == "-∞"
+    # decimals 同时是微尺度分支的有效数字位数（趋势表用 6 位）
+    assert disp(5.013012e-10, 6) == "5.01301e-10"
+    assert disp(0.501301, 6) == "0.501301"
+
+
+# ══════════════════════════════════════════════════════════════
+# 微尺度**量纲对抗**：展示层三通道（R2BD-06 / C-1 同族残留）
+# ══════════════════════════════════════════════════════════════
+
+
+def _survival_df(scale: float = 1.0) -> pd.DataFrame:
+    """右删失寿命数据的微/宏观同构构造（**同一数组仅乘 `scale`**）。"""
+    rng = np.random.default_rng(21)
+    times = rng.weibull(2.0, 60) * 100.0 * scale
+    events = (rng.random(60) < 0.7).astype(int)
+    events[0] = 1
+    return pd.DataFrame({"t": times, "e": events})
+
+
+def _run_gage_rr(scale: float) -> AnalysisResult:
+    return gage_rr(
+        AnalysisRequest(
+            task="gage_rr",
+            data=_gage_df(scale),
+            target_col="m",
+            feature_cols=["part", "op"],
+            params={"part_col": "part", "operator_col": "op"},
+        )
+    )
+
+
+def _run_survival_analysis(scale: float) -> AnalysisResult:
+    return survival_analysis(
+        AnalysisRequest(
+            task="survival_analysis",
+            data=_survival_df(scale),
+            target_col="t",
+            feature_cols=["e"],
+            params={},
+        )
+    )
+
+
+#: task → 跑一次（入参 = 量纲缩放因子）。两个任务的 `summary` / 表内**字符串**单元格 /
+#: 图内文本都曾用固定小数位手写格式化（`:.4f` / `:.6f` / `:.0f`），
+#: 在 ×1e-9 下整段吞成 `0.0000` / `0`（审查 2026-10-09 R2BD-06 同族残留）。
+_MICRO_CONTRAST_RUNNERS = {
+    "gage_rr": _run_gage_rr,
+    "survival_analysis": _run_survival_analysis,
+}
+
+_NUM_RE = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
+
+#: 展示字符串判据的相对容差：渲染出来的文本只有 4~6 位有效数字，
+#: **宏量级那一侧解析回来本身就带舍入**（`0.0260` ← 0.0259714、`0.000105` ← 1.048e-4），
+#: 微尺度分支又按 `decimals` 位**有效数字**渲染（`disp(x, 3)` → `1.21e-07` ← 1.20715e-07，
+#: 相对误差 ~2.4e-3）。故按 5% 判"同一个量"；而"被固定小数位吞成 0"是 **100%** 偏离，
+#: 判别力不受影响。
+_REL_TOL = 0.05
+
+#: 宏量级就渲染成 0 的格子（合法零 / 被钳位的方差分量 / KM 曲线起点）在微尺度也必须为 0
+#: （允许 < 1e-12 的浮点尘埃）。
+_ABS_TOL = 1e-12
+
+
+def _scale_law_holds(macro_val: float, micro_val: float) -> bool:
+    """微/宏两个**展示值**是否符合量纲定律（不变量 / ×s / ×s²）。
+
+    ⚠️ 判据做成**比值**而非"与期望值比"：`×s²` 分支的期望值本身在 ~1e-18 量级，
+    若用绝对容差（如 1e-12）兜底，"塌缩成 0"会被误判为通过（本轮实测踩到过）。
+    """
+    if macro_val == 0.0:
+        return abs(micro_val) <= _ABS_TOL
+    ratio = micro_val / macro_val
+    return any(
+        abs(ratio - _MICRO_SCALE**power) <= _REL_TOL * _MICRO_SCALE**power for power in (0, 1, 2)
+    )
+
+
+def _numbers(text: str) -> list[float]:
+    """抽出一段展示文本里的全部数字（含科学计数法）。"""
+    return [float(m) for m in _NUM_RE.findall(str(text))]
+
+
+def _channel_texts(res: AnalysisResult) -> dict[str, str]:
+    """`AnalysisResult` 的**三个用户可见通道** → 逐条文本（键稳定，可逐条对齐）。
+
+    summary / 表内单元格（含预格式化字符串）/ 图内文本（标题、轴标签、图例、图内标注）。
+    与 `_visible_texts` 覆盖同一批通道，但**带键**，以便 macro↔micro 逐条比对
+    （见 `test_micro_scale_channels_are_scale_covariant` 为何不用通用扫描）。
+    """
+    out: dict[str, str] = {"summary": str(res.summary)}
+    for name, frame in (res.tables or {}).items():
+        for col in frame.columns:
+            for i, value in enumerate(frame[col].tolist()):
+                out[f"{name}[{i}].{col}"] = str(value)
+    for fi, fig in enumerate(res.figures or []):
+        for ai, ax in enumerate(fig.axes):
+            out[f"fig{fi}.ax{ai}.title"] = ax.get_title()
+            out[f"fig{fi}.ax{ai}.xlabel"] = ax.get_xlabel()
+            out[f"fig{fi}.ax{ai}.ylabel"] = ax.get_ylabel()
+            legend = ax.get_legend()
+            if legend is not None:
+                for li, t in enumerate(legend.get_texts()):
+                    out[f"fig{fi}.ax{ai}.legend{li}"] = t.get_text()
+            for ti, t in enumerate(ax.texts):
+                out[f"fig{fi}.ax{ai}.text{ti}"] = t.get_text()
+    return out
+
+
+@pytest.mark.parametrize("task", sorted(_MICRO_CONTRAST_RUNNERS))
+def test_micro_scale_channels_are_scale_covariant(task):
+    """×1e-9 下**每个**用户可见数字必须按量纲定律缩放（或本就是无量纲不变量）。
+
+    判据（陷阱 9 的"量纲对抗"用在展示层）：同一数组乘 `s = 1e-9` 后，展示文本里的
+    每个数字必须满足三者之一 ——
+
+    - **无量纲不变量**：逐字相同（`%GRR`/`ndc`/`F`/`p`/贡献率/`%SV`/生存概率/
+      Weibull β/自由度/样本量）；
+    - **线性协变量**（`×s`）：带一次量纲的量 —— 标准差、`kσ` 研究变异、TV、
+    - **平方协变量**（`×s²`）：**方差量** —— 均方（`SS/df`）、方差分量及其 95%CI
+      （单位是量纲的平方，数据乘 1e-9 后它们乘 1e-18）。
+
+    固定小数位手写格式化会让这些量塌缩成**恰好 0**（`0.0000` / `0.000000` / `0`），
+    三个分支都不成立 → 逐条点名。**合法零不受影响**：宏量级就渲染成 0 的格子
+    （`gage_rr` 的交互分量被合并钳位为 0、KM 曲线起点 `时间=0.0`）在微尺度仍为 0，
+    走"不变量"分支通过 —— 这正是本判据不能用"含 `0.000` 子串"那种通用扫描的原因：
+
+    - `gage_rr` 在**正确输出**下就有 `贡献率(%)=0.0`、`方差分量=0.000000`（合法 0）；
+    - `survival_analysis` 在**正确输出**下就有 `km_survival[0].时间=0.0`（曲线起点）
+      与 `生存概率=1.0000`（含子串 `0.000`）。
+
+    两者若接进 `_MICRO_RUNNERS` 的通用扫描都会在**修复后**依旧变红（误报）。
+
+    判据的已知边界（如实登记）：它把"整体不缩放"也视为合法（与"无量纲不变量"
+    无法从文本区分），故它拦的是**展示塌缩**这一类缺陷，不拦"该缩放却没缩放"的整体性错误。
+
+    修复前实测（×1e-9）：`gage_rr` 的 `标准差/5.2σ变异/均方/方差分量/95%CI/图内标注`
+    与 `summary` 的 EV/AV/PV 全为 `0.0000`/`0.000000`/`0.000`；
+    `survival_analysis` 的 `summary` 与图例 `Weibull (β=1.99, η=121)` 中 `η` 显示为 `0`。
+    """
+    macro = _MICRO_CONTRAST_RUNNERS[task](1.0)
+    micro = _MICRO_CONTRAST_RUNNERS[task](_MICRO_SCALE)
+    assert macro.status == "ok", macro.messages
+    assert micro.status == "ok", micro.messages
+
+    macro_channels, micro_channels = _channel_texts(macro), _channel_texts(micro)
+    assert set(macro_channels) == set(micro_channels), (
+        f"{task} 两次运行的通道结构不一致，判据无法逐条对齐："
+        f"{sorted(set(macro_channels) ^ set(micro_channels))}"
+    )
+    collapsed: list[str] = []
+    for key in sorted(macro_channels):
+        macro_nums, micro_nums = _numbers(macro_channels[key]), _numbers(micro_channels[key])
+        assert len(macro_nums) == len(micro_nums), (
+            f"{task}.{key}: 数字个数变化 —— {macro_channels[key]!r} → {micro_channels[key]!r}"
+        )
+        for macro_val, micro_val in zip(macro_nums, micro_nums, strict=True):
+            if not _scale_law_holds(macro_val, micro_val):
+                collapsed.append(
+                    f"{key}: {macro_val!r} → {micro_val!r}"
+                    "（既非无量纲不变量、也未按 ×s 或 ×s² 缩放 —— 固定小数位把它吞成了 0）"
+                )
+    assert not collapsed, f"{task} 在 ×{_MICRO_SCALE:g} 下展示塌缩：\n  " + "\n  ".join(collapsed)

@@ -10,6 +10,22 @@ on:
       - "docs/user-manual/**"
       - "docs/specification/api-reference.md"
       - "uv.lock"
+      # 审查 2026-10-09 R2 的 G-10：本 job 的**版本链断言**（tag == pyproject ==
+      # manifest == CHANGELOG）与 `verify_docs --strict` 的**目录树登记**，
+      # 守护的恰恰是下列文件 —— 而它们原先**不在 paths 里**：改了它们不会触发质量门禁
+      # （实测：改 AGENTS.md 的模板数、改 manifest 版本号都不跑本 job）。
+      # 这正是 R2 中 `verify_docs --strict` 反复变红的成因 —— 改的人从未看到门禁。
+      - "pyproject.toml"
+      - "CHANGELOG.md"
+      - ".release-please-manifest.json"
+      - "AGENTS.md"
+      - "templates/**"
+      - "mkdocs.yml"
+      - "docs/governance/**"
+  # main 直推同样要过门禁：PR 事件覆盖不到 release-please 的自动提交与维护者直推，
+  # 版本链一旦漂移会**无人拦截**直到发版当天。
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # 最小权限：只读仓库内容；pull-requests: read 供 dependency-review-action 读取 PR 元数据
@@ -43,17 +59,18 @@ jobs:
       - name: 安装依赖（冻结锁文件）
         run: uv sync --frozen --all-extras
       - name: Run test quality guard
-        # WARN 基线 12（2026-10-09 发版前全量审查 P1-1）。
-        # 审查实测：CI 口径 89 > 10 → 红；而本地 verify_all.py 跑的是**默认口径**
-        # （exit 0）→ 假绿。本轮两处一起修：verify_all 复用本参数，
-        # WARN 由 89 压到 11：
-        #   · 修守卫自身 1 处漏判（_STRONG_ASSERT_RE 不识别 `== "字面量"`，
-        #     使含 `err.code == "NOT_FINITE"` 的测试被误报为弱）；
-        #   · 64 条"参数接受度"测试加**具名豁免**（WEAK_ASSERT_EXEMPT，逐项注明理由：
-        #     该数据无法令参数产生差异，实测确认无法做效果断言）；
-        #   · 其余逐条加强（参数回报 / 上界语义 / p 值范围 / 拆复合断言 / 删冗余 is not None）。
-        # 基线 12 = 实测 11 + 1 条余量。**豁免条数始终打印**，避免"豁免变看不见"。
-        run: uv run python scripts/test_quality_guard.py --max-warn 12
+        # WARN 基线 0（2026-10-09 发版前收尾）。
+        # 沿革：全量审查 P1-1 时 CI 口径 89 → 修守卫漏判 + 64 条具名豁免 + 逐条加强 → 11；
+        # 打包轮次把上限写成 12（"实测 11 + 1 条余量"）。收尾轮**消减而非调高**：
+        #   · 补 2 处守卫自身漏判（`== "字面量"`、`fn(...) is True/False` 两族强断言形态）；
+        #   · 11 条 WARN 逐条补真实值断言（Cp=(USL−LSL)/6σ 恒等式、卡方 p 与
+        #     `chi2.sf(stat, df)` 独立复算、列联表维度/总数、box_chart 分组元数据、
+        #     网格搜索最优点落在区间内、doe 3 水平字符串因子明确拒绝、
+        #     inverse_solve 参数三态方向、variance_test 回落与显式口径逐值一致…）；
+        #   · 顺带删除 2 条**陈旧豁免**（测试被加强后条目失效，`check_stale_exemptions` 拦下）。
+        # 现 WARN 实测 **0**，上限即 0 —— 余量是真实的：任何一条新弱断言直接顶红。
+        # **豁免条数始终打印**（现 61 条，见 WEAK_ASSERT_EXEMPT），避免"豁免变看不见"。
+        run: uv run python scripts/test_quality_guard.py --max-warn 0
 
   docs-consistency:
     name: 文档一致性（断链/目录树/裸异常/版本漂移）
@@ -70,7 +87,11 @@ jobs:
         run: uv run python scripts/verify_docs.py --strict
 
   manual-parity:
-    name: 手册数值一致性
+    # 审查 2026-10-09 G-7：job 名原为「手册数值一致性」—— 过度声称：本 job 跑的是
+    # verify_cross_consistency.py，其实只校验 MANUAL_EXPECTATIONS 登记的 11 项
+    # （/42 任务）；未登记任务的手册漂移由 ci.yml quick 的 verify_manual_claims
+    # （38 条 CLAIM）承担。现名字写实，脚本输出亦带"手册覆盖度（G-7）"一行。
+    name: 手册数值一致性（抽样：登记 11 项，全量由 ci.yml 手册 CLAIM 门禁承担）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

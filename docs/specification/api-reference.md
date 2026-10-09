@@ -1,7 +1,14 @@
 # SmartSuite API Reference
 
-> 全部 42 个分析函数的完整参考。数据契约定义在 `smartsuite/core/contracts.py`。
+> 全部 **42 个分析任务**（`services/task_spec.py::TASK_SPECS`，即 `/api/tasks` 下发的任务全集）的完整参考。
+> 数据契约定义在 `smartsuite/core/contracts.py`。
 > 开发规范 → `AGENTS.md` | 开发陷阱 → `skills/smartsuite-dev.md` | 场景选择 → `skills/analysis-decision-tree.md` | 术语 → `docs/governance/context.md`
+>
+> **计数口径**：本文档的「42」指**任务数**（`TASK_SPECS`，唯一注册点）。
+> 引擎包 `smartsuite.engine.__all__` 另有 **49** 个导出 = **43 个 callable + 6 个常量**
+> （常量：`CPK_GOOD` / `CPK_MINIMUM` / `DW_SAFE_LOWER` / `DW_SAFE_UPPER` / `GROUP_COLORS` / `PALETTE`）。
+> 43 个 callable 中 42 个对应下面的任务小节，多出的 1 个是显示工具
+> `round_for_display`（见「五、报告导出 API」）—— **它不是分析任务**，故不计入 42。
 
 ## 数据契约
 
@@ -44,7 +51,7 @@ class AnalysisResult:
 ### anova_analysis
 - **Task Key**: `anova`
 - **描述**: 多因子 ANOVA 方差分析，含效应量 (η²/ω²)、Levene 方差齐性检验、Shapiro-Wilk 正态性检验、Tukey HSD 事后比较
-- **params**: `alpha` (默认 0.05), `interactions` (是否包含两两交互)
+- **params**: `alpha` (默认 0.05), `interactions` (是否包含两两交互), `ss_type` (平方和类型：2=Type II（默认）/ 3=Type III（Minitab/SAS 默认口径）；仅在不平衡设计下有区别，口径与 `design_balanced`/`cell_sizes` 写入 `metadata`)
 - **返回**: `anova_enhanced`, `coefficients`, `posthoc_tukey`
 - **图**: 箱线图 + 交互效应图
 
@@ -267,28 +274,29 @@ class AnalysisResult:
 ### attribute_chart
 - **Task Key**: `spc_attribute`
 - **描述**: 计数型控制图 — p (不良率), np (不良数), c (缺陷数), u (单位缺陷率)
-- **params**: `chart_type` ("p"|"np"|"c"|"u"), `group_col` (分组依据，空→单一序列), `n_col` (p/np/u 图样本量列；np 图亦以其为样本量来源并要求子组缺陷计数 ≤ 样本量；未在 DEFAULT_PARAMS 注册默认值，不传时默认取每点子组样本量)
+- **params**: `chart_type` ("p"|"np"|"c"|"u"), `group_col` (分组依据，空→单一序列), `n_col` (p/np/u 图样本量列；np 图亦以其为样本量来源并要求子组缺陷计数 ≤ 样本量；**已注册进 `DEFAULT_PARAMS`**（键集合 `chart_type`/`group_col`/`n_col`），不传时按每点子组样本量处理)
 - **返回**: `control_stats`
 - **图**: 属性控制图 + 控制限
 
 ### cusum_chart
 - **Task Key**: `spc_cusum`
 - **描述**: CUSUM 累积和控制图 — 对小偏移 (±0.5σ~2σ) 敏感
-- **params**: `k` (默认 0.5), `h` (默认 5.0), `mu`/`sigma` (需同时提供，指定已知受控状态参数；缺省从数据估计)
+- **params**: `k` (默认 0.5), `h` (默认 5.0), `mu`/`sigma` (需同时提供，指定已知受控状态参数；缺省从数据估计), `group_col` (分组依据：按此列分系列，各组独立估计 μ/σ 并独立检测报警；空→单一序列)
 - **返回**: `cusum_stats`
 - **图**: 原始数据 (上) + C+/C- 累积和 (下)
 
 ### ewma_chart
 - **Task Key**: `spc_ewma`
 - **描述**: EWMA 指数加权移动平均控制图 — 时变控制限
-- **params**: `lam` (默认 0.2), `L` (默认 2.7), `mu`/`sigma` (需同时提供，引擎强制成对校验；缺省从数据估计)
+- **params**: `lam` (默认 0.2), `L` (默认 2.7), `mu`/`sigma` (需同时提供，引擎强制成对校验；缺省从数据估计), `group_col` (分组依据：按此列分系列，各组独立估计 μ/σ 并独立计算 EWMA；空→单一序列)
 - **返回**: `ewma_stats`
 - **图**: EWMA + 时变控制限 + 渐近控制限
 
 ### process_capability_analysis
 - **Task Key**: `process_capability`
 - **描述**: 过程能力分析 — Cp/Cpk/Pp/Ppk/Cpm + 95%CI + Sigma Level + DPMO
-- **params**: `usl`, `lsl`, `target` (Cpm 目标), `transform` ("boxcox"：可选 Box-Cox 正态化转换，默认不转换；要求数据为正)
+- **params**: `usl`, `lsl`, `target` (Cpm 目标), `transform` ("boxcox"：可选 Box-Cox 正态化转换，默认不转换；要求数据为正), `subgroup_col` (按该列分组、组内去均值后**池化**求组内 σ；不依赖行序), `subgroup_size` (按行序切成连续等长子组求组内 σ；依赖行序)
+- **口径**：组内 σ 三口径由 `metadata.within_sigma_method` 标明（`moving_range` 默认 / `pooled_subgroup_col` / `subgroup_size`）。同时给出 `subgroup_col` 与 `subgroup_size` 属歧义输入，引擎**拒绝**而不任选其一；含单观测子组同样拒绝
 - **返回**: `capability_indices`, `descriptive_stats`
 - **图**: 直方图 + 正态拟合 + 规格限
 
@@ -296,6 +304,7 @@ class AnalysisResult:
 - **Task Key**: `trend_forecast`
 - **描述**: 线性趋势预测，含 MAPE/RMSE/MAE 精度指标、Durbin-Watson、Ljung-Box、ACF
 - **params**: `forecast_steps` (默认 5)
+- **口径**：`RMSE` / `MAE` 按 **`ddof=0`（除以 n）** 计算，与 sklearn `mean_squared_error` 一致；`statsmodels` 的 `mse_resid`（回归标准误）用 **n − p**（p=2），故 `RMSE_引擎 / σ_回归 = sqrt((n−p)/n)`（n=60 时 ≈ 0.9832，约 1.7% 系统差）—— 属口径差异，不是计算错误（审查 2026-10-09 R2BD-12）
 - **返回**: `forecast`, `accuracy_metrics`
 - **图**: 2×2 布局: 趋势+预测 / 残差 / ACF / Actual vs Predicted
 
@@ -374,7 +383,8 @@ class AnalysisResult:
 ### survival_analysis
 - **Task Key**: `survival_analysis`
 - **描述**: Kaplan-Meier 生存分析 + Weibull 拟合 + Log-rank 检验 (可选分组)
-- **params**: 无 (使用 `feature_cols[0]` 为事件列, `feature_cols[1]` 为分组列)
+- **params**: `group_col` (分组列：≥2 组时做 Log-rank 组间比较；**当前实现仅支持两组**，分组数 > 2 时不做 log-rank 并在 `messages` + `metadata.logrank_skipped_reason` 显式披露), `event_value` (失效标记值：事件列为「合格/不合格」这类语义不明的文本时，填其中一个值表示「失效」，默认留空 = 未指定)。事件列取 `feature_cols[0]`、分组列取 `feature_cols[1]`（若未显式给 `group_col`）
+- **口径**：`event_value` 自 2026-10-09 起登记进 `reliability.PARAM_SPECS["survival_analysis"]` 与 `TaskSpec.default_params`，**Web 参数面板可达**（原「引擎内部另读、面板不可达、只能 CLI/Python 直调」的说明已过期）；引擎按 `is not None` 判空，故面板默认的 `None` 与不传逐字等价，而显式传入的 `""`/`0` 不会被静默丢弃（falsy 陷阱）。可选值取决于**数据列的实际取值**（如「合格/不合格」），故不是固定下拉选项 —— 见 [用户手册 08](../user-manual/08-advanced.md) 的「常见参数误用」
 - **返回**: `km_survival`, `logrank_test` (如有分组)
 - **图**: KM 阶梯曲线 + Weibull 拟合 + 删失标记
 
@@ -387,16 +397,38 @@ class AnalysisResult:
 
 ### TaskSpec / TASK_SPECS（任务注册唯一事实源）
 `services/task_spec.py` 的 `TASK_SPECS: tuple[TaskSpec, ...]` 是任务元数据的**唯一来源**。
-`TaskSpec(key, func_path, label, group, default_params={}, raw_cat=False, no_target=False, no_data=False)`；
+
+```python
+TaskSpec(key, func_path, label, group, default_params={}, raw_cat=False,
+         no_target=False, no_data=False, y_only=False, x_optional=False)  # 共 10 个字段
+```
+
 `func_path` 为 `"模块:函数名"` 字符串，首次访问时按需 import（不在此展开引擎依赖）。
 
 ### derive(specs) -> DerivedRegistry
-由 `TASK_SPECS` 派生全部注册结构：`registry`（LazyTaskRegistry）、`labels`、`groups`、
-`default_params`、`raw_cat`、`no_target`、`no_data`。重复 key 直接 `ValueError`。
-审查 2026-09-19 B1 之前，这 7 个结构需手工同步（且含 3 处 `append`/`add` 补丁）。
+由 `TASK_SPECS` 派生全部注册结构（`DerivedRegistry` 的 **9** 个字段，与下面 9 个名字一一对应）：
 
-### TASK_REGISTRY: MutableMapping[str, Callable]
-全部 task key → 引擎函数的注册表，由 `task_spec.derive()` 派生。支持
+| DerivedRegistry 字段 | orchestrator 导出名 |
+|---|---|
+| `registry` | `TASK_REGISTRY` |
+| `labels` | `TASK_LABELS` |
+| `groups` | `TASK_GROUPS` |
+| `default_params` | `DEFAULT_PARAMS` |
+| `raw_cat` | `RAW_CAT_TASKS` |
+| `no_target` | `NO_TARGET_TASKS` |
+| `no_data` | `NO_DATA_TASKS` |
+| `y_only` | `Y_ONLY_TASKS` |
+| `x_optional` | `X_OPTIONAL_TASKS` |
+
+> 数量**以 `DerivedRegistry.__dataclass_fields__` 为准**（不要再硬编码数字）。
+> 重复 key 直接 `ValueError`。
+> 审查 2026-09-19 B1 之前，这些结构需手工同步（且含 3 处 `append`/`add` 补丁）；
+> `y_only` / `x_optional` 于 2026-09-24（第 42 轮）加入，此前文档中的「7 个结构」为过期计数。
+
+### TASK_REGISTRY: Mapping[str, Callable]
+全部 task key → 引擎函数的注册表，由 `task_spec.derive()` 派生。类型是 **只读 `Mapping`**
+（`LazyTaskRegistry` 只继承 `collections.abc.Mapping`，**不是** `MutableMapping`；
+`isinstance(TASK_REGISTRY, MutableMapping) == False`）。支持
 按下标取函数后调用（如 `TASK_REGISTRY[task]` 再 `(req)`）/ `keys()` / `values()` / `items()` / `in` / `len()` /
 `set(...)` / `sorted(...)` 与 `monkeypatch.setitem` 覆盖（覆盖仅改解析缓存，可逆）。
 Task key 按业务场景分为 5 组（定义在 `TASK_GROUPS` 中，`web/app.py` 通过 import 引用）。
@@ -416,6 +448,15 @@ Task key 按业务场景分为 5 组（定义在 `TASK_GROUPS` 中，`web/app.py
 | `to_ppt` | `(result, output_path, template_path=None) -> str` | PPTX 文件 |
 | `to_html` | `(result, output_path) -> str` | 自包含 HTML |
 
+### round_for_display(values, decimals=4)
+
+`smartsuite.engine._utils` 的**显示舍入工具**（经 `services/bridge.py` 借道导出；`engine.__all__` 中第 43 个 callable，**不是分析任务**）。
+
+- **作用**：常规量级按 `decimals` 位小数；**微尺度数据改按有效数字** —— 固定 4 位小数会把 ~1e-10 的纳米/微应变测量值整组显示为 `0.0000`（审查 2026-09-05 O-1）。
+- **入参**：`values` 标量或数组（`ndarray`/`Series`/`list`，按位置转换），`decimals` 常规量级的小数位（同时是微尺度分支的有效数字位数）。`NaN`/`Inf` 原样保留。
+- **返回**：标量输入 → `float`；数组输入 → `ndarray`。
+- ⚠️ 只处理**数值列**；`summary` 拼接、图内文本与预格式化字符串单元格走同源的 `disp()`（同一 `_is_micro_scale` 阈值）。两者是一对，**勿单独改其一**。
+
 ---
 
 ## 六、数据 IO API
@@ -425,7 +466,7 @@ Task key 按业务场景分为 5 组（定义在 `TASK_GROUPS` 中，`web/app.py
 | `validate_data(df, target_col, feature_cols)` | 校验列存在性、类型、缺失值 |
 | `read_csv_with_encoding(source, *, nrows=None, encoding=None)` | 多编码读取 CSV。`encoding=None`：先按 BOM 判定（UTF-8/UTF-16/UTF-32），无 BOM 再走 UTF-8 BOM → UTF-8 → GBK；显式 `encoding` 取值见 `SUPPORTED_CSV_ENCODINGS`（`utf-8-sig`/`gbk`/`gb18030`/`big5`/`utf-16`）。解码失败抛 `CsvEncodingError`，结构非法抛 `CsvParseError`（Web/CLI 共用；不含 latin-1 兜底；ADR-0004） |
 | `SUPPORTED_CSV_ENCODINGS` | 可显式声明的 CSV 编码白名单（唯一来源：CLI `--encoding` 与 Web 上传面板下拉框；ADR-0004） |
-| `preprocess_data(df, features, categorical_cols=None)` | One-Hot 编码 + 中位数插补 |
+| `preprocess_data(df, features, categorical_cols=None, known_cat_map=None)` | One-Hot 编码 + 中位数插补。`categorical_cols=None` → 自动检测；`known_cat_map=None` → 从数据推断（传入历史映射可对齐既有编码）。**返回 5 元组** `(encoded_df, encoded_cols, cat_map, imputation_log, unknown_cat_warnings)` —— 增删返回值必须同步全部调用方 |
 | `missing_pattern_analysis(df)` | 缺失模式诊断 + 高基数检测 |
 | `recommend_analysis(df, target_col=None)` | 基于数据结构智能推荐分析方法 |
 
@@ -435,7 +476,7 @@ Task key 按业务场景分为 5 组（定义在 `TASK_GROUPS` 中，`web/app.py
 
 | 函数 | 用途 |
 |------|------|
-| `process_audit(df, target_col, feature_cols, ...)` | 一站式 6 项健康检查 |
-| `batch_analyze(df, target_col, feature_cols, tasks=None)` | 批量运行多个分析 |
-| `auto_report(df, target_col, feature_cols=None, ...)` | 一键自动报告 → HTML |
-| `export_workbook(df, target_col, feature_cols, output_path)` | 批量分析 → 多 Sheet Excel |
+| `process_audit(df, target_col, feature_cols, usl=None, lsl=None, target=None, time_order=False)` | 一站式 6 项健康检查 |
+| `batch_analyze(df, target_col, feature_cols, tasks=None, **kwargs)` | 批量运行多个分析（`tasks=None` → 全部；`**kwargs` 透传到底层分析参数） |
+| `auto_report(df, target_col, feature_cols=None, output_path=None, usl=None, lsl=None, title='SmartSuite 自动分析报告')` | 一键自动报告 → HTML |
+| `export_workbook(df, target_col, feature_cols, output_path, tasks=None)` | 批量分析（`tasks=None` → 全部）→ 多 Sheet Excel |

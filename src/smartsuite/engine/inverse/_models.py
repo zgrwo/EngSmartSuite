@@ -26,6 +26,12 @@ from smartsuite.engine._constants import (
     INVERSE_RATE_RIDGE_ALPHA_MIN,
     INVERSE_RATE_RIDGE_ALPHA_N,
 )
+from smartsuite.engine._guard import (
+    BoundaryIssue,
+    BoundaryReport,
+    degenerate_column_code,
+    first_degenerate_reason,
+)
 from smartsuite.engine._utils import round_for_display
 
 logger = logging.getLogger(__name__)
@@ -155,7 +161,24 @@ def _auto_candidates(n_rows: int, feature_count: int) -> tuple[tuple[str, ...], 
     return candidates, notes
 
 
-def _fit_forward(history, roles, model="auto", random_state=42):
+def _fit_forward(
+    history,
+    roles,
+    model="auto",
+    random_state=42,
+    *,
+    report: BoundaryReport | None = None,
+):
+    """前向模型候选筛选与拟合。
+
+    `report`（可选）：把两处**降级**登记为边界处置，由调用方并入
+    `AnalysisResult.messages` 与 `metadata["boundary_codes"]` ——
+    契约硬性要求 1 禁止"只在日志里说明的降级"。两处降级都会改变结果口径：
+
+      - **常量特征列被剔除**（`E_DATA_CONSTANT_COLUMN`，B1）：模型少了一个输入项；
+      - **auto 候选被规模削减**（`E_SCALE_AUTO_CANDIDATE_SKIPPED`，B2）：
+        候选集合变了，"auto 选了 X" 的可比范围随之变化。
+    """
     feature_cols = [
         c
         for c in roles.incoming + roles.variable + roles.fixed
@@ -206,11 +229,36 @@ def _fit_forward(history, roles, model="auto", random_state=42):
         for row in quality_rows:
             if row["Output"] == out_col and row["候选"] == best_kind:
                 row["选用"] = True
-    if dropped:
-        logger.warning("常量列已从特征中剔除: %s", dropped)
     note = "；".join(auto_notes) if auto_notes else None
     if note:
         logger.warning(note)
+        if report is not None:
+            report.add(
+                BoundaryIssue(
+                    level="B2",
+                    code="E_SCALE_AUTO_CANDIDATE_SKIPPED",
+                    detail=note,
+                )
+            )
+    if dropped:
+        logger.warning("常量列已从特征中剔除: %s", dropped)
+        if report is not None:
+            # 契约 #5：原因取自 `_guard` 单一归因（整列为空 ≠ 常量列）——
+            # 「常量列已剔除」这句话此前由本模块自己下结论，全 NaN 列也会被这么说。
+            reason = first_degenerate_reason(history, dropped, label="特征列")
+            detail = (
+                f"{reason}，未参与建模"
+                if len(dropped) == 1
+                else f"以下 {len(dropped)} 个特征列退化，未参与建模"
+                f"（{'、'.join(dropped)}）；首个：{reason}"
+            )
+            report.add(
+                BoundaryIssue(
+                    level="B1",
+                    code=degenerate_column_code(history[dropped[0]]) or "E_DATA_CONSTANT_COLUMN",
+                    detail=detail,
+                )
+            )
     fast = [_fast_predictor(model_item) for model_item in models]
     return (
         ForwardModel(feature_cols, models, choices, note=note, fast=fast),
@@ -300,11 +348,21 @@ class RateForwardModel:
         return offsets - self.predict_rate(incoming_row, u) * float(time)
 
 
-def _fit_rate_forward(history, roles, time_col, random_state=42):
+def _fit_rate_forward(
+    history, roles, time_col, random_state=42, *, report: BoundaryReport | None = None
+):
     """速率物理先验模型：Y_j = Inc_j - r_j(z)·t，r_j 用 StandardScaler + RidgeCV。
 
     速率特征二选一（逐输出按 LOO R² 选优）：params = fixed + variable；
     all = incoming + fixed + variable。time_col 不参与速率特征（防止速率依赖预报时间）。
+
+    `report`（可选）：登记三处**降级**（契约硬性要求 1，此前只写日志）：
+
+      - 来料/输出配对回退（`E_DESIGN_PAIRING_FALLBACK`，B2）——决定每个输出用哪一列来料；
+      - 时间列无效的行被剔除（`E_DATA_INVALID_TIME_DROPPED`，B1）
+        ——速率 = (来料−输出)/t，t 缺失或为 0 时该行不可用；
+      - 逐输出剔除含缺失/非有限特征的行（`E_DATA_INCOMPLETE_ROWS_DROPPED`，B1）
+        ——每个输出实际参与拟合的行数可能不同。
     """
     if not time_col or time_col not in history.columns:
         raise ValueError("rate 模型需要有效的时间列 time_col")
@@ -324,6 +382,10 @@ def _fit_rate_forward(history, roles, time_col, random_state=42):
         detail = "、".join(f"{inc_col}→{out_col}" for inc_col, out_col in pairs)
         pairing_note = f"来料与输出未能按后缀完全配对，已按{mode}方式配对：{detail}"
         logger.warning(pairing_note)
+        if report is not None:
+            report.add(
+                BoundaryIssue(level="B2", code="E_DESIGN_PAIRING_FALLBACK", detail=pairing_note)
+            )
     params_cols = list(dict.fromkeys(c for c in roles.fixed + roles.variable if c != time_col))
     all_cols = list(
         dict.fromkeys(c for c in roles.incoming + roles.fixed + roles.variable if c != time_col)
@@ -337,6 +399,17 @@ def _fit_rate_forward(history, roles, time_col, random_state=42):
     dropped_time = int((~valid_time).sum())
     if dropped_time:
         logger.warning("速率模型丢弃 %d 行缺少有效时间值的记录", dropped_time)
+        if report is not None:
+            report.add(
+                BoundaryIssue(
+                    level="B1",
+                    code="E_DATA_INVALID_TIME_DROPPED",
+                    detail=(
+                        f"速率模型已剔除 {dropped_time} 行时间列无效（缺失或为 0）的历史记录，"
+                        f"速率拟合基于其余 {int(valid_time.sum())} 行"
+                    ),
+                )
+            )
     train = history.loc[valid_time]
     train_time = time_values.loc[valid_time].to_numpy(float)
     finite_union = np.isfinite(train[union_cols].to_numpy(float)).all(axis=1)
@@ -358,6 +431,17 @@ def _fit_rate_forward(history, roles, time_col, random_state=42):
             logger.warning(
                 "输出「%s」的速率模型剔除 %d 行含缺失/非有限特征的数据", out_col, dropped
             )
+            if report is not None:
+                report.add(
+                    BoundaryIssue(
+                        level="B1",
+                        code="E_DATA_INCOMPLETE_ROWS_DROPPED",
+                        detail=(
+                            f"输出「{out_col}」的速率模型已剔除 {dropped} 行含缺失/非有限特征的"
+                            f"历史记录，该输出速率基于其余 {int(mask.sum())} 行"
+                        ),
+                    )
+                )
         rate = (inc[mask] - y[mask]) / train_time[mask]
         best_name, best_r2, best_model, best_cols = None, -np.inf, None, None
         for name, cols in candidates:

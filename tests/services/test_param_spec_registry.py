@@ -29,11 +29,217 @@
 
 from __future__ import annotations
 
+import ast
+import importlib
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from smartsuite.services.param_labels import spec_for_task
+
+#: 校验器方法名：`Spec.validate(...)` / `Spec.validate_or_raise(...)` 的返回值
+#: 即"已校验参数对象"，其属性取用等价于读取该参数。
+_VALIDATOR_METHODS = frozenset({"validate", "validate_or_raise", "check"})
+
+
+def _is_validator_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _VALIDATOR_METHODS
+    )
+
+
+def _mentions_validator(node: ast.AST) -> bool:
+    return any(_is_validator_call(sub) for sub in ast.walk(node))
+
+
+def _param_names(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    return [a.arg for a in fn.args.args + fn.args.kwonlyargs]
+
+
+def _scan_scope(task_key: str) -> list[Path]:
+    """任务参数的**读取面扫描范围**：任务模块（包子模块时含同包兄弟）。
+
+    为什么包子模块要扫兄弟：`inverse_solve` 的引擎模块 `engine/inverse/solve.py`
+    只做编排与归一，17 个参数散在 `_roles.py` / `_solver.py` / `_params.py` /
+    `_bounds.py` / `_report.py` 里读取。只看任务模块会得到 20+ 个"引擎不读"的
+    假阳性（本门禁首版实测），门禁随即退化成一张大豁免表 —— 那比没有更糟。
+
+    平铺在 `engine/` 根下的模块**不扫兄弟**：那里是几十个互不相关的任务模块，
+    合并读取面会让"某任务真的不读某键"永远查不出来（假阴性）。
+    """
+    from smartsuite.services.task_spec import TASK_SPECS
+
+    matched = [s for s in TASK_SPECS if s.key == task_key]
+    if not matched:
+        return []
+    module = importlib.import_module(matched[0].func_path.split(":", 1)[0])
+    path = Path(module.__file__)
+    engine_dir = Path(importlib.import_module("smartsuite.engine").__file__).parent
+    if path.parent != engine_dir:
+        return sorted(path.parent.glob("*.py"))
+    return [path]
+
+
+def _scan_read_keys(task_key: str) -> frozenset[str]:
+    """**引擎实际会读取**的参数键（`engine_read_param_keys` 的跨函数增强版）。
+
+    `services/param_labels.engine_read_param_keys` 只认 `xxx.get("<字面量>")`
+    且限定在任务模块内 —— 作为"未知参数提示"的已知集够用，作为**可达性门禁**
+    则会把大量真实读取判成"不读"（首版实测 38 键 / 17 任务假阳性）。本函数补上
+    四种本项目实际使用的读取形态：
+
+    1. **内联校验属性**：`SPEC.validate_or_raise(p).method`（`correlation.py:125`）；
+    2. **跨函数传递**：`_dd = SPEC.validate_or_raise(p)` → `_build_design(_dd)` →
+       形参 `spec_params.replicates`（`doe.py:816/745`）；
+    3. **循环变量作键**：`for spec_key, _ in [("usl", …), ("lsl", …)]: _xp.get(spec_key)`
+       （`xbar_r.py:434`、`exploratory.py:517`）；
+    4. **键名走实参**：`_str_param(params, "model", "auto")` → 形参 `key` 被
+       `params.get(key)` 取用（`inverse/_params.py` + `inverse/solve.py`）。
+
+    仍是**保守下界**：动态拼键（`params.get(f"{role}_cols")`）与跨模块实参传递
+    不在覆盖内 —— 这类键由本文件的 `UNREAD_WHITELIST` 具名登记（见下）。
+    """
+    files = _scan_scope(task_key)
+    if not files:
+        return frozenset()
+    trees = [ast.parse(f.read_text(encoding="utf-8-sig")) for f in files]
+
+    # ── 第一遍：全局函数签名 + "哪个形参被当作参数键使用" ──
+    func_params: dict[str, list[str]] = {}
+    key_params: dict[str, set[str]] = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            func_params.setdefault(node.name, _param_names(node))
+            for sub in ast.walk(node):
+                if (
+                    isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == "get"
+                    and sub.args
+                    and isinstance(sub.args[0], ast.Name)
+                ):
+                    key_params.setdefault(node.name, set()).add(sub.args[0].id)
+                if isinstance(sub, ast.Subscript) and isinstance(sub.slice, ast.Name):
+                    key_params.setdefault(node.name, set()).add(sub.slice.id)
+
+    keys: set[str] = set()
+    for tree in trees:
+        keys |= _scan_tree(tree, func_params, key_params)
+    return frozenset(keys)
+
+
+def _scan_tree(
+    tree: ast.AST,
+    func_params: dict[str, list[str]],
+    key_params: dict[str, set[str]],
+) -> set[str]:
+    """单文件分析：上面 `_scan_read_keys` 的四种形态 + holder 数据流。"""
+    funcs = {
+        n.name: n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    # 循环变量 → 其可迭代表达式里的字符串常量
+    loop_keys: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.For, ast.comprehension)):
+            continue
+        strings = {
+            c.value
+            for c in ast.walk(node.iter)
+            if isinstance(c, ast.Constant) and isinstance(c.value, str)
+        }
+        for sub in ast.walk(node.target):
+            if isinstance(sub, ast.Name):
+                loop_keys.setdefault(sub.id, set()).update(strings)
+
+    def keys_of(arg: ast.AST) -> set[str]:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return {arg.value}
+        if isinstance(arg, ast.Name):
+            return set(loop_keys.get(arg.id, ()))
+        return set()
+
+    keys: set[str] = set()
+
+    # 形态 4：本地/同包辅助函数的"键名实参"
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        wanted = key_params.get(node.func.id)
+        if not wanted:
+            continue
+        names = func_params.get(node.func.id, [])
+        for i, arg in enumerate(node.args):
+            if i >= len(names) or names[i] in wanted:
+                keys |= keys_of(arg)
+        for kw in node.keywords:
+            if kw.arg in wanted:
+                keys |= keys_of(kw.value)
+
+    # holder = 校验结果（`x = SPEC.validate(...)` / `x, err = SPEC.validate(...)`）
+    holders: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if node.value is None or not _mentions_validator(node.value):
+            continue
+        for target in targets:
+            for sub in ast.walk(target):
+                if isinstance(sub, ast.Name):
+                    holders.add(sub.id)
+    # 形态 2：holder 作为实参传给本地函数 → 对应形参也是 holder（不动点）
+    for _ in range(4):
+        added = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            fn = funcs.get(node.func.id)
+            if fn is None:
+                continue
+            names = _param_names(fn)
+            for i, arg in enumerate(node.args):
+                if i >= len(names):
+                    break
+                name = arg.id if isinstance(arg, ast.Name) else None
+                if (name in holders or _mentions_validator(arg)) and names[i] not in holders:
+                    holders.add(names[i])
+                    added = True
+        if not added:
+            break
+
+    for node in ast.walk(tree):
+        # 形态 1/2：属性取用（`SPEC.validate_or_raise(p).usl` / `validated.usl`）
+        if isinstance(node, ast.Attribute) and (
+            _mentions_validator(node.value)
+            or (isinstance(node.value, ast.Name) and node.value.id in holders)
+        ):
+            keys.add(node.attr)
+        # 形态 3 + 既有口径：`*.get(<键>)`
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and node.args
+        ):
+            recv = node.func.value
+            is_holder = isinstance(recv, ast.Name) and recv.id in holders
+            is_params = ast.unparse(recv).split(".")[-1].endswith("params")
+            if is_holder or is_params or _mentions_validator(recv):
+                keys |= keys_of(node.args[0])
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in holders
+        ):
+            keys |= keys_of(node.slice)
+    return keys
 
 
 class TestSpecIsResolvedPerTask:
@@ -530,3 +736,151 @@ class TestCapabilityTransformReachableWithoutForcingBoxCox:
         _m.loader.exec_module(_vfp)
         opts = _vfp.check()
         assert not opts, f"前端参数门禁应保持全绿：{opts}"
+
+
+class TestDefaultParamsAreReadByTheEngine:
+    """「面板可达、引擎不读」的**假参数**必须被点名（审查 2026-10-09 A-3）。
+
+    ## 缺陷机制（注入 I-3 实测）
+
+    给 `regression` 同时加 `Spec.fake_knob`（`Finite(gt=0, le=10)` + 中文标签 + 提示）
+    与 `default_params["fake_knob"] = 3`，结果：
+
+        pytest tests/services/test_param_spec_registry.py tests/scripts/test_params_panel.py \\
+               tests/engine/test_param_migration_batch8.py tests/core -q   → 208 passed
+        node scripts/check_params_panel.mjs                                → OK
+        python scripts/verify_frontend_params.py                           → OK
+        pytest tests/integration/test_api_tasks_params.py …                → 42 passed
+        运行时（把该默认值送给引擎）                                        → status=ok, messages=[]
+
+    即 **8 项门禁全绿**，而用户在面板上改这个参数**什么都不会发生**，且没有任何提示。
+    既有门禁全都只看"`Spec` 与 `default_params` 是否互相一致"—— 假参数当然一致。
+
+    ## 判据：`default_params` 的每个键都必须**被引擎真实读取**
+
+    注意"在 `Spec.field_names` 里"**不是**证据 —— 注入 I-3 的 `fake_knob` 就在 Spec 里。
+    故判据只有两条：① 被 `_scan_read_keys(task)`（AST 读取面）命中；
+    ② 落在下面**逐条写明理由**的 `UNREAD_WHITELIST` 里。
+
+    白名单的**过期即失败**：登记项若某天变成"引擎读了"（或键被删了），
+    本组用例会 FAIL 要求移除登记 —— 缺口不许无声存在，也不许用登记代替修复。
+
+    ⚠️ 前身口径：审查报告建议的判据是「`key ∈ engine_read_param_keys(task)` **或**
+    `Spec` 中该字段被 `ValidatedParams` 属性取用」。本组实现取**更严**的口径
+    （只认"引擎读"）：`engine_read_param_keys` 单独用会有 38 键 / 17 任务的假阳性
+    （它只认任务模块内的 `xxx.get("<字面量>")`），故本文件另写了跨函数增强扫描器
+    `_scan_read_keys`（四种读取形态见其 docstring），把假阳性压到 6 键。
+    """
+
+    #: 引擎**确实不读**、但有明确理由的键（任务, 键）→ 理由。理由须 ≥ 20 字。
+    UNREAD_WHITELIST: dict[tuple[str, str], str] = {
+        ("regression", "model_type"): (
+            "**文档化保留参数**：`docs/specification/api-reference.md` 明写"
+            "「params: `model_type`（保留参数，当前仅支持 OLS）」，"
+            "`regression_analysis()` 有意不读它（`doe_opt/regression.py:35-37` 已留档"
+            "「那是独立问题，需先确认该被读还是该移除」）。属有意设计，不是缺陷。"
+        ),
+        ("inverse_solve", "incoming_cols"): (
+            "**前端注入的列角色勾选组**：面板把勾选结果作为列表下发；引擎在"
+            " `engine/inverse/_roles.py::_resolve_roles` 用**动态拼键**"
+            ' `params.get(f"{role}_cols")` 读取 —— f-string 拼出的键名静态解析不出来，'
+            " 属扫描器的已知保守下界（同族：variable_cols/fixed_cols/output_cols/target_cols）。"
+        ),
+        ("inverse_solve", "variable_cols"): (
+            '同上：前端列角色勾选组，引擎以 `params.get(f"{role}_cols")` 动态键读取'
+            "（`_roles.py::_resolve_roles`），AST 无法解析 f-string 键名。"
+        ),
+        ("inverse_solve", "fixed_cols"): (
+            '同上：前端列角色勾选组，引擎以 `params.get(f"{role}_cols")` 动态键读取'
+            "（`_roles.py::_resolve_roles`），AST 无法解析 f-string 键名。"
+        ),
+        ("inverse_solve", "output_cols"): (
+            '同上：前端列角色勾选组，引擎以 `params.get(f"{role}_cols")` 动态键读取'
+            "（`_roles.py::_resolve_roles`），AST 无法解析 f-string 键名。"
+        ),
+        ("inverse_solve", "target_cols"): (
+            '同上：前端列角色勾选组，引擎以 `params.get(f"{role}_cols")` 动态键读取'
+            "（`_roles.py::_resolve_roles`），AST 无法解析 f-string 键名。"
+        ),
+    }
+
+    @staticmethod
+    def _unread() -> dict[str, list[str]]:
+        """各任务中「不在 Spec 也不被引擎读取」的 `default_params` 键。"""
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        gaps: dict[str, list[str]] = {}
+        for spec in TASK_SPECS:
+            declared = set(DEFAULT_PARAMS.get(spec.key, {}))
+            if not declared:
+                continue
+            unread = sorted(declared - _scan_read_keys(spec.key))
+            if unread:
+                gaps[spec.key] = unread
+        return gaps
+
+    def test_every_default_param_is_read_by_the_engine(self):
+        """**核心断言**：`default_params` 的每个键都必须被引擎读取（白名单除外）。"""
+        offenders = [
+            f"{task}.{key}"
+            for task, keys in self._unread().items()
+            for key in keys
+            if (task, key) not in self.UNREAD_WHITELIST
+        ]
+        assert not offenders, (
+            "以下参数**面板可达但引擎不读**（用户改了不起作用，且不报错、不提示）：\n  "
+            + "\n  ".join(sorted(offenders))
+            + "\n请把它接到引擎上（或从 `default_params` 删掉）；若确属有意保留，"
+            "请在 `TestDefaultParamsAreReadByTheEngine.UNREAD_WHITELIST` 登记并写明理由。"
+        )
+
+    def test_whitelist_has_reasons_and_no_stale_entries(self):
+        """白名单必须逐条写明理由，且**过期即失败**（引擎读它了 / 键没了 → 必须移除）。"""
+        unread = self._unread()
+        for (task, key), reason in self.UNREAD_WHITELIST.items():
+            assert len(reason.strip()) >= 20, f"{task}.{key} 的豁免理由过于简略: {reason!r}"
+            assert key in unread.get(task, []), (
+                f"白名单过期：{task}.{key} 现在**已被引擎读取**（或该键已不存在），"
+                "请从 UNREAD_WHITELIST 移除该登记"
+            )
+
+    def test_reserved_param_reason_stays_true(self):
+        """`regression.model_type` 的豁免理由依赖 api-reference 的「保留参数」声明。
+
+        声明被删掉后，豁免就只剩"我懒得接"——故把理由的**事实依据**也钉住。
+        """
+        api = Path(__file__).resolve().parents[2] / "docs" / "specification" / "api-reference.md"
+        lines = [
+            line
+            for line in api.read_text(encoding="utf-8").splitlines()
+            if "model_type" in line and "保留参数" in line
+        ]
+        assert lines, (
+            "api-reference.md 不再声明 `model_type` 是保留参数 —— 那么它就只是"
+            "「引擎不读的假参数」，应接线或删除，不得继续豁免"
+        )
+
+    def test_scanner_is_not_vacuous(self):
+        """扫描器不得退化成空集/恒真 —— 否则上一条断言会变成永远通过。
+
+        三个锚点分别对应扫描器的三种读取形态（内联属性 / 循环变量作键 / 普通 `get`）：
+        它们都是首版朴素扫描器**漏掉**的真实读取，回归任何一种都说明扫描能力退化。
+        """
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        total = 0
+        for spec in TASK_SPECS:
+            if DEFAULT_PARAMS.get(spec.key):
+                keys = set(_scan_read_keys(spec.key))
+                total += len(keys)
+                assert keys, f"{spec.key} 的读取面为空 —— 扫描器失效"
+        assert total >= 150, f"全库读取面只有 {total} 个键，扫描器可能失效"
+
+        for task, key in (
+            ("correlation", "method"),  # 形态 1：SPEC.validate_or_raise(p).method
+            ("spc_xbar", "usl"),  # 形态 3：for spec_key in [("usl", …)]: _xp.get(spec_key)
+            ("process_capability", "usl"),  # 既有口径：params.get("usl")
+        ):
+            assert key in _scan_read_keys(task), f"扫描器漏掉 {task}.{key}（读取形态退化）"

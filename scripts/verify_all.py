@@ -13,7 +13,7 @@ verify_all.py — 全量验证入口（一个命令完成全部治理验证）
   3. 类型检查（mypy，与 quality.yml type-check 作业同口径）
   4. 文档一致性（verify_docs.py --strict：断链/目录树/裸异常/版本漂移）
   5. Falsy 审计（falsy_audit.py）
-  6. 测试质量守卫（test_quality_guard.py --max-warn 12：弱断言/缺测/命名）
+  6. 测试质量守卫（test_quality_guard.py --max-warn 0：弱断言/缺测/命名）
    ⚠️ 口径与 CI `quality.yml` 一致 —— 本地参数若宽于 CI，本脚本就是安慰剂
 7. 数值真值覆盖率（truth_coverage.py：分析类测试被真值钉住的比例）
 
@@ -90,13 +90,14 @@ def main(argv: list[str] | None = None) -> int:
             ("文档一致性", [PYTHON, "scripts/verify_docs.py", "--strict"]),
             ("Falsy 审计", [PYTHON, "scripts/falsy_audit.py"]),
             # ⚠️ **必须带 CI 的口径参数**（2026-10-09 审查 P1-1）：
-            # `quality.yml:47` 用的是 `--max-warn N`，而本脚本原先跑**默认口径**
+            # `quality.yml` 用的是 `--max-warn N`，而本脚本原先跑**默认口径**
             # （exit 0，只在超过内置大阈值时才失败）。后果：本地"全绿"，
             # CI 红 —— 89 条 WARN 从未在本地被看见。
             # 教训：**本地一键验证必须复用 CI 的真实参数**，否则它是安慰剂。
+            # 上限现为 0（2026-10-09 发版前收尾实测 WARN=0）—— 与 quality.yml 同步。
             (
                 "测试质量守卫（CI 口径）",
-                [PYTHON, "scripts/test_quality_guard.py", "--max-warn", "12"],
+                [PYTHON, "scripts/test_quality_guard.py", "--max-warn", "0"],
             ),
             # 分析类数值真值覆盖率（选项 A 口径，2026-09-24）：
             # "引擎算出来的数，有多少被真值钉住"。原口径（真值测试/全部测试）

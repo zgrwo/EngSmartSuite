@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -43,6 +44,33 @@ def _node() -> str | None:
     import shutil
 
     return shutil.which("node")
+
+
+_MISSING = object()
+
+
+def _canon(value):
+    """默认值归一：`None`/`''`/空数组 = 「未下发」（= 引擎落回自己的默认值）。"""
+    if value is None or value == "" or value == [] or value == {}:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value
+
+
+def _same_default(declared, sent) -> bool:
+    """「面板回读值 == 声明默认值」的判据（与 `check_params_panel.mjs::sameDefault` 同语义）。
+
+    两侧都是数就按数比 —— `<select>` 只能发出字符串，`2` 与 `"2"` 是同一个值；
+    其余按字符串比（`bool` 已归一为 `'true'`/`'false'`，与 `<input>` 的文本一致）。
+    """
+    left, right = _canon(declared), _canon(sent)
+    if left is None or right is None:
+        return left is None and right is None
+    try:
+        return float(left) == float(right)
+    except (TypeError, ValueError):
+        return str(left) == str(right)
 
 
 @pytest.mark.skipif(_node() is None, reason="未安装 Node，跳过参数面板冒烟")
@@ -127,6 +155,111 @@ class TestParamsPanelSmoke:
             "以下任务的面板载荷被引擎拒绝（Web 默认流程会失败）：\n  " + "\n  ".join(offenders)
         )
 
+    def test_roundtripped_payload_equals_declared_defaults(self, tmp_path):
+        """**未经用户编辑**时，面板回读值必须与 `DEFAULT_PARAMS[task]` 逐键相等。
+
+        审查 2026-10-09 C-4：上一条用例的判据是"载荷被 `Spec` **接受**" —— 那是
+        必要不充分条件。`Choice` 掉一个空选项后下发的 `boxcox` 同样是合法选项，
+        `Spec` 自然接受，于是"面板把默认值悄悄换成了别的值"整条链全绿
+        （注入 I-2 实测：`node` OK + 23 passed，实际下发 `{"transform": "boxcox"}`）。
+        本用例把判据收紧为**逐任务逐键的默认值等价**。
+
+        它能拦住的三类回归：
+          · `Choice` 掉选项 / 默认值不在选项集里 → 浏览器隐式选首项（C-2、I-1、I-2）；
+          · 数值默认值被 `<select>` 字符串化后**对不上**声明的默认值；
+          · 非空默认值根本没有被渲染成控件（面板静默丢掉该参数）。
+
+        归一化口径与 `scripts/check_params_panel.mjs::sameDefault` 保持一致：
+        `None`/`''`/空数组 = 「未下发」（引擎落回自己的默认值，两者语义等价）；
+        布尔按小写字符串比（`<input>` 里 `true` 是文本）；两侧都是数就按数比。
+        """
+        dump = tmp_path / "roundtripped.json"
+        r = subprocess.run(
+            [_node(), str(CHECKER)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            env={
+                **os.environ,
+                "SMARTSUITE_PYTHON": sys.executable,
+                "SMARTSUITE_PARAMS_DUMP": str(dump),
+            },
+        )
+        assert r.returncode == 0, f"参数面板冒烟失败：\n{r.stdout}\n{r.stderr}"
+        payload = json.loads(dump.read_text(encoding="utf-8"))
+        assert payload, "往返载荷为空，扫描器失效"
+
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+        offenders: list[str] = []
+        checked = 0
+        for task, sent in payload.items():
+            for key, declared in DEFAULT_PARAMS.get(task, {}).items():
+                checked += 1
+                actual = sent.get(key, _MISSING)
+                if not _same_default(declared, None if actual is _MISSING else actual):
+                    shown = "「未下发」" if actual is _MISSING else f"{actual!r}"
+                    offenders.append(f"{task}.{key}: 声明 {declared!r} → 面板回读 {shown}")
+        assert checked >= 100, f"只比对了 {checked} 个参数槽位 —— 扫描器可能失效（会变恒真）"
+        assert not offenders, (
+            "以下参数的面板回读值与声明默认值不一致 —— Web 默认流程会跑出与 CLI/Python/手册"
+            "不同的参数（用户看到的、发出去的、声明的三者不一致）：\n  " + "\n  ".join(offenders)
+        )
+
+    def test_free_text_sentinel_literal_reaches_engine(self, tmp_path):
+        """自由文本参数里的 `null` 字面量必须**原样到达引擎**（审查 2026-10-09 C-3）。
+
+        端到端三段：真实 `params.js` 渲染+回读 → 面板载荷 → 真实引擎。
+
+        P0-1 的兜底曾把 `'null'`/`'undefined'`/`'NaN'` 三个**字符串**当"未填"丢弃，
+        但 `proportion_ci.success_value` 的值域来自**数据列**，`null` 是合法取值：
+        数据 `['null','null','ok'×10]` 下用户想算 `null` 占比 = 2/12 = **16.67%**，
+        字面量被吞后引擎落回首个类别 → **83.33%**，且 `status=ok`、`messages=[]`
+        （静默换了一个数，用户无从察觉）。
+        """
+        dump = tmp_path / "sentinel.json"
+        r = subprocess.run(
+            [_node(), str(CHECKER)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            env={
+                **os.environ,
+                "SMARTSUITE_PYTHON": sys.executable,
+                "SMARTSUITE_SENTINEL_DUMP": str(dump),
+            },
+        )
+        assert r.returncode == 0, f"参数面板冒烟失败：\n{r.stdout}\n{r.stderr}"
+        assert dump.is_file(), f"脚本未落盘哨兵字面量回读：\n{r.stdout}"
+        params = json.loads(dump.read_text(encoding="utf-8"))
+        assert params.get("success_value") == "null", (
+            f"面板必须原样下发用户在自由文本参数里输入的 'null'，实发 {params!r}"
+        )
+
+        import pandas as pd
+
+        from smartsuite.core.contracts import AnalysisRequest
+        from smartsuite.services.orchestrator import orchestrate
+
+        frame = pd.DataFrame({"状态": ["null", "null"] + ["ok"] * 10})
+        result = orchestrate(
+            AnalysisRequest(
+                task="proportion_ci",
+                data=frame,
+                target_col="状态",
+                feature_cols=[],
+                params=params,
+            )
+        )
+        assert result.status == "ok", result.messages
+        assert "2/12 = 16.67%" in result.summary, (
+            f"面板载荷 {params!r} 应算出 null 占比 2/12=16.67%，实际：{result.summary!r}"
+        )
+
     def test_switching_tasks_does_not_leak_previous_values(self, tmp_path):
         """切换任务后不得残留上一个任务同名的控件值（防跨任务串值）。
 
@@ -176,6 +309,37 @@ class TestParamsPanelSmoke:
         src = PARAMS_JS.read_text(encoding="utf-8")
         for name in ("buildParamInput", "hydrateParams", "paramsHydrated"):
             assert f"export function {name}" in src, f"params.js 未导出 {name}"
+
+    def test_comment_counts_match_measured(self):
+        """`params.js` 注释里的参数槽位数必须等于**实测**值（审查 2026-10-09 A-4）。
+
+        旧注释写"派生覆盖已达 **114/114** 个默认参数槽位"，而实测是 **124** 槽位 ——
+        114 是 `derive_param_labels()` 的**标签条目数**（同一标签被多任务共用时只存一条），
+        两个口径被混用了。注释里的数字会被后来者当事实引用（本轮审查就是这么发现的），
+        故把"注释数字 == 实测数字"变成门禁：加参数后忘记更新注释会直接红。
+        """
+        src = PARAMS_JS.read_text(encoding="utf-8")
+        slots = re.findall(r"\*\*(\d+)/(\d+)\*\* 个默认参数槽位", src)
+        labels = re.findall(r"目前是 \*\*(\d+) 条标签条目\*\*", src)
+        assert slots, (
+            "params.js 应写明实测口径（`**N/N** 个默认参数槽位`）—— 数字不许只存在于口头约定里"
+        )
+        assert labels, "params.js 应同时写明 `目前是 **N** 条标签条目`（两个口径必须分开写）"
+
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+        from smartsuite.services.param_labels import derive_param_labels
+
+        measured_slots = sum(len(v) for v in DEFAULT_PARAMS.values())
+        measured_labels = len(derive_param_labels())
+        for left, right in slots:
+            assert left == right == str(measured_slots), (
+                f"params.js 注释写 {left}/{right} 个默认参数槽位，实测 {measured_slots} —— "
+                "改参数后请同步注释（或删掉数字改为引用来源）"
+            )
+        for value in labels:
+            assert value == str(measured_labels), (
+                f"params.js 注释写 {value} 条标签条目，实测 {measured_labels}"
+            )
 
     def test_column_params_survive_the_deletion(self):
         """列选择器表必须保留 —— 它是**纯 UI 关注点**，不属于 `Spec`。

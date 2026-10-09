@@ -36,13 +36,47 @@ SECTION_BY_ANALYSIS = {
     # 此前**不在任何 CLAIM 覆盖内**（净增 3 条），故门禁全绿也拦不住它们漂移。
     "distribution_summary": "5.3",
     "normality_check": "5.4",
+    # ── 第二轮全量审查（2026-10-10，维度 F）补充 ──────────────────────────
+    # 手册 33 个含数值的节里有 20 个**零 CLAIM 覆盖**：改坏手册值门禁仍 exit 0
+    # （注入 INJ-3 §4.4 训练 R² / INJ-4 §6.1 const / INJ-5 §3.1 预览 /
+    #  INJ-6 §6.8 准确率 全部 exit 0 实测）。以下映射把补登记的 CLAIM 落到节；
+    # 缺映射、缺锚点、缺捕获都会在 check_manual_freshness 里点名 FAIL。
+    "manual_preview": "3.1",  # F08/F03：前 5 行预览表逐格比对
+    "variance_test": "4.8",
+    "cohens_kappa": "5.1",
+    "cronbach_alpha": "5.2",  # F04：Web 口径 α=0.031 / n=1000
+    "power_analysis": "5.5",
+    "regression": "6.1",  # F04/F03：Web 口径 const 6.105 / R² 0.0058
+    "response_surface": "6.2",  # F04
+    "roc_analysis": "6.7",  # F06：手册约定编码 合格=1 → AUC 0.511
+    "logistic_regression": "6.8",  # F04/F03：Web 口径准确率 89.7%
+    "lasso_regression": "6.9",  # F04
+    "spc_cusum": "7.3",
+    "change_point": "7.8",
+    "outlier_consensus": "7.9",  # F09：Web 口径 23/59 + 方法计数
+    "box_chart": "7.10",
+    "spc_nonparametric": "7.11",
+    "median_ci": "8.2",
+    "gage_rr": "8.3",
+    "survival_analysis": "8.5",
+    # §10 排错 FAQ 的两个阈值（F03 盲区收尾）：Tukey 事后检验水平上限、上传大小上限。
+    # 该章标题是 `## 10. 排错 FAQ`（二级），故依赖 locate_section 的级别感知终止条件。
+    "manual_faq": "10",
 }
 
-# 章节标题定位：### 4.1 …（要求后续不是数字，防 4.1 前缀误配 4.10）
-_SECTION_START_RE_TPL = r"^###\s+{sec}(?=$|\s|\()"
+# 章节标题定位：### 4.1 …（要求后续不是数字，防 4.1 前缀误配 4.10）。
+# 审查 2026-10-10（维度 F）扩展两处，使 **`## 10. 排错 FAQ` 这类二级标题章节**也能定位：
+#   ① 标题级别放宽为 `##`/`###`（手册章节文件里 `## N. 章名` 与 `### N.M 节名` 并存）；
+#   ② 允许节号后跟一个**不接数字**的点号（`10.` ✓ / `4.1` 不误配 `4.10` ✓）。
+# 对既有的 31 个 `### N.M` 节，行为与旧实现**逐字等价**（old: `^###`，new: `^#{2,3}` 且
+# 手册中不存在 `## N.M` 形态的标题）。
+_SECTION_START_RE_TPL = r"^(#{{2,3}})\s+{sec}(?=$|\s|\(|\.(?!\d))"
 _ANY_HEADING_RE = re.compile(r"^#{2,3}\s", re.MULTILINE)
 _NUMBER_TOKEN_RE = re.compile(r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[+-]?\d+(?:\.\d+)?")
 _UNSIGNED_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?")
+
+#: CLAIM 登记来源（唯一来源，禁止在本文件重抄）。做成模块级常量便于测试注入替身。
+_VERIFY_MANUAL_CLAIMS = Path(__file__).resolve().parents[1] / "scripts" / "verify_manual_claims.py"
 
 
 def _normalize(text: str) -> str:
@@ -122,6 +156,130 @@ ANCHOR_PATTERNS = {
     ("distribution_summary", "偏度"): r"CV=29\.2%[^\n]*偏度",
     ("distribution_summary", "峰度"): r"CV=29\.2%[^\n]*峰度",
     ("normality_check", "满足正态列数(web 口径)"): r"^0/2\s*列满足正态性",
+    # ── 第二轮全量审查（2026-10-10，维度 F）补充的行锚点 ────────────────
+    # §4.4 训练/CV R²：同行两句，锚点收紧到「=」以免命中 raw 对照行（:233）
+    ("decision_tree", "训练 R²"): r"训练 R²\s*=",
+    ("decision_tree", "CV R²"): r"CV R²\s*=",
+    # §4.4 Gini / 排列 std 列：与 perm 同表同行，靠逐列捕获区分（见下）
+    ("decision_tree", "冷却时间 Gini"): r"^\|\s*冷却时间\s*\|",
+    ("decision_tree", "熔体温度 Gini"): r"^\|\s*熔体温度\s*\|",
+    ("decision_tree", "模具温度 Gini"): r"^\|\s*模具温度\s*\|",
+    ("decision_tree", "注射压力 Gini"): r"^\|\s*注射压力\s*\|",
+    ("decision_tree", "冷却时间 perm std"): r"^\|\s*冷却时间\s*\|",
+    ("decision_tree", "熔体温度 perm std"): r"^\|\s*熔体温度\s*\|",
+    ("decision_tree", "模具温度 perm std"): r"^\|\s*模具温度\s*\|",
+    ("decision_tree", "注射压力 perm std"): r"^\|\s*注射压力\s*\|",
+    # §4.8 方差齐性：两行各 2 值（统计量 + p）同行
+    ("variance_test", "Levene 统计量"): r"Levene\s*\(中位数",
+    ("variance_test", "Levene p"): r"Levene\s*\(中位数",
+    ("variance_test", "Bartlett 统计量"): r"Bartlett\s*\(需正态\)",
+    ("variance_test", "Bartlett p"): r"Bartlett\s*\(需正态\)",
+    # §5.1 Kappa 结论行（解读行的「Kappa 等级标准」不匹配 `^Kappa =`）
+    ("cohens_kappa", "Kappa"): r"^Kappa\s*=",
+    # §5.2 α 与 n 同行（参数表行的 `Cronbach's α 及…` 无 `=`，不匹配）
+    ("cronbach_alpha", "α"): r"Cronbach's α\s*=",
+    ("cronbach_alpha", "n"): r"Cronbach's α\s*=",
+    # §5.5 三个效应量各在不同行
+    ("power_analysis", "d=0.5 每组样本量"): r"每组需要",
+    ("power_analysis", "d=0.2 每组样本量"): r"d=0\.2",
+    ("power_analysis", "d=0.8 每组样本量"): r"d=0\.8",
+    # §6.1 系数表逐行（熔体温度/注射压力系数同为 −0.007，必须逐行锚定）
+    ("regression", "const 系数"): r"^\|\s*const\s*\|",
+    ("regression", "const 标准误"): r"^\|\s*const\s*\|",
+    ("regression", "const t值"): r"^\|\s*const\s*\|",
+    ("regression", "const p值"): r"^\|\s*const\s*\|",
+    ("regression", "熔体温度 系数"): r"^\|\s*熔体温度\s*\|",
+    ("regression", "熔体温度 标准误"): r"^\|\s*熔体温度\s*\|",
+    ("regression", "熔体温度 t值"): r"^\|\s*熔体温度\s*\|",
+    ("regression", "熔体温度 p值"): r"^\|\s*熔体温度\s*\|",
+    ("regression", "注射压力 系数"): r"^\|\s*注射压力\s*\|",
+    ("regression", "注射压力 标准误"): r"^\|\s*注射压力\s*\|",
+    ("regression", "注射压力 t值"): r"^\|\s*注射压力\s*\|",
+    ("regression", "注射压力 p值"): r"^\|\s*注射压力\s*\|",
+    ("regression", "冷却时间 系数"): r"^\|\s*冷却时间\s*\|",
+    ("regression", "冷却时间 标准误"): r"^\|\s*冷却时间\s*\|",
+    ("regression", "冷却时间 t值"): r"^\|\s*冷却时间\s*\|",
+    ("regression", "冷却时间 p值"): r"^\|\s*冷却时间\s*\|",
+    # §6.1 diagnostics 表逐行
+    ("regression", "R²"): r"^\|\s*R²\s*/\s*调整R²\s*\|",
+    ("regression", "调整R²"): r"^\|\s*R²\s*/\s*调整R²\s*\|",
+    ("regression", "F"): r"^\|\s*F\s*\(p\)\s*\|",
+    ("regression", "F p"): r"^\|\s*F\s*\(p\)\s*\|",
+    ("regression", "DW"): r"^\|\s*DW\s*\|",
+    ("regression", "BP p"): r"^\|\s*BP\s*\|",
+    # §6.2 三个值同在数值结果首行（raw 对照在下一段，行首是 `>` 故不匹配）
+    ("response_surface", "R²"): r"^R²\s*=",
+    ("response_surface", "调整R²"): r"^R²\s*=",
+    ("response_surface", "最优预测值"): r"^R²\s*=",
+    # §6.7 数值结果行以 `AUC=` 开头（图注行以 `*AUC=` 开头、编码对照表无该前缀）
+    ("roc_analysis", "AUC"): r"^AUC\s*=",
+    ("roc_analysis", "最佳阈值"): r"^AUC\s*=",
+    ("roc_analysis", "Youden J"): r"^AUC\s*=",
+    # §6.8 / §6.9 数值结果整行
+    ("logistic_regression", "准确率(%)"): r"^准确率\s*=",
+    ("logistic_regression", "McFadden R²"): r"^准确率\s*=",
+    ("lasso_regression", "α"): r"^选中 3/3",
+    ("lasso_regression", "R²"): r"^选中 3/3",
+    # §7.3 数值结果行
+    ("spc_cusum", "总报警"): r"^####\s*数值结果",
+    # §7.5 CI 列（与 Cp/Cpk 点值同表同行；Pp/Ppk 两行新增）
+    ("process_capability", "Cp CI 下限"): r"^\|\s*Cp\s*\(短期能力\)",
+    ("process_capability", "Cp CI 上限"): r"^\|\s*Cp\s*\(短期能力\)",
+    ("process_capability", "Cpk CI 下限"): r"^\|\s*Cpk\s*\(短期\+偏倚\)",
+    ("process_capability", "Cpk CI 上限"): r"^\|\s*Cpk\s*\(短期\+偏倚\)",
+    ("process_capability", "Pp CI 下限"): r"^\|\s*Pp\s*\(长期能力\)",
+    ("process_capability", "Pp CI 上限"): r"^\|\s*Pp\s*\(长期能力\)",
+    ("process_capability", "Ppk CI 下限"): r"^\|\s*Ppk\s*\(长期\+偏倚\)",
+    ("process_capability", "Ppk CI 上限"): r"^\|\s*Ppk\s*\(长期\+偏倚\)",
+    # §7.5 尾注：Pp/Cp 的 CI 半宽比写在「该比值随数据波动」那一段
+    ("process_capability", "尾注 Pp/Cp 半宽比"): r"该比值随数据波动",
+    # §7.6 R²/DW/MAPE/RMSE 同在「#### 数值结果」那一行
+    ("trend_forecast", "R²"): r"^####\s*数值结果",
+    ("trend_forecast", "DW"): r"^####\s*数值结果",
+    ("trend_forecast", "MAPE"): r"^####\s*数值结果",
+    # §7.8 分段统计表第 1 行
+    ("change_point", "段1 样本数"): r"^\|\s*1\s*\|\s*0\s*\|\s*999\s*\|",
+    ("change_point", "段1 均值"): r"^\|\s*1\s*\|\s*0\s*\|\s*999\s*\|",
+    ("change_point", "段1 标准差"): r"^\|\s*1\s*\|\s*0\s*\|\s*999\s*\|",
+    # §7.9 数值结果行（raw 口径对照在下一行，行首是 `>`）
+    ("outlier_consensus", "高置信异常"): r"^####\s*数值结果",
+    ("outlier_consensus", "总标记"): r"^####\s*数值结果",
+    ("outlier_consensus", "IsoForest 计数"): r"^####\s*数值结果",
+    # §7.10 分组统计表逐行
+    ("box_chart", "ABS 样本量"): r"^\|\s*ABS\s*\|",
+    ("box_chart", "ABS 均值"): r"^\|\s*ABS\s*\|",
+    ("box_chart", "ABS 标准差"): r"^\|\s*ABS\s*\|",
+    ("box_chart", "PA6 样本量"): r"^\|\s*PA6\s*\|",
+    ("box_chart", "PA6 均值"): r"^\|\s*PA6\s*\|",
+    ("box_chart", "PA6 标准差"): r"^\|\s*PA6\s*\|",
+    ("box_chart", "PA66 样本量"): r"^\|\s*PA66\s*\|",
+    ("box_chart", "PA66 均值"): r"^\|\s*PA66\s*\|",
+    ("box_chart", "PA66 标准差"): r"^\|\s*PA66\s*\|",
+    ("box_chart", "PC 样本量"): r"^\|\s*PC\s*\|",
+    ("box_chart", "PC 均值"): r"^\|\s*PC\s*\|",
+    ("box_chart", "PC 标准差"): r"^\|\s*PC\s*\|",
+    ("box_chart", "PP 样本量"): r"^\|\s*PP\s*\|",
+    ("box_chart", "PP 均值"): r"^\|\s*PP\s*\|",
+    ("box_chart", "PP 标准差"): r"^\|\s*PP\s*\|",
+    # §7.11 控制限表逐行
+    ("spc_nonparametric", "CL"): r"^\|\s*CL\s*\(分布中位数\)\s*\|",
+    ("spc_nonparametric", "UCL"): r"^\|\s*UCL\s*\(P99\.865\)\s*\|",
+    ("spc_nonparametric", "LCL"): r"^\|\s*LCL\s*\(P0\.135\)\s*\|",
+    # §8.2 中位数 CI 表逐行
+    ("median_ci", "中位数"): r"^\|\s*中位数\s*\|",
+    ("median_ci", "CI 下限"): r"^\|\s*CI 下限\s*\|",
+    ("median_ci", "CI 上限"): r"^\|\s*CI 上限\s*\|",
+    # §8.3 / §8.5 数值结果行
+    ("gage_rr", "%GRR"): r"^####\s*数值结果",
+    ("gage_rr", "ndc"): r"^####\s*数值结果",
+    ("survival_analysis", "中位寿命"): r"^KM 阶梯曲线",
+    # §7.5 口径表两行（blockquote 内的表格行，行首是 `> |`）：
+    # 该表此前被评为「数据集与 seed 未给出 → 无法逐位复现」；实测配方 + seed=0
+    # 与手册**逐位一致**（见 verify_manual_claims.py §12 的 §7.5 口径表复算），故纳入门禁。
+    # 锚点/捕获由文件末尾的循环按行 × 列生成（见 _S75_*）。
+    # §10 两个阈值（手册正文行；`>` 在行内是字面量，不是 blockquote）
+    ("manual_faq", "Tukey 水平上限"): r"自动跳过\s*>\s*\d+\s*个水平的 Tukey HSD",
+    ("manual_faq", "上传大小上限(MB)"): r"确认文件\s*<\s*\d+\s*MB",
 }
 
 # 逐列绑定捕获（审查 2026-09-13 G-1）：token+容差匹配对"同锚点行内近值"无区分力
@@ -155,17 +313,213 @@ VALUE_CAPTURE_PATTERNS = {
     ("distribution_summary", "偏度"): r"CV=29\.2%[^\n]*?偏度\s*=\s*(-?\d+(?:\.\d+)?)",
     ("distribution_summary", "峰度"): r"CV=29\.2%[^\n]*?峰度\s*=\s*(-?\d+(?:\.\d+)?)",
     ("normality_check", "满足正态列数(web 口径)"): r"^(0)/2\s*列满足正态性",
+    # ── 第二轮全量审查（2026-10-10，维度 F）补充的逐值捕获 ──────────────
+    # 原则同 P1-5：同一行内有多个数值时，必须把「本 CLAIM 绑定的那一列」捕获出来，
+    # 否则兄弟列（如 §6.1 熔体温度/注射压力系数同为 −0.007）会互相掩盖。
+    ("decision_tree", "训练 R²"): r"训练 R²\s*=\s*(-?\d+(?:\.\d+)?)",
+    ("decision_tree", "CV R²"): r"CV R²\s*=\s*(-?\d+(?:\.\d+)?)",
+    ("decision_tree", "冷却时间 Gini"): r"^\|\s*冷却时间\s*\|\s*(-?\d+(?:\.\d+)?)",
+    ("decision_tree", "熔体温度 Gini"): r"^\|\s*熔体温度\s*\|\s*(-?\d+(?:\.\d+)?)",
+    ("decision_tree", "模具温度 Gini"): r"^\|\s*模具温度\s*\|\s*(-?\d+(?:\.\d+)?)",
+    ("decision_tree", "注射压力 Gini"): r"^\|\s*注射压力\s*\|\s*(-?\d+(?:\.\d+)?)",
+    ("decision_tree", "冷却时间 perm std"): (
+        r"^\|\s*冷却时间\s*\|[^|]*\|[^|]*\|\s*±\s*(-?\d+(?:\.\d+)?)"
+    ),
+    ("decision_tree", "熔体温度 perm std"): (
+        r"^\|\s*熔体温度\s*\|[^|]*\|[^|]*\|\s*±\s*(-?\d+(?:\.\d+)?)"
+    ),
+    ("decision_tree", "模具温度 perm std"): (
+        r"^\|\s*模具温度\s*\|[^|]*\|[^|]*\|\s*±\s*(-?\d+(?:\.\d+)?)"
+    ),
+    ("decision_tree", "注射压力 perm std"): (
+        r"^\|\s*注射压力\s*\|[^|]*\|[^|]*\|\s*±\s*(-?\d+(?:\.\d+)?)"
+    ),
+    ("variance_test", "Levene 统计量"): r"Levene\s*\(中位数[^|]*\|\s*(-?[\d.]+)",
+    ("variance_test", "Levene p"): (r"Levene\s*\(中位数[^\n]*\|\s*[-\d.]+\s*\|\s*(-?[\d.]+)"),
+    ("variance_test", "Bartlett 统计量"): r"Bartlett\s*\(需正态\)\s*\|\s*(-?[\d.]+)",
+    ("variance_test", "Bartlett p"): (r"Bartlett\s*\(需正态\)[^\n]*\|\s*[-\d.]+\s*\|\s*(-?[\d.]+)"),
+    ("cohens_kappa", "Kappa"): r"^Kappa\s*=\s*(-?\d+(?:\.\d+)?)",
+    ("cronbach_alpha", "α"): r"Cronbach's α\s*=\s*(-?\d+(?:\.\d+)?)",
+    ("cronbach_alpha", "n"): r"Cronbach's α[^\n]*n\s*=\s*(\d+)",
+    ("power_analysis", "d=0.5 每组样本量"): r"每组需要\s*\**\s*(\d+)",
+    ("power_analysis", "d=0.2 每组样本量"): r"d=0\.2[^\n]*?每组需\s*(\d+)",
+    ("power_analysis", "d=0.8 每组样本量"): r"d=0\.8[^\n]*?每组仅需\s*(\d+)",
+    # §6.1 系数表：列序 = 变量 | 系数 | 标准误 | t值 | p值 | 标准化 β
+    # 系数列可有显式正号（手册 §6.1「+0.011」）→ 捕获组须接受 `+`
+    ("regression", "const 系数"): r"^\|\s*const\s*\|\s*([+-]?\d+(?:\.\d+)?)",
+    ("regression", "const 标准误"): r"^\|\s*const\s*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)",
+    ("regression", "const t值"): (r"^\|\s*const\s*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "const p值"): (r"^\|\s*const\s*\|[^|]*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "熔体温度 系数"): r"^\|\s*熔体温度\s*\|\s*([+-]?\d+(?:\.\d+)?)",
+    ("regression", "熔体温度 标准误"): (r"^\|\s*熔体温度\s*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "熔体温度 t值"): (r"^\|\s*熔体温度\s*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "熔体温度 p值"): (
+        r"^\|\s*熔体温度\s*\|[^|]*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"
+    ),
+    ("regression", "注射压力 系数"): r"^\|\s*注射压力\s*\|\s*([+-]?\d+(?:\.\d+)?)",
+    ("regression", "注射压力 标准误"): (r"^\|\s*注射压力\s*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "注射压力 t值"): (r"^\|\s*注射压力\s*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "注射压力 p值"): (
+        r"^\|\s*注射压力\s*\|[^|]*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"
+    ),
+    ("regression", "冷却时间 系数"): r"^\|\s*冷却时间\s*\|\s*([+-]?\d+(?:\.\d+)?)",
+    ("regression", "冷却时间 标准误"): (r"^\|\s*冷却时间\s*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "冷却时间 t值"): (r"^\|\s*冷却时间\s*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"),
+    ("regression", "冷却时间 p值"): (
+        r"^\|\s*冷却时间\s*\|[^|]*\|[^|]*\|[^|]*\|\s*([+-]?\d+(?:\.\d+)?)"
+    ),
+    # §6.1 diagnostics：R² / 调整R² 同行；F (p) 同行；DW、BP p 各一行
+    ("regression", "R²"): r"^\|\s*R²\s*/\s*调整R²\s*\|\s*(-?[\d.]+)",
+    ("regression", "调整R²"): r"^\|\s*R²\s*/\s*调整R²\s*\|\s*[\d.]+\s*/\s*(-?[\d.]+)",
+    ("regression", "F"): r"^\|\s*F\s*\(p\)\s*\|\s*(-?[\d.]+)",
+    ("regression", "F p"): r"^\|\s*F\s*\(p\)\s*\|[^\n]*p=(-?[\d.]+)\)",
+    ("regression", "DW"): r"^\|\s*DW\s*\|\s*(-?[\d.]+)",
+    ("regression", "BP p"): r"^\|\s*BP\s*\|\s*p=(-?[\d.]+)",
+    # §6.2 首行：R²=0.016, 调整R²=0.011。最优区域：… 预测不良率=3.52。
+    ("response_surface", "R²"): r"^R²\s*=\s*(-?[\d.]+)",
+    ("response_surface", "调整R²"): r"^R²\s*=\s*[-\d.]+,\s*调整R²\s*=\s*(-?[\d.]+)",
+    ("response_surface", "最优预测值"): r"^R²\s*=[^\n]*预测不良率\s*=\s*(-?[\d.]+)",
+    # §6.7 首行：AUC=0.511（…），最佳阈值 202.6，Youden's J=0.112（TPR=… / FPR=…）。
+    ("roc_analysis", "AUC"): r"^AUC\s*=\s*(-?[\d.]+)",
+    ("roc_analysis", "最佳阈值"): r"^AUC\s*=[^\n]*最佳阈值\s+(-?[\d.]+)",
+    ("roc_analysis", "Youden J"): r"^AUC\s*=[^\n]*Youden's J\s*=\s*(-?[\d.]+)",
+    # §6.8 首行：准确率=89.7%, 灵敏度=…, 特异度=…, McFadden R²=0.004。
+    ("logistic_regression", "准确率(%)"): r"^准确率\s*=\s*(-?[\d.]+)",
+    ("logistic_regression", "McFadden R²"): r"^准确率\s*=[^\n]*McFadden R²\s*=\s*(-?[\d.]+)",
+    # §6.9 首行：选中 3/3 个变量（α=0.0022, R²=0.0071）。
+    ("lasso_regression", "α"): r"^选中 3/3[^\n]*α\s*=\s*(-?[\d.]+)",
+    ("lasso_regression", "R²"): r"^选中 3/3[^\n]*R²\s*=\s*(-?[\d.]+)",
+    ("spc_cusum", "总报警"): r"^####\s*数值结果[^\n]*?总报警\s*(\d+)",
+    # §7.5 CI：与点值同行的第 3 列 [下限, 上限]
+    ("process_capability", "Cp CI 下限"): (
+        r"^\|\s*Cp\s*\(短期能力\)\s*\|[^|]*\|\s*\[\s*(-?[\d.]+)"
+    ),
+    ("process_capability", "Cp CI 上限"): (
+        r"^\|\s*Cp\s*\(短期能力\)[^\n]*?\[\s*[-\d.]+\s*,\s*(-?[\d.]+)"
+    ),
+    ("process_capability", "Cpk CI 下限"): (
+        r"^\|\s*Cpk\s*\(短期\+偏倚\)\s*\|[^|]*\|\s*\[\s*(-?[\d.]+)"
+    ),
+    ("process_capability", "Cpk CI 上限"): (
+        r"^\|\s*Cpk\s*\(短期\+偏倚\)[^\n]*?\[\s*[-\d.]+\s*,\s*(-?[\d.]+)"
+    ),
+    ("process_capability", "Pp CI 下限"): (
+        r"^\|\s*Pp\s*\(长期能力\)\s*\|[^|]*\|\s*\[\s*(-?[\d.]+)"
+    ),
+    ("process_capability", "Pp CI 上限"): (
+        r"^\|\s*Pp\s*\(长期能力\)[^\n]*?\[\s*[-\d.]+\s*,\s*(-?[\d.]+)"
+    ),
+    ("process_capability", "Ppk CI 下限"): (
+        r"^\|\s*Ppk\s*\(长期\+偏倚\)\s*\|[^|]*\|\s*\[\s*(-?[\d.]+)"
+    ),
+    ("process_capability", "Ppk CI 上限"): (
+        r"^\|\s*Ppk\s*\(长期\+偏倚\)[^\n]*?\[\s*[-\d.]+\s*,\s*(-?[\d.]+)"
+    ),
+    # §7.5 尾注：本页数据实测 **0.74**
+    ("process_capability", "尾注 Pp/Cp 半宽比"): r"本页这份数据（`n=1000`）实测\s*\**\s*(-?[\d.]+)",
+    # §7.6 数值结果行：R²=0.0002, DW=1.979, MAPE=24.82%, RMSE=1.2415。
+    ("trend_forecast", "R²"): r"R²\s*=\s*(-?[\d.]+)",
+    ("trend_forecast", "DW"): r"DW\s*=\s*(-?[\d.]+)",
+    ("trend_forecast", "MAPE"): r"MAPE\s*=\s*(-?[\d.]+)",
+    # §7.8 分段统计表：| 段 | 起始 | 结束 | 样本数 | 均值 | 标准差 |
+    ("change_point", "段1 样本数"): (r"^\|\s*1\s*\|\s*0\s*\|\s*999\s*\|\s*(\d+)"),
+    ("change_point", "段1 均值"): (r"^\|\s*1\s*\|\s*0\s*\|\s*999\s*\|\s*\d+\s*\|\s*(-?[\d.]+)"),
+    ("change_point", "段1 标准差"): (
+        r"^\|\s*1\s*\|\s*0\s*\|\s*999\s*\|\s*\d+\s*\|\s*[-\d.]+\s*\|\s*(-?[\d.]+)"
+    ),
+    # §7.9 数值结果行：高置信异常 23 个（2.3%），总标记 59 个（5.9%）。… IsoForest 最多（50）…
+    ("outlier_consensus", "高置信异常"): r"^####\s*数值结果[^\n]*?高置信异常\s*(\d+)",
+    ("outlier_consensus", "总标记"): r"^####\s*数值结果[^\n]*?总标记\s*(\d+)",
+    ("outlier_consensus", "IsoForest 计数"): (r"^####\s*数值结果[^\n]*?IsoForest 最多（(\d+)）"),
+    # §7.10 分组统计表：| 分组 | 样本量 | 均值 | 中位数 | 标准差 | …
+    ("box_chart", "ABS 样本量"): r"^\|\s*ABS\s*\|\s*(\d+)",
+    ("box_chart", "ABS 均值"): r"^\|\s*ABS\s*\|\s*\d+\s*\|\s*(-?[\d.]+)",
+    ("box_chart", "ABS 标准差"): (r"^\|\s*ABS\s*\|\s*\d+\s*\|[^|]*\|[^|]*\|\s*(-?[\d.]+)"),
+    ("box_chart", "PA6 样本量"): r"^\|\s*PA6\s*\|\s*(\d+)",
+    ("box_chart", "PA6 均值"): r"^\|\s*PA6\s*\|\s*\d+\s*\|\s*(-?[\d.]+)",
+    ("box_chart", "PA6 标准差"): (r"^\|\s*PA6\s*\|\s*\d+\s*\|[^|]*\|[^|]*\|\s*(-?[\d.]+)"),
+    ("box_chart", "PA66 样本量"): r"^\|\s*PA66\s*\|\s*(\d+)",
+    ("box_chart", "PA66 均值"): r"^\|\s*PA66\s*\|\s*\d+\s*\|\s*(-?[\d.]+)",
+    ("box_chart", "PA66 标准差"): (r"^\|\s*PA66\s*\|\s*\d+\s*\|[^|]*\|[^|]*\|\s*(-?[\d.]+)"),
+    ("box_chart", "PC 样本量"): r"^\|\s*PC\s*\|\s*(\d+)",
+    ("box_chart", "PC 均值"): r"^\|\s*PC\s*\|\s*\d+\s*\|\s*(-?[\d.]+)",
+    ("box_chart", "PC 标准差"): r"^\|\s*PC\s*\|\s*\d+\s*\|[^|]*\|[^|]*\|\s*(-?[\d.]+)",
+    ("box_chart", "PP 样本量"): r"^\|\s*PP\s*\|\s*(\d+)",
+    ("box_chart", "PP 均值"): r"^\|\s*PP\s*\|\s*\d+\s*\|\s*(-?[\d.]+)",
+    ("box_chart", "PP 标准差"): r"^\|\s*PP\s*\|\s*\d+\s*\|[^|]*\|[^|]*\|\s*(-?[\d.]+)",
+    # §7.11 控制限表：| 统计量 | 值 |
+    ("spc_nonparametric", "CL"): r"^\|\s*CL\s*\(分布中位数\)\s*\|\s*(-?[\d.]+)",
+    ("spc_nonparametric", "UCL"): r"^\|\s*UCL\s*\(P99\.865\)\s*\|\s*(-?[\d.]+)",
+    ("spc_nonparametric", "LCL"): r"^\|\s*LCL\s*\(P0\.135\)\s*\|\s*(-?[\d.]+)",
+    ("median_ci", "中位数"): r"^\|\s*中位数\s*\|\s*(-?[\d.]+)",
+    ("median_ci", "CI 下限"): r"^\|\s*CI 下限\s*\|\s*(-?[\d.]+)",
+    ("median_ci", "CI 上限"): r"^\|\s*CI 上限\s*\|\s*(-?[\d.]+)",
+    ("gage_rr", "%GRR"): r"^####\s*数值结果[^\n]*?%GRR\s*=\s*(-?[\d.]+)",
+    ("gage_rr", "ndc"): r"^####\s*数值结果[^\n]*?ndc\s*=\s*(\d+)",
+    ("survival_analysis", "中位寿命"): r"^KM 阶梯曲线[^\n]*?中位寿命\s*=\s*(-?[\d.]+)",
+    # §10：阈值都在正文行内
+    ("manual_faq", "Tukey 水平上限"): r"自动跳过\s*>\s*(\d+)\s*个水平的 Tukey HSD",
+    ("manual_faq", "上传大小上限(MB)"): r"确认文件\s*<\s*(\d+)\s*MB",
 }
+
+# §3.1 前 5 行预览表：逐行锚定（行首生产日期）+ 逐列捕获（列序固定）。
+# 该表此前**完全无门禁**（INJ-5 把预览行改成「111.1 | 11.1」门禁仍 exit 0）。
+# 列序与 03-data-import.md 表头一致：1 生产日期 … 10 拉伸强度（数值列从第 5 列起）。
+_PREVIEW_TASK = "manual_preview"
+_PREVIEW_COL_ORDER = (
+    "生产日期",
+    "班次",
+    "车间",
+    "原料类型",
+    "熔体温度",
+    "模具温度",
+    "注射压力",
+    "冷却时间",
+    "不良率",
+    "拉伸强度",
+)
+_PREVIEW_ROW_DATES = ("2026-05-21", "2026-03-15", "2026-03-04", "2026-04-05", "2026-04-01")
+for _ri, _date in enumerate(_PREVIEW_ROW_DATES, start=1):
+    for _ci, _col in enumerate(_PREVIEW_COL_ORDER, start=1):
+        if _ci < 5:  # 前 4 列是文本（日期/班次/车间/原料类型），无数值 CLAIM
+            continue
+        _key = (_PREVIEW_TASK, f"{_ri}行·{_col}")
+        _row_anchor = rf"^\|\s*{_date}\s*\|"
+        ANCHOR_PATTERNS[_key] = _row_anchor
+        # 跳过本行第 2…(_ci-1) 列，再捕获第 _ci 列
+        VALUE_CAPTURE_PATTERNS[_key] = (
+            _row_anchor + r"[^|]*\|" * (_ci - 2) + r"\s*(-?\d+(?:\.\d+)?)"
+        )
+
+# §7.5 口径表（07-spc.md 的 blockquote 表格）：两行 × 5 列逐值锚定。
+# 该表原被评为「数据集与 seed 未给出 → 无法逐位复现」（第二轮审查复核表"待确认"）；
+# 补上 seed 后实测与手册**逐位一致**（§12 复算），故设门禁防再次漂移。
+# 列序：口径 | σ_within | Cp | Cpk | Pp | Ppk；按列池化行的值带 `**` 粗体标记。
+_S75_ROW_LABELS = (("移动极差", "移动极差法（默认）"), ("按列池化", "按列池化"))
+_S75_COLS = ("σ_within", "Cp", "Cpk", "Pp", "Ppk")
+for _tag, _label in _S75_ROW_LABELS:
+    for _ci, _col in enumerate(_S75_COLS, start=1):
+        _key = ("process_capability", f"口径表 {_tag} {_col}")
+        _row_anchor = rf"^>\s*\|\s*{_label}\s*\|"
+        ANCHOR_PATTERNS[_key] = _row_anchor
+        VALUE_CAPTURE_PATTERNS[_key] = _row_anchor + r"[^|]*\|" * (_ci - 1) + r"\s*\**\s*(-?[\d.]+)"
 _VALUE_CAPTURE_TOL = 5e-6
 
 
 def locate_section(text: str, sec: str) -> str | None:
-    """提取手册章节正文（标题行起、下一同级标题止）；找不到返回 None。"""
+    """提取手册章节正文（标题行起、下一**同级或更高级**标题止）；找不到返回 None。
+
+    审查 2026-10-10（维度 F）：终止条件由「下一个 `##`/`###` 标题」改为
+    「下一个级别 ≤ 本节的标题」。对 `### N.M` 节两者等价（级别 ≤ 3 ⇔ `#{2,3}`）；
+    对 `## N. 章名` 形式的章节（如 10-faq.md 的 `## 10. 排错 FAQ`，其下紧跟
+    `### Q: …`）旧口径会在标题行处**立刻截断**，正文取不到 → 该章的数值无法设门禁。
+    """
     pattern = re.compile(_SECTION_START_RE_TPL.format(sec=re.escape(sec)), re.MULTILINE)
     m = pattern.search(text)
     if not m:
         return None
-    nxt = _ANY_HEADING_RE.search(text, m.end())
+    level = len(m.group(1))
+    nxt = re.compile(rf"^#{{2,{level}}}\s", re.MULTILINE).search(text, m.end())
     end = nxt.start() if nxt else len(text)
     return text[m.start() : end]
 
@@ -337,17 +691,54 @@ def _read_manual_text_local() -> str:
 
 
 def _load_claims_local() -> list[tuple[str, str, object]]:
-    """复用 `verify_manual_claims.py` 的 CLAIM 登记（唯一来源，禁止在本文件重抄）。"""
-    import runpy
+    """复用 `verify_manual_claims.py` 的 CLAIM 登记（唯一来源，禁止在本文件重抄）。
 
+    本函数**只取数据、不承担判据**，返回空列表即表示"取不到 CLAIM"，
+    由 `_main()` 一律判 FAIL。
+
+    实现（审查 2026-10-09 G-3 第二轮）：`exec` 到**自建命名空间**，而不是
+    `runpy.run_path()` —— 后者的语义是"像脚本一样跑完这个文件"，于是：
+
+      · 被导入脚本的主体（含结尾 `sys.exit(1)`）会完整执行，
+        `SystemExit` 属 **`BaseException`**，`except Exception` 捕不到；
+      · 调用方的退出码被被导入脚本**跨模块污染** —— 实测把它的退出码
+        defuse 成 0 后，本模块的独立入口 `python scripts/manual_claims_freshness.py`
+        **exit 0 且一个字都不打印**（零结论输出）。
+
+    `exec` 路径下命名空间由本模块持有：无论被导入脚本是否 `sys.exit`（正常 /
+    报红 / 未来任何改动），已登记的 `CLAIM_LOG` 都拿得到，退出码也只由本模块决定。
+    `SystemExit` 仍被显式捕获并如实报告（`runpy` 陷阱见 tooling-pitfalls #20 同族）。
+    """
+    target = Path(str(_VERIFY_MANUAL_CLAIMS))
+    if not target.is_file():
+        print(f"[FAIL] 找不到 CLAIM 登记来源：{target}")
+        return []
     try:
-        mod = runpy.run_path(
-            str(Path(__file__).resolve().parents[1] / "scripts" / "verify_manual_claims.py")
+        src = target.read_text(encoding="utf-8-sig")
+        code = compile(src, str(target), "exec")
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        print(f"[FAIL] 无法读取 CLAIM 登记来源 {target}：{type(exc).__name__}: {exc}")
+        return []
+    # 以脚本语义执行（`__name__` 非 "__main__"：本模块取的是数据，不代理它的退出码）
+    ns: dict[str, object] = {"__name__": target.stem, "__file__": str(target)}
+    try:
+        exec(code, ns)  # noqa: S102 - 被执行对象是本仓自有门禁脚本，非外部输入
+    except SystemExit as exc:
+        # 不 re-raise：退出码属被导入脚本，不得污染本入口的结论
+        print(
+            f"[提醒] {target.name} 以 SystemExit({exc.code!r}) 结束；"
+            "本模块只取其 CLAIM 登记，判定与退出码由下方新鲜度校验给出"
         )
     except Exception as exc:  # pragma: no cover - 由 verify_manual_claims 自己报错
-        print(f"[FAIL] 无法加载 CLAIM 登记：{exc}")
+        print(f"[FAIL] 加载 CLAIM 登记时出错：{type(exc).__name__}: {exc}")
         return []
-    return list(mod.get("CLAIM_LOG") or [])
+    raw = ns.get("CLAIM_LOG")
+    if raw is None:
+        print(
+            f"[FAIL] {target.name} 未暴露 CLAIM_LOG（登记结构已变化）——拒绝在取不到 CLAIM 时报成功"
+        )
+        return []
+    return list(raw)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ from smartsuite.engine._constants import (
 )
 from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import durbin_watson, round_for_display
+from smartsuite.engine._utils import disp, durbin_watson, round_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,19 @@ def _dw_interpretation(dw, n, k=1):
 
 
 def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
-    """线性趋势预测，含精度指标 (MAPE/RMSE/MAE)、残差诊断和 Durbin-Watson 检验。"""
+    """线性趋势预测，含精度指标 (MAPE/RMSE/MAE)、残差诊断和 Durbin-Watson 检验。
+
+    ## 精度指标的口径（审查 2026-10-09 R2BD-12：**原先未注明**）
+
+    `RMSE` / `MAE` 按 **`ddof=0`（除以 n）** 计算 —— 与 `sklearn.metrics.mean_squared_error`
+    的默认口径一致，也是"预测误差"的常见工程定义。`statsmodels` 的 `mse_resid`
+    （回归标准误 σ）用 **n − p**（p = 参数个数，本任务 p=2），故两者之比恒为
+    `sqrt((n − p) / n)`（n=60 时 ≈ 0.9832）—— 与 statsmodels / R 对比时出现的
+    ~1.7% 系统差是**口径差异而非计算错误**（实测 0.3054 vs 0.3106 = sqrt(58/60)）。
+
+    同一次分析里的 `R²` / `调整R²` / `Durbin-Watson` / `MAPE` / `Ljung-Box` 均为
+    无量纲或口径无歧义的量，可直接与任何实现交叉核对。
+    """
     # ── B1 边界处置（2026-10-09 审查 P1-2）──
     # 原实现只 `dropna()`，**不剔除 ±Inf** → ±Inf 漏进 sklearn，抛
     # "Input y contains infinity"，被下面的 except 泛化成
@@ -155,6 +167,10 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
             if mape_mask.sum() > 0
             else None
         )
+        # RMSE/MAE 的口径是 **ddof=0（除以 n）**——与 sklearn 一致、与 statsmodels 的
+        # `mse_resid`（除以 n−p）不同，比值恒为 sqrt((n−p)/n)。属可辩护的口径选择，
+        # 故**不改实现**，只在文档面披露（审查 2026-10-09 R2BD-12；口径声明见本函数
+        # docstring 与 `docs/specification/api-reference.md` 的 trend_forecast 条目）。
         rmse = float(np.sqrt(np.mean(residuals**2)))
         mae = float(np.mean(np.abs(residuals)))
         r2 = float(model.score(X, y))
@@ -213,11 +229,15 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
                     "斜率 (每步)",
                     "截距",
                 ],
+                # 带量纲的精度指标走共享展示格式化器（审查 2026-10-09 C-1/R2BD-06）：
+                # RMSE/MAE/斜率/截距 原用 `:.4f`/`:.6f`，在 ×1e-9 下整列 `0.0000`
+                # —— 而同一次分析的 `forecast` 表已是科学计数。
+                # R²/调整R²/DW/MAPE%/Ljung-Box 为无量纲（AC 报告 C-1 白名单），保留定点。
                 "值": [
                     f"{r2:.4f}",
                     f"{adj_r2:.4f}",
-                    f"{rmse:.4f}",
-                    f"{mae:.4f}",
+                    disp(rmse),
+                    disp(mae),
                     f"{mape:.2f}%" if mape is not None else "N/A",
                     f"{dw:.4f}",
                     f"{lb_q:.3f}",
@@ -225,8 +245,8 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
                     f"{dw_label}; {lb_label}",
                     str(n),
                     str(steps),
-                    f"{float(model.coef_[0]):.6f}",
-                    f"{float(model.intercept_):.4f}",
+                    disp(float(model.coef_[0]), 6),
+                    disp(float(model.intercept_)),
                 ],
             }
         )
@@ -294,7 +314,8 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         _last_pred = float(predictions[-1])
         _last_conf = float(conf_array[-1])
         ax1.annotate(
-            f"预测 {_last_pred:.2f}\n95%区间 [{_last_pred - _last_conf:.2f}, {_last_pred + _last_conf:.2f}]",
+            f"预测 {disp(_last_pred, 2)}\n"
+            f"95%区间 [{disp(_last_pred - _last_conf, 2)}, {disp(_last_pred + _last_conf, 2)}]",
             xy=(n + steps, _last_pred),
             xytext=(-36, 26),
             textcoords="offset points",
@@ -352,11 +373,12 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
         ax4.set_title(f"实际值 vs 预测值 (R²={r2:.3f})", fontsize=10)
         fig.tight_layout()
 
-        # ── 汇总 ──
+        # 汇总（审查 2026-10-09 C-1）：斜率与 RMSE 带**数据量纲** → `disp`；
+        # R² 与 MAPE 无量纲 → 保留定点。
         mape_str = f"{mape:.1f}%" if mape is not None else "N/A"
         summary = (
-            f"趋势{trend_dir} (斜率={float(model.coef_[0]):.4f}/步)，"
-            f"预测{steps}步。R²={r2:.3f}, RMSE={rmse:.4f}, MAPE={mape_str}。"
+            f"趋势{trend_dir} (斜率={disp(float(model.coef_[0]))}/步)，"
+            f"预测{steps}步。R²={r2:.3f}, RMSE={disp(rmse)}, MAPE={mape_str}。"
             f"残差自相关: {dw_label}"
         )
 

@@ -45,8 +45,12 @@ jobs:
         # 而不是悄悄退回未锁定口径。
         if: matrix.language == 'python'
         run: |
-          python -m pip install pip-audit
-          python -m pip install -e ".[dev]" || { echo "::error::项目依赖安装失败，无法审计"; exit 1; }
+          # 审查 2026-10-09 G-16：① 扫描器**锁版本**（原 `pip install pip-audit`
+          # 不固定版本 ⇒ 新 pip-audit 改判定/误报行为会让本 job 无故变红）；
+          # ② 删掉原先的 `pip install -e ".[dev]"` —— 它是"先装项目依赖再审计"
+          # 时代的遗留，P2-15 改为审计 `uv export --frozen` 的锁定集后已成冗余
+          # （审计读的是 `-r locked-reqs.txt`，不读当前环境）。
+          python -m pip install "pip-audit==2.10.1"
           if [ -f uv.lock ]; then
             # --no-emit-project：排除本项目自身（它不在 PyPI 上，pip-audit 无法查询）
             uv export --frozen --no-emit-project --format requirements-txt > locked-reqs.txt \

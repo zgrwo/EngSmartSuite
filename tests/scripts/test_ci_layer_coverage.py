@@ -21,6 +21,7 @@ workflow 的 `run:` 文本或 `tests/scripts/*.py` 包装里被引用；非门�
 与本地工具须在 `EXEMPT_GATE_SCRIPTS` / `NON_GATE_LOCAL_TOOLS` **具名登记理由**。
 """
 
+import ast
 import fnmatch
 import re
 from pathlib import Path
@@ -34,17 +35,36 @@ TESTS_DIR = ROOT / "tests"
 WORKFLOWS_DIR = ROOT / ".github" / "workflows"
 SCRIPTS_DIR = ROOT / "scripts"
 TESTS_SCRIPTS_DIR = ROOT / "tests" / "scripts"
+_SCRIPTS_REL = SCRIPTS_DIR.relative_to(ROOT).as_posix()
 _SELF = Path(__file__).resolve()
+_SELF_REL = _SELF.relative_to(TESTS_DIR).as_posix()
+
+#: scripts/ 下参与"门禁 vs 本地工具"清册的扩展名（README.md 等文档不参与）
+SCRIPT_SUFFIXES = (".py", ".mjs", ".sh")
 
 # 有意不在 quick job 中运行的测试文件（须写明理由）
 EXCLUDED_FROM_QUICK = {
     "tests/integration/test_web_e2e.py": "需运行中的服务器，由 e2e job 覆盖",
 }
 
-# ── 门禁脚本 → CI 接线（审查 2026-10-09 P2-12）──────────────────────────────
+# ── 门禁脚本 → CI 接线（审查 2026-10-09 P2-12 / G-6 第二轮）────────────────────
 #
 # 「门禁类」= 自身带判据、失败即表示"仓库状态不合格"的脚本。它们必须有**到达路径**
 # （workflow 的 run: 直接调用，或 tests/scripts/ 的 pytest 包装），否则等于没有门禁。
+#
+# ⚠️ 审查 2026-10-09 G-6 实测的两个漏洞（本轮的修复目标）：
+#   (b) 模式**封闭**：新门禁若命名落在模式外（如 `audit_*.py`、`lint_*.py`）完全
+#       不可见 —— 注入 `scripts/r2g_silent_orphan.py` 后仍 39 passed / EXIT 0；
+#   (c) 「文本提及即接线」：判据是**子串搜索**，任何注释/docstring 提及都算接线
+#       —— 注入 `scripts/verify_r2g_ghost.py`（恒 exit 1、无人执行）+ 一行注释后
+#       307 passed / EXIT 0。
+# 现判据（两层，均不依赖"人记得登记"）：
+#   ① **默认须表态**：`scripts/` 下每个脚本必须要么匹配 `GATE_PATTERNS`（→ 门禁，
+#      必须有执行证据），要么在 `NON_GATE_LOCAL_TOOLS` **具名登记理由**（→ 本地工具）。
+#      新脚本未被分类即 FAIL ⇒ 漏项不再是默认态。
+#   ② **接线 = 执行点**：`workflow 步骤命令里的命令行参数` 或 `tests/scripts/*.py 里
+#      指向它的字符串字面量`（docstring 与整行注释**不算**）。从不验证"是否真的跑过"
+#      的文本子串判据被彻底移除。
 GATE_PATTERNS = (
     "check_*.mjs",  # 前端/导出流静态门禁（经 tests/scripts/ 包装进 CI）
     "*.mjs",  # 其余 Node 脚本（非门禁的共用助手须具名豁免）
@@ -53,30 +73,52 @@ GATE_PATTERNS = (
     "truth_coverage.py",
     "falsy_audit.py",
     "test_quality_guard.py",
+    "validate-commit-msg.sh",  # 唯一非 Python 门禁（ci.yml 提交规范检查调用）
 )
 
-#: 允许**无引用**的门禁类文件（键 = `scripts/` 下的文件名）→ 理由。
+#: 允许**无执行证据**的门禁类文件（键 = `scripts/` 下的文件名）→ 理由。
 #:
-#: 登记是「经审定的例外」：新增门禁脚本若无人调用，`TestGateScriptsAreWired`
-#: 会 FAIL 并点名，除非在此写明理由。
-EXEMPT_GATE_SCRIPTS: dict[str, str] = {
+#: 登记是「经审定的例外」：新门禁若没有任何 workflow/tests 执行点，
+#: `TestGateScriptsAreWired` 会 FAIL 并点名，除非在此写明理由；
+#: 且条目数受 `GATE_WIRING_FREEZE_BASELINE` 封顶（见该常量）。
+GATE_WIRING_FREEZE: dict[str, str] = {
+    "claims_gate.py": (
+        "库模块（非独立执行体）：无 `__main__`、自身不产出结论；判据函数 "
+        "`classify_missing` 由 tests/scripts/test_claims_gate.py 导入直接调用"
+        "（import 形式，非 subprocess 执行点）。故无『执行点证据』但它并非孤儿"
+    ),
+    "templates_gate.py": (
+        "库模块：判据函数 `validate_template_tasks` 由 verify_consistency.py 与 "
+        "tests/scripts/test_templates_gate.py 导入后直接调用 —— 执行点是「函数调用」"
+        "而非「进程执行」，故不在本守卫的执行点证据内；它随 verify_consistency 进 CI"
+    ),
     "_probe_python.mjs": (
-        "共用解释器探测助手（**非门禁**）：自身无判据，只被 check_*.mjs 与 "
-        "tests/scripts/test_python_probe.py 调用。命中 `*.mjs` 模式是因为"
-        "模式要覆盖全部 Node 脚本；登记豁免以免把助手误当门禁"
+        "共用解释器探测助手（**非门禁**）：自身无判据，被 check_*.mjs 以 "
+        "`import { resolvePython } from './_probe_python.mjs'` 导入；测试侧由 "
+        "tests/scripts/test_python_probe.py 用 NODE 直接加载执行该文件。"
+        "命中 `*.mjs` 是因为模式要覆盖全部 Node 脚本 —— 登记以免把助手误当门禁"
     ),
     "verify_all.py": (
         "本地一键入口（AGENTS.md「一键全量验证」）：编排其它门禁、自身不判据，"
-        "由开发者在仓库根手动运行 —— 不作 CI 门禁"
+        "由开发者在仓库根手动运行 —— 有意不作 CI 门禁（其覆盖的步骤由 CI 各 job "
+        "分别承担）。独立入口的『直接运行』判据由 tests/scripts/test_verify_all* 之外"
+        "的本地约定承担，故无执行点证据"
     ),
 }
 
+#: `GATE_WIRING_FREEZE` 的封顶条数。新增条目必须**显式**上调本常量 ——
+#: 目的是把"我又加了一个没有执行点的门禁"变成一次可见、可审、可 review 的改动，
+#: 而不是让冻结表悄悄长大（同 `WEAK_ASSERT_EXEMPT` 的具名豁免模式）。
+GATE_WIRING_FREEZE_BASELINE = 4
+
 #: 非门禁类的本地工具清单（**不作 CI 门禁是有意设计**；登记以防"看起来没人管"）。
 #: 这些文件不匹配 `GATE_PATTERNS`，故不参与接线校验，仅作可审计清册。
+#: ⚠️ 与旧实现的差别：清册不再是"可选补充"，而是**默认须表态**的另一半 ——
+#: `TestScriptInventoryIsExplicit` 要求 scripts/ 下每个脚本要么是门禁、要么在这里。
 NON_GATE_LOCAL_TOOLS: dict[str, str] = {
     "new_task.py": "本地脚手架（注册链生成器）：由 tests/scripts/test_new_task.py 覆盖，非 CI 门禁",
-    "demo.py": "本地演示脚本",
-    "doctor.py": "本地环境诊断（AGENTS.md「环境诊断」）",
+    "demo.py": "本地演示脚本（tests/scripts/test_demo.py 跑它，但它是演示而非判据）",
+    "doctor.py": "本地环境诊断（AGENTS.md「环境诊断」）：诊断环境就绪性，不对仓库状态判红",
     "generate_images.py": "本地文档配图生成",
     "generate_test_data.py": "本地测试数据生成",
     "gen_requirements.py": "本地 requirements 生成",
@@ -84,61 +126,211 @@ NON_GATE_LOCAL_TOOLS: dict[str, str] = {
     "run_smartsuite.py": "本地启动器",
     "setup_offline.py": "本地离线安装辅助",
     "common.py": "共用助手（child_env 等），被多个门禁导入，自身无判据",
-    "manual_claims_freshness.py": "库模块（CLAIM 锚点解析），由 verify_manual_claims.py 与 tests/scripts 包装调用",
+    "manual_claims_freshness.py": (
+        "库模块（CLAIM 锚点解析，唯一实现）：CI 判据由 verify_manual_claims.py 承担"
+        "（ci.yml quick 直接调用，进程内调用本模块的 check_manual_freshness）；"
+        "本文件的**独立入口** `python scripts/manual_claims_freshness.py` 仅作本地"
+        "快速校验，由 tests/scripts/test_manual_claims_freshness.py 以 subprocess 真跑。"
+        "审查 2026-10-09 G-3：其独立入口曾可被 runpy 跨模块 sys.exit 污染成"
+        "『exit 0 且零结论输出』，现改为自建命名空间 exec（不再代理被导入脚本退出码）"
+    ),
     "run_affected_tests.py": "本地增量测试路由（AGENTS.md），非 CI 门禁",
 }
 
 
-def iter_gate_scripts(scripts_dir: Path = SCRIPTS_DIR) -> list[str]:
-    """`scripts/` 下的门禁类文件名（按 `GATE_PATTERNS` 匹配）。"""
+def _script_files(scripts_dir: Path) -> list[Path]:
+    """`scripts/` 下参与清册的脚本文件（.py / .mjs / .sh）。"""
     if not scripts_dir.is_dir():
         return []
-    return sorted(
+    return sorted(p for p in scripts_dir.iterdir() if p.is_file() and p.suffix in SCRIPT_SUFFIXES)
+
+
+def classify_script(name: str) -> str:
+    """返回 `"gate"` 或 `"local"`（门禁类 / 本地工具类）。"""
+    return "gate" if any(fnmatch.fnmatch(name, pat) for pat in GATE_PATTERNS) else "local"
+
+
+def unclassified_scripts(
+    scripts_dir: Path = SCRIPTS_DIR, inventory: dict[str, str] | None = None
+) -> list[str]:
+    """既不是门禁模式、又未登记进本地工具清册的脚本（默认须表态，漏项既 FAIL）。
+
+    这是 G-6(b) 的修复：旧判据是**封闭白名单**（只有匹配模式的才检查），
+    命名落在模式外的新门禁**完全不可见**；现在"未被分类"本身就是失败。
+    """
+    inventory = NON_GATE_LOCAL_TOOLS if inventory is None else inventory
+    return [
         p.name
-        for p in scripts_dir.iterdir()
-        if p.is_file() and any(fnmatch.fnmatch(p.name, pat) for pat in GATE_PATTERNS)
-    )
+        for p in _script_files(scripts_dir)
+        if classify_script(p.name) == "local" and p.name not in inventory
+    ]
 
 
-def workflow_run_text(workflows_dir: Path = WORKFLOWS_DIR) -> str:
-    """全部 workflow 的 `run:` 文本拼接（含非 ci.yml 的 job）。"""
-    chunks: list[str] = []
+def iter_gate_scripts(scripts_dir: Path = SCRIPTS_DIR) -> list[str]:
+    """`scripts/` 下的门禁类文件名（按 `GATE_PATTERNS` 匹配）。"""
+    return [p.name for p in _script_files(scripts_dir) if classify_script(p.name) == "gate"]
+
+
+def workflow_run_commands(
+    workflows_dir: Path = WORKFLOWS_DIR, scripts_dir: Path = SCRIPTS_DIR
+) -> set[str]:
+    """全部 workflow `run:` 文本里出现的**本仓脚本文件名**（命令行参数形态）。
+
+    与旧实现的差别（G-6c）：这里读的是**步骤命令**（`run:`），不是整份 YAML 文本
+    —— YAML 注释、step 的 `name:` 文案、`if:` 条件都不再能"制造接线"。
+    返回的是**文件名**（`verify_docs.py`），与 `tests/scripts` 侧证据同口径。
+    """
+    names = {p.name for p in _script_files(scripts_dir)}
+    tokens: set[str] = set()
     for wf in sorted(workflows_dir.glob("*.yml")):
         data = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
         for job in (data.get("jobs") or {}).values():
             for step in job.get("steps") or []:
                 run = step.get("run")
-                if run:
-                    chunks.append(str(run))
-    return "\n".join(chunks)
+                if not run:
+                    continue
+                for tok in re.split(r"[\s|;&()<>\"'`]+", str(run)):
+                    if tok:
+                        tokens.add(tok.strip())
+    return {_basename(t) for t in tokens if _basename(t) in names} if names else set()
 
 
-def wrapper_source_text(tests_scripts_dir: Path = TESTS_SCRIPTS_DIR) -> str:
-    """`tests/scripts/*.py` 源码拼接 —— **排除本文件**。
+def _basename(tok: str) -> str:
+    """命令行片段 → 文件名（`scripts/verify_docs.py` / `./scripts/x.mjs` → `x.mjs`）。"""
+    return re.split(r"[/\\]", tok)[-1]
 
-    排除是必须的：豁免表的键名（`_probe_python.mjs` 等）就写在本文件里，
-    若把本文件计入引用来源，每个登记项都会"自证被引用"，豁免表失去意义
+
+def _docstring_lines(tree: ast.AST) -> set[int]:
+    """模块 / 类 / 函数 docstring 的起始行号（这些字面量不算"指向脚本的引用"）。"""
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            lines.add(first.value.lineno)
+    return lines
+
+
+def _rel_scripts_dir(scripts_dir: Path) -> str:
+    """`scripts_dir` 相对仓库根（不在仓内时退回目录名，供 tmp_path 用例）。"""
+    try:
+        return scripts_dir.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return scripts_dir.name
+
+
+def _test_file_evidence(path: Path, scripts_dir: Path) -> set[str]:
+    """某测试文件里**指向 scripts/ 下脚本**的字符串字面量（去掉 docstring）。
+
+    为什么不用 `name in source` 子串判据：那会把注释/docstring 里的提及也算成接线
+    （G-6c 的 ghost gate 正是这样被判为"已接线"的）。这里只取 AST 的字面量、
+    且剔除 docstring —— 整行注释不进 AST，天然被排除。
+
+    反向写法：把 `tests/scripts/*.py` 拼成一个字面量池，用**白名单路径模式**
+    （只可能是本仓脚本：`.py` / `.mjs` / `.sh` + 存在的路径形状）去池里找，
+    而不是拿文件名去池里做裸子串搜索。故整行注释里的提及、
+    以及模块/函数 docstring 里的提及，都不算证据。
+    """
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(src)
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return set()
+    skip = _docstring_lines(tree)
+    literals = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.lineno not in skip
+    ]
+    return _script_paths_in("\n".join(literals), scripts_dir)
+
+
+def _script_paths_in(text: str, scripts_dir: Path) -> set[str]:
+    """字面量池 → 命中的**脚本文件名**。
+
+    ⚠️ 两个坑（都实测踩过）：
+      ① 不能假设字面量池里看得到目录前缀：源码写成 `ROOT / "scripts" / "x.py"` 时，
+         AST 的字面量是**分开**的多个片段，拼起来并不含 `scripts/x.py` 连续子串；
+      ② 拿这些片段拼接去 `f"{rel}/" in joined` 比对会把 `"\n"` 之类的转义串当路径。
+    故统一以**文件名**为锚（`scripts/` 下都是本仓独有的具体名，且全仓无同名文件，
+    见 `test_script_names_are_unique`），路径前缀只用于人读日志，不参与判据。
+    """
+    text = text.replace("\\", "/")
+    names = "|".join(re.escape(p.name) for p in _script_files(scripts_dir))
+    if not names:
+        return set()
+    return {m.group("name") for m in re.finditer(rf"(?P<name>{names})(?![\w.])", text)}
+
+
+def _looks_like_path(tok: str) -> bool:
+    """命令行片段是否形如路径（含分隔符）——用于日志可读性，不参与判据。"""
+    return "/" in tok or "\\" in tok
+
+
+def wiring_evidence(
+    scripts_dir: Path = SCRIPTS_DIR, tests_scripts_dir: Path = TESTS_SCRIPTS_DIR
+) -> set[str]:
+    """有**执行点证据**的脚本路径集合。
+
+    证据来源只有两类（G-6 判据升级）：
+      ① workflow 步骤命令里的命令行参数（`bash scripts/validate-commit-msg.sh`）；
+      ② `tests/scripts/*.py` 里指向该脚本的字符串字面量（`ROOT / "scripts" / "x.py"`、
+         `subprocess.run([... , "scripts/x.py"])` …）—— docstring / 注释不算。
+    **本文件（冻结表所在地）被排除**，否则冻结键名会"自证被引用"
     （见 `test_self_reference_loophole_is_closed`）。
     """
-    chunks: list[str] = []
+    ev = set(workflow_run_commands())
     for p in sorted(tests_scripts_dir.glob("*.py")):
-        if p.resolve() == _SELF:
+        if _is_self(p, tests_scripts_dir):
             continue
-        chunks.append(p.read_text(encoding="utf-8", errors="replace"))
-    return "\n".join(chunks)
+        ev |= _test_file_evidence(p, scripts_dir)
+    return ev
 
 
-def unwired_gate_scripts(scripts_dir: Path, haystack: str, exempt: dict[str, str]) -> list[str]:
-    """返回既未被引用、也未登记豁免的门禁类文件名（审查 P2-12 的判据）。"""
-    return [
-        name
-        for name in iter_gate_scripts(scripts_dir)
-        if name not in haystack and name not in exempt
-    ]
+def _is_self(path: Path, tests_scripts_dir: Path) -> bool:
+    """该文件是否就是本文件（只对真实目录成立，tmp 目录里的同名文件不算）。"""
+    return (
+        path.name == _SELF.name
+        and path.parent.resolve() == TESTS_SCRIPTS_DIR.resolve()
+        and tests_scripts_dir.resolve() == TESTS_SCRIPTS_DIR.resolve()
+    )
 
 
-def _gate_haystack() -> str:
-    return workflow_run_text() + "\n" + wrapper_source_text()
+def unwired_gate_scripts(
+    scripts_dir: Path,
+    evidence: set[str] | None = None,
+    frozen: dict[str, str] | None = None,
+    tests_scripts_dir: Path = TESTS_SCRIPTS_DIR,
+) -> list[str]:
+    """返回**没有任何执行点证据**、也未登记冻结理由的门禁类文件名。
+
+    判据（G-6 第二轮）：该文件名必须出现在证据集合里（证据 = workflow 步骤命令的
+    命令行参数 + `tests/scripts/*.py` 的代码字面量），或 `frozen` 具名登记 ——
+    不再接受"某处文本提到过它"。
+
+    `evidence=None` 时自行收集（workflow 命令 + tests/scripts 字面量）。
+    """
+    frozen = GATE_WIRING_FREEZE if frozen is None else frozen
+    if evidence is None:
+        evidence = wiring_evidence(scripts_dir, tests_scripts_dir)
+    ev = set(evidence)
+    missing = []
+    for p in _script_files(scripts_dir):
+        if classify_script(p.name) != "gate" or p.name in frozen:
+            continue
+        if p.name not in ev and _rel_scripts_dir(scripts_dir) + "/" + p.name not in ev:
+            missing.append(p.name)
+    return missing
 
 
 @pytest.fixture(scope="module")
@@ -255,19 +447,23 @@ class TestQuickJobStaysReasonable:
 
 
 class TestGateScriptsAreWired:
-    """门禁脚本 → CI 接线（审查 2026-10-09 P2-12）。
+    """门禁脚本 → CI 接线（审查 2026-10-09 P2-12，判据于 G-6 第二轮升级）。
 
     原守卫只问「**测试**有没有接入 CI」，新增的孤儿门禁脚本无人调用时仍全绿
-    （注入 I12 实测 10 passed / EXIT=0）。本类补上「**门禁**有没有到达路径」。
+    （注入 I12 实测 10 passed / EXIT=0）。P2-12 补了「**门禁**有没有到达路径」，
+    但判据仍是两处漏洞：模式外命名隐形（G-6b）、文本提及即算接线（G-6c）。
+    本类的判据现为：**执行点证据**（workflow 命令参数 / tests 里的字面量路径）
+    + **默认须表态**（未分类即 FAIL）。
     """
 
     def test_every_gate_script_is_wired_or_excused(self):
-        """每个门禁类脚本都必须被 workflow `run:` 或 `tests/scripts/` 包装引用。"""
-        missing = unwired_gate_scripts(SCRIPTS_DIR, _gate_haystack(), EXEMPT_GATE_SCRIPTS)
+        """每个门禁类脚本都必须有执行点证据，或在冻结表具名登记理由。"""
+        missing = unwired_gate_scripts(SCRIPTS_DIR, wiring_evidence(), GATE_WIRING_FREEZE)
         assert not missing, (
-            f"以下门禁脚本既未被 CI 引用、也未登记豁免: {missing}。"
-            "请接入 workflow run: 或 tests/scripts/ 的 pytest 包装；"
-            "确属共用助手/本地工具的，在 EXEMPT_GATE_SCRIPTS 具名登记理由。"
+            f"以下门禁脚本没有任何**执行点**（workflow 命令 args / tests 字面量路径）、"
+            f"也未登记冻结理由: {missing}。"
+            "请接入 workflow run: 或 tests/scripts/ 的 pytest 包装（subprocess 真跑）；"
+            "确属库模块/共用助手的，在 GATE_WIRING_FREEZE 具名登记理由。"
         )
 
     def test_orphan_gate_is_detected(self, tmp_path):
@@ -276,48 +472,144 @@ class TestGateScriptsAreWired:
         scripts.mkdir()
         (scripts / "check_wired.mjs").write_text("// 已接线\n")
         (scripts / "zz_orphan_gate.py").write_text("print('orphan')\nraise SystemExit(1)\n")
-        missing = unwired_gate_scripts(scripts, "node scripts/check_wired.mjs", {})
+        missing = unwired_gate_scripts(
+            scripts, {"check_wired.mjs"}, {}, tests_scripts_dir=tmp_path / "none"
+        )
         assert missing == ["zz_orphan_gate.py"], f"孤儿门禁未被点名: {missing}"
 
+    def test_ghost_gate_mentioning_only_in_comment_is_detected(self, tmp_path):
+        """**G-6c 负向注入**：仅被注释/docstring 提及的门禁必须仍被判为孤儿。
+
+        审查实测原形：新增 `scripts/verify_r2g_ghost.py`（恒 exit 1、无人执行），
+        在某个测试文件里加一行注释提及它的路径 → 旧判据（子串搜索）判为"已接线"，
+        307 passed / EXIT 0。本用例把该形态转正为回归用例。
+        """
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "verify_r2g_ghost.py").write_text("raise SystemExit(1)\n")
+        tests = tmp_path / "tst"
+        tests.mkdir()
+        (tests / "test_ghost_wired.py").write_text(
+            '"""本文件说明：相关检查见 scripts/verify_r2g_ghost.py。"""\n'
+            "\n"
+            "# 备注（仅为字符串提及）：相关检查见 scripts/verify_r2g_ghost.py\n"
+            "def test_noop():\n"
+            "    assert True\n",
+            encoding="utf-8",
+        )
+        missing = unwired_gate_scripts(scripts, set(), {}, tests_scripts_dir=tests)
+        assert missing == ["verify_r2g_ghost.py"], (
+            f"注释/docstring 提及被当成了接线（G-6c 回归）: {missing}"
+        )
+
+    def test_real_execution_point_counts_as_wired(self, tmp_path):
+        """**反面守卫**：真正被 subprocess 执行的路径字面量必须算接线。"""
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "verify_r2g_real.py").write_text("print('ok')\n")
+        tests = tmp_path / "tst"
+        tests.mkdir()
+        (tests / "test_real_wired.py").write_text(
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "ROOT = Path(__file__).resolve().parents[1]\n"
+            "SCRIPT = ROOT / 'scripts' / 'verify_r2g_real.py'\n"
+            "\n"
+            "def test_runs():\n"
+            "    subprocess.run(['python', str(SCRIPT)], check=True)\n",
+            encoding="utf-8",
+        )
+        assert unwired_gate_scripts(scripts, None, {}, tests_scripts_dir=tests) == []
+
     def test_excused_gate_is_not_flagged(self, tmp_path):
-        """**反面守卫**：具名豁免的门禁脚本不得被判为孤儿（否则豁免表形同虚设）。"""
+        """**反面守卫**：具名冻结的门禁脚本不得被判为孤儿（否则冻结表形同虚设）。"""
         scripts = tmp_path / "scripts"
         scripts.mkdir()
         (scripts / "helper.mjs").write_text("// 共用助手\n")
-        missing = unwired_gate_scripts(scripts, "", {"helper.mjs": "共用助手（非门禁）"})
+        missing = unwired_gate_scripts(
+            scripts,
+            set(),
+            {"helper.mjs": "共用助手（非门禁）"},
+            tests_scripts_dir=tmp_path / "none",
+        )
         assert missing == []
 
     def test_real_repo_has_no_orphan_gate(self):
         """真实仓库现状：孤儿的门禁数必须为 0（与上面同一判据，独立复核用）。"""
-        assert unwired_gate_scripts(SCRIPTS_DIR, _gate_haystack(), EXEMPT_GATE_SCRIPTS) == []
+        assert unwired_gate_scripts(SCRIPTS_DIR, wiring_evidence(), GATE_WIRING_FREEZE) == []
+
+    def test_wiring_evidence_really_contains_gate_scripts(self):
+        """本守卫**本身有效**：真实证据集必须覆盖已知已接线的门禁。
+
+        G-6(b) 的教训：判据看不见文件时，一切"没发现问题"都没有意义 ——
+        故先钉住"证据集认得出这些"，再谈"零孤儿"。
+        """
+        ev = wiring_evidence()
+        must = {
+            "verify_docs.py",
+            "verify_consistency.py",
+            "verify_manual_claims.py",
+            "falsy_audit.py",
+            "validate-commit-msg.sh",
+            "test_quality_guard.py",
+            "truth_coverage.py",
+            "check_params_panel.mjs",
+        }
+        assert must <= ev, f"证据集缺少这些已接线的门禁（判据失效）: {sorted(must - ev)}"
+        assert len(iter_gate_scripts()) >= 10, "门禁分类器把文件都漏掉了"
+
+    def test_workflow_command_evidence_is_from_run_only(self):
+        """workflow 证据只认 `run:` 里的命令 —— 注释/`name:`/`if:` 都不算接线。"""
+        cmds = workflow_run_commands()
+        assert "verify_docs.py" in cmds, "真实 workflow 未认出 verify_docs.py"
+        # `validate-commit-msg.sh` 出现在 ci.yml 的**回显文案**里（run 内的 echo），
+        # 同时也确实是 `bash scripts/validate-commit-msg.sh` 的执行点 —— 两者都读得到；
+        # 但 `verify_manual_claims.py` 只在注释里被 ci.yml 提及过，必须在 run: 中真实执行
+        assert "verify_manual_claims.py" in cmds, "verify_manual_claims.py 应有 run: 执行点"
+
+    def test_script_names_are_unique_across_scan_pool(self):
+        """以**文件名**为锚的前提：`scripts/` 下无重名文件（否则判据会被同名混淆）。"""
+        names = [p.name for p in _script_files(SCRIPTS_DIR)]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        assert not dupes, f"scripts/ 下存在重名文件，文件名锚点判据失效: {dupes}"
 
     def test_exemptions_have_reasons(self):
-        """豁免必须写明理由（空理由/纯符号视为未登记）。"""
-        for name, reason in EXEMPT_GATE_SCRIPTS.items():
-            assert reason and len(reason.strip()) >= 8, f"{name} 的豁免理由过短: {reason!r}"
+        """冻结必须写明理由（空理由/纯符号视为未登记）。"""
+        for name, reason in GATE_WIRING_FREEZE.items():
+            assert reason and len(reason.strip()) >= 8, f"{name} 的冻结理由过短: {reason!r}"
+
+    def test_freeze_table_does_not_grow_silently(self):
+        """冻结表条数封顶：新增条目必须显式上调基线常量（可见、可审）。"""
+        assert len(GATE_WIRING_FREEZE) <= GATE_WIRING_FREEZE_BASELINE, (
+            f"GATE_WIRING_FREEZE 已有 {len(GATE_WIRING_FREEZE)} 条 > 基线 "
+            f"{GATE_WIRING_FREEZE_BASELINE} —— 新加「没有执行点的门禁」必须显式上调 "
+            "GATE_WIRING_FREEZE_BASELINE，并在理由里说明为何无法接入 CI"
+        )
 
     def test_exemption_targets_and_inventory_exist(self):
         """登记表/清册的键必须都对应真实文件（防拼写漂移让条目静默失效）。"""
-        for name in list(EXEMPT_GATE_SCRIPTS) + list(NON_GATE_LOCAL_TOOLS):
+        for name in list(GATE_WIRING_FREEZE) + list(NON_GATE_LOCAL_TOOLS):
             assert (SCRIPTS_DIR / name).is_file(), f"登记项 {name} 在 scripts/ 下不存在"
 
     def test_exempted_entries_are_gate_class_or_documented_tools(self):
-        """豁免键必须确实是门禁类（否则该用 NON_GATE_LOCAL_TOOLS 清册）。"""
+        """冻结键必须确实是门禁类（否则该用 NON_GATE_LOCAL_TOOLS 清册）。"""
         gate = set(iter_gate_scripts())
-        stray = [n for n in EXEMPT_GATE_SCRIPTS if n not in gate]
-        assert not stray, f"以下豁免项不匹配任何门禁模式，请移入 NON_GATE_LOCAL_TOOLS: {stray}"
+        stray = [n for n in GATE_WIRING_FREEZE if n not in gate]
+        assert not stray, f"以下冻结项不匹配任何门禁模式，请移入 NON_GATE_LOCAL_TOOLS: {stray}"
 
     def test_self_reference_loophole_is_closed(self):
-        """本文件（豁免表所在地）不得计入引用来源。
+        """本文件（冻结表所在地）不得计入引用来源。
 
-        否则 `EXEMPT_GATE_SCRIPTS` 的键名会"自证被引用"，接线校验对登记项失效。
+        否则 `GATE_WIRING_FREEZE` 的键名会"自证被引用"，接线校验对登记项失效。
         """
-        text = wrapper_source_text()
-        assert "EXEMPT_GATE_SCRIPTS" not in text, "本文件被计入了引用来源（自证循环）"
-        assert "zz_orphan_gate" not in text
-        # 对照：豁免键名确实写在本文件里 —— 若不排除本文件，它们会全部"被引用"
+        for p in sorted(TESTS_SCRIPTS_DIR.glob("*.py")):
+            if _is_self(p, TESTS_SCRIPTS_DIR):
+                continue
+            assert "GATE_WIRING_FREEZE" not in p.read_text(encoding="utf-8", errors="replace")
+        # 对照：冻结键名确实写在本文件里 —— 若不排除本文件，它们会全部"被引用"
         self_src = Path(__file__).read_text(encoding="utf-8")
         assert "_probe_python.mjs" in self_src
+        assert _is_self(_SELF, TESTS_SCRIPTS_DIR), "本文件的自我识别失效"
 
     def test_local_tools_inventory_has_reasons(self):
         """非门禁本地工具清册同样须写明理由。"""
@@ -325,10 +617,50 @@ class TestGateScriptsAreWired:
             assert reason and len(reason.strip()) >= 4, f"{name} 的清册理由过短: {reason!r}"
 
 
+class TestScriptInventoryIsExplicit:
+    """**G-6(b) 的修复**：`scripts/` 下每个脚本都必须被分类（默认须表态）。
+
+    旧判据是封闭白名单 —— 只有匹配 `GATE_PATTERNS` 的文件才被检查，
+    新门禁若命名为 `audit_*.py` / `lint_*.py` 就**完全隐形**（注入实测 39 passed）。
+    现反转默认：未分类 = FAIL，新增脚本必须显式表态（是门禁 → 要执行点；
+    是本地工具 → 进清册写理由）。
+    """
+
+    def test_every_script_is_classified(self):
+        missing = unclassified_scripts()
+        assert not missing, (
+            f"以下 scripts/ 脚本既不是门禁类、也未登记进 NON_GATE_LOCAL_TOOLS: {missing}。"
+            "请二选一表态：① 门禁 → 接入 CI/测试并确认执行点证据；"
+            "② 本地工具 → 在 NON_GATE_LOCAL_TOOLS 写明理由"
+        )
+
+    def test_unknown_script_is_detected(self, tmp_path):
+        """**负向注入（G-6b 原形）**：命名落在模式外的新脚本必须被点名。"""
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        (scripts / "r2g_silent_orphan.py").write_text("raise SystemExit(1)\n")
+        missing = unclassified_scripts(scripts, {})
+        assert missing == ["r2g_silent_orphan.py"], f"模式外脚本未被点名: {missing}"
+
+    def test_shell_gate_is_gate_class(self):
+        """`validate-commit-msg.sh` 是唯一非 Python 门禁，必须被分类为门禁类。"""
+        assert classify_script("validate-commit-msg.sh") == "gate"
+        assert classify_script("doctor.py") == "local"
+
+
 RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
 
 #: 版本链断言脚本必须出现的两个 job（审查 2026-10-09 P2-13：原先只在手工路径）
 VERSION_CHAIN_JOBS = ("release-please", "build-artifacts")
+
+#: 版本链断言的**四向量**（审查 2026-10-09 G-12：原实现只断言 3 个，
+#: 注释却称"四向量"；现补 CHANGELOG.md 断言 —— 与 verify_docs.py:560-565 同源表达式）
+VERSION_CHAIN_TOKENS = (
+    "pyproject.toml",
+    ".release-please-manifest.json",
+    "CHANGELOG.md",
+    "TAG_NAME",
+)
 
 
 class TestReleaseWorkflowHardening:
@@ -354,14 +686,27 @@ class TestReleaseWorkflowHardening:
 
     @pytest.mark.parametrize("job", VERSION_CHAIN_JOBS)
     def test_version_chain_asserted_on_both_paths(self, job):
-        """两条发版路径都必须显式断言 tag == pyproject == manifest。"""
+        """两条发版路径都必须显式断言 tag == pyproject == manifest == CHANGELOG。
+
+        审查 2026-10-09 G-12：token 列表加上 `CHANGELOG.md` —— 原实现只比对 3 个，
+        `CHANGELOG` 从不参与（而它恰是唯一在 main/发版时点无守卫的向量）。
+        """
         steps = self._data()["jobs"][job]["steps"]
         script = "\n".join(s.get("run") or "" for s in steps)
         assert "校验 tag 与版本链一致" in "\n".join(s.get("name") or "" for s in steps), (
             f"{job} 缺版本链断言步骤（自动路径原先只靠 extra-files 结构性保证）"
         )
-        for token in ("pyproject.toml", ".release-please-manifest.json", "TAG_NAME"):
+        for token in VERSION_CHAIN_TOKENS:
             assert token in script, f"{job} 的版本链断言缺 {token}"
+
+    @pytest.mark.parametrize("job", VERSION_CHAIN_JOBS)
+    def test_version_chain_assertion_uses_verify_docs_regex(self, job):
+        """CHANGELOG 判据必须与 `verify_docs.check_version_consistency` 同源（SSOT）。"""
+        steps = self._data()["jobs"][job]["steps"]
+        script = "\n".join(s.get("run") or "" for s in steps)
+        assert r"^##\s*\[(\d+\.\d+\.\d+)\]" in script, (
+            f"{job} 的 CHANGELOG 判据与 scripts/verify_docs.py 的表达式不同源"
+        )
 
     def test_auto_path_uses_release_output_tag(self):
         """自动路径必须以 release-please 的 tag_name 输出为断言对象（而非 ref_name）。"""

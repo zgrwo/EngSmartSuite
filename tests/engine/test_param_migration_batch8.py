@@ -292,10 +292,58 @@ class TestInverseSolveDeclaredButNotValidated:
             assert key in joined, f"{key} 的降级必须在 messages 里可见: {r.messages}"
 
     def test_invalid_params_do_not_raise(self):
-        """透传字段 → 引擎不抛 `ParamValidationError`（校验留在 `_params.py`）。"""
-        for params in ({"model": "bogus"}, {"weight_mode": "bogus"}, {"reg_lambda": -1}):
-            r = _via("inverse_solve", params)
-            assert r.status in ("ok", "error"), (params, r.status)
+        """透传字段 → 引擎不抛 `ParamValidationError`（校验留在 `_params.py`）。
+
+        真实值断言（原为恒真断言 `status in ("ok","error")`）：逐参数钉住**方向**——
+        `model` 非法取值属硬错误（拒绝并列出可选值），`weight_mode` 与负 `reg_lambda`
+        属**可见降级**（回退/透传后继续）。
+
+        ⚠️ 本用例**不能**复用 `_via()` 的 `_frame()`：那张表没有
+        `Incoming*/Variable*/Output*` 角色列，`inverse_solve` 会因"未识别到输出列"
+        直接 error —— 原断言 `status in ("ok","error")` 正是靠这个**无关错误**通过的
+        （假绿）。故这里单独造一份角色列齐备的历史。
+        """
+        rng = np.random.default_rng(7)
+        inc = rng.normal(1.1, 0.05, 40)
+        u1 = rng.uniform(4.0, 8.0, 40)
+        u2 = rng.uniform(2.0, 4.0, 40)
+        history = pd.DataFrame(
+            {
+                "IncomingA": inc,
+                "VariableU1": u1,
+                "VariableU2": u2,
+                "OutputY1": 1.3 - 0.06 * u2 + 0.05 * inc,
+            }
+        )
+
+        def run(params: dict):
+            return orchestrate(
+                AnalysisRequest(
+                    task="inverse_solve",
+                    data=history,
+                    target_col="",
+                    feature_cols=[],
+                    params=params,
+                )
+            )
+
+        # ① model 非法 → 拒绝，且必须列出全部可选模型（用户据此改）
+        r_model = run({"model": "bogus"})
+        assert r_model.status == "error", r_model.messages
+        msg = " ".join(r_model.messages)
+        assert "参数「model」取值无效（bogus）" in msg, r_model.messages
+        assert "auto/linear/poly/gpr/gbm/rate" in msg, r_model.messages
+
+        # ② weight_mode 非法 → 继续，但必须披露已回退默认 std
+        r_mode = run({"weight_mode": "bogus"})
+        assert r_mode.status == "ok", r_mode.messages
+        assert any("已回退默认 std" in m for m in r_mode.messages), r_mode.messages
+        assert r_mode.metadata["model_choice"] == {"OutputY1": "linear"}, r_mode.metadata
+
+        # ③ 负 reg_lambda → 透传（透传字段不做区间校验），结果仍可产出
+        r_lam = run({"reg_lambda": -1})
+        assert r_lam.status == "ok", r_lam.messages
+        assert not any("取值无效" in m for m in r_lam.messages), r_lam.messages
 
 
 class TestRegressionModelType:

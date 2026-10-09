@@ -14,7 +14,12 @@ from smartsuite.core.param_specs_common import ALPHA, GROUP_COL
 from smartsuite.engine._constants import (
     EPSILON,
 )
-from smartsuite.engine._guard import BoundaryReport, clean_frame, clean_series
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    clean_frame,
+    clean_series,
+    degenerate_column_reason,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     round_for_display,
@@ -280,14 +285,31 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(
             task="hypothesis_test", status="error", messages=["KS 检验需要恰好 2 个分组"]
         )
-    g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
-    g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
     # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
     # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
     # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    #
+    # 审查 2026-10-09 R2BD-08（P2）：原写法对 g1/g2 **各调一次** `clean_series
+    # (column=目标列)` —— 清洗按**分组**发生，披露粒度却写的是**按列**，
+    # 于是同一列出现「含 2 个」+「含 1 个」两条同名不同量的记录（真实总数 3），
+    # 用户无从核对，`codes()` 也返回同码两条。
+    # 修法：**分组前**对整列清洗一次，再按组切分 —— 披露条数/数量/错误码
+    # 三者与真实注入量严格一致（`_guard.clean_series` 只调用一次）。
+    #
+    # ⚠️ **索引纪律（2026-10-10 用户级回归，务必保留）**：
+    # `_guard.clean_series` 返回的是**过滤后的 Series（保留原索引）**，不是等长掩码。
+    # 故分组标签必须与清洗结果**同源**：先把两列 `reset_index(drop=True)`，
+    # 再按位置取标签。**禁止**写 `req.data.loc[cleaned.index, group_col]` ——
+    # 索引重复时（`pd.concat([g1, g2])` 把两张同为 0..n 的表拼起来，是极常见的
+    # 用户操作）`.loc` 会对每个标签命中**全部**重复行而**膨胀**
+    # （实测 100 行 → 200 行 → 布尔索引 `IndexError: ... size of axis is 100
+    # but size of corresponding boolean axis is 400`，`hypothesis_test` 整任务报错）。
     _report = BoundaryReport()
-    g1, _n1 = clean_series(g1, column=req.target_col, report=_report)
-    g2, _n2 = clean_series(g2, column=req.target_col, report=_report)
+    _paired = req.data[list(dict.fromkeys([req.target_col, group_col]))].reset_index(drop=True)
+    _cleaned = clean_series(_paired[req.target_col], column=req.target_col, report=_report)[0]
+    _labels = _paired.loc[_cleaned.index, group_col]
+    g1 = _cleaned[_labels == groups[0]]
+    g2 = _cleaned[_labels == groups[1]]
     inf_msgs = _report.messages()
     if len(g1) < 3 or len(g2) < 3:
         return AnalysisResult(
@@ -331,7 +353,13 @@ def _ht_ks(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=f"KS 检验: {conclusion} (D={stat:.3f}, p={p:.4f})",
-        metadata={"test": test_name, "statistic": float(stat), "p_value": float(p), "alpha": alpha},
+        metadata={
+            "test": test_name,
+            "statistic": float(stat),
+            "p_value": float(p),
+            "alpha": alpha,
+            "boundary_codes": _report.codes(),
+        },
         messages=inf_msgs,
     )
 
@@ -419,14 +447,20 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=["Hedges g 需要恰好 2 个分组"],
         )
-    g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
-    g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
     # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
     # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
     # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    #
+    # 审查 2026-10-09 R2BD-08（P2）：同 `_ht_ks` —— 分组前统一清洗，
+    # 使披露条数/数量/错误码与真实 ±Inf 总数一致（原先 g1/g2 各登记一次）。
+    # ⚠️ 索引纪律同 `_ht_ks`：`clean_series` 返回**过滤后的 Series（保留原索引）**，
+    # 必须先 `reset_index(drop=True)` 再按位置取分组标签，否则重复索引会膨胀报错。
     _report = BoundaryReport()
-    g1, _n1 = clean_series(g1, column=req.target_col, report=_report)
-    g2, _n2 = clean_series(g2, column=req.target_col, report=_report)
+    _paired = req.data[list(dict.fromkeys([req.target_col, group_col]))].reset_index(drop=True)
+    _cleaned = clean_series(_paired[req.target_col], column=req.target_col, report=_report)[0]
+    _labels = _paired.loc[_cleaned.index, group_col]
+    g1 = _cleaned[_labels == groups[0]]
+    g2 = _cleaned[_labels == groups[1]]
     if len(g1) < 3 or len(g2) < 3:
         return AnalysisResult(
             task="hypothesis_test",
@@ -482,6 +516,7 @@ def _ht_cohens_d(req: AnalysisRequest) -> AnalysisResult:
             "effect_size_ci": (float(ci[0]), float(ci[1])),
             "n1": len(g1),
             "n2": len(g2),
+            "boundary_codes": _report.codes(),
         },
         messages=warn_list,
     )
@@ -513,11 +548,20 @@ def _ht_correlation(req: AnalysisRequest) -> AnalysisResult:
     x = sub[x_col].values
     y = sub[req.target_col].values
     # 审查 2026-09-16 D-2：原绝对 EPSILON 把微尺度变量误判常量列；改精确零判据
-    if np.std(x, ddof=1) == 0 or np.std(y, ddof=1) == 0:
+    # 收尾轮（契约 #5）：判据改走 `_guard` 三级归因，并**点名是哪个变量**退化 ——
+    # 原先只报"需要两个变量均有变异"，用户不知道去查哪一列。
+    _degenerate_x = degenerate_column_reason(sub[x_col], what=f"变量「{x_col}」")
+    _degenerate_y = degenerate_column_reason(
+        sub[req.target_col], what=f"目标列「{req.target_col}」"
+    )
+    if _degenerate_x is not None or _degenerate_y is not None:
         return AnalysisResult(
             task="hypothesis_test",
             status="error",
-            messages=["相关显著性检验需要两个变量均有变异（常量列无法计算相关系数）"],
+            messages=[
+                f"{_degenerate_x or _degenerate_y}，相关显著性检验需要两个变量均有变异"
+                "（常量列无法计算相关系数）"
+            ],
         )
     r_val, p_val = sp_stats.pearsonr(x, y)
     ci = _correlation_ci(r_val, len(sub))
@@ -1537,18 +1581,23 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
             messages=[f"分组列需要恰好 2 个水平，当前有 {len(groups)} 个"],
         )
 
-    g1 = req.data[req.data[group_col] == groups[0]][req.target_col].dropna()
-    g2 = req.data[req.data[group_col] == groups[1]][req.target_col].dropna()
-
     # 审查 2026-09-22 发现 2：±Inf 既非 NaN 也未被 dropna 剔除，scipy 对含 Inf
     # 数组返回 NaN p 值，而 `p < alpha` 对 NaN 恒 False → 被表述为「未发现显著差异」。
     # 入口按缺失处理剔除并显式提示（同一缺陷族：paired/mannwhitney/wilcoxon 已同修）。
     # 第三十八轮：该清洗点自带一个 `_guard` 处置记录器。
     # ⚠️ **不跨分支共用** —— `tests/engine/test_welch_ttest.py` 断言
     # 方差齐性时 `messages == []`；共用会把未执行分支的处置带进结果。
+    #
+    # 审查 2026-10-09 R2BD-08（P2）：同 `_ht_ks` —— 分组前统一清洗，
+    # 使披露条数/数量/错误码与真实 ±Inf 总数一致（原先 g1/g2 各登记一次）。
+    # ⚠️ 索引纪律同 `_ht_ks`：`clean_series` 返回**过滤后的 Series（保留原索引）**，
+    # 必须先 `reset_index(drop=True)` 再按位置取分组标签，否则重复索引会膨胀报错。
     _report = BoundaryReport()
-    g1, _n1 = clean_series(g1, column=req.target_col, report=_report)
-    g2, _n2 = clean_series(g2, column=req.target_col, report=_report)
+    _paired = req.data[list(dict.fromkeys([req.target_col, group_col]))].reset_index(drop=True)
+    _cleaned = clean_series(_paired[req.target_col], column=req.target_col, report=_report)[0]
+    _labels = _paired.loc[_cleaned.index, group_col]
+    g1 = _cleaned[_labels == groups[0]]
+    g2 = _cleaned[_labels == groups[1]]
 
     # 最小样本量检查 — 与其他分支保持一致 (P2-3 fix)
     min_n = 3
@@ -1733,6 +1782,9 @@ def hypothesis_test(req: AnalysisRequest) -> AnalysisResult:
         "effect_label": effect_label,
         "power": power,
         "effect_size_ci": effect_ci,
+        # 审查 2026-10-09 R2BD-08：披露必须同时到达机器可读出口
+        # （原该分支只把文案放进 messages，`metadata` 里没有 `boundary_codes`）。
+        "boundary_codes": _report.codes(),
     }
     if effect_ci_note:
         metadata["effect_ci_note"] = effect_ci_note

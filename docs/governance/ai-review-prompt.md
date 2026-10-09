@@ -37,7 +37,7 @@
 
 ## 三、项目背景（审查者必读）
 
-> 术语表 [context.md](context.md)；开发宪法 [AGENTS.md](../../AGENTS.md)；开发技能（7 大陷阱 + 修复模板）[smartsuite-dev.md](../../skills/smartsuite-dev.md)；哨兵契约 [sentinel-contract.md](sentinel-contract.md)。以下为摘要，任何声称以文档原文为准。
+> 术语表 [context.md](context.md)；开发宪法 [AGENTS.md](../../AGENTS.md)；开发技能（10 大陷阱 + 5 套修复模板）[smartsuite-dev.md](../../skills/smartsuite-dev.md)；哨兵契约 [sentinel-contract.md](sentinel-contract.md)。以下为摘要，任何声称以文档原文为准。
 
 ### 3.1 一句话定位
 
@@ -76,8 +76,9 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 ```
 
 **注册只有 1 处**（审查 2026-09-19 B1）：`services/task_spec.py` 的 `TASK_SPECS`；
-`orchestrator.py` 的 `TASK_REGISTRY` / `DEFAULT_PARAMS` / `TASK_LABELS` / `TASK_GROUPS` /
-`RAW_CAT_TASKS` / `NO_TARGET_TASKS` / `NO_DATA_TASKS` 共 7 个名字全部由 `derive()` 派生。
+`orchestrator.py` 的 `TASK_REGISTRY` / `TASK_LABELS` / `TASK_GROUPS` / `DEFAULT_PARAMS` /
+`RAW_CAT_TASKS` / `NO_TARGET_TASKS` / `NO_DATA_TASKS` / `Y_ONLY_TASKS` / `X_OPTIONAL_TASKS`
+共 **9** 个名字全部由 `derive()` 派生（数量以 `DerivedRegistry.__dataclass_fields__` 为准）。
 审查时若发现 `orchestrator.py` 里出现任务字面量集合，即为回退。
 
 **前端列约束（单一来源）**：任务的列需求只在 `TaskSpec` 里声明一次（`services/task_spec.py`），
@@ -129,7 +130,7 @@ engine/ 实现 → engine/__init__.py 导出 → services/task_spec.py 的 TASK_
 **高频复发模式**（逐条做被动排查，历史见 [AGENTS.md](../../AGENTS.md) 历史经验表）：
 ① **falsy 陷阱**（`if value:` 与 `params.get(x) or default` 对 0/False/空串误判，5+ 次）；② **preprocess_data 返回值解包错误**（4+ 次，元组数变更未同步调用方）；③ **手册数值与实际不一致**（10+ 次，写入文档前未实跑）；④ **matplotlib 后端冲突**（CLI 模式 pyplot 提前导入，引擎入口统一配置 Agg）；⑤ **winreg ImportError**（Linux 上未捕获 Windows API）；⑥ **statsmodels 兼容**（`params` 返回 numpy 数组、警告含 `'failed'` 词不判失败、`sum(axis=None)` 弃用）；⑦ **CI YAML 结构损坏**（内联代码缩进/花括号冲突，3 次）；⑧ **绝对阈值误判微尺度**（`std<=1e-12` 等量纲绑定判据，spc_xbar 已修相对阈值，2026-09-05 B1/B3）；⑨ **float 无 isfinite 守卫**（inf/nan 规格限静默产出荒谬值，2026-09-05 C1）；⑩ **同族修复不完整**（只修报告反例、同取值域复发，2026-09-05 B1）；⑪ **固定位展示舍入吞没小数值**（2026-09-05 O-1）；⑫ **数据列 ±Inf 未清洗**（穿透 `dropna()`：scipy 返回 NaN p 值被表述为「未发现显著差异」/ matplotlib·sklearn 抛未捕获异常，2026-09-22 发现 2/3，入口统一走 `engine/_guard.py` 的 `clean_series` / `clean_frame` + `BoundaryReport`）。
 
-**smartsuite-dev 技能 7 大陷阱速查**（详见 [smartsuite-dev.md](../../skills/smartsuite-dev.md)）：
+**smartsuite-dev 技能陷阱速查**（**节选前 7 条**，全表共 **10** 条陷阱 + 5 套模板，详见 [smartsuite-dev.md](../../skills/smartsuite-dev.md)）：
 1. PALETTE 嵌套键错误（`anomaly` 无 `secondary`；访问即 KeyError 被 orchestrator 误翻译成"缺列"）
 2. 前端列约束三集合与引擎实际 `target_col/feature_cols` 使用不一致
 3. SPC 颜色约定：控制限金黄 `#d4a017` 虚线 `--`，规格限红 `#e31a1c` 实线 `-`，目标灰点线

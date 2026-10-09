@@ -123,6 +123,21 @@ class TestTruthCoverageGate:
         assert proc.returncode == 1, "抬低下限后门禁仍通过 —— 门禁未生效"
         assert "FAIL" in proc.stdout
 
+    def test_floor_constant_is_pinned_independently(self):
+        """**审查 2026-10-09 G-5 回归**：下限的期望值必须**独立于被测脚本**。
+
+        原判据 `data["ratio"] >= data["floor"]` 的期望值取自被测脚本自身
+        （`collect()` 回填 `FLOOR`）—— 把 `FLOOR` 0.10 → 0.01 后本文件仍
+        25 passed / EXIT 0，属自校验。现由 `tests/scripts/test_gate_floor_pinning.py`
+        以字面量独立钉住；本条是它在**本文件**侧的就近断言（两处都改才能放行）。
+        """
+        from test_gate_floor_pinning import EXPECTED_FLOOR
+
+        assert tc.FLOOR == EXPECTED_FLOOR, (
+            f"门禁 FLOOR={tc.FLOOR!r} != 独立钉住的 {EXPECTED_FLOOR!r}（自校验放行）"
+        )
+        assert _report()["floor"] == EXPECTED_FLOOR
+
 
 class TestSnapshotLockRegistry:
     """审查 2026-10-09 P2-14：引擎自洽锁不得计入独立真值。"""

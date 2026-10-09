@@ -44,7 +44,9 @@
 > `Y_ONLY_TASKS` / `X_OPTIONAL_TASKS` 全部由 `derive(TASK_SPECS)` 派生 ——
 > `orchestrator.py` 里**不存在**可手改的任务字面量集合（`LazyTaskRegistry` 是只读 `Mapping`），
 > 去改它技术上不可行。审查时若发现 `orchestrator.py` 出现任务字面量集合，**即为回退**
-> （见 [ai-review-prompt.md](ai-review-prompt.md) 第 3.3 节）。
+> （见仓库内 `docs/governance/ai-review-prompt.md` 第 3.3 节）。
+> ℹ️ 该文件与 `docs/governance/review-checklist.md` 属**内部审查资产，不随文档站发布**
+> （`mkdocs.yml` 的 `exclude_docs`），故此处用仓库路径而非站内链接 —— 站内链接会 404。
 
 ## 数字一致性
 

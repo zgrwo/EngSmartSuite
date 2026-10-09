@@ -14,6 +14,7 @@ from smartsuite.engine._constants import EPSILON
 from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, clean_frame, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
+    disp,
     round_for_display,
 )
 
@@ -89,7 +90,21 @@ PARAM_SPECS = {
     # 的「每个默认参数槽位都有派生标签」会红，用户会看到英文键名 `group_col`。
     # 本任务尚未迁移到 `validate_or_raise`（声明仅用于标签派生，与其它未迁移任务同形）；
     # `default=None` 与 `task_spec` 的 `group_col: None` 一致。
-    "survival_analysis": Spec(group_col=GROUP_COL),
+    #
+    # 审查 2026-10-09 F11：`event_value` 原先**只被引擎读、未登记进面板** ——
+    # 语义不明时错误消息指引用户「① 用参数 event_value 显式声明失效标记」，
+    # 而 Web 面板不渲染该控件（键集来自 `TaskSpec.default_params`），
+    # 用户被指引去设一个界面上不存在的参数。现双侧补登记（Spec + defaults）。
+    # 可选值取决于**数据列的实际取值**（如「合格/不合格」），故不能声明为 `Choice`。
+    "survival_analysis": Spec(
+        group_col=GROUP_COL,
+        event_value=Opt(
+            default=None,
+            label="失效标记值",
+            hint="事件列为「合格/不合格」这类语义不明的文本时，填其中一个值表示「失效」"
+            "（如 event_value=合格）；留空则只接受语义明确的固定编码",
+        ),
+    ),
 }
 
 
@@ -704,9 +719,10 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
         ],
     )
     # 数值标注：AV 常被合成公式下界截断为 0，光标不可见时靠文字可读
+    # 审查 2026-10-09 R2BD-06 同族残留：带量纲量不得用固定小数位（×1e-9 下整段 `0.000`）
     for yi, v in enumerate(values_pct):
         ax.annotate(
-            f"{v:.3f}",
+            disp(v, 3),
             xy=(v, yi),
             xytext=(4, 0),
             textcoords="offset points",
@@ -728,7 +744,7 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
         color=PALETTE["anomaly"]["primary"],
         linestyle="--",
         linewidth=1,
-        label=f"TV={tv_pct:.3f}",
+        label=f"TV={disp(tv_pct, 3)}",
     )
     ax.set_xlabel(f"{sigma_mult:.1f}σ 研究变异", fontsize=10)
     ax.set_title(
@@ -738,8 +754,10 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
     ax.legend(fontsize=8, loc="upper right")
     fig.tight_layout()
 
+    # 带量纲量（EV/AV/PV 标准差）走量纲感知展示；`%GRR`/`ndc` 无量纲，保留定点
     summary = (
-        f"Gage R&R: %GRR={grr_sv:.1f}% ({judge}), ndc={ndc}。EV={ev:.4f}, AV={av:.4f}, PV={pv:.4f}"
+        f"Gage R&R: %GRR={grr_sv:.1f}% ({judge}), ndc={ndc}。"
+        f"EV={disp(ev)}, AV={disp(av)}, PV={disp(pv)}"
     )
 
     return AnalysisResult(
@@ -754,13 +772,15 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                         "部件间 (PV)",
                         "总计 (TV)",
                     ],
-                    "标准差": [f"{ev:.4f}", f"{av:.4f}", f"{grr:.4f}", f"{pv:.4f}", f"{tv:.4f}"],
+                    # 带量纲列（标准差 / kσ 研究变异）走 `disp`；`贡献率(%)`/`%SV`
+                    # 是无量纲，保留定点（审查 2026-10-09 R2BD-06 同族残留）
+                    "标准差": [disp(ev), disp(av), disp(grr), disp(pv), disp(tv)],
                     f"{sigma_mult:.1f}σ变异": [
-                        f"{ev_pct:.4f}",
-                        f"{av_pct:.4f}",
-                        f"{grr_pct:.4f}",
-                        f"{pv_pct:.4f}",
-                        f"{tv_pct:.4f}",
+                        disp(ev_pct),
+                        disp(av_pct),
+                        disp(grr_pct),
+                        disp(pv_pct),
+                        disp(tv_pct),
                     ],
                     "贡献率(%)": [
                         f"{ev_contrib:.1f}",
@@ -784,11 +804,14 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                                 str(anova["df"]["interaction"]),
                                 str(anova["df"]["repeatability"]),
                             ],
+                            # 均方 / 方差分量 / 95%CI 都是**带量纲**的方差量（6 位定点
+                            # 在 ×1e-9 下整列 `0.000000`）→ 走 `disp(x, 6)`；`F`/`p 值`
+                            # 无量纲，保留定点
                             "均方": [
-                                f"{anova['f_tests']['part']['MS']:.6f}",
-                                f"{anova['f_tests']['operator']['MS']:.6f}",
-                                f"{anova['f_tests']['interaction']['MS']:.6f}",
-                                f"{anova['f_tests']['repeatability']['MS']:.6f}",
+                                disp(anova["f_tests"]["part"]["MS"], 6),
+                                disp(anova["f_tests"]["operator"]["MS"], 6),
+                                disp(anova["f_tests"]["interaction"]["MS"], 6),
+                                disp(anova["f_tests"]["repeatability"]["MS"], 6),
                             ],
                             "F": [
                                 f"{anova['f_tests']['part']['F']:.3f}",
@@ -803,22 +826,22 @@ def gage_rr(req: AnalysisRequest) -> AnalysisResult:
                                 "—",
                             ],
                             "方差分量": [
-                                f"{anova['components']['part']:.6f}",
-                                f"{anova['components']['operator']:.6f}",
-                                f"{anova['components']['interaction']:.6f}",
-                                f"{anova['components']['repeatability']:.6f}",
+                                disp(anova["components"]["part"], 6),
+                                disp(anova["components"]["operator"], 6),
+                                disp(anova["components"]["interaction"], 6),
+                                disp(anova["components"]["repeatability"], 6),
                             ],
                             "95%CI 下限": [
-                                f"{anova['ci95']['part'][0]:.6f}",
-                                f"{anova['ci95']['operator'][0]:.6f}",
-                                f"{anova['ci95']['interaction'][0]:.6f}",
-                                f"{anova['ci95']['repeatability'][0]:.6f}",
+                                disp(anova["ci95"]["part"][0], 6),
+                                disp(anova["ci95"]["operator"][0], 6),
+                                disp(anova["ci95"]["interaction"][0], 6),
+                                disp(anova["ci95"]["repeatability"][0], 6),
                             ],
                             "95%CI 上限": [
-                                f"{anova['ci95']['part'][1]:.6f}",
-                                f"{anova['ci95']['operator'][1]:.6f}",
-                                f"{anova['ci95']['interaction'][1]:.6f}",
-                                f"{anova['ci95']['repeatability'][1]:.6f}",
+                                disp(anova["ci95"]["part"][1], 6),
+                                disp(anova["ci95"]["operator"][1], 6),
+                                disp(anova["ci95"]["interaction"][1], 6),
+                                disp(anova["ci95"]["repeatability"][1], 6),
                             ],
                         }
                     )
@@ -927,6 +950,9 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
 
     from math import sqrt
 
+    # 容许区间的端点/均值/标准差都带**数据量纲** → 共享展示格式化器 `disp`
+    # （审查 2026-10-09 C-1：×1e-9 时摘要写成「落在 [0.0000, 0.0000]」、
+    # 表内 均值/标准差/下限/上限 四格全 `0.0000`，图例同）
     if side == "two-sided":
         # 双侧容许区间的 k 因子 (Howe 近似)
         z_p = sp_stats.norm.ppf((1 + coverage) / 2)
@@ -936,7 +962,7 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
         upper = mu + k * sigma
         label = (
             f"{coverage * 100:.0f}% 总体以 {confidence * 100:.0f}% 置信度落在 "
-            f"[{lower:.4f}, {upper:.4f}]"
+            f"[{disp(lower)}, {disp(upper)}]"
         )
     elif side == "upper":
         # 单侧上限
@@ -945,7 +971,7 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
         k_upper = t_val
         upper = mu + k_upper * sigma
         lower = float("-inf")
-        label = f"{coverage * 100:.0f}% 总体 ≤ {upper:.4f} ({confidence * 100:.0f}% 置信)"
+        label = f"{coverage * 100:.0f}% 总体 ≤ {disp(upper)} ({confidence * 100:.0f}% 置信)"
     else:
         # 单侧下限
         delta = sp_stats.norm.ppf(coverage) * sqrt(n)
@@ -953,7 +979,7 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
         k_lower = t_val
         lower = mu - k_lower * sigma
         upper = float("inf")
-        label = f"{coverage * 100:.0f}% 总体 ≥ {lower:.4f} ({confidence * 100:.0f}% 置信)"
+        label = f"{coverage * 100:.0f}% 总体 ≥ {disp(lower)} ({confidence * 100:.0f}% 置信)"
 
     # 可视化
     fig = Figure(figsize=(8, 4))
@@ -980,7 +1006,7 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
             color=PALETTE["anomaly"]["primary"],
             linestyle="--",
             linewidth=2,
-            label=f"下限={lower:.4f}",
+            label=f"下限={disp(lower)}",
         )
     if side != "lower":
         ax.axvline(
@@ -988,7 +1014,7 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
             color=PALETTE["center"]["primary"],
             linestyle="--",
             linewidth=2,
-            label=f"上限={upper:.4f}",
+            label=f"上限={disp(upper)}",
         )
     if side == "two-sided":
         ax.legend(fontsize=8)
@@ -1013,12 +1039,13 @@ def tolerance_interval(req: AnalysisRequest) -> AnalysisResult:
                     ],
                     "值": [
                         str(n),
-                        f"{mu:.4f}",
-                        f"{sigma:.4f}",
+                        disp(mu),
+                        disp(sigma),
                         f"{coverage:.1%}",
                         f"{confidence:.1%}",
-                        f"{lower:.4f}" if lower > float("-inf") else "-∞",
-                        f"{upper:.4f}" if upper < float("inf") else "+∞",
+                        # `disp` 对 ±Inf 给「±∞」，与原先的单侧显示语义逐字一致
+                        disp(lower),
+                        disp(upper),
                         side,
                     ],
                 }
@@ -1100,6 +1127,10 @@ def _resolve_event_value(raw_events, event_col: str, params) -> tuple[object | N
     if len(uniq) != 2:
         return None, None  # 非 2 值场景交由调用方的通用分支报错
 
+    # ⚠️ 只认 `is not None`（= 未指定），**不得**写成 `params.get("event_value") or ...`：
+    # 面板默认值就是 `None`，而 `""`/`0` 是用户**明确输入**的取值 —— `or` 会把它们
+    # 静默丢弃并回落到自动判定（falsy 陷阱，`docs/governance/falsy-pitfalls.md`；
+    # 实测 `event_value=""` 在 `or` 写法下会静默走对照表并返回 ok）。
     declared = params.get("event_value")
     if declared is not None:
         target = _normalize_event_label(declared)
@@ -1571,7 +1602,9 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
             color=PALETTE["data"]["secondary"],
             linewidth=1.5,
             alpha=0.7,
-            label=f"Weibull (β={weibull_shape:.2f}, η={weibull_scale:.0f})",
+            # β 是无量纲形状参数（定点不会塌缩）；η 是**带时间量纲**的尺度参数，
+            # 原先 `:.0f` 在 ×1e-9 下显示成 `η=0`（审查 2026-10-09 R2BD-06 同族残留）
+            label=f"Weibull (β={weibull_shape:.2f}, η={disp(weibull_scale, 3)})",
         )
 
     # 删失标记
@@ -1602,7 +1635,8 @@ def survival_analysis(req: AnalysisRequest) -> AnalysisResult:
         f"KM: 中位寿命={median_survival:g}" if median_survival is not None else "KM: 中位寿命未达到"
     ]
     if weibull_shape is not None:
-        summary_parts.append(f"Weibull β={weibull_shape:.2f}, η={weibull_scale:.0f}")
+        # η 带时间量纲（同图例口径）；β 无量纲保留 `:.2f`
+        summary_parts.append(f"Weibull β={weibull_shape:.2f}, η={disp(weibull_scale, 3)}")
     if logrank_result:
         summary_parts.append(f"Log-rank: {logrank_result['分组']} p={logrank_result['p值']}")
     summary = "；".join(summary_parts)

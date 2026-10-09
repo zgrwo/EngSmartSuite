@@ -370,19 +370,67 @@ class TestParamOptionsDispatched:
         assert not unscoped, f"选项不得有全局键（会跨任务泄漏）: {unscoped}"
 
     def test_options_only_for_declaring_tasks(self):
-        """逐任务核对：选项键只应出现在**真的声明了该 Choice** 的任务下。"""
-        from smartsuite.services.param_labels import derive_param_options
+        """逐任务核对：选项键只应出现在**真的声明了该 Choice** 的任务下。
+
+        真实值断言（原仅"键存在 + 有 options 属性"，任何非空结果都能通过）：
+        ① 选项键集与「独立走一遍 `TASK_SPECS × Spec._fields` 找 Choice」的结果**完全相等**
+           （多一个 = 泄漏到未声明的任务，少一个 = 前端拿不到下拉框）；
+        ② 每个键的 `[[值, 文案], ...]` 与 Spec 声明**逐值相等**（含显示文案）；
+        ③ 抽查 3 个已知键的确切内容（防"结构对但内容错"）。
+        """
+        from smartsuite.services.param_labels import derive_param_options, spec_for_task
+        from smartsuite.services.task_spec import TASK_SPECS
 
         opts = derive_param_options()
-        for key in opts:
-            name, task_key = key.split("@", 1)
-            spec = _spec_of(task_key)
-            assert spec is not None, f"{key}: 任务 {task_key} 不应有 Spec"
-            validator = spec._fields.get(name)
-            validator = validator.validator if validator is not None else None
-            assert validator is not None and hasattr(validator, "options"), (
-                f"{key}: 该任务未声明 {name} 为 Choice"
-            )
+        assert len(opts) >= 15, f"选项表过小（{len(opts)} 键）—— 门禁将近似空转：{sorted(opts)}"
+
+        # ① 独立派生期望键集（不走 derive_param_options 的实现路径）
+        expected_keys: set[str] = set()
+        for task_spec in TASK_SPECS:
+            spec = spec_for_task(task_spec.key)
+            if spec is None:
+                continue
+            for name, field in spec._fields.items():
+                validator = getattr(field, "validator", None)
+                options = list(getattr(validator, "options", list)())
+                if not options:
+                    continue
+                expected_keys.add(f"{name}@{task_spec.key}")
+                # ② 下发内容必须与声明逐值相等（含中文文案）
+                assert opts[f"{name}@{task_spec.key}"] == [
+                    [value, label] for value, label in options
+                ], f"{name}@{task_spec.key} 的选项与其 Spec 声明不一致"
+        assert set(opts) == expected_keys, (
+            f"选项键集漂移：多 {sorted(set(opts) - expected_keys)}，"
+            f"少 {sorted(expected_keys - set(opts))}"
+        )
+
+        # ③ 抽查确切内容（值 + 文案 + 顺序）
+        assert opts["ss_type@anova"] == [
+            [2, "Type II（引擎默认）"],
+            [3, "Type III（Minitab/SAS 默认）"],
+        ]
+        assert opts["method@correlation"][0] == ["pearson", "Pearson（线性相关）"]
+        # 17 个检验方法的**顺序**也被前端直接使用（下拉框按此排列）
+        assert [value for value, _label in opts["test@hypothesis_test"]] == [
+            "ttest_ind",
+            "ttest_1samp",
+            "ttest_paired",
+            "wilcoxon_1samp",
+            "wilcoxon_paired",
+            "mannwhitney",
+            "kruskal_wallis",
+            "kruskal",
+            "jonckheere",
+            "mcnemar",
+            "mann_kendall",
+            "auto",
+            "cochran_q",
+            "ks",
+            "friedman",
+            "cohens_d",
+            "correlation",
+        ]
 
 
 class TestDerivationLogic:

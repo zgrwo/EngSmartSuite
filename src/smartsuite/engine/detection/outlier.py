@@ -11,7 +11,12 @@ from smartsuite.engine._constants import (
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
-from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
+from smartsuite.engine._guard import (
+    BoundaryIssue,
+    BoundaryReport,
+    check_magnitude,
+    clean_series,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.detection._shared import iqr_outlier_mask
@@ -68,6 +73,14 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     z_mask = z_scores > ZSCORE_OUTLIER_THRESHOLD
 
     # ── 方法 3: Isolation Forest ──
+    # 降级可见性（审查 2026-10-09 R2BD-04，P1）：本方法不可用时原先只写
+    # `logger.debug` 并把 `iso_mask` 整体置 False —— 该列照常渲染为「否」，
+    # 与"IsoForest 跑了且认为都不是异常"**字面完全一致**，而投票成员数已由 3
+    # 降为 2（≥2 票 = 高置信的语义随之变化），用户无法分辨「未运行」与「未发现」。
+    # 违反 `boundary-contract.md` 硬性要求 1「禁止任何只在 logger.debug 里说明的降级」。
+    # 现四处同步可见：① `BoundaryReport`（B2 + 错误码）② WARNING 日志
+    # ③ 结果表该列写「未参与」（与「否」区分）④ summary 与 metadata 披露成员数。
+    iso_available = True
     try:
         from sklearn.ensemble import IsolationForest
         from sklearn.preprocessing import StandardScaler
@@ -90,13 +103,29 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             iso_preds = iso.fit_predict(X)
             iso_mask = pd.Series(iso_preds == -1, index=data.index)
     except (ValueError, RuntimeError, ImportError):
-        logger.debug("IsolationForest failed in outlier_consensus", exc_info=True)
+        logger.warning("IsolationForest 方法不可用，本次投票已跳过该方法", exc_info=True)
         iso_mask = pd.Series(False, index=data.index)
+        iso_available = False
+        _boundary.add(
+            BoundaryIssue(
+                level="B2",
+                code="E_NUMERIC_METHOD_UNAVAILABLE",
+                detail=(
+                    "⚠ IsolationForest 方法不可用（已跳过），本次投票仅基于 IQR 与 Z-Score "
+                    "2 种方法；结果表该列显示「未参与」而非「否」。投票成员数由 3 降为 2，"
+                    "高置信阈值仍为 ≥2 票 —— 同一票数在更少成员下含义更强，请结合方法列判读。"
+                ),
+            )
+        )
 
     # ── 投票: ≥2 票 → 高置信异常 ──
     votes = iqr_mask.astype(int) + z_mask.astype(int) + iso_mask.astype(int)
     high_conf = votes >= 2
     any_flag = votes >= 1
+
+    # 降级时该列写「未参与」而不是「否」（审查 2026-10-09 R2BD-04）：
+    # 二者若同为「否」，用户无法分辨「方法未运行」与「方法运行了但认为不是异常」。
+    _iso_cell_true, _iso_cell_false = ("是", "否") if iso_available else ("未参与", "未参与")
 
     # ── 结果表 ──
     anomaly_rows = []
@@ -108,7 +137,7 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
                     req.target_col: round_for_display(float(data.iloc[i])),
                     "IQR": "是" if iqr_mask.iloc[i] else "否",
                     "Z-Score": "是" if z_mask.iloc[i] else "否",
-                    "IsoForest": "是" if iso_mask.iloc[i] else "否",
+                    "IsoForest": _iso_cell_true if iso_mask.iloc[i] else _iso_cell_false,
                     "投票数": int(votes.iloc[i]),
                     "置信度": "高 (≥2票)" if high_conf.iloc[i] else "低 (1票)",
                 }
@@ -165,12 +194,15 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
 
+    _iso_label = "IsoForest" if iso_available else "IsoForest(未参与)"
     summary = (
         f"异常共识: {int(any_flag.sum())} 个标记, "
         f"{int(high_conf.sum())} 个高置信(≥2票)。"
         f"方法: IQR({int(iqr_mask.sum())}), Z-score({int(z_mask.sum())}), "
-        f"IsoForest({int(iso_mask.sum())})"
+        f"{_iso_label}({int(iso_mask.sum())})"
     )
+    if not iso_available:
+        summary += "。⚠ IsolationForest 方法不可用，本次仅 IQR 与 Z-Score 2 种方法参与投票"
 
     return AnalysisResult(
         task="outlier_consensus",
@@ -178,7 +210,13 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             "anomalies": pd.DataFrame(anomaly_rows) if anomaly_rows else pd.DataFrame(),
             "method_counts": pd.DataFrame(
                 {
-                    "方法": ["IQR", "Z-Score", "Isolation Forest", "高置信(≥2票)", "任意标记"],
+                    "方法": [
+                        "IQR",
+                        "Z-Score",
+                        "Isolation Forest" if iso_available else "Isolation Forest (未参与投票)",
+                        "高置信(≥2票)",
+                        "任意标记",
+                    ],
                     "检测数": [
                         int(iqr_mask.sum()),
                         int(z_mask.sum()),
@@ -198,6 +236,11 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
             "isoforest_count": int(iso_mask.sum()),
             "high_confidence_count": int(high_conf.sum()),
             "total_flagged": int(any_flag.sum()),
+            # 实际参与投票的方法清单（审查 2026-10-09 R2BD-04）：机器可读出口，
+            # 上游不必解析中文文案即可判断本次投票的成员数。
+            "voting_methods": ["IQR", "Z-Score", "Isolation Forest"]
+            if iso_available
+            else ["IQR", "Z-Score"],
             "boundary_codes": _boundary.codes(),
         },
     )

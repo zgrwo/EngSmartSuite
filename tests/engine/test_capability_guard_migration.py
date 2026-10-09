@@ -133,10 +133,19 @@ class TestRejectionsAreUnchanged:
 
     @pytest.mark.parametrize("n", [3, 4])
     def test_tiny_but_valid_sample_still_runs(self, n):
-        """边界另一侧：`n = 3/4` 应能跑（拒绝条件是 `< 3`）。"""
+        """边界另一侧：`n = 3/4` 应能跑（拒绝条件是 `< 3`），且指数自洽。"""
         rng = np.random.default_rng(3)
         r = _run(pd.DataFrame({"y": 50.0 + rng.normal(0, 1.0, n)}))
         assert r.status == "ok", r.messages
+        # 真实值断言（原只查 status）：样本量如实回报，Cp 等于规格宽度/6σ组内，
+        # 且 Cpk ≤ Cp（数学不变量）—— 小样本下这些关系同样必须成立。
+        assert r.metadata["n"] == n, r.metadata
+        sigma_within = float(r.metadata["sigma_within"])
+        assert sigma_within > 0
+        assert float(r.metadata["cp"]) == pytest.approx(
+            (56.0 - 44.0) / (6.0 * sigma_within), rel=1e-9
+        ), r.metadata
+        assert float(r.metadata["cpk"]) <= float(r.metadata["cp"]) + 1e-12, r.metadata
 
 
 class TestWarningSetIsUnchanged:

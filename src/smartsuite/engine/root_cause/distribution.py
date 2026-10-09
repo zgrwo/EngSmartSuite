@@ -13,7 +13,7 @@ from smartsuite.core.param_spec import Integer, Opt, Spec
 from smartsuite.core.param_specs_common import ALPHA
 from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import round_for_display, shapiro_p
+from smartsuite.engine._utils import disp, round_for_display, shapiro_p
 
 logger = logging.getLogger(__name__)
 
@@ -107,18 +107,23 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     # 强行统一会改造调用方。**改动其中一处请同步另一处**，并注意已知不对称：
     # 此处 lognorm 无 try/except（拟合失败会向上抛），彼处有（静默降级）。
     # 分布拟合
+    # 展示口径（审查 2026-10-09 R2BD-06 / C-1）：拟合参数带**数据量纲**
+    # （Normal 的 μ/σ、Weibull 的 η），必须走量纲感知格式化 —— 原 `:.3f` 在
+    # ×1e-9 下把 `μ=5.08e-09` 显示成 `μ=0.000`，与同表数值列自相矛盾。
+    # Lognormal 的 σ 与 Weibull 的 β 是**形状参数**（无量纲），同样走 `disp`
+    # 不改变其常规量级显示（0.210 → "0.210"）。
     fits: dict[str, dict[str, Any]] = {}
     # Normal
     mu, sigma = sp_stats.norm.fit(data)
     ks_norm = float(sp_stats.kstest(data, sp_stats.norm(loc=mu, scale=sigma).cdf)[1])
-    fits["Normal"] = {"params": f"μ={mu:.3f}, σ={sigma:.3f}", "KS p": round(ks_norm, 4)}
+    fits["Normal"] = {"params": f"μ={disp(mu, 3)}, σ={disp(sigma, 3)}", "KS p": round(ks_norm, 4)}
 
     # Lognormal (only if all positive)
     if (data > 0).all():
         shape, loc, scale = sp_stats.lognorm.fit(data, floc=0)
         ks_ln = float(sp_stats.kstest(data, sp_stats.lognorm(shape, loc=0, scale=scale).cdf)[1])
         fits["Lognormal"] = {
-            "params": f"σ={shape:.3f}, μ={np.log(scale):.3f}",
+            "params": f"σ={disp(shape, 3)}, μ={disp(np.log(scale), 3)}",
             "KS p": round(ks_ln, 4),
         }
 
@@ -130,7 +135,7 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
                 sp_stats.kstest(data, sp_stats.weibull_min(shape_w, loc=0, scale=scale_w).cdf)[1]
             )
             fits["Weibull"] = {
-                "params": f"β={shape_w:.3f}, η={scale_w:.3f}",
+                "params": f"β={disp(shape_w, 3)}, η={disp(scale_w, 3)}",
                 "KS p": round(ks_w, 4),
             }
         except Exception:
@@ -207,9 +212,13 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
             "distribution_fits": pd.DataFrame(fits).T,
         },
         figures=[fig],
+        # summary 的 μ/M/σ 带数据量纲，走共享展示格式化器 `disp`
+        # （审查 2026-10-09 R2BD-06：原 `:.3f` 在 ×1e-9 下整句吞成 `μ=0.000`）。
+        # CV 是**无量纲百分比**，维持 `:.1f`（AC 报告 C-1 的量纲无关量白名单）；
+        # KS p 是 p 值（无量纲），同样保留 `:.3f`。
         summary=(
-            f"{req.target_col}: μ={desc['均值']:.3f}, M={desc['中位数']:.3f}, "
-            f"σ={desc['标准差']:.3f}, CV={_cv_txt}%。"
+            f"{req.target_col}: μ={disp(desc['均值'], 3)}, M={disp(desc['中位数'], 3)}, "
+            f"σ={disp(desc['标准差'], 3)}, CV={_cv_txt}%。"
             f"最佳拟合: {best_fit} (KS p={fits[best_fit]['KS p']:.3f})"
         ),
         metadata={

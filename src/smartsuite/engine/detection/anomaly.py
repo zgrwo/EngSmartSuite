@@ -15,7 +15,12 @@ from smartsuite.engine._constants import (
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
-from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    check_magnitude,
+    clean_series,
+    degenerate_column_reason,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.detection._shared import iqr_outlier_mask
@@ -253,11 +258,14 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         # 审查 2026-09-16 B-2：原 `sigma < EPSILON`（绝对 1e-10）在首次迭代对微尺度
         # 数据直接 break → 静默返回 0 异常。常量列改为显式中文错误；迭代中 sigma 归零
         # （剔除后剩余值全同）才 break（此时已返回已检出异常，语义正确）。
-        if data.nunique(dropna=True) <= 1:
+        # 收尾轮（契约 #5）：判据与文案统一走 `_guard.degenerate_column_reason` ——
+        # 原先手写 `nunique(dropna=True) <= 1` 会把「整列为空」也报成"常量列"。
+        _degenerate = degenerate_column_reason(data, what="目标列")
+        if _degenerate is not None:
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
-                messages=["目标列为常量列（标准差为 0），无法进行 Grubbs 检验"],
+                messages=[f"{_degenerate}，无法进行 Grubbs 检验"],
             )
         vals = data.values.copy()
         mask = np.zeros(len(data), dtype=bool)
@@ -312,11 +320,12 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     else:
         # 审查 2026-09-16 D-1：原 `data_std < EPSILON`（绝对 1e-10）显式拒绝微尺度
         # 数据；改精确零判据——只有真常量列才无法做 z 分数（z 本身量纲无关）
-        if data.nunique(dropna=True) <= 1:
+        _degenerate = degenerate_column_reason(data, what="目标列")
+        if _degenerate is not None:
             return AnalysisResult(
                 task="anomaly_detect",
                 status="error",
-                messages=["目标列为常量列（标准差为 0），无法进行 Z-score 异常检测"],
+                messages=[f"{_degenerate}，无法进行 Z-score 异常检测"],
             )
         z = np.abs((data - data.mean()) / data_std)
         mask = z > ZSCORE_OUTLIER_THRESHOLD

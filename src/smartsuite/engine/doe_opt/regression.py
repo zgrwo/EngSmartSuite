@@ -19,6 +19,8 @@ from smartsuite.engine._guard import (
     check_magnitude,
     check_tables_finite,
     clean_frame,
+    degenerate_column_reason,
+    first_degenerate_reason,
 )
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
@@ -167,33 +169,54 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["需要至少 1 个因子列"],
         )
 
-    df = req.data[[req.target_col] + cols].dropna()
+    # ── 边界处置（B0/B1）：±Inf 清洗 + 量级上界（审查 2026-10-09 R2BD-02，P1）──
+    # `dropna()` **不剔除 ±Inf**（Inf 不是 NaN —— `_guard.py` 模块 docstring 与
+    # `skills/smartsuite-dev.md` 快速修复清单第 13 行均已明文记录）。实测：
+    #   · 目标列含 3 个 +Inf → R² 变非有限 → 旧文案「数据可能为常量或退化」**错误归因**；
+    #   · 特征列含 3 个 +Inf → statsmodels 抛 `Input X contains infinity` → 泛化文案；
+    #   两者都**不披露**非有限值（用户去查"常量列"永远查不到原因）。
+    # 与同文件 `quantile_regression` 同口径（那段是本文件唯一接对了 `_guard` 的函数；
+    # 文件级源码守卫因此整文件放行，另外 3 个函数结构上看不见 —— 本轮补齐）。
+    _boundary = BoundaryReport()
+    df, _n_non_finite = clean_frame(
+        req.data[[req.target_col] + cols], [req.target_col] + cols, report=_boundary
+    )
+    if check_magnitude(df[req.target_col], what=f"目标列「{req.target_col}」", report=_boundary):
+        return AnalysisResult(
+            task="regression",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
     if len(df) < len(cols) + 2:
         return AnalysisResult(
             task="regression",
             status="error",
-            messages=[f"有效样本量({len(df)})不足，需要至少{len(cols) + 2}条"],
+            messages=[f"有效样本量({len(df)})不足，需要至少{len(cols) + 2}条"]
+            + _boundary.messages(),
         )
 
     # Round-2 #A2a：常量特征列 → 系数 t=inf/NaN 且 inf 进入 Web JSON 链
-    _const_feats = [c for c in cols if df[c].nunique(dropna=True) <= 1]
-    if _const_feats:
+    # 收尾轮（契约 #5）：判据与文案统一走 `_guard` 三级归因（原先手写 nunique 判据，
+    # 只拿到列名、把"整列为空"也说成"常量列"）
+    _degenerate_feat = first_degenerate_reason(df, cols, label="特征列")
+    if _degenerate_feat is not None:
         return AnalysisResult(
             task="regression",
             status="error",
-            messages=[
-                f"特征列「{_const_feats[0]}」为常量列（无变异），无法估计回归系数。"
-                "请移除该列或检查数据。"
-            ],
+            messages=[f"{_degenerate_feat}，无法估计回归系数。请移除该列或检查数据。"],
         )
 
     # 审查 2026-08-19 #1.4：常量目标列 → R²=0/0=-inf 且误报异方差/自相关诊断
     # Round-2 #A2l：用 nunique 替代绝对阈值（微尺度数据不误报）
-    if df[req.target_col].nunique(dropna=True) <= 1:
+    _degenerate_target = degenerate_column_reason(
+        df[req.target_col], what=f"目标列「{req.target_col}」"
+    )
+    if _degenerate_target is not None:
         return AnalysisResult(
             task="regression",
             status="error",
-            messages=[f"目标列「{req.target_col}」为常量列（方差为 0），回归模型无意义"],
+            messages=[f"{_degenerate_target}，回归模型无意义"],
         )
 
     try:
@@ -205,10 +228,20 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             model = sm.OLS(y, X).fit()
         # 审查 2026-08-19 #1.4：输出守卫——R² 非有限时替换为哨兵 N/A
         if not np.isfinite(model.rsquared):
+            # 归因改写（审查 2026-10-09 R2BD-02）：原文案「数据可能为常量或退化」
+            # 把 ±Inf 也说成常量 —— 而常量列在**入口**就已被
+            # `degenerate_column_reason` 拦下，能走到这里的非有限 R² 只可能是
+            # 极端量级（平方和溢出）或完全共线。禁止错误归因（契约硬性要求 2）。
             return AnalysisResult(
                 task="regression",
                 status="error",
-                messages=["R² 计算为非有限值（数据可能为常量或退化），回归结果不可用"],
+                messages=[
+                    "回归拟合结果不可用：R² 计算为非有限值。"
+                    "常见原因：响应/因子列量级极端（平方和溢出为 Inf）或设计矩阵完全共线。"
+                    "请先做单位换算或中心化、移除共线列后重试。"
+                ]
+                + _boundary.messages(),
+                metadata={"boundary_codes": _boundary.codes()},
             )
         residuals = model.resid
         fitted = model.fittedvalues
@@ -404,6 +437,22 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             summary_parts.append("⚠ 存在异方差")
         summary = "；".join(summary_parts)
 
+        # ── 出口侧后置断言（审查 2026-10-09 R2BD-07/#22）──
+        # 与 `quantile_regression` 同口径：结果表渗出 ±Inf 或整个数值块非有限即拒绝，
+        # 不得让「回归完成」与一张发散的表同时出现。
+        if check_tables_finite(
+            {"coefficients": coef_df, "diagnostics": diagnostics_df},
+            what="「regression」结果表",
+            code="E_NUMERIC_MODEL_DEGENERATE",
+            report=_boundary,
+        ):
+            return AnalysisResult(
+                task="regression",
+                status="error",
+                messages=_boundary.messages(),
+                metadata={"boundary_codes": _boundary.codes()},
+            )
+
         return AnalysisResult(
             task="regression",
             tables={
@@ -413,6 +462,7 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
             figures=[fig_res],
             summary=summary,
             metadata={
+                "n_samples": n,
                 "r_squared": model.rsquared,
                 "r_squared_adj": model.rsquared_adj,
                 "f_statistic": float(model.fvalue) if np.isfinite(model.fvalue) else None,
@@ -424,15 +474,17 @@ def regression_analysis(req: AnalysisRequest) -> AnalysisResult:
                 "bic": float(model.bic),
                 "significant_vars": sig_vars["变量"].tolist(),
                 "std_betas": {col: beta for col, beta in zip(X.columns, std_betas, strict=True)},
+                "boundary_codes": _boundary.codes(),
             },
-            messages=warn_msgs,
+            messages=warn_msgs + _boundary.messages(),
         )
     except Exception:
         logger.debug("回归模型拟合失败", exc_info=True)
         return AnalysisResult(
             task="regression",
             status="error",
-            messages=["回归模型拟合失败，请检查数据是否存在缺失值或共线性"],
+            messages=["回归模型拟合失败，请检查数据是否存在缺失值或共线性"] + _boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
         )
 
 
@@ -447,20 +499,39 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
             task="lasso_regression", status="error", messages=["至少需要 2 个因子列"]
         )
 
-    sub = req.data[[req.target_col] + cols].dropna()
+    # ── 边界处置（B0/B1）：±Inf 清洗 + 量级上界（审查 2026-10-09 R2BD-02，P1）──
+    # 原 `dropna()` 让 ±Inf 直达 sklearn —— 实测目标列 3 个 +Inf 时
+    # `LassoCV.fit` 抛 `ValueError: Input y contains infinity`，**未捕获逃出引擎**
+    # （红线：引擎必须返回 `AnalysisResult(status="error")`）；特征列同理（`Input X`）。
+    _boundary = BoundaryReport()
+    sub, _n_non_finite = clean_frame(
+        req.data[[req.target_col] + cols], [req.target_col] + cols, report=_boundary
+    )
+    if check_magnitude(sub[req.target_col], what=f"目标列「{req.target_col}」", report=_boundary):
+        return AnalysisResult(
+            task="lasso_regression",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
     if len(sub) < len(cols) + 2:
-        return AnalysisResult(task="lasso_regression", status="error", messages=["有效样本不足"])
+        return AnalysisResult(
+            task="lasso_regression",
+            status="error",
+            messages=["有效样本不足"] + _boundary.messages(),
+        )
 
     from sklearn.linear_model import ElasticNetCV, LassoCV
     from sklearn.preprocessing import StandardScaler
 
     X = sub[cols].values
     y = sub[req.target_col].values
-    if np.unique(y).size <= 1:
+    _degenerate = degenerate_column_reason(sub[req.target_col], what="目标列")
+    if _degenerate is not None:
         return AnalysisResult(
             task="lasso_regression",
             status="error",
-            messages=["目标列为常量列，无法进行 Lasso/ElasticNet 回归"],
+            messages=[f"{_degenerate}，无法进行 Lasso/ElasticNet 回归"],
         )
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -589,9 +660,23 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         f", 训练 R²={train_r2:.3f}" if train_r2 else ""
     )
 
-    messages = []
+    messages = list(_boundary.messages())
     if convergence_warning:
         messages.append(convergence_warning)
+
+    # 出口侧后置断言（审查 2026-10-09 R2BD-07/#22）
+    if check_tables_finite(
+        {"coefficients": coef_df},
+        what="「lasso_regression」系数表",
+        code="E_NUMERIC_MODEL_DEGENERATE",
+        report=_boundary,
+    ):
+        return AnalysisResult(
+            task="lasso_regression",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
 
     return AnalysisResult(
         task="lasso_regression",
@@ -600,12 +685,14 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
         summary=summary,
         messages=messages,
         metadata={
+            "n_samples": len(sub),
             "r_squared": r2,
             "train_r2": train_r2,
             "best_alpha": best_alpha,
             "n_selected": n_selected,
             "n_features": len(cols),
             "converged": not bool(convergence_warning),
+            "boundary_codes": _boundary.codes(),
         },
     )
 
@@ -621,20 +708,38 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
             task="robust_regression", status="error", messages=["需要至少 1 个因子列"]
         )
 
-    sub = req.data[[req.target_col] + cols].dropna()
+    # ── 边界处置（B0/B1）：±Inf 清洗 + 量级上界（审查 2026-10-09 R2BD-02，P1）──
+    # 原 `dropna()` 让 ±Inf 直达 sklearn/statsmodels →「稳健回归拟合失败」（泛化文案，
+    # **不披露**真实原因）。与同文件另两个回归函数统一走 `_guard`。
+    _boundary = BoundaryReport()
+    sub, _n_non_finite = clean_frame(
+        req.data[[req.target_col] + cols], [req.target_col] + cols, report=_boundary
+    )
+    if check_magnitude(sub[req.target_col], what=f"目标列「{req.target_col}」", report=_boundary):
+        return AnalysisResult(
+            task="robust_regression",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
     if len(sub) < len(cols) + 2:
-        return AnalysisResult(task="robust_regression", status="error", messages=["有效样本不足"])
+        return AnalysisResult(
+            task="robust_regression",
+            status="error",
+            messages=["有效样本不足"] + _boundary.messages(),
+        )
 
     from sklearn.linear_model import HuberRegressor
 
     try:
         X = sub[cols].values
         y = sub[req.target_col].values
-        if np.unique(y).size <= 1:
+        _degenerate = degenerate_column_reason(sub[req.target_col], what="目标列")
+        if _degenerate is not None:
             return AnalysisResult(
                 task="robust_regression",
                 status="error",
-                messages=["目标列为常量列，无法进行 Huber 稳健回归"],
+                messages=[f"{_degenerate}，无法进行 Huber 稳健回归"],
             )
         huber = HuberRegressor(epsilon=1.35, max_iter=1000)
         huber.fit(X, y)
@@ -772,17 +877,46 @@ def robust_regression(req: AnalysisRequest) -> AnalysisResult:
             f"差异最大变量: {outlier_sensitive}" if outlier_sensitive else ""
         )
 
+        # 出口侧后置断言（审查 2026-10-09 R2BD-07/#22）
+        if check_tables_finite(
+            {"coefficient_comparison": coef_df},
+            what="「robust_regression」系数对比表",
+            code="E_NUMERIC_MODEL_DEGENERATE",
+            report=_boundary,
+        ):
+            return AnalysisResult(
+                task="robust_regression",
+                status="error",
+                messages=_boundary.messages(),
+                metadata={"boundary_codes": _boundary.codes()},
+            )
+
         return AnalysisResult(
             task="robust_regression",
             tables={"coefficient_comparison": coef_df},
             figures=[fig],
             summary=summary,
-            metadata={"n_samples": len(sub), "n_features": len(cols)},
+            messages=_boundary.messages(),
+            metadata={
+                "n_samples": len(sub),
+                "n_features": len(cols),
+                "boundary_codes": _boundary.codes(),
+            },
         )
     except Exception:
         logger.debug("稳健回归拟合失败", exc_info=True)
+        # 归因补充（审查 2026-10-09 R2BD-02）：原文案只有「稳健回归拟合失败」黑盒一句。
+        # Huber 拟合失败的真实原因通常是设计矩阵退化或量级溢出，故给出可执行方向；
+        # 若本轮确有 ±Inf 清洗，披露随 `_boundary.messages()` 一并到达用户。
         return AnalysisResult(
-            task="robust_regression", status="error", messages=["稳健回归拟合失败"]
+            task="robust_regression",
+            status="error",
+            messages=[
+                "稳健回归（Huber）拟合失败：常见原因是设计矩阵退化（特征完全共线/常数）"
+                "或数值量级溢出。请检查特征列的变异与量级后重试。"
+            ]
+            + _boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
         )
 
 
@@ -826,11 +960,12 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
     try:
         X_df = sub[cols]
         y = sub[req.target_col]
-        if y.nunique() <= 1:
+        _degenerate = degenerate_column_reason(y, what="目标列")
+        if _degenerate is not None:
             return AnalysisResult(
                 task="quantile_regression",
                 status="error",
-                messages=["目标列为常量列，无法进行分位数回归"],
+                messages=[f"{_degenerate}，无法进行分位数回归"],
             )
         Xc = sm.add_constant(X_df)
         model = sm.QuantReg(y, Xc).fit(q=quantile)

@@ -9,8 +9,11 @@
 所有用例在修复前为红（先写测试 → 修复 → 转绿）。
 """
 
+import ast
+import inspect
 import re
 import secrets
+import textwrap
 import warnings
 from pathlib import Path
 
@@ -347,6 +350,375 @@ class TestMissingColumnIsRejected:
         )
 
 
+class TestUnequalSubgroupIsDisclosed:
+    """契约边界清单 #4（子组大小不一致）的**行为锁定**。
+
+    背景：清单登记的现状是「⚠待规范（当前静默取 min(n)）」。2026-10-09 发版前实测
+    **该登记已过期** —— `spc_xbar` 取 min(n) 的同时在 `messages` 与图表标题里都
+    写明了这件事；本类把这一披露钉住，使"已规范"这一状态有据可依（契约口径：
+    `✅已规范` = 代码已实现且有用例钉住）。
+
+    同时锁定相邻三条不受影响的路径（避免"顺手统一"把它们改坏）：
+      · `spc_attribute` 的 np / c 图 → 样本量不等时 **B0 拒绝** 并给出改图建议；
+      · `spc_attribute` 的 p / u 图 → 逐点变限，**不降级**（数学上正确支持不等 n）；
+      · `process_capability(subgroup_col=)` → 按 nᵢ−1 自由度池化（不取 min(n)）。
+    """
+
+    @staticmethod
+    def _unequal_frame() -> pd.DataFrame:
+        """两组大小不同（8 / 12）的正常数据 —— σ 有变异、非退化。"""
+        rng = np.random.default_rng(7)
+        values = np.concatenate([rng.normal(10.0, 0.5, 8), rng.normal(10.6, 0.5, 12)])
+        return pd.DataFrame({"v": values, "g": ["A"] * 8 + ["B"] * 12})
+
+    def test_xbar_min_n_is_stated_in_messages_and_metadata(self):
+        r = orchestrate(
+            AnalysisRequest(
+                task="spc_xbar",
+                data=self._unequal_frame(),
+                target_col="v",
+                feature_cols=["g"],
+                params={},
+            )
+        )
+        assert r.status == "ok", r.messages
+        blob = " ".join(r.messages)
+        assert "子组大小不一致" in blob, (
+            f"子组大小不一致时必须向用户披露（契约 #4：不得静默取 min(n)）：{r.messages}"
+        )
+        assert "8" in blob, f"披露必须点名实际用的最小子组大小（实测 8）：{r.messages}"
+        # 真实值断言：统一 n 如实上报为最小子组大小（而不是最大/平均）
+        assert r.metadata["subgroup_size"] == 8, r.metadata
+        cl, ucl, lcl = r.metadata["xbar_mean"], r.metadata["ucl_x"], r.metadata["lcl_x"]
+        assert np.isfinite(cl) and ucl > cl > lcl
+
+    @pytest.mark.parametrize("chart_type", ["np", "c"])
+    def test_attribute_constant_limit_charts_reject_unequal_sizes(self, chart_type):
+        """np / c 图的常数控制限在样本量不等时**必然错**，故必须 B0 拒绝并给建议。"""
+        df = pd.DataFrame({"def": [3, 5, 2, 7, 4, 6], "tot": [50, 100, 80, 120, 60, 90]})
+        r = orchestrate(
+            AnalysisRequest(
+                task="spc_attribute",
+                data=df,
+                target_col="def",
+                feature_cols=[],
+                params={"chart_type": chart_type, "n_col": "tot"},
+            )
+        )
+        assert r.status == "error", f"{chart_type} 图不等样本量应拒绝：{r.status} / {r.messages}"
+        blob = " ".join(r.messages)
+        assert "最小 50" in blob and "最大 120" in blob, (
+            f"{chart_type} 拒绝必须列出实际样本量范围（供用户定位）：{r.messages}"
+        )
+        assert "50" in blob and "120" in blob, r.messages
+
+    @pytest.mark.parametrize("chart_type", ["p", "u"])
+    def test_attribute_varying_limit_charts_accept_unequal_sizes(self, chart_type):
+        """p / u 图逐点变限，不等样本量是**合法**输入（不得误伤为拒绝）。"""
+        df = pd.DataFrame({"def": [3, 5, 2, 7, 4, 6], "tot": [50, 100, 80, 120, 60, 90]})
+        r = orchestrate(
+            AnalysisRequest(
+                task="spc_attribute",
+                data=df,
+                target_col="def",
+                feature_cols=[],
+                params={"chart_type": chart_type, "n_col": "tot"},
+            )
+        )
+        assert r.status == "ok", f"{chart_type} 图支持不等样本量：{r.status} / {r.messages}"
+        assert r.metadata["n_points"] == 6, r.metadata
+
+    def test_capability_pooled_subgroup_weights_by_group_size(self):
+        """池化子组 σ 按自由度加权（不取 min(n)）：不等子组仍可给出能力指数。"""
+        r = orchestrate(
+            AnalysisRequest(
+                task="process_capability",
+                data=self._unequal_frame(),
+                target_col="v",
+                feature_cols=[],
+                params={"subgroup_col": "g", "usl": 13.0, "lsl": 7.0},
+            )
+        )
+        assert r.status == "ok", r.messages
+        assert r.metadata["within_sigma_method"] == "pooled_subgroup_col", r.metadata
+        # 真实值断言：合并组内 σ 由两组各自的离差平方和加权而来（介于两组 σ 之间）
+        group_a = self._unequal_frame().query("g == 'A'")["v"]
+        group_b = self._unequal_frame().query("g == 'B'")["v"]
+        ss = float(
+            ((group_a - group_a.mean()) ** 2).sum() + ((group_b - group_b.mean()) ** 2).sum()
+        )
+        expected = (ss / (len(group_a) + len(group_b) - 2)) ** 0.5
+        assert float(r.metadata["sigma_within"]) == pytest.approx(expected, rel=1e-9)
+
+
+# ══════════════════════════════════════════════════════════════
+# 契约 #5：常量/无变异判据与归因的**单一实现**（源码级门禁）
+# ══════════════════════════════════════════════════════════════
+
+
+class TestDegenerateColumnAttributionSSOT:
+    """契约边界清单 #5「各模块不一致」的源码级收口（2026-10-09 发版前收尾）。
+
+    修复前实测（判据跑在 `HEAD` 源码副本上）：命中 **19 处**手写「常量列/无变异」判据
+    （`x.nunique(dropna=True) <= 1` 一族），各写各的判据与文案，且都把
+    「整列为空」（n_valid=0）与「只有 1 个有效观测」一并说成"常量列" ——
+    用户按"常量列"去排查一个空列永远查不到原因（错误归因，硬性要求 2）。
+    其中 17 处已改走 `_guard`，2 处（判的是**计数**而非观测列：子组大小一致性、
+    设计单元平衡性）留在判据白名单。
+
+    本类把两个不变量钉成门禁（互补，缺一不可）：
+
+    ① **判据唯一**：源码里不得再出现手写的退化判据特征族，必须走 `_guard`；
+    ② **归因唯一**：任何向用户报「常量列」的模块，必须能区分三级
+       （常量 / 整列为空 / 有效观测不足），否则它就是在猜原因。
+
+    两条都带**具名白名单**；白名单条目必须（a）仍在命中、（b）理由非空、
+    （c）理由里点名的代码特征仍在文件里 —— 否则条目会被 `test_*_still_live`
+    报红，要求人工复核（白名单不得漂移成"永久免死金牌"）。
+    """
+
+    #: 判据特征族（手写形态）
+    _HANDWRITTEN_PREDICATES = (
+        # ① `x.nunique(dropna=True) <= 1` / `== 1` / `< 2`
+        re.compile(r"nunique\s*\([^)]*\)\s*(?:<=|==|<)\s*[12]\b"),
+        # ①' 反向写法 `1 >= x.nunique()`
+        re.compile(r"[12]\s*(?:>=|>)\s*\w+\.nunique\s*\("),
+        # ② `np.unique(y).size <= 1`
+        re.compile(r"np\.unique\s*\([^)]*\)\s*\.size\s*(?:<=|==|<)\s*[12]\b"),
+        # ②' `len(set(x)) <= 1`
+        re.compile(r"len\s*\(\s*set\s*\([^)]*\)\s*\)\s*(?:<=|==|<)\s*[12]\b"),
+        # ③ 精确零方差 `x.std(...) == 0` / `x.var(...) == 0`
+        re.compile(r"\.(?:std|var)\s*\([^)]*\)\s*==\s*0(?:\.0)?\b"),
+        # ④ 极差为零 `x.max(...) == y.min(...)`
+        re.compile(r"\.max\s*\([^)]*\)\s*==\s*\w+\.min\s*\("),
+    )
+
+    #: `_guard` 的合法入口（源码里出现任一即视为"已走单一实现"）
+    _SANCTIONED = (
+        "check_non_constant(",
+        "degenerate_column_code(",
+        "degenerate_column_reason(",
+        "first_degenerate_reason(",
+        "explain_undefined_sigma(",
+    )
+
+    #: ① 判据白名单 —— `{路径: {该行必须包含的片段: 理由}}`（**逐行**登记）
+    _PREDICATE_WHITELIST: dict[str, dict[str, str]] = {
+        "spc_charts/xbar_r.py": {
+            "n_sizes.nunique() == 1": (
+                "`n_sizes.nunique() == 1` 判的是**子组大小 n 是否一致**（契约 #4），"
+                "不是数据列是否退化（契约 #5）—— 判据对象是计数列而不是观测列，"
+                "没有「整列为空/样本不足」三级可分，故不适用 `_guard`。"
+                "对应的不等子组披露由 `TestUnequalSubgroupIsDisclosed` 钉住"
+            )
+        },
+        "root_cause/anova.py": {
+            "len(set(cell_sizes)) <= 1": (
+                "`design_balanced` 判的是**单元计数是否平衡**（设计平衡性，决定 Type II 与 "
+                "III 是否有差异）：`cell_sizes` 是 `groupby().size()` 的计数结果，"
+                "不是观测列，没有退化三级可分 —— 与契约 #4 同族"
+            )
+        },
+    }
+
+    #: ② 归因白名单 —— 报了「常量列」但**判据本身不是退化判据**的文件
+    _BLAME_WHITELIST = {
+        "detection/trend.py": (
+            "判据是**相对方差** `σ ≤ 1e-12 · max|x|`（不是 `nunique` 退化判据）："
+            "它额外覆盖'浮点意义上无变异'，由 `tests/guards/test_micro_scale_guards.py`"
+            "（B-4）钉住 —— 改用 `_guard` 的精确退化判据会把 pico 级**真实**波动"
+            "判成常量（正是当年 B-4 的误报）。故此处保留自己的判据，只报「无变异」"
+        ),
+        "spc_charts/xbar_r.py": (
+            "同上：`_abs_scale == 0 or sigma_xbar <= 1e-12 · max|x|` 是相对方差判据；"
+            "非有限 σ 已**先于**它由 `explain_undefined_sigma` 单独归因（R3-P1-6），"
+            "故到达该分支的确实是'数值上无变异'，不构成错误归因"
+        ),
+        "spc_charts/nonparametric.py": (
+            "同上（相对方差判据）。⚠ 该文件本轮由并行 agent 持有，"
+            "本次收尾未改动它；口径与 trend/xbar_r 一致"
+        ),
+        "detection/_shared.py": (
+            "`iqr == 0` 不是退化判据（IQR 可为 0 而数据并非常量，如 [1,2,2,2,2,3]）；"
+            "docstring 里的「（常量列）」是术语沿用，函数本身返回 None 交由调用方"
+            "给任务级中文报错"
+        ),
+    }
+
+    #: ② 白名单条目必须真的**仍由相对方差判据触发**（否则理由过期）
+    _RELATIVE_VARIANCE_MARK = "1e-12 *"
+
+    @classmethod
+    def _code_lines(cls, path: Path) -> list[tuple[int, str]]:
+        """返回 `[(行号, 去注释后的源码行)]`（注释不算代码）。"""
+        return [
+            (i, ln.split("#", 1)[0])
+            for i, ln in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)
+        ]
+
+    @classmethod
+    def _predicate_hits(cls) -> dict[str, list[tuple[int, str]]]:
+        """`{相对路径: [(行号, 该行源码)]}`（只统计判据特征族命中的行）。"""
+        hits: dict[str, list[tuple[int, str]]] = {}
+        for path in sorted(_ENGINE.rglob("*.py")):
+            if path.name == "_guard.py":  # 单一实现本身
+                continue
+            lines = [
+                (i, code.strip())
+                for i, code in cls._code_lines(path)
+                if any(p.search(code) for p in cls._HANDWRITTEN_PREDICATES)
+            ]
+            if lines:
+                hits[str(path.relative_to(_ENGINE)).replace("\\", "/")] = lines
+        return hits
+
+    @classmethod
+    def _blame_files(cls) -> dict[str, list[int]]:
+        """报了「常量列」的引擎模块（`_guard` 是文案源，不算调用方）。"""
+        hits: dict[str, list[int]] = {}
+        for path in sorted(_ENGINE.rglob("*.py")):
+            if path.name == "_guard.py":
+                continue
+            lines = [i for i, code in cls._code_lines(path) if "常量列" in code]
+            if lines:
+                hits[str(path.relative_to(_ENGINE)).replace("\\", "/")] = lines
+        return hits
+
+    def _unwhitelisted_predicate_hits(self) -> list[str]:
+        """① 未被 `_PREDICATE_WHITELIST` 逐行登记的命中。
+
+        白名单**按行登记**（`{路径: {该行源码片段: 理由}}`）而不是按文件 ——
+        按文件登记会让"该文件以后新增一处手写判据"也一并被放过。
+        """
+        offenders = []
+        for rel, rows in self._predicate_hits().items():
+            allowed = self._PREDICATE_WHITELIST.get(rel, {})
+            for line_no, code in rows:
+                if any(snippet in code for snippet in allowed):
+                    continue
+                offenders.append(f"{rel}:{line_no} —— {code}")
+        return offenders
+
+    def test_no_handwritten_degenerate_predicate(self):
+        """① 手写退化判据必须清零（或已具名登记为例外）。"""
+        offenders = self._unwhitelisted_predicate_hits()
+        assert not offenders, (
+            "以下位置仍手写「常量/无变异」判据 —— 应改用 `_guard.degenerate_column_code` "
+            "（判据）与 `degenerate_column_reason` / `first_degenerate_reason`（文案），"
+            "否则「整列为空」「有效观测不足」会被误报成「常量列」（契约 #5）:\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_constant_blame_files_have_three_level_attribution(self):
+        """② 报「常量列」的模块必须能区分三级（否则是在猜原因）。"""
+        offenders = []
+        for rel, lines in self._blame_files().items():
+            if rel in self._BLAME_WHITELIST:
+                continue
+            src = (_ENGINE / rel).read_text(encoding="utf-8")
+            if not any(k in src for k in self._SANCTIONED):
+                offenders.append(f"{rel}:{lines}")
+        assert not offenders, (
+            "以下模块向用户报「常量列」，但没有走 `_guard` 的三级归因 —— "
+            "全 NaN 列 / 单有效观测会被它说成「常量列」（错误归因，硬性要求 2）:\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_predicate_whitelist_entries_are_live_and_justified(self):
+        """① 白名单条目必须仍在命中，理由非空 —— 条目过期即 FAIL 要求删除。"""
+        hits = self._predicate_hits()
+        for rel, allowed in self._PREDICATE_WHITELIST.items():
+            codes = [code for _ln, code in hits.get(rel, [])]
+            for snippet, reason in allowed.items():
+                assert any(snippet in code for code in codes), (
+                    f"判据白名单 {rel} 的条目 {snippet!r} 已不再命中 —— "
+                    f"该处判据已被改写，请删除条目并重新评估（否则守卫被悄悄放宽）"
+                )
+                assert len(reason) >= 20, f"白名单 {rel}/{snippet} 的理由太短：{reason!r}"
+
+    def test_blame_whitelist_entries_are_live_and_justified(self):
+        """② 白名单条目必须**仍然因为相对方差判据**而被豁免（理由不得过期）。
+
+        若某天 trend/xbar_r 改成了 `_guard` 判据，`1e-12 *` 会消失 → 本条 FAIL，
+        要求删除白名单条目；反之若有人把它们改成别的写法，也会被发现。
+        """
+        blame = self._blame_files()
+        stale = sorted(set(self._BLAME_WHITELIST) - set(blame))
+        assert not stale, f"归因白名单已不再命中（应删除）: {stale}"
+        for rel, reason in self._BLAME_WHITELIST.items():
+            assert len(reason) >= 20, f"白名单 {rel} 的理由太短：{reason!r}"
+            src = (_ENGINE / rel).read_text(encoding="utf-8")
+            if rel == "detection/_shared.py":
+                assert "iqr == 0" in src, f"{rel} 的豁免理由（IQR==0 非退化判据）已过期"
+            else:
+                assert self._RELATIVE_VARIANCE_MARK in src, (
+                    f"{rel} 的豁免理由是「相对方差判据 σ ≤ 1e-12·max|x|」，"
+                    f"但源码里已找不到该特征 —— 请删除该白名单条目并重新评估"
+                )
+
+    def test_scanner_detects_every_known_predicate_form(self, tmp_path):
+        """**负向注入**：六种手写形态各写一份样本，扫描器必须全部抓到。
+
+        没有这条，「零违规」与「扫描器失效」无法区分。
+        """
+        forms = {
+            "nunique.py": "def f(s):\n    return s.nunique(dropna=True) <= 1\n",
+            "nunique_eq.py": "def f(s):\n    return s.nunique() == 1\n",
+            "nunique_rev.py": "def f(s):\n    return 1 >= s.nunique(dropna=True)\n",
+            "unique_size.py": "def f(y):\n    return np.unique(y).size <= 1\n",
+            "len_set.py": "def f(x):\n    return len(set(x)) <= 1\n",
+            "std_zero.py": "def f(x):\n    return np.std(x, ddof=1) == 0\n",
+        }
+        for name, body in forms.items():
+            (tmp_path / name).write_text(body, encoding="utf-8")
+        hits: dict[str, list[int]] = {}
+        for path in sorted(tmp_path.rglob("*.py")):
+            lines = [
+                i
+                for i, code in self._code_lines(path)
+                if any(p.search(code) for p in self._HANDWRITTEN_PREDICATES)
+            ]
+            if lines:
+                hits[path.name] = lines
+        missing = sorted(set(forms) - set(hits))
+        assert not missing, f"扫描器漏掉这些判据形态: {missing}"
+
+    def test_guard_exposes_the_single_implementation(self):
+        """单一实现必须在（否则上面的"必须改用 _guard"无法执行）。"""
+        from smartsuite.engine import _guard
+
+        for name in (
+            "degenerate_column_code",
+            "degenerate_column_reason",
+            "first_degenerate_reason",
+        ):
+            assert hasattr(_guard, name), f"_guard 缺少 {name}"
+
+    def test_attribution_is_three_level_and_order_stable(self):
+        """行为契约：三级归因的顺序不可颠倒（**整列为空 → 样本不足 → 常量**）。
+
+        （本 docstring 原写作「常量 → 空列 → 样本不足」，与实现相反 —— 属审查
+        2026-10-09 R2BD-09 的同一处顺序漂移，随契约文档一并更正。）
+        """
+        from smartsuite.engine._guard import degenerate_column_code
+
+        assert degenerate_column_code(pd.Series([5.0, 5.0])) == "E_DATA_CONSTANT_COLUMN"
+        assert degenerate_column_code(pd.Series([np.nan, np.nan])) == "E_DATA_EMPTY_COLUMN"
+        assert degenerate_column_code(pd.Series([7.0])) == "E_DATA_INSUFFICIENT_N"
+        assert degenerate_column_code(pd.Series([1.0, 2.0])) is None
+        # 判据等价性：`code is not None` ⟺ `nunique(dropna=True) <= 1`（收口不改分支）
+        for series in (
+            [5.0, 5.0],
+            [np.nan, np.nan],
+            [7.0],
+            [7.0, np.nan],
+            [1.0, 2.0],
+            [],
+        ):
+            s = pd.Series(series, dtype=float)
+            assert (degenerate_column_code(s) is not None) == (s.nunique(dropna=True) <= 1), series
+
+
 class TestBoundaryContractSourceGuard:
     """源码级防线：错误归因与清洗重复不得回流。"""
 
@@ -376,13 +748,12 @@ class TestBoundaryContractSourceGuard:
             "VIF 绘图轴范围：只按有限值定 xlim 以免 matplotlib 抛错，数值表仍如实给出 inf"
         ),
         "inverse/_report.py": (
-            "`_feature_scales` 只计算各特征列的量级判据 max|x|（不剔除任何行），"
-            "非有限时回退 1.0 —— 属内部数值归一，无 B1 披露义务"
-        ),
-        "inverse/_models.py": (
-            "速率模型对**辅助时间列/配对标**做行筛选（缺有效时间的行已由 "
-            "`logger.warning` 记录行数），不改变用户所选目标列的样本口径；"
-            "该文件不在本批所有权内 —— ⚠ 已知缺口：其披露目前仅到日志，未进 messages"
+            "`_feature_scales` 只计算各特征列的量级判据 max|x|（**不剔除任何行**、"
+            "不改样本口径），非有限时回退 1.0 —— 属内部数值归一，无 B1 披露义务。"
+            "已核实回退分支实际不可达：前向路径传入的 `history` 已被 `solve.py` 的 "
+            "`clean_mask` 按 `clean_cols`（与 `feature_cols` 同一常量过滤）清洗过；"
+            "速率路径的 `finite_union` 掩码会在整列无有效值时报 '有效历史不足' 拒绝，"
+            "故该回退只是防御性写法"
         ),
     }
 
@@ -468,3 +839,255 @@ class TestBoundaryContractSourceGuard:
         assert not stale, f"白名单里这些条目已不再命中（应删除，否则守卫被悄悄放宽）: {stale}"
         for rel, reason in self._INPUT_CLEANUP_WHITELIST.items():
             assert len(reason) >= 20, f"白名单 {rel} 的理由太短，不足以说明为何合规：{reason!r}"
+
+
+# ══════════════════════════════════════════════════════════════
+# 契约文档 ↔ `_guard` 实现：归因顺序 / 接入面（R2BD-09 / R2BD-07）
+# ══════════════════════════════════════════════════════════════
+
+_CONTRACT = _ENGINE.parents[2] / "docs" / "governance" / "boundary-contract.md"
+
+#: 错误码 → 契约文档里的归因标签（文档两处措辞不同，此处做**显式**别名归一）。
+_CODE_LABEL = {
+    "E_DATA_EMPTY_COLUMN": "整列为空",
+    "E_DATA_INSUFFICIENT_N": "样本不足",
+    "E_DATA_CONSTANT_COLUMN": "常量",
+    "E_DATA_NON_FINITE_BLOCKS_SIGMA": "非有限值",
+    "E_NUMERIC_SIGMA_UNDEFINED": "兜底",
+}
+
+#: 标签 → 错误码（行为级判据用）
+_CODE_LABEL_INVERSE = {label: code for code, label in _CODE_LABEL.items()}
+
+#: 文档措辞 → 归一标签（`样本量` == `样本不足`；`非有限` == `非有限值`）
+_LABEL_ALIAS = {"样本量": "样本不足", "非有限": "非有限值"}
+
+_ORDER_RE = re.compile(
+    r"((?:整列为空|样本不足|样本量|常量|非有限值|非有限|兜底)"
+    r"(?:\s*→\s*(?:整列为空|样本不足|样本量|常量|非有限值|非有限|兜底))+)"
+)
+
+
+def _normalize_order(text: str) -> list[str]:
+    """把契约里的箭头串归一成标签列表（`A → B → C` → `[A, B, C]`）。"""
+    return [_LABEL_ALIAS.get(p.strip(), p.strip()) for p in text.split("→")]
+
+
+def _row(num: int) -> str:
+    """边界清单表里编号为 `num` 的那一行原文。"""
+    for line in _CONTRACT.read_text(encoding="utf-8").splitlines():
+        if re.match(rf"^\|\s*{num}\s*\|", line):
+            return line
+    raise AssertionError(f"契约表里找不到编号 {num} 的行")
+
+
+def _code_literal(node: ast.AST) -> str | None:
+    """语句子树里第一个可识别的错误码字面量（优先 `code=` 关键字，其次裸字符串）。
+
+    两种实现形态都要认：`return "E_DATA_EMPTY_COLUMN"`（`degenerate_column_code`）
+    与 `return BoundaryIssue(code="E_...")` / `if code == "E_...":`（`explain_undefined_sigma`）。
+    """
+    for sub in ast.walk(node):
+        if (
+            isinstance(sub, ast.keyword)
+            and sub.arg == "code"
+            and isinstance(sub.value, ast.Constant)
+            and sub.value.value in _CODE_LABEL
+        ):
+            return sub.value.value
+    for sub in ast.walk(node):
+        if (
+            isinstance(sub, ast.Constant)
+            and isinstance(sub.value, str)
+            and sub.value in _CODE_LABEL
+        ):
+            return sub.value
+    return None
+
+
+def _impl_order(function_name: str) -> list[str]:
+    """从实现的**源码顺序**推出归因顺序（标签列表）。
+
+    判据只认代码形态（分支里的错误码字面量），**剔除 docstring**、不看注释 ——
+    否则"把注释改对、代码留错"会假绿（R2BD-09 的原形：只修了 `_guard` 的 docstring，
+    契约文档与实现的顺序仍是反的）。
+    """
+    from smartsuite.engine import _guard
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(_guard, function_name))))
+    node = tree.body[0]
+    body = node.body[1:] if ast.get_docstring(node) else node.body
+    order: list[str] = []
+    for stmt in body:
+        if isinstance(stmt, (ast.If, ast.Return)):
+            code = _code_literal(stmt)
+            if code is not None:
+                order.append(_CODE_LABEL[code])
+    return order
+
+
+def _is_ordered_subsequence(short: list[str], long: list[str]) -> bool:
+    """`short` 是否为 `long` 的**有序**子序列（允许文档省略未涉及的归因）。"""
+    it = iter(long)
+    return all(label in it for label in short)
+
+
+class TestAttributionOrderMatchesGuard:
+    """契约文档的**归因顺序**必须与 `_guard` 的实现逐序一致（审查 2026-10-09 R2BD-09）。
+
+    缺陷原形：契约两处写「常量 → 非有限 → 样本量 → 兜底」（#23 行 / 执行点表），
+    实现是「…样本量 → 非有限…」—— 两处**互相颠倒**，且只有文档↔源码双向比对才能发现
+    （改错那一版时 2078 项测试全绿）。
+
+    顺序颠倒会产生**错误归因**：`[5.0, NaN]` 剔除 NaN 后只剩 1 个有效值，属样本量问题；
+    先判「含非有限值」就把用户引向错误的排查方向（契约硬性要求 2）。
+    """
+
+    def test_degenerate_order_matches_contract_row_23(self):
+        """#23 行的顺序 = `degenerate_column_code` 的返回分支顺序（逐项相等）。"""
+        impl = _impl_order("degenerate_column_code")
+        assert impl == ["整列为空", "样本不足", "常量"], (
+            f"`degenerate_column_code` 的实测分支顺序变了：{impl} —— "
+            "请同步契约 #23 行与本用例（顺序不可颠倒；`[5.0, NaN]` 属样本量而非非有限值）"
+        )
+        match = _ORDER_RE.search(_row(23))
+        assert match is not None, f"#23 行找不到归因顺序串：{_row(23)}"
+        doc = _normalize_order(match.group(1))
+        assert doc[:3] == impl, (
+            f"契约 #23 的归因顺序 {doc[:3]} 与实现 {impl} 不一致（文档↔实现漂移）—— "
+            "改文档或改实现，二者必须同序"
+        )
+
+    def test_explain_sigma_order_matches_contract_execution_table(self):
+        """执行点表的顺序必须与 `explain_undefined_sigma` 的真实分支顺序一致。"""
+        impl = _impl_order("explain_undefined_sigma")
+        # 关键优先级：退化三级（含"样本不足"）一律**先于**非有限值判据
+        assert impl.index("样本不足") < impl.index("非有限值"), (
+            f"`explain_undefined_sigma` 把「非有限值」排到了样本量之前：{impl} —— "
+            "这会把 [5.0, NaN] 这类样本量问题误导成「含非有限值」"
+        )
+        assert impl[-1] == "兜底", f"最后一个分支不是兜底：{impl}"
+        row = next(
+            (
+                line
+                for line in _CONTRACT.read_text(encoding="utf-8").splitlines()
+                if "explain_undefined_sigma" in line and _ORDER_RE.search(line)
+            ),
+            None,
+        )
+        assert row is not None, "执行点表里找不到 `explain_undefined_sigma` 的归因顺序串"
+        doc = _normalize_order(_ORDER_RE.search(row).group(1))
+        assert _is_ordered_subsequence(doc, impl), (
+            f"执行点表声明的顺序 {doc} 不是实现顺序 {impl} 的有序子序列（文档↔实现漂移）"
+        )
+
+    def test_contract_order_predicts_guard_behavior(self):
+        """把文档顺序当**优先级**用，必须能复现实现的每一次归因（行为级判据）。
+
+        这条不依赖源码解析：把契约 #23 的顺序串解释成"第一个命中的判据胜出"，
+        对 9 类输入逐个预测错误码，再与 `explain_undefined_sigma` 的真实返回比对。
+        `(+inf,)`（单值 + 非有限）是**判别对**：按实现它属「样本不足」（先判），
+        若文档把「非有限」提前，预测就会变成 `E_DATA_NON_FINITE_BLOCKS_SIGMA` → 红。
+        """
+        from smartsuite.engine._guard import explain_undefined_sigma
+
+        doc = _normalize_order(_ORDER_RE.search(_row(23)).group(1))
+        assert doc == ["整列为空", "样本不足", "常量", "非有限值", "兜底"], doc
+
+        def n_valid(s: pd.Series) -> int:
+            return int(s.notna().sum())
+
+        predicates = {
+            "整列为空": lambda s: n_valid(s) == 0,
+            "样本不足": lambda s: 0 < n_valid(s) < 2,
+            "常量": lambda s: n_valid(s) >= 2 and s.nunique(dropna=True) <= 1,
+            "非有限值": lambda s: bool(np.isinf(s.to_numpy(dtype=float, na_value=np.nan)).any()),
+            "兜底": lambda s: True,
+        }
+        cases = {
+            (5.0, 5.0, 5.0, 5.0): "E_DATA_CONSTANT_COLUMN",
+            (np.nan, np.nan, np.nan): "E_DATA_EMPTY_COLUMN",
+            (5.0, np.nan, np.nan): "E_DATA_INSUFFICIENT_N",
+            (np.inf,): "E_DATA_INSUFFICIENT_N",
+            (np.inf, np.inf, np.inf): "E_DATA_CONSTANT_COLUMN",
+            (1.0, 2.0, np.inf): "E_DATA_NON_FINITE_BLOCKS_SIGMA",
+            (1.0, 2.0, -np.inf): "E_DATA_NON_FINITE_BLOCKS_SIGMA",
+            (): "E_DATA_EMPTY_COLUMN",
+            (1.0, 2.0): "E_NUMERIC_SIGMA_UNDEFINED",
+        }
+        for values, expected in cases.items():
+            series = pd.Series(list(values), dtype=float)
+            predicted = next(
+                _CODE_LABEL_INVERSE[label] for label in doc if predicates[label](series)
+            )
+            assert predicted == expected, f"{values}: 文档顺序预测 {predicted} ≠ 期望 {expected}"
+            actual = explain_undefined_sigma(series, what="T").code
+            assert actual == expected, f"{values}: 实现返回 {actual} ≠ 期望 {expected}"
+
+
+class TestCheckTablesFiniteCoverageIsDeclared:
+    """契约 #22 的**接入面**必须与源码实测一致（审查 2026-10-09 R2BD-07）。
+
+    缺陷原形：`check_tables_finite` 只接在 3/42 个任务上，契约却标 `✅已规范`
+    —— 「代码已实现」被当成了「全覆盖」，出口保洁的实际覆盖率被高估 ~14 倍。
+
+    判据（双向）：
+
+    1. 契约 #22 行里**列出的任务名** == AST 实测接入 `check_tables_finite` 的任务集合；
+    2. 只要接入面 ≠ 全部任务，状态列就**不得**写 `✅已规范`（应写 `⚠部分规范` 并给覆盖率）。
+
+    本用例同时是那些数字的**来源**：现场实测，不另抄一份必然过期的计数。
+    """
+
+    @staticmethod
+    def _measured() -> set[str]:
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        hits: set[str] = set()
+        for spec in TASK_SPECS:
+            module, _, attr = spec.func_path.partition(":")
+            path = Path(__file__).resolve().parents[2] / "src" / (module.replace(".", "/") + ".py")
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == attr:
+                    for sub in ast.walk(node):
+                        if (
+                            isinstance(sub, ast.Call)
+                            and getattr(sub.func, "id", None) == "check_tables_finite"
+                        ):
+                            hits.add(spec.key)
+        return hits
+
+    @staticmethod
+    def _declared() -> set[str]:
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        keys = {s.key for s in TASK_SPECS}
+        return {k for k in re.findall(r"`([a-z0-9_]+)`", _row(22)) if k in keys}
+
+    def test_declared_coverage_matches_source(self):
+        """契约 #22 行声明的接入清单 == 源码实测（列一份会过期的清单就必然漂移）。"""
+        measured, declared = self._measured(), self._declared()
+        assert measured, "AST 扫描没找到任何接入 `check_tables_finite` 的任务（扫描器失效）"
+        assert declared == measured, (
+            "契约 #22 行声明的接入清单与源码实测不一致：\n"
+            f"  契约 - 实测 = {sorted(declared - measured)}\n"
+            f"  实测 - 契约 = {sorted(measured - declared)}\n"
+            "请同步该行的「已接入任务清单」（数字来源即本用例的 AST 实测）"
+        )
+
+    def test_status_reflects_partial_coverage(self):
+        """未全覆盖时状态列不得写 `✅已规范`（R2BD-07 的原形）。"""
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        covered = len(self._measured())
+        total = len(TASK_SPECS)
+        status = _row(22).strip().strip("|").split("|")[-1].strip()
+        if covered < total:
+            assert not status.startswith("✅"), (
+                f"出口保洁只接了 {covered}/{total} 个任务，状态列却写「{status[:20]}…」—— "
+                "「已实现」不等于「已全覆盖」，应写 `⚠部分规范` + 已接入清单"
+            )
+            assert f"{covered}/{total}" in status, f"状态列应写明覆盖率 {covered}/{total}：{status}"
+        else:
+            assert status.startswith("✅"), f"已全覆盖但状态列仍写：{status}"

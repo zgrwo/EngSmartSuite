@@ -38,8 +38,15 @@ const _ready = new Promise((resolve) => {
  *
  * 审查 2026-09-24（P4 步骤④，第二十八轮）：**前端的手写平行字典已全部删除**
  * （原 `PARAM_LABELS` 36 行 + `PARAM_HINTS` 11 行 + `PARAM_META` 167 行）。
- * 前提是后端派生覆盖已达 **114/114** 个默认参数槽位 —— 断言见
+ * 前提是后端派生覆盖已达 **124/124** 个默认参数槽位 —— 断言见
  * `tests/engine/test_param_migration_batch8.py::TestDerivationCoversEverySlot`。
+ *
+ * ⚠️ 口径（审查 2026-10-09 A-4 更正）：**124** = `DEFAULT_PARAMS` 的参数**槽位数**
+ * （`sum(len(v) for v in DEFAULT_PARAMS.values())`）；而 `derive_param_labels()`
+ * 目前是 **114 条标签条目**（同一标签被多任务共用时只存一条，故条目数 < 槽位数）。
+ * 旧注释把 114 当成槽位数写进这里，属**两个口径混用** —— 数字由
+ * `tests/scripts/test_params_panel.py::TestParamsPanelSmoke::test_comment_counts_match_measured`
+ * 钉住，改参数后必须同步本段（别处不再重复写死数字，只引用本段）。
  *
  * 顺带修掉了手写字典里**本身就写错的提示**：
  *   - `ranges` 原写「格式: 料温:180,220; 模具温度:40,80」（字符串格式），
@@ -61,8 +68,9 @@ let _apiXOptionalTasks = new Set();
  * 该参数的中文标签：**接口 → 参数名本身**（最后兜底保证不空白）。
  *
  * 审查 2026-09-24（P4 步骤④，第二十八轮）：原回退链是
- * `接口 → PARAM_LABELS → 参数名`。派生覆盖已达 **114/114** 个参数槽位
- * （断言见 `tests/engine/test_param_migration_batch8.py`），
+ * `接口 → PARAM_LABELS → 参数名`。派生覆盖已达全部默认参数槽位
+ * （槽位/标签条目口径与实测数字见本文件头部 `_apiLabels` 的说明，
+ * 断言见 `tests/engine/test_param_migration_batch8.py`），
  * `PARAM_LABELS` 已成死兜底，故删除。保留键名兜底以防接口失败时界面空白。
  */
 function paramLabel(k, task) {
@@ -192,8 +200,8 @@ export function defaultParams(task) {
  *     故这一条必须留在前端，它也不是"与后端重复的事实"。
  *
  * 审查 2026-09-24（P4 步骤④，第二十八轮）：原 `PARAM_META`（167 行）里
- * 23 条 `select` 条目的标签与选项**已被后端派生完全覆盖**（114/114 个参数槽位），
- * 属死兜底，故整表删除，只保留这 4 个列选择器。
+ * 23 条 `select` 条目的标签与选项**已被后端派生完全覆盖**（覆盖口径见文件头部
+ * `_apiLabels` 的说明），属死兜底，故整表删除，只保留这 4 个列选择器。
  */
 const COLUMN_PARAMS = new Set(['group_col', 'part_col', 'operator_col', 'time_col']);
 
@@ -399,8 +407,14 @@ export function buildParamInput(k, v, task) {
   const options = paramOptions(k, task);
 
   if (options) {
+    // 审查 2026-10-09 C-2：比较**字符串形式**（`String(val)`），不是跨类型 `===`。
+    // `val` 来自 JSON，`Choice((0,'不含交互'),(1,'含两两交互'))` 里是**数字**，而
+    // `String(v) === 0` 恒假 → 没有任何 option 带 `selected` → 浏览器按 HTML 规范
+    // **隐式选首项**，于是"默认值 ≠ 首项"时面板静默下发首项（改掉了引擎/手册的默认值，
+    // 且 7 项门禁全绿）。回归防线：scripts/check_params_panel.mjs 的「断言 7」对每个
+    // 有选项的参数用**非首项**默认值渲染一遍，断言该项真的带上了 `selected`。
     const opts = options.map(([val, text]) =>
-      `<option value="${val}" ${String(v) === val ? 'selected' : ''}>${escHtml(String(text))}</option>`
+      `<option value="${val}" ${String(v) === String(val) ? 'selected' : ''}>${escHtml(String(text))}</option>`
     ).join('');
     return `<div class="param-item" id="param-item_${k}">
       <label class="param-label" for="${id}">${label}</label>
@@ -485,11 +499,17 @@ export function getParams(task) {
     const el = document.getElementById('param_'+k);
     if (!el) return;
     let v = el.value.trim();
-    // 审查 2026-10-09 P0-1：哨兵值统一视为"未填"（与空串同义）。
-    // 渲染侧已归一（`value="${v ?? ''}"`），这里再兜一道 —— 任何上游把 `null`/`undefined`
-    // 变成字符串的路径都不得把字面量送给引擎（`isNaN('null')` 为真会跳过数值转换，
-    // 于是 `params["usl"] === "null"` → Spec 校验报"无法解析"）。
-    if (v === '' || v === 'null' || v === 'undefined' || v === 'NaN') return;
+    // 审查 2026-10-09 P0-1：渲染侧已把 `None` 默认值归一为空控件（`value="${v ?? ''}"`，
+    // 见 buildParamInput），故这里**只丢真正的空值**。
+    //
+    // 审查 2026-10-09 C-3：上一轮这里还丢 `'null'`/`'undefined'`/`'NaN'` 三个**字符串**，
+    // 那是把"渲染期产物"的兜底错用在了**用户输入**上 —— 而它们是**合法的数据字面量**：
+    // `proportion_ci.success_value` 的值域来自数据列（引擎按列内实际取值匹配），
+    // 用户想算"取值为文本 null 的占比"时，字面量被吞掉 → 引擎落回首个类别，
+    // 实测 16.67% 静默变成 83.33%（status=ok、messages=[]，用户无从察觉）。
+    // 回归防线：scripts/check_params_panel.mjs「断言 8」+ tests/scripts/test_params_panel.py
+    // 的 `test_free_text_sentinel_literal_reaches_engine`（面板载荷 → 引擎 → 16.67%）。
+    if (v === '') return;
 
     if (k === 'ranges') {
       // 审查 2026-08-19 H1：提示格式为"料温:180,220"（逗号分隔上下限），

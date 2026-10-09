@@ -14,6 +14,7 @@ from smartsuite.engine._constants import (
     INVERSE_MIN_HISTORY,
     INVERSE_REG_LAMBDA,
 )
+from smartsuite.engine._guard import BoundaryReport
 from smartsuite.engine._utils import round_for_display, safe_float
 from smartsuite.engine.inverse._bounds import (
     _as_bool,
@@ -294,26 +295,23 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
         if is_rate and time_median is None:
             raise ValueError(f"时间列「{time_col}」在历史中无有效数值，无法建立速率模型")
 
+        # 建模阶段的降级披露（B1/B2）：常量特征剔除、auto 候选削减、配对回退、
+        # 速率模型的行剔除 —— 全部由 `_models` 登记进唯一执行点，此处并入用户可见处。
+        # 契约硬性要求 1：这些降级都会改变结果口径，禁止只写日志（见 boundary-contract）。
+        boundary = BoundaryReport()
         if is_rate:
-            forward, quality = _fit_rate_forward(history, roles, time_col, random_state=seed)
-            if getattr(forward, "pairing_note", None):
-                messages.append(forward.pairing_note)
+            forward, quality = _fit_rate_forward(
+                history, roles, time_col, random_state=seed, report=boundary
+            )
+            messages.extend(boundary.messages())
             messages.append(
                 "rate 模型基于时间线性速率假设（输出=来料−速率×时间），时间外推结论需实验验证"
             )
         else:
-            forward, quality = _fit_forward(history, roles, model=model, random_state=seed)
-            if getattr(forward, "note", None):
-                messages.append(forward.note)
-            dropped_features = [
-                c
-                for c in roles.incoming + roles.variable + roles.fixed
-                if c not in forward.feature_cols
-            ]
-            if dropped_features:
-                messages.append(
-                    f"以下特征列在历史中为常量，未参与建模：{'、'.join(dropped_features)}"
-                )
+            forward, quality = _fit_forward(
+                history, roles, model=model, random_state=seed, report=boundary
+            )
+            messages.extend(boundary.messages())
         selected = quality[quality["选用"]] if not quality.empty else quality
         choice_label = "速率特征" if is_rate else "模型"
         for _, q_row in selected.iterrows():
@@ -640,6 +638,7 @@ def inverse_parameter_solve(req: AnalysisRequest) -> AnalysisResult:
                     "bottleneck_output": bottleneck,
                 },
                 "seed": seed,
+                "boundary_codes": boundary.codes(),
             },
             messages=messages,
         )

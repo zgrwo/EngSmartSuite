@@ -16,6 +16,11 @@ verify_frontend_params.py — 前后端参数一致性门禁（审查 2026-09-06
   3. inverse_solve 列角色勾选前缀 INVERSE_PREFIXES == 引擎 DEFAULT_PREFIXES
      （2026-09-11 审查 F4：双份 SSOT 漂移会导致勾选组预勾选错列）
   4. 有意差异须在 KNOWN_DEFAULT_DIFFERENCES 登记，登记失配或过期同样 FAIL。
+     ⚠️ 审查 2026-10-09 A-1：该表已清空 —— 前端字典删除后 Web 与 CLI/Python 同源，
+     不存在"合法的入口差异"；曾登记的 `inverse_solve.model` 是**死登记**（在真实
+     代码库路径下根本不被读取），且把手册带偏成了「默认 `linear`」。
+  5. **用户手册**里显式标注「（默认）」的参数默认值必须等于 `DEFAULT_PARAMS`
+     （2026-10-09 A-1 新增：手册是这条链上此前唯一无门禁的消费方）。
 发现差异即 FAIL 并 exit 1。
 
 ## 历史口径（`TASK_PARAMS` 静态比对）—— **已删除，本脚本无任何命令行开关**
@@ -58,11 +63,15 @@ INVERSE_PREFIX_MARKER = "const INVERSE_PREFIXES ="
 
 # 已知有意差异（任务, 键）→（前端值, 后端值）。白名单外任何简单标量默认值漂移
 # 必须 FAIL；白名单项若两侧已一致或配对变化同样 FAIL（强制显式更新登记）。
-# inverse_solve.model：Web 默认 linear（快路径）；orchestrator/CLI 默认 auto
-# （R-1 三重预算约束），见 user-manual §6.12 与 api-reference（审查 2026-09-13 F-2）。
-KNOWN_DEFAULT_DIFFERENCES = {
-    ("inverse_solve", "model"): ("linear", "auto"),
-}
+#
+# 审查 2026-10-09 A-1：这里曾有 `("inverse_solve", "model"): ("linear", "auto")` ——
+# 声称「Web 默认 linear（快路径）、orchestrator/CLI 默认 auto」。P4 步骤④ 删除前端
+# `TASK_PARAMS` 后，Web 与 CLI/Python **同源**（都来自 `TaskSpec.default_params`），
+# 该差异已不存在；而这条登记在 `js_path=None`（真实代码库）路径下**根本不会被读取**
+# （该路径不做前端字面量比对）→ 属**死登记**，且会让读者以为差异仍存在（本轮手册
+# 的「`model | linear`（默认）」正是照它写的）。故删除，并把"文档默认值"接进本门禁
+# （见 `_check_manual_defaults`）—— 差异必须有真实来源，不许靠登记维持。
+KNOWN_DEFAULT_DIFFERENCES: dict[tuple[str, str], tuple[str, str]] = {}
 
 # 复合默认值豁免登记（N-3）：本门禁只比对简单标量；非空数组/对象默认值出现
 # 即 FAIL，需在此登记（task, key）确认后豁免。当前 42 任务无复合默认值。
@@ -340,6 +349,66 @@ def _check_inverse_prefixes(frontend_prefixes: dict[str, list[str]] | None) -> l
     return problems
 
 
+#: 用户手册里「值（默认）」标注的表格行：`` | `key` | `value`（默认） | 说明 | ``
+_MANUAL_DEFAULT_ROW_RE = re.compile(
+    r"^\|\s*`(?P<key>[\w]+)`\s*\|\s*`?(?P<value>[^`|（）]+?)`?\s*（默认）\s*\|"
+)
+#: 手册小节标题里登记的任务键：`### 6.12 工艺参数反解 (`inverse_solve`)`
+_MANUAL_TASK_HEADING_RE = re.compile(r"^#{2,4}\s.*?`(?P<task>[a-z][\w]*)`")
+
+
+def _manual_declared_defaults() -> list[tuple[str, str, str, str]]:
+    """抽取用户手册里**显式标注「（默认）」**的参数默认值。
+
+    返回 `[(手册文件, 任务键, 参数名, 手册写的值), ...]`。
+
+    判据刻意收窄（宁少勿错）：
+      · 必须是 Markdown 表格行，且**第一列是反引号包起来的参数名**；
+      · **第二列以反引号值 + （默认）** 结尾 —— 描述列里提到"默认"不算；
+      · 任务键取**最近的上方标题**里反引号登记的键（如 `` (`inverse_solve`) ``）。
+
+    为什么需要它（审查 2026-10-09 A-1）：`DEFAULT_PARAMS` 的消费方除 Web/CLI 外
+    还有**用户手册**，而手册里的默认值此前**没有任何门禁** —— 实测
+    `06-modeling.md` 写「`model | linear`（默认）」，而引擎/面板实际默认 `auto`
+    （`auto` 会按 CV R² 门控，可能选 `poly`，**结果口径不同**，不只是显示差异）。
+    同一个"单一来源"链条上，手册是唯一还能静默漂移的一环，故接进本门禁。
+    """
+    manual_dir = ROOT / "docs" / "user-manual"
+    found: list[tuple[str, str, str, str]] = []
+    for path in sorted(manual_dir.glob("*.md")):
+        task = ""
+        for line in path.read_text(encoding="utf-8").splitlines():
+            heading = _MANUAL_TASK_HEADING_RE.match(line.strip())
+            if heading:
+                task = heading.group("task")
+                continue
+            row = _MANUAL_DEFAULT_ROW_RE.match(line.strip())
+            if row and task:
+                found.append((path.name, task, row.group("key"), row.group("value").strip()))
+    return found
+
+
+def _check_manual_defaults() -> list[str]:
+    """手册里标注的默认值必须与 `DEFAULT_PARAMS` 一致（审查 2026-10-09 A-1）。"""
+    problems: list[str] = []
+    rows = _manual_declared_defaults()
+    for filename, task, key, written in rows:
+        declared = DEFAULT_PARAMS.get(task, {})
+        if key not in declared:
+            problems.append(
+                f"{filename}: 手册写了 {task}.{key} 的默认值 {written!r}，"
+                f"但 `DEFAULT_PARAMS[{task!r}]` 没有该键（可用：{sorted(declared)}）"
+            )
+            continue
+        actual = declared[key]
+        if _normalize_default(written) != _normalize_default(actual):
+            problems.append(
+                f"{filename}: 手册写 {task}.{key} 默认 {written!r}，"
+                f"而 `DEFAULT_PARAMS` 是 {actual!r} —— 以引擎为准改手册"
+            )
+    return problems
+
+
 def _strip_js_comments(src: str) -> str:
     """去掉 JS 注释（块注释 + 行注释）。
 
@@ -416,6 +485,9 @@ def _check_single_source_architecture() -> list[str]:
         problems.append('web/app.py 的 /api/tasks 未下发 "params" 字段')
 
     problems.extend(_check_inverse_prefixes(extract_inverse_prefixes(js_text)))
+    # 审查 2026-10-09 A-1：手册是同一个"默认值单一来源"链上的**另一个消费方**，
+    # 此前无任何门禁（实测漂移：`inverse_solve.model` 手册写 linear，引擎/面板是 auto）。
+    problems.extend(_check_manual_defaults())
     return problems
 
 
@@ -433,7 +505,8 @@ def main(js_path: Path | None = None) -> None:
         # 真实代码库：检查的是**单一来源架构**，不再是"两份字典是否一致"
         print(
             f"OK: 参数默认值单一来源（后端 DEFAULT_PARAMS → /api/tasks → 前端 hydrateParams）；"
-            f"{len(TASK_REGISTRY)} 任务；{scope}；前端无副本、INVERSE_PREFIXES 与引擎一致"
+            f"{len(TASK_REGISTRY)} 任务；{scope}；前端无副本、INVERSE_PREFIXES 与引擎一致、"
+            f"手册「（默认）」标注 {len(_manual_declared_defaults())} 处均与引擎一致"
         )
     else:
         print(

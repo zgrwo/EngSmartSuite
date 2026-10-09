@@ -14,6 +14,7 @@ from smartsuite.engine._guard import (
     check_magnitude,
     check_tables_finite,
     clean_frame,
+    degenerate_column_reason,
 )
 from smartsuite.engine._palette import PALETTE
 
@@ -77,12 +78,13 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 审查 2026-08-19 #1.4：常量目标列 → R²=-inf 且误报诊断
-    if df[req.target_col].nunique(dropna=True) <= 1:
+    # 收尾轮（契约 #5）：判据与文案统一走 `_guard` 三级归因（原先手写 nunique 判据）
+    _degenerate = degenerate_column_reason(df[req.target_col], what=f"目标列「{req.target_col}」")
+    if _degenerate is not None:
         return AnalysisResult(
             task="response_surface",
             status="error",
-            messages=[f"目标列「{req.target_col}」为常量列（方差为 0），响应面模型无意义"]
-            + _boundary.messages(),
+            messages=[f"{_degenerate}，响应面模型无意义"] + _boundary.messages(),
         )
 
     try:

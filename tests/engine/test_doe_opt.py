@@ -108,9 +108,16 @@ def test_lasso_cv_floor_small_sample():
         task="lasso_regression", data=df, target_col="y", feature_cols=["x1", "x2"]
     )
     result = lasso_regression(req)
-    # 不再抛 InvalidParameterError（可能因样本过少返回 error，但必须是明确消息而非异常冒泡）
-    assert result.status in ("ok", "error")
-    assert result.task == "lasso_regression"
+    # 真实值断言（原为恒真断言 `status in ("ok","error")`）：4 行 × 2 特征必须**成功**
+    # 返回系数表 —— 这正是"cv 下限"修复要保住的行为（修复前抛 InvalidParameterError）。
+    assert result.status == "ok", result.messages
+    coef = result.tables["coefficients"]
+    assert list(coef["变量"]) == ["(截距)", "x2", "x1"], coef.to_dict()
+    assert np.isfinite(coef["标准化系数"].to_numpy(dtype=float)).all(), coef.to_dict()
+    # 被剔除的 x1（2/6 行为 NaN → 整行 dropna）不得被选出
+    picked = dict(zip(coef["变量"], coef["选中"], strict=True))
+    assert picked["x1"] == "否", f"含缺失的列不应被 Lasso 选中：{picked}"
+    assert picked["x2"] == "是", f"唯一完整特征应被选中：{picked}"
 
 
 def test_roc_all_nan_target():

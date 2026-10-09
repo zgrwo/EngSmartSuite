@@ -34,13 +34,14 @@
 
 | 层 | 位置 | 验证内容 | 强度说明 |
 |---|---|---|---|
-| ① 数值正确性 | `tests/engine/test_correctness.py` | 已知答案 + 手工公式交叉验证 | 约 6% 的测试有**独立真值**（如 `cpk == approx(4/3, abs=0.02)`、手算 KM 中位数） |
+| ① 数值正确性 | `tests/engine/test_correctness.py` | 已知答案 + 手工公式交叉验证 | **独立真值**覆盖率以 `scripts/truth_coverage.py` 的输出为准（2026-10-10 实测 **13.3%**，可执行下限 **10.0%**；该脚本同时列出逐任务的真值缺口，如 `cpk == approx(4/3, abs=0.02)`、手算 KM 中位数） |
 | ② 数学不变量 | `tests/engine/test_invariants.py` | p∈[0,1]、Cpk≤Cp、R²≥0、KM 单调递减 | 弱断言为主，**不依赖正确答案** |
 | ③ 边界模糊 | `tests/engine/test_edge_cases.py`、`tests/engine/test_boundary_guard.py` | 空数据/单行/全 NaN/常量列/共线/±Inf/大子组 | 退化输入不崩溃 + 处置分级正确 |
 | ④ 差分测试 | `tests/services/test_cli_web_parity.py` | Web vs 引擎直调数值一致 | 全 42 方法 |
 
 > ⚠️ **关于①②的强度，需要如实告知**：
-> 第①层的"独立真值"占比并不高，第②层的断言多为弱不变量。
+> 第①层的"独立真值"占比并不高（实测见上表，可自行运行 `python scripts/truth_coverage.py` 复核），
+> 第②层的断言多为弱不变量。
 > 这意味着"全绿"**不等于"数值都对"**。历史上正是这条缝隙漏过了三个真实缺陷
 > （生存分析事件列语义反转、Cp 置信区间偏窄 28%、t 检验缺 Welch），
 > 三者都不违反任何既有断言。详见第三轮复核清单（`logs/reports/verify-round3/`，

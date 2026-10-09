@@ -142,6 +142,53 @@ def durbin_watson(residuals):
     return dw
 
 
+def _is_micro_scale(scale: float, decimals: int) -> bool:
+    """微尺度判据 —— `round_for_display` 与 `disp` 的**唯一**阈值来源。
+
+    固定 `decimals` 位小数会把量级低于 `0.5×10^-decimals` 的值整组吞成 `0.0000`。
+    本函数只回答"这个量级需要改走有效数字（科学计数）吗"，两个格式化入口共用它，
+    使阈值只在一处定义（避免"同一判据两处各写一份必然漂移"，见审查 P2-3）。
+    """
+    return scale != 0.0 and scale < 0.5 * 10.0 ** (-decimals)
+
+
+def disp(value, decimals: int = 4) -> str:
+    """量纲感知的**展示格式化**（summary / 图内文本 / 预格式化单元格的唯一实现）。
+
+    为什么需要（审查 2026-10-09 R2BD-06 / C-1）：展示层原本是**双通道** ——
+    数值列经 `round_for_display` 走尺度感知，而 `summary` 拼接、图例/标题文案、
+    以及"先格式化成字符串再放进表"的单元格走 `f"{x:.4f}"` 手写定点格式，
+    于是微尺度（ppm/ppb、nm 级厚度、微应变）下这些通道被整段吞成 `0.0000`：
+    实测 ×1e-9 时 `spc_xbar` 摘要为 `CL=0.0000, UCL=0.0000, LCL=0.0000`，
+    而**同一结果**的 `control_limits` 表却写着 `1.004000e-08` —— 两套口径自相矛盾。
+
+    口径（与 `round_for_display` 同源，见 `_is_micro_scale`）：
+
+    - 常规量级（`|x| ≥ 0.5×10^-decimals`）→ `f"{x:.{decimals}f}"`，与此前逐字一致；
+    - 微尺度 → `f"{x:.{decimals}g}"`（`decimals` 位**有效数字**，自动科学计数）；
+    - 显式零 → 常规分支（`0.0000` 是真值 0 的正确显示，不改）；
+    - `NaN` → `"N/A"`（无法判定，见哨兵契约 L2）；`±Inf` → `"+∞"` / `"-∞"`。
+
+    Args:
+        value: 标量（数值或可转 float 的对象）
+        decimals: 常规量级的小数位（同时也是微尺度分支的有效数字位数）
+
+    Returns:
+        展示用字符串。**调用方不得再对其做二次舍入或再套 `:.Nf`。**
+    """
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if np.isnan(x):
+        return "N/A"
+    if np.isinf(x):
+        return "+∞" if x > 0 else "-∞"
+    if _is_micro_scale(abs(x), decimals):
+        return f"{x:.{decimals}g}"
+    return f"{x:.{decimals}f}"
+
+
 def round_for_display(values, decimals: int = 4):
     """表格显示舍入：常规量级按 decimals 位小数；微尺度数据改按有效数字。
 
@@ -157,12 +204,15 @@ def round_for_display(values, decimals: int = 4):
 
     Returns:
         标量输入返回 float，数组输入返回 ndarray
+
+    ⚠️ 本函数只处理**数值列**；`summary` 拼接、图内文本与预格式化字符串单元格
+    走同源的 `disp()`（同一 `_is_micro_scale` 阈值）。两者是一对，勿单独改其一。
     """
     scalar_input = np.isscalar(values)
     arr = np.atleast_1d(np.asarray(values, dtype=float))
     finite = arr[np.isfinite(arr)]
     scale = float(np.max(np.abs(finite))) if finite.size else 0.0
-    if scale == 0.0 or scale >= 0.5 * 10.0 ** (-decimals):
+    if not _is_micro_scale(scale, decimals):
         out = np.round(arr, decimals)
     else:
         mag = int(np.floor(np.log10(scale)))

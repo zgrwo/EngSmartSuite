@@ -17,7 +17,13 @@ from smartsuite.core.param_specs_common import RANDOM_STATE
 from smartsuite.engine._constants import (
     VIF_THRESHOLD,
 )
-from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, clean_frame
+from smartsuite.engine._guard import (
+    BoundaryIssue,
+    BoundaryReport,
+    clean_frame,
+    degenerate_column_reason,
+    first_degenerate_reason,
+)
 from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
@@ -88,11 +94,13 @@ def decision_tree_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     X = df[cols]
     y = df[req.target_col]
-    if y.nunique() <= 1:
+    # 收尾轮（契约 #5）：判据与文案统一走 `_guard` 三级归因（原先手写 nunique 判据）
+    _degenerate = degenerate_column_reason(y, what="目标列")
+    if _degenerate is not None:
         return AnalysisResult(
             task="decision_tree",
             status="error",
-            messages=["目标列为常量列，决策树特征重要性无意义（避免假 R²=1）"],
+            messages=[f"{_degenerate}，决策树特征重要性无意义（避免假 R²=1）"],
         )
     # 参数校验（P4 步骤③，第二十二轮）：失败时抛 ParamValidationError，
     # 由 orchestrator 统一转成 status="error" + 中文文案。
@@ -273,19 +281,30 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="vif", status="error", messages=["VIF 分析需要至少 2 个因子列"])
 
     df = req.data[cols].dropna()
+    # 审查 2026-10-09 R2BD-03（P1）：`dropna()` **不剔除 ±Inf**（Inf 不是 NaN），而
+    # `variance_inflation_factor` 拿到含 Inf 的设计矩阵后发散/抛错 → 落进本函数末尾的
+    # `except Exception`，用户看到「VIF 计算失败，请检查共线性」（**错误归因**）、
+    # 数值表全丢、且 `messages` 里没有任何 ±Inf 披露。
+    # 同文件 `decision_tree_analysis` 早已走 `_guard.clean_frame`（本条的修复范式）；
+    # 本函数此前因"同文件已接 `_guard`"被文件级源码守卫整文件放行。
+    report = BoundaryReport()
+    df, n_inf = clean_frame(df, cols, report=report)
     if len(df) < len(cols) + 2:
-        return AnalysisResult(task="vif", status="error", messages=[f"有效样本({len(df)})不足"])
+        # 样本不足的**真实原因**可能就是刚被剔除的那批 ±Inf —— 必须点名，
+        # 否则用户按"样本不足"去加数据，问题依旧（禁止错误归因）。
+        reason = f"剔除 {n_inf} 行 ±Inf（非有限值）后" if n_inf else ""
+        return AnalysisResult(
+            task="vif", status="error", messages=[f"{reason}有效样本({len(df)})不足"]
+        )
 
     # Round-2 #A2b：常量特征列使 add_constant 静默跳过截距 → VIF 算出有限伪值
-    _const_feats = [c for c in cols if df[c].nunique(dropna=True) <= 1]
-    if _const_feats:
+    # 收尾轮（契约 #5）：判据与文案统一走 `_guard` 三级归因（原先手写 nunique 判据）
+    _degenerate_feat = first_degenerate_reason(df, cols, label="特征列")
+    if _degenerate_feat is not None:
         return AnalysisResult(
             task="vif",
             status="error",
-            messages=[
-                f"特征列「{_const_feats[0]}」为常量列（无变异），VIF 无法定义。"
-                "请移除该列或检查数据。"
-            ],
+            messages=[f"{_degenerate_feat}，VIF 无法定义。请移除该列或检查数据。"],
         )
 
     # 用户可通过 params 自定义阈值，fallback 到全局常量
@@ -391,12 +410,19 @@ def vif_analysis(req: AnalysisRequest) -> AnalysisResult:
             tables={"vif_table": vif_data},
             figures=[fig],
             summary=warning,
-            metadata={"high_vif_count": len(high_vif), "invalid_vif_count": len(invalid_vif)},
+            metadata={
+                "high_vif_count": len(high_vif),
+                "invalid_vif_count": len(invalid_vif),
+                # 审查 2026-10-09 R2BD-03：入口清洗的处置必须机器可读（原为 `{}`）
+                "boundary_codes": report.codes(),
+            },
+            messages=report.messages(),
         )
     except Exception:
         logger.debug("VIF 计算失败", exc_info=True)
         return AnalysisResult(
             task="vif",
             status="error",
-            messages=["VIF 计算失败，请检查数据是否存在共线性或数值异常"],
+            # 真失败也要先披露入口处置（否则"剔除了多少行 ±Inf"这条信息随异常一起丢失）
+            messages=report.messages() + ["VIF 计算失败，请检查数据是否存在共线性或数值异常"],
         )

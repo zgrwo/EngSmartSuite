@@ -50,8 +50,13 @@ def test_all_nan_column():
     req = AnalysisRequest(task="correlation", data=df, target_col="y", feature_cols=["x"])
     result = correlation_analysis(req)
     assert result.status == "error", f"全 NaN 特征列相关性应 error: {result.messages}"
-    assert any("常量" in m or "变异" in m for m in result.messages), (
-        f"应给出中文常量列提示: {result.messages}"
+    # 2026-10-09 发版前收尾（契约 #5）：归因统一到 `_guard` 三级口径后，
+    # **整列为空**不再被误报成「常量列」—— 用户按"常量"去查一个空列永远查不到原因。
+    assert any("整列为空" in m for m in result.messages), (
+        f"全 NaN 特征列应报「整列为空」（区别于「常量列」）: {result.messages}"
+    )
+    assert not any("常量" in m for m in result.messages), (
+        f"整列为空不是常量列（错误归因，契约硬性要求 2）: {result.messages}"
     )
 
     # 回归/DOE/ANOVA：有效样本不足 → error + 中文消息
@@ -195,13 +200,23 @@ def test_large_values():
 
 
 def test_negative_target_for_process_capability():
-    """负值目标变量在过程能力分析中不应崩溃。"""
+    """负值目标变量在过程能力分析中不应崩溃（含真实数值一致性）。"""
     df = _make_df({"val": np.random.normal(-5, 1, 30)})
     req = AnalysisRequest(
         task="process_capability", data=df, target_col="val", params={"usl": -2.0, "lsl": -8.0}
     )
     result = process_capability_analysis(req)
-    assert result.status == "ok"
+    assert result.status == "ok", result.messages
+    # 真实值断言：Cp 必须等于 (USL−LSL)/(6·组内σ)（负值域不得出现符号错误）
+    usl, lsl = -2.0, -8.0
+    sigma_within = float(result.metadata["sigma_within"])
+    assert sigma_within > 0
+    assert float(result.metadata["cp"]) == pytest.approx(
+        (usl - lsl) / (6.0 * sigma_within), rel=1e-9
+    ), result.metadata
+    assert float(result.metadata["cp"]) > 0, "负值域下 Cp 仍应为正"
+    # 数学不变量：Cpk ≤ Cp（偏离中心时严格小于）
+    assert float(result.metadata["cpk"]) <= float(result.metadata["cp"]) + 1e-12, result.metadata
 
 
 # ── 新函数 ──
@@ -458,7 +473,20 @@ def test_contingency_large():
     )
     req = AnalysisRequest(task="contingency", data=df, target_col="a", feature_cols=["b"])
     r = contingency_analysis(req)
-    assert r.status == "ok"
+    assert r.status == "ok", r.messages
+    # 真实值断言：3×4 列联表 → 自由度 (3−1)(4−1)=6；表维度与观测总数如实
+    assert r.metadata["degrees_of_freedom"] == 6, r.metadata
+    table = r.tables["contingency_table"]
+    assert table.shape == (3, 4), table.shape
+    assert int(table.to_numpy().sum()) == 200, table.to_dict()
+    assert r.tables["expected_frequencies"].shape == (3, 4)
+    # p 值必须与其统计量/自由度自洽（用 scipy 独立复算，而不是只看是否在 [0,1]）
+    from scipy import stats as sp_stats
+
+    chi2 = float(r.metadata["statistic"])
+    assert r.metadata["p_value"] == pytest.approx(float(sp_stats.chi2.sf(chi2, 6)), rel=1e-12), (
+        r.metadata
+    )
 
 
 def test_roc_perfect_separation():
@@ -861,6 +889,12 @@ def test_box_chart_group_col_equals_target_or_subcol():
         )
     )
     assert r1.status == "ok", f"group==target 崩溃: {r1.messages}"
+    # 真实值断言：分组按 v 的两个取值切（数值分组名如实回填，行数不得丢失）
+    assert r1.metadata["group_col"] == "v", r1.metadata
+    assert r1.metadata["n_groups"] == 2, r1.metadata
+    assert r1.metadata["n_total"] == 40, r1.metadata
+    assert r1.metadata["groups"] == ["1.0", "2.0"], r1.metadata
+    assert len(r1.figures) == 1
     # group_col == feature_cols[1]（次分类列同列）
     df2 = pd.DataFrame(
         {
@@ -879,6 +913,10 @@ def test_box_chart_group_col_equals_target_or_subcol():
         )
     )
     assert r2.status == "ok", f"group==feat[1] 崩溃: {r2.messages}"
+    # 真实值断言：分组列与次分类列同列时按该列 2 个水平切，且不重复计数
+    assert r2.metadata["group_col"] == "g" and r2.metadata["sub_col"] == "g", r2.metadata
+    assert r2.metadata["has_sub"] is True and r2.metadata["n_groups"] == 2, r2.metadata
+    assert r2.metadata["n_total"] == 40, r2.metadata
 
 
 def test_grid_search_ranges_key_equals_target():
@@ -897,6 +935,16 @@ def test_grid_search_ranges_key_equals_target():
         )
     )
     assert r.status == "ok", f"ranges==target 失败: {r.status} {r.messages[:1]}"
+    # 真实值断言：ranges 键与目标列同名时列名去重后仍应完成寻优，
+    # 且最优点落在给定区间内、寻优点数如实回报（原断言只看 status）。
+    assert r.metadata["n_points_used"] == 10, r.metadata
+    assert r.metadata["n_points_requested"] == 10, r.metadata
+    best = float(r.metadata["optimal_params"]["料温"])
+    assert 170.0 <= best <= 190.0, r.metadata["optimal_params"]
+    assert float(r.metadata["cv_r2"]) == pytest.approx(1.0, abs=1e-6), r.metadata["cv_r2"]
+    top = r.tables["top_candidates"]
+    assert len(top) == 5, top.to_dict()
+    assert float(top["料温"].iloc[0]) == best, top.to_dict()
 
 
 def test_box_chart_filter_groups_contract():
@@ -1160,9 +1208,13 @@ def test_doe_analysis_string_factor_3levels():
     r = orchestrate(
         AnalysisRequest(task="doe_analysis", data=df, target_col="y", feature_cols=["f"])
     )
-    assert r.status in ("ok", "error"), f"doe_analysis 崩溃: {r.status}"
-    if r.status == "error":
-        assert any("无法" in m or "非数值" in m or "水平" in m for m in r.messages)
+    # 真实值断言（原为恒真断言 `status in ("ok","error")`，且 error 分支只查"含某个词"）：
+    # 3 水平字符串因子**没有**二水平对照可言 → 必须明确拒绝，并指向"先编码/转数值"这条出路。
+    assert r.status == "error", f"3 水平字符串因子应明确拒绝: {r.status} / {r.messages}"
+    blob = " ".join(r.messages)
+    assert "因子列「f」含 3 个非数值水平" in blob, r.messages
+    assert "One-Hot" in blob, r.messages
+    assert r.tables == {} or r.tables is None, "拒绝时不得给出效应表（会误导）"
 
 
 def test_anomaly_contamination_invalid_rejected():

@@ -1219,6 +1219,93 @@ def test_variance_test_detects_heterogeneity():
     assert levene_p_uneq < 0.05, f"异方差数据 Levene p 应<0.05, 实际={levene_p_uneq:.4f}"
 
 
+def test_variance_test_levene_uses_median_centering():
+    """Levene 的 `center` 口径必须是 **median**（Brown-Forsythe），不是 mean。
+
+    ## 为什么必须是 median
+
+    Levene 检验先把每组的偏差取绝对值 `|x − center|`，再对这些偏差做单因素 ANOVA。
+    `center` 取**中位数**时即 **Brown-Forsythe 检验**：中位数对**偏态/重尾**分布的
+    抵抗性远高于均值 —— 用均值中心化时，少数极端观测会把该组的偏差整体抬高，
+    使"方差不齐"被**虚假放大**（实测同一组偏态数据统计量 10.29 → 17.10，+66%）。
+    本仓结果表的标签逐字写着「Levene (中位数, 推荐)」，故口径即对外承诺。
+
+    ## 为什么需要这条用例（审查 2026-10-09 R2BD-05，P1 假绿）
+
+    既有的方向断言（等方差组 `p>0.05`、16 倍方差差组 `p<0.05`）**无法区分**
+    median 与 mean 两种口径：把 `root_cause/inference.py` 的
+    `levene(..., center="median")` 改成 `center="mean"` 后
+    （统计量 5.5145 → 12.6980、p 0.0056 → 0.0000）**202 个测试全绿**。
+    本用例改为与 `scipy.stats.levene(..., center="median")` **独立复算**对账，
+    统计量按发布的 4 位精度、p 值按 `rel=1e-12` 逐值一致 —— 口径再漂移会直接红。
+
+    ## 口径精度说明（为什么不把统计量也钉在 1e-12）
+
+    引擎的 `metadata` 只发布 `levene_p`（全精度）；统计量仅以 4 位定点**字符串**
+    出现在 `variance_tests` 表里，而本条的修法明确要求**不改 `inference.py` 的实现**
+    （不得为了让测试好转而新增 `metadata["levene_stat"]`）。故统计量按
+    "独立复算后按发布精度正确舍入"逐值钉住（`rel=1e-12` 对舍入值比较），
+    p 值承担全精度对账。
+    """
+    from smartsuite.engine.root_cause import variance_test
+
+    # 偏态分组（指数分布）—— median 与 mean 口径在此**可分辨**（见下断言）
+    rng = np.random.default_rng(20261009)
+    g_a = rng.exponential(scale=1.0, size=30)
+    g_b = rng.exponential(scale=3.0, size=30) + 5.0
+    frame = pd.DataFrame(
+        {
+            "group": ["A"] * len(g_a) + ["B"] * len(g_b),
+            "val": np.concatenate([g_a, g_b]),
+        }
+    )
+    ref_median = sp_stats.levene(g_a, g_b, center="median")
+    ref_mean = sp_stats.levene(g_a, g_b, center="mean")
+
+    # 夹具自检（防空过/假绿）：这两种口径在本数据上必须**显著不同** ——
+    # 若有人把数据换成对称分布，这条会红并提示"钉子已失去判别力"。
+    assert ref_mean.statistic > ref_median.statistic * 1.5, (
+        f"夹具失去判别力：median 统计量={ref_median.statistic}、"
+        f"mean 统计量={ref_mean.statistic}（应相差 >50%）"
+    )
+    assert ref_mean.pvalue < ref_median.pvalue / 2.0, (
+        f"夹具失去判别力：median p={ref_median.pvalue}、mean p={ref_mean.pvalue}"
+    )
+    # 两种口径的**判决方向**相同（都判"方差不齐"）—— 这正是既有方向断言恒绿的原因
+    assert ref_median.pvalue < 0.05 and ref_mean.pvalue < 0.05
+
+    result = variance_test(
+        AnalysisRequest(
+            task="variance_test",
+            data=frame,
+            target_col="val",
+            feature_cols=["group"],
+            params={"group_col": "group"},
+        )
+    )
+    assert result.status == "ok", result.messages
+
+    # ① p 值：与 scipy 的 median 口径独立复算**逐值一致**（全精度）
+    engine_p = float(result.metadata["levene_p"])
+    assert engine_p == pytest.approx(ref_median.pvalue, rel=1e-12), (
+        f"引擎 Levene p={engine_p} 与 scipy(center='median')={ref_median.pvalue} 不一致"
+    )
+    # ② 且**不是** mean 口径（把"另一个可辩护口径"挡在门外）
+    assert engine_p != pytest.approx(ref_mean.pvalue, rel=1e-6), (
+        f"引擎 Levene p={engine_p} 与 scipy(center='mean')={ref_mean.pvalue} 相同 —— "
+        "口径已漂移为均值中心化（Brown-Forsythe → 经典 Levene）"
+    )
+
+    # ③ 结果表发布的统计量：独立复算后按发布精度（4 位）逐值一致
+    table = result.tables["variance_tests"]
+    shown = float(table.loc[0, "统计量"])
+    assert shown == pytest.approx(round(ref_median.statistic, 4), rel=1e-12), (
+        f"引擎 Levene 统计量={shown} 与 scipy(center='median')="
+        f"{round(ref_median.statistic, 4)} 不一致"
+    )
+    assert table.loc[0, "检验方法"].startswith("Levene"), table.loc[0, "检验方法"]
+
+
 # ── Cohen's Kappa 一致性 ──
 
 

@@ -19,11 +19,64 @@ from smartsuite.engine._guard import (
     check_tables_finite,
     clean_frame,
     clean_series,
+    degenerate_column_code,
+    degenerate_column_reason,
     degenerate_tables,
     explain_undefined_sigma,
+    first_degenerate_reason,
     non_finite_tables,
     partition_finite,
 )
+
+
+class TestDegenerateColumnReason:
+    """三级归因的**文案源**与"逐列检查"入口（契约 #5 收口新增的公开执行点）。
+
+    `degenerate_column_code`（判据）与 `degenerate_column_reason`（文案）必须同源：
+    各引擎模块只负责拼自己的后果语（"无法估计回归系数"），原因一律来自此处，
+    否则「整列为空」又会被各模块自己编成「常量列」。
+    """
+
+    def test_reason_phrases_match_the_code(self):
+        assert (
+            degenerate_column_reason(pd.Series([5.0, 5.0]), what="目标列「y」")
+            == "目标列「y」为常量列（无变异）"
+        )
+        assert (
+            degenerate_column_reason(pd.Series([np.nan, np.nan]), what="特征列「x」")
+            == "特征列「x」整列为空（没有任何有效观测）"
+        )
+        assert (
+            degenerate_column_reason(pd.Series([7.0]), what="目标列「y」")
+            == "目标列「y」有效观测不足 2 个（当前 1 个）"
+        )
+        assert degenerate_column_reason(pd.Series([1.0, 2.0])) is None
+
+    def test_reason_defaults_label_to_shuju(self):
+        assert degenerate_column_reason(pd.Series([5.0, 5.0])) == "数据为常量列（无变异）"
+
+    def test_reason_agrees_with_code_on_every_shape(self):
+        """任取一列：有 reason ⟺ 有 code（两者不得各自判一遍）。"""
+        for values in ([5.0, 5.0], [np.nan], [7.0], [1.0, 2.0], []):
+            s = pd.Series(values, dtype=float)
+            assert (degenerate_column_reason(s) is None) == (degenerate_column_code(s) is None), (
+                values
+            )
+
+    def test_first_degenerate_reason_names_the_first_offender(self):
+        frame = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 4.0, 4.0], "c": [np.nan] * 3})
+        assert first_degenerate_reason(frame, ["a", "b", "c"], label="特征列") == (
+            "特征列「b」为常量列（无变异）"
+        )
+        # 顺序敏感：a 正常 → 跳过；b 常量 → 命中（即使 c 更"空"也不越过 b）
+        assert first_degenerate_reason(frame, ["b", "c"], label="特征列") == (
+            "特征列「b」为常量列（无变异）"
+        )
+
+    def test_first_degenerate_reason_none_when_all_vary(self):
+        frame = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+        assert first_degenerate_reason(frame, ["a", "b"]) is None
+        assert first_degenerate_reason(frame, []) is None
 
 
 class TestPartitionFinite:

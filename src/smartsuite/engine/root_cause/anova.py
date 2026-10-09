@@ -13,6 +13,7 @@ from statsmodels.formula.api import ols
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Opt, Spec
 from smartsuite.core.param_specs_common import ALPHA
+from smartsuite.engine._guard import degenerate_column_code
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import shapiro_p
 from smartsuite.engine.root_cause._shared import _effect_interpretation
@@ -149,9 +150,12 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-10-09 P2-3 收口：原先只判 `nunique(dropna=True) <= 1` —— **全 NaN 列**
     # 的 nunique 为 0，于是整列为空被报成「常量列（无变异）」。那不是"没变异"，
     # 是"没有任何观测"，两者排查方向完全不同（前者去查量测分辨力，后者去查数据导入）。
-    # 归因口径与 `_guard.explain_undefined_sigma`/`check_non_constant` 统一。
+    # 归因口径与 `_guard.check_non_constant`/`explain_undefined_sigma` 统一。
+    # 发版前收尾（契约 #5）：三级判据本身也改由 `_guard.degenerate_column_code`
+    # **单一实现**产出 —— 本处不再自己写三份判据（文案保持逐字不变）。
     _tgt = req.data[req.target_col]
-    if _tgt.notna().sum() == 0:
+    _tgt_code = degenerate_column_code(_tgt)
+    if _tgt_code == "E_DATA_EMPTY_COLUMN":
         return AnalysisResult(
             task="anova",
             status="error",
@@ -160,7 +164,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                 "请检查数据导入与缺失值处理。"
             ],
         )
-    if _tgt.notna().sum() < 2:
+    if _tgt_code == "E_DATA_INSUFFICIENT_N":
         return AnalysisResult(
             task="anova",
             status="error",
@@ -168,7 +172,7 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
                 f"目标列「{req.target_col}」有效观测不足 2 个，无法做 ANOVA；请补充数据后重试。"
             ],
         )
-    if _tgt.nunique(dropna=True) <= 1:
+    if _tgt_code == "E_DATA_CONSTANT_COLUMN":
         return AnalysisResult(
             task="anova",
             status="error",

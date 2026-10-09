@@ -5,13 +5,25 @@
 第二十轮实测：**42 个任务里只有 3 个有 `PARAM_SPEC`，剩 39 个**，而计划总预算
 40 轮 —— 按"每轮手工迁一个任务"的节奏**不可能达成目标**。
 
-复盘同时找到可批量化的证据：`DEFAULT_PARAMS` 的 **114 个参数槽位里只有 83 个
-不同参数名**。高频重复：
+复盘同时找到可批量化的证据：`DEFAULT_PARAMS` 的 **125 个参数槽位里只有 91 个不同参数名**
+（数字来源 —— 新增任务/参数后请重跑这两条命令再改本行）：
+
+```python
+from collections import Counter
+
+from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+sum(len(v) for v in DEFAULT_PARAMS.values())                      # → 125（槽位）
+len({k for v in DEFAULT_PARAMS.values() for k in v})              # → 91（不同参数名）
+Counter(k for v in DEFAULT_PARAMS.values() for k in v).most_common(3)   # 下表来源
+```
+
+高频重复：
 
 | 参数 | 出现任务数 |
 |:---|---:|
 | `alpha` | **9** |
-| `group_col` | **8** |
+| `group_col` | **9** |
 | `method` / `random_state` / `ci_level` / `usl` / `lsl` / `target` | 各 3 |
 
 故把"每个任务各自重写同样字段"改为"引用共享声明"：

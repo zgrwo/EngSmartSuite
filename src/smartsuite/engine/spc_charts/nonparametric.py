@@ -11,7 +11,7 @@ from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Opt, Spec
 from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import round_for_display
+from smartsuite.engine._utils import disp, round_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -185,21 +185,24 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         violations = sorted(set(list(np.where(values > ucl)[0]) + list(np.where(values < lcl)[0])))
         side_note = f"双侧控制限 (拟合={best_name})"
 
+    # 控制限与"距中位数"都带**数据量纲** → 共享展示格式化器 `disp`
+    # （审查 2026-10-09 C-1：×1e-9 时本段写成 `UCL=0.0000 / LCL=0.0000`，
+    # 而同一结果的 `control_limits` 表是 `1.004000e-08` —— 两套口径自相矛盾）
     limit_parts = []
     if ucl is not None:
-        limit_parts.append(f"UCL={ucl:.4f}")
+        limit_parts.append(f"UCL={disp(ucl)}")
     if lcl is not None:
-        limit_parts.append(f"LCL={lcl:.4f}")
+        limit_parts.append(f"LCL={disp(lcl)}")
     limit_label = " / ".join(limit_parts) if limit_parts else "N/A"
 
-    # 偏度评估
+    # 偏度评估（偏度无量纲 → 保留 `:.2f`；两个"距中位数"带量纲 → `disp`）
     skew_val = float(data.skew())
     if abs(skew_val) > 0.5:
         asym_parts = [f"数据偏度={skew_val:.2f}({'右偏' if skew_val > 0 else '左偏'})"]
         if ucl is not None:
-            asym_parts.append(f"上限距中位数={ucl - cl:.3f}")
+            asym_parts.append(f"上限距中位数={disp(ucl - cl, 3)}")
         if lcl is not None:
-            asym_parts.append(f"下限距中位数={cl - lcl:.3f}")
+            asym_parts.append(f"下限距中位数={disp(cl - lcl, 3)}")
         asym_note = "，".join(asym_parts)
     else:
         asym_note = f"数据近似对称(偏度={skew_val:.2f})"
@@ -236,7 +239,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         color=PALETTE["control"]["primary"],
         linestyle="--",
         linewidth=2,
-        label=f"CL (中位数)={cl:.4f}",
+        label=f"CL (中位数)={disp(cl)}",
     )
 
     if ucl is not None:
@@ -245,7 +248,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             color=PALETTE["control"]["primary"],
             linestyle="--",
             linewidth=1.5,
-            label=f"UCL (P99.865)={ucl:.4f}",
+            label=f"UCL (P99.865)={disp(ucl)}",
         )
         if ucl_2s is not None:
             ax.axhline(
@@ -273,7 +276,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             color=PALETTE["control"]["primary"],
             linestyle="--",
             linewidth=1.5,
-            label=f"LCL (P0.135)={lcl:.4f}",
+            label=f"LCL (P0.135)={disp(lcl)}",
         )
         if lcl_2s is not None:
             ax.axhline(
@@ -302,7 +305,8 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     # 契约 #16：回退发生时**图表标题也必须标注**（用户看的是图，不看 messages）
     _title_mark = "  ⚠ 控制限=经验分位数（PPF 不可用）" if _ppf_fallbacks else ""
     ax.set_title(
-        f"非参数控制图 — {req.target_col} ({side_note}){_title_mark}\nCL={cl:.4f} | {limit_label}",
+        f"非参数控制图 — {req.target_col} ({side_note}){_title_mark}\n"
+        f"CL={disp(cl)} | {limit_label}",
         fontsize=10,
     )
     ax.legend(fontsize=7.5, loc="upper right", ncol=2)
@@ -311,11 +315,11 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
     # ── 汇总 ──
     n_violations = len(violations)
     is_stable = n_violations == 0
-    ucl_str = f"{ucl:.4f}" if ucl is not None else "N/A"
-    lcl_str = f"{lcl:.4f}" if lcl is not None else "N/A"
+    ucl_str = disp(ucl) if ucl is not None else "N/A"
+    lcl_str = disp(lcl) if lcl is not None else "N/A"
     summary = (
         f"非参数控制图({side_note}): {'过程稳定 ✓' if is_stable else f'{n_violations} 个点违规'}。"
-        f"CL(P50)={cl:.4f}, UCL={ucl_str}, LCL={lcl_str}。{asym_note}。"
+        f"CL(P50)={disp(cl)}, UCL={ucl_str}, LCL={lcl_str}。{asym_note}。"
     )
 
     # ── 控制限表（去重列表确保统计量与值始终同步）──

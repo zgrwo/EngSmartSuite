@@ -17,7 +17,7 @@ from smartsuite.engine._guard import (
     partition_finite,
 )
 from smartsuite.engine._palette import PALETTE
-from smartsuite.engine._utils import _adjust_xlabels
+from smartsuite.engine._utils import _adjust_xlabels, disp
 from smartsuite.engine.spc_charts._shared import _natural_sort_key
 from smartsuite.engine.spc_charts.we_rules import (
     _we_rules_r,
@@ -376,21 +376,23 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         color=PALETTE["control"]["primary"],
         linestyle="--",
         linewidth=1.5,
-        label=f"CL={xbar_bar:.4f}",
+        # 图内文本走共享展示格式化器（审查 2026-10-09 C-1/R2BD-06）：
+        # 原 `:.4f` 在 ×1e-9 下把图例写成 `CL=0.0000`，而表内数值列已是科学计数。
+        label=f"CL={disp(xbar_bar)}",
     )
     ax1.axhline(
         ucl_x,
         color=PALETTE["control"]["primary"],
         linestyle="--",
         linewidth=1.2,
-        label=f"UCL={ucl_x:.4f}",
+        label=f"UCL={disp(ucl_x)}",
     )
     ax1.axhline(
         lcl_x,
         color=PALETTE["control"]["primary"],
         linestyle="--",
         linewidth=1.2,
-        label=f"LCL={lcl_x:.4f}",
+        label=f"LCL={disp(lcl_x)}",
     )
     ax1.axhline(
         xbar_bar + 2 * sigma_xbar,
@@ -618,21 +620,21 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             color=PALETTE["control"]["primary"],
             linestyle="--",
             linewidth=1.5,
-            label=f"CL={lower_cl:.4f}",
+            label=f"CL={disp(lower_cl)}",
         )
         ax2.axhline(
             lower_ucl,
             color=PALETTE["control"]["primary"],
             linestyle="--",
             linewidth=1.2,
-            label=f"UCL={lower_ucl:.4f}",
+            label=f"UCL={disp(lower_ucl)}",
         )
         ax2.axhline(
             lower_lcl,
             color=PALETTE["control"]["primary"],
             linestyle="--",
             linewidth=1.2,
-            label=f"LCL={lower_lcl:.4f}",
+            label=f"LCL={disp(lower_lcl)}",
         )
 
         # ── 分组独立散度控制限 ──
@@ -800,23 +802,26 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     elif len(multi_data) > 0:
         lower_stats_name = "R"
 
+    # 控制限表：字符串单元格已由本函数预格式化，Web 的 `round_for_display`
+    # 不会二次介入 → 必须在此就走量纲感知格式化（审查 2026-10-09 C-1：
+    # ×1e-9 时 X-bar 行 5 格全 `0.0000`，而同一列未缩放时是 `200.1392`）。
     limits_rows = [
         {
             "统计量": "X-bar",
-            "CL": f"{xbar_bar:.4f}",
-            "UCL": f"{ucl_x:.4f}",
-            "LCL": f"{lcl_x:.4f}",
-            "1σ上限": f"{xbar_bar + sigma_xbar:.4f}",
-            "1σ下限": f"{xbar_bar - sigma_xbar:.4f}",
+            "CL": disp(xbar_bar),
+            "UCL": disp(ucl_x),
+            "LCL": disp(lcl_x),
+            "1σ上限": disp(xbar_bar + sigma_xbar),
+            "1σ下限": disp(xbar_bar - sigma_xbar),
         }
     ]
     if lower_stats_name != "—":
         limits_rows.append(
             {
                 "统计量": lower_stats_name,
-                "CL": f"{lower_cl:.4f}",
-                "UCL": f"{lower_ucl:.4f}",
-                "LCL": f"{lower_lcl:.4f}",
+                "CL": disp(lower_cl),
+                "UCL": disp(lower_ucl),
+                "LCL": disp(lower_lcl),
                 "1σ上限": "—",
                 "1σ下限": "—",
             }
@@ -888,7 +893,11 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
             else pd.DataFrame({"状态": ["未检测到违规"]}),
         },
         figures=[fig],
-        summary=f"{stability_summary}。X-bar CL={xbar_bar:.4f}, UCL={ucl_x:.4f}, LCL={lcl_x:.4f}",
+        # 摘要的控制限带数据量纲 → `disp`（审查 2026-10-09 C-1：
+        # 原 `:.4f` 在 ×1e-9 下写成 `CL=0.0000, UCL=0.0000, LCL=0.0000`）
+        summary=(
+            f"{stability_summary}。X-bar CL={disp(xbar_bar)}, UCL={disp(ucl_x)}, LCL={disp(lcl_x)}"
+        ),
         messages=_boundary.messages() + messages,
         metadata=metadata,
     )

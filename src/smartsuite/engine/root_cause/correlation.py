@@ -18,7 +18,13 @@ from smartsuite.engine._constants import (
     SIG_HIGH,
     SIG_MODERATE,
 )
-from smartsuite.engine._guard import BoundaryReport, clean_frame
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    clean_frame,
+    degenerate_column_code,
+    degenerate_column_reason,
+    first_degenerate_reason,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.root_cause._shared import _correlation_ci, _effect_size_label
@@ -133,7 +139,11 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         for c2 in cols:
             # 常量列防护：nunique<=1 时相关性/检验无定义，直接 NaN（与其他函数一致，
             # 避免 pearsonr/spearmanr/kendalltau 返回 NaN 后混入校正矩阵）
-            if frame[c1].nunique(dropna=True) <= 1 or frame[c2].nunique(dropna=True) <= 1:
+            # 收尾轮（契约 #5）：判据改走 `_guard` 单一实现（等价改写，不改变矩阵结果）
+            if (
+                degenerate_column_code(frame[c1]) is not None
+                or degenerate_column_code(frame[c2]) is not None
+            ):
                 pmat.loc[c1, c2] = np.nan
                 continue
             # 审查 2026-09-22 发现 4：pandas `.corr()` 对 ±Inf 按缺失成对剔除，
@@ -196,13 +206,20 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     if pd.isna(top_value):
         # 审查 2026-08-19 #2.6/#3.4：原消息一律指向目标列，但常量特征列
         # （或有效样本不足）同样会导致 top_value=NaN，消息须指向真实原因
-        const_cols = [c for c in cols if c != req.target_col and frame[c].nunique(dropna=True) <= 1]
         # Round-2 #A2m：目标列本身为常量时消息应指向目标列而非误称"特征列"
-        target_const = frame[req.target_col].nunique(dropna=True) <= 1
-        if const_cols and not target_const:
+        # 收尾轮（契约 #5）：特征列与目标列的**原因**一律取自 `_guard` 三级归因 ——
+        # 原先手写 `nunique(dropna=True) <= 1` 会把「整列为空」也说成"常量列"。
+        _feat_reason = first_degenerate_reason(
+            frame, [c for c in cols if c != req.target_col], label="特征列"
+        )
+        _target_code = degenerate_column_code(frame[req.target_col])
+        if _feat_reason is not None and _target_code is None:
+            msg = f"{_feat_reason}，无法计算相关性分析。请移除该列或检查数据。"
+        elif _target_code in ("E_DATA_EMPTY_COLUMN", "E_DATA_INSUFFICIENT_N"):
+            # 空列 / 单观测此前被误报为"方差为零（常量列）"——按真实原因说明
             msg = (
-                f"特征列「{const_cols[0]}」为常量列（无变异），无法计算相关性分析。"
-                f"请移除该列或检查数据。"
+                f"{degenerate_column_reason(frame[req.target_col], what=f'目标列「{req.target_col}」')}"
+                f"，无法计算相关性分析。"
             )
         else:
             msg = (

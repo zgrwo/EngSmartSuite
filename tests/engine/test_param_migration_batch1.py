@@ -181,9 +181,17 @@ class TestBehaviourPreserved:
         兼容，行为与迁移前一致。
         """
         r = _via_orchestrator("variance_test", _numeric(), {"alpha": 0.05})
-        assert r.status in ("ok", "error"), r.status
-        # 只要不因"分组列缺失"而崩，即说明回落路径完好
-        assert not any("Traceback" in m for m in r.messages)
+        # 真实值断言（原为恒真断言 `status in ("ok","error")` + "不含 Traceback"）：
+        # 回落路径必须**真的按 g 分了 2 组**，并给出两个方差齐性检验的 p 值。
+        assert r.status == "ok", r.messages
+        assert r.metadata["n_groups"] == 2, r.metadata
+        for key in ("levene_p", "bartlett_p"):
+            p = float(r.metadata[key])
+            assert 0.0 <= p <= 1.0, f"{key}={p} 不在 [0,1]"
+        # 与显式给出 group_col 的口径**逐值一致**（回落不得改变分组方式）
+        explicit = _via_orchestrator("variance_test", _numeric(), {"alpha": 0.05, "group_col": "g"})
+        assert explicit.metadata["levene_p"] == pytest.approx(r.metadata["levene_p"], rel=1e-12)
+        assert explicit.metadata["bartlett_p"] == pytest.approx(r.metadata["bartlett_p"], rel=1e-12)
 
 
 class TestEngineRaisesParamValidationError:

@@ -11,13 +11,16 @@
 5. 用户手册记录的关键数值是否与实际输出一致
 """
 
+import json
 import os
+import re
 import sys
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 np.random.seed(42)
 
 from smartsuite.core.contracts import AnalysisRequest
@@ -78,6 +81,103 @@ MANUAL_EXPECTATIONS = {
 #: 现分母取自**登记条目数常量**，不随实际跑通的任务数变化；未产出可核对结果的
 #: 登记任务直接计为失败（见下方 `status_a != "ok"` 分支）。
 MANUAL_CHECKS_TOTAL = len(MANUAL_EXPECTATIONS)
+
+# ── 手册覆盖度报告（审查 2026-10-09 G-7）──────────────────────────────────────
+#
+# 问题：本门禁在 `quality.yml` 里的 job 名是「手册数值一致性」，但它只校验
+# `MANUAL_EXPECTATIONS` 登记的 **11/42** 个任务；`process_capability` 不在其中
+# —— 实测把手册 §7.5 的 `Cp 1.279` 改成 `1.100` 后本脚本仍 `*** ALL PASSED ***`
+# / exit 0（真实漂移由 `verify_manual_claims` 兜住，故定级 P2 而非 P1）。
+# 分母本身守恒（不是"失败让通过率变好看"），问题是**覆盖面被 job 名高估**。
+#
+# 处置：① 输出与 job 名一律写实（"登记 N 项 / 手册含数值结果的任务 M 项"）；
+#      ② 登记表**只增不减**（`MANUAL_REGISTRY_FLOOR`，防有人删条目把门禁调松）；
+#      ③ 登记项必须真的出现在手册"含数值结果"的任务节里（防登记到不存在的节）。
+MANUAL_EXPECTATIONS_COUNT = len(MANUAL_EXPECTATIONS)
+
+#: 登记表条数下限（**只准增加**）。删掉一条登记即 FAIL —— 否则"门禁变松"无声无息。
+MANUAL_REGISTRY_FLOOR = 11
+
+#: 手册中"含数值结果"的任务节数下限（实测 28/42，2026-10-09）。
+#: 低于此值说明手册被大幅删减（或检测口径失效），两种情况都该人工复核。
+MANUAL_SECTION_FLOOR = 28
+
+#: 判定"含数值结果"的口径（与 CLAIM/锚点门禁同一思路：只认**具体数值**）：
+#:   · 表格行：≥2 列且某个非首列单元格含 `数字.两位以上小数`；
+#:   · 列表/散文行：含 `数字.三位以上小数`（两位的常出现在章节编号/参数说明里）。
+_MANUAL_TASK_HEADING_RE = re.compile(r"^###\s+\d+(?:\.\d+)*\s*(.*)$", re.MULTILINE)
+_MANUAL_ANY_HEADING_RE = re.compile(r"^#{2,3}\s", re.MULTILINE)
+_MANUAL_TASK_NAME_RE = re.compile(r"`([a-z0-9_]+)`")
+_MANUAL_DEC2_RE = re.compile(r"\d+\.\d{2,}")
+_MANUAL_DEC3_RE = re.compile(r"\d+\.\d{3,}")
+#: 这些小节标题下的数字不算"数值结果"（解读/备注/参数说明里的数字是示例或散文）
+_MANUAL_NON_RESULT_HINTS = ("解读", "备注", "注意", "提示", "参数选择", "示例图片")
+
+#: 登记的检查项中**其判据不是手册里写出的数值**的那些（键 → 理由）。
+#:
+#: 这类登记项对不上"手册含数值结果的任务节"是**预期**的：它们校验的是判定/口径，
+#: 不是手册数值。分开登记是为了让"登记项 ⊆ 手册含数值节"这条断言保持严格
+#: —— 其余登记项若能对不上，说明登记到了一个不会产出可核对结果的位置（静默空转）。
+MANUAL_CHECKS_WITHOUT_MANUAL_NUMERIC: dict[str, str] = {
+    "outlier_consensus": (
+        "判据是**高置信比例落在 1–10% 区间**（统计口径校验），不是手册某处写死的"
+        "数值；§7.9 手册节为图表+方法说明，无 `≥0.01` 精度的结果值可核对"
+    ),
+}
+
+
+def _manual_task_sections(manual_dir) -> dict[str, str]:
+    """`### N.M 名称 (\\`task\\`)` 小节 → {任务名: 小节正文}（只收注册任务）。"""
+    from pathlib import Path as _Path
+
+    sections: dict[str, str] = {}
+    for path in sorted(_Path(manual_dir).glob("[0-9]*.md")):
+        text = path.read_text(encoding="utf-8")
+        marks = list(_MANUAL_TASK_HEADING_RE.finditer(text))
+        for i, mark in enumerate(marks):
+            end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+            nxt = _MANUAL_ANY_HEADING_RE.search(text, mark.end())
+            if nxt:
+                end = min(end, nxt.start())
+            for task in _MANUAL_TASK_NAME_RE.findall(mark.group(1)):
+                if task in TASK_REGISTRY:
+                    sections[task] = text[mark.start() : end]
+    return sections
+
+
+def _manual_sections_with_numbers(manual_dir) -> tuple[set[str], int]:
+    """返回 (含数值结果的任务名集合, 手册任务节总数)。"""
+    sections = _manual_task_sections(manual_dir)
+    with_numbers = {t for t, body in sections.items() if _manual_has_numeric_result(body)}
+    return with_numbers, len(sections)
+
+
+def _registered_manual_tasks() -> list[str]:
+    """`MANUAL_EXPECTATIONS` 登记的任务名（供包装测试核对覆盖面对不对得上手册）。"""
+    return sorted(MANUAL_EXPECTATIONS)
+
+
+def _manual_sections_total(manual_dir) -> int:
+    """手册里映射到注册任务的小节总数（供包装测试断言手册结构未变）。"""
+    return len(_manual_task_sections(manual_dir))
+
+
+def _manual_has_numeric_result(body: str) -> bool:
+    """该手册节是否含数值结果行（口径见 `_MANUAL_DEC2_RE` 注释）。"""
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("!["):  # 图片行
+            continue
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) >= 2 and any(_MANUAL_DEC2_RE.search(c) for c in cells[1:]):
+                return True
+        elif _MANUAL_DEC3_RE.search(line) and not any(
+            hint in line for hint in _MANUAL_NON_RESULT_HINTS
+        ):
+            return True
+    return False
+
 
 #: 允许 `status != "ok"` 的任务（键 → 理由）。**默认空**：42 个任务在本数据集
 #: （`tests/data/injection_process.xlsx`，seed=42）上必须全部 `status=ok` —— 与
@@ -445,13 +545,52 @@ print(f"  未登记的非 ok 任务: {task_not_ok}  ← 必须为 0（见 ALLOWE
 print(f"  status 不一致: {status_mismatch}")
 print(f"  tables 不一致: {tables_mismatch}")
 print(f"  figures 不一致: {figs_mismatch}")
-manual_msg = (
+
+# ── 手册覆盖度（审查 2026-10-09 G-7）──────────────────────────────────────────
+# job 名曾写作"手册数值一致性"，实际只覆盖登记表里的 11 个任务 ⇒ 覆盖面被高估。
+# 现如实报告：登记项 / 手册含数值结果的任务节 / 全部任务，并把"登记表只增不减"
+# 与"手册不被大幅删减"两条变成退出码的一部分（不达标即 FAIL，而不是只打印）。
+manual_with_numbers, manual_sections_total = _manual_sections_with_numbers(
+    os.path.join(PROJECT_ROOT, "docs", "user-manual")
+)
+manual_cov_problems: list[str] = []
+if MANUAL_EXPECTATIONS_COUNT < MANUAL_REGISTRY_FLOOR:
+    manual_cov_problems.append(
+        f"登记表缩水：{MANUAL_EXPECTATIONS_COUNT} < 下限 {MANUAL_REGISTRY_FLOOR}"
+        f"（MANUAL_EXPECTATIONS 只准增加；删除登记项 = 把门禁调松）"
+    )
+if len(manual_with_numbers) < MANUAL_SECTION_FLOOR:
+    manual_cov_problems.append(
+        f"手册含数值结果的任务节 {len(manual_with_numbers)} < 下限 {MANUAL_SECTION_FLOOR}"
+        f"（手册被删减，或数值结果检测口径失效）"
+    )
+not_in_manual = sorted(
+    set(MANUAL_EXPECTATIONS) - manual_with_numbers - set(MANUAL_CHECKS_WITHOUT_MANUAL_NUMERIC)
+)
+if not_in_manual:
+    manual_cov_problems.append(
+        f"登记项在手册中找不到含数值结果的任务节：{not_in_manual}"
+        f"（登记到了不存在的节，该检查会静默空转；确属「判据不是手册数值」的，"
+        f"请登记进 MANUAL_CHECKS_WITHOUT_MANUAL_NUMERIC 并写明理由）"
+    )
+
+print(
     f"  用户手册验证: {manual_checks_passed}/{MANUAL_CHECKS_TOTAL} passed"
     f"（登记条目数常量，分母守恒）"
 )
+print(
+    f"  手册覆盖度（G-7）: 登记 {MANUAL_EXPECTATIONS_COUNT} 项 / "
+    f"手册含数值结果的任务节 {len(manual_with_numbers)} 个 / "
+    f"手册任务节 {manual_sections_total} 个 / TASK_REGISTRY {len(TASK_REGISTRY)} 个"
+)
+print(
+    "    ↳ 本门禁的名称是「手册数值一致性」，但**只校验登记表内的任务**；"
+    "未登记任务的手册漂移由 verify_manual_claims.py（38 条 CLAIM）承担"
+)
 if manual_failed:
-    manual_msg += f"（{manual_failed} 项失败）"
-print(manual_msg)
+    print(f"    ↳ 登记项失败 {manual_failed} 项")
+for prob in manual_cov_problems:
+    print(f"    ↳ [FAIL] {prob}")
 print()
 
 if issues:
@@ -462,12 +601,58 @@ else:
     print("  *** ALL PASSED ***")
 print("=" * 70)
 
+# ── 机器可读报告（审查 2026-10-09 G-7）──────────────────────────────────────
+# 包装测试需要一个**稳定**的口径来断言覆盖度（而不是 grep 中文输出）。
+# `--json <path>` 写出判定所用的全部计数；路径默认落在 `logs/`（.gitignore 已忽略），
+# 因此本选项不会污染仓库。
+_json_path = None
+if "--json" in sys.argv:
+    _idx = sys.argv.index("--json")
+    _json_path = (
+        sys.argv[_idx + 1]
+        if _idx + 1 < len(sys.argv) and not sys.argv[_idx + 1].startswith("-")
+        else os.path.join(PROJECT_ROOT, "logs", "cross_consistency.json")
+    )
+    os.makedirs(os.path.dirname(_json_path), exist_ok=True)
+    with open(_json_path, "w", encoding="utf-8") as _f:
+        json.dump(
+            {
+                "tasks_total": len(results),
+                "ok": ok_count,
+                "error": error_count,
+                "task_not_ok": task_not_ok,
+                "status_mismatch": status_mismatch,
+                "tables_mismatch": tables_mismatch,
+                "figs_mismatch": figs_mismatch,
+                "manual_checks_passed": manual_checks_passed,
+                "manual_checks_total": MANUAL_CHECKS_TOTAL,
+                "manual_registered": MANUAL_EXPECTATIONS_COUNT,
+                "manual_registry_floor": MANUAL_REGISTRY_FLOOR,
+                "manual_sections_with_numbers": len(manual_with_numbers),
+                "manual_sections_total": manual_sections_total,
+                "manual_section_floor": MANUAL_SECTION_FLOOR,
+                "manual_checks_without_manual_numeric": MANUAL_CHECKS_WITHOUT_MANUAL_NUMERIC,
+                "task_registry_size": len(TASK_REGISTRY),
+                "manual_coverage_problems": manual_cov_problems,
+                "issues": issues,
+            },
+            _f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    print(f"  JSON 报告: {_json_path}")
+
 # 返回状态码（第二轮 #3：手册数值检查失败也计入退出码，不再被静默吞掉）
-# 注：CI consistency job 以 2>&1 | tail -5 调用会掩码退出码——判定依赖 issues 输出
+# 注（审查 2026-10-09 P3-13/G-13）：ci.yml 的 consistency job 现以
+# `set -o pipefail && … > log 2>&1 || { tail -80 log; exit 1; }` 调用 ——
+# `pipefail` 已在管道**之前**生效，退出码**不会**被掩码（旧注释称"会掩码退出码"
+# 是 `set -o pipefail` 引入前的遗留）。截尾只影响成功时的日志长度，失败时打全明细。
 # 审查 2026-09-01 G-5：收敛容差——表格/图表差异为 0 容差（此前 ≤5 表 / ≤3 图
 # 与"严格"验收声明矛盾，且当前基线实测 0 差异）
 # 审查 2026-10-09 P1-12：补 `task_not_ok`（任务整体 error 时 A/B 同错 → 三项 mismatch
 # 均为 0，旧口径会 `*** ALL PASSED ***` + exit 0）。
+# 审查 2026-10-09 G-7：补 `manual_cov_problems`（登记表缩水 / 手册被删减 /
+# 登记项对不上手册节 → 一律 FAIL，不只打印）。
 exit_code = (
     1
     if (
@@ -476,6 +661,7 @@ exit_code = (
         or figs_mismatch > 0
         or manual_failed > 0
         or task_not_ok > 0
+        or bool(manual_cov_problems)
     )
     else 0
 )

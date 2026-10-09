@@ -91,7 +91,7 @@ EngSmartSuite/
 ├── tests/                            # 测试（engine/services/integration/guards/crossval/scripts + data/）
 ├── benchmarks/                       # 性能基准（pytest-benchmark，非测试防线）
 ├── skills/                           # Skill 定义（领域 5 + 过程 6）
-├── templates/                        # YAML 分析模板 (45 个: 42 任务 + 2 方法变体 + 1 工作流指南)
+├── templates/                        # YAML 分析模板 (45 个: 42 任务 + 2 方法变体 + 1 工作流指南；口径见 templates/README.md)
 ├── scripts/                          # 治理脚本（验证/审计/测试路由/hooks）
 ├── run_smartsuite.bat              # 一键启动脚本（Windows）
 ├── run_smartsuite.sh               # 一键启动脚本（Linux/macOS）
