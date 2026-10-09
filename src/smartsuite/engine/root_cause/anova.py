@@ -29,8 +29,15 @@ PARAM_SPECS = {
         alpha=ALPHA,
         # `interactions` 是 0/1 开关（引擎按真值判断 `if req.params.get("interactions")`）。
         # 用 `Choice` 而非 `Integer(min=0,max=1)`：值集就是 {0,1}，语义比区间更准。
+        # ⚠️ 别名 "0"/"1" 必须保留（审查 2026-10-09 P0-2）：
+        #   前端把 `Choice` 渲染为 `<select>`，DOM 的 `option.value` **必然是字符串**，
+        #   而 `getParams` 只对 `<input>` 做 Number() 转换 → 引擎只会收到 '0'/'1'。
+        #   不登记别名则 ANOVA 在 Web 端 **100% 不可用**（四个可选交互全部报"取值无效"）。
+        #   与下方 `ss_type` 的别名是同一处置；当初只给 ss_type 加、漏了这里，
+        #   故本项由 `tests/services/test_param_spec_registry.py` 的
+        #   "面板能选中的每个值都必须被接受" 结构门禁强制（防再漏）。
         interactions=Opt(
-            Choice((0, "不含交互"), (1, "含两两交互")),
+            Choice((0, "不含交互"), (1, "含两两交互"), aliases={"0": 0, "1": 1}),
             default=0,
             label="含两两交互 (0/1)",
             hint="含交互项会显著增加模型自由度；样本量不足时结论不稳定",

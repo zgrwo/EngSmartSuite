@@ -89,6 +89,68 @@ class TestSpecIsResolvedPerTask:
         assert spec_for_task("no_such_task") is None
 
 
+class TestEveryUiSelectableValueIsAccepted:
+    """面板**能选中**的每个值，引擎都必须接受（审查 2026-10-09 P0-2）。
+
+    ## 缺陷链条
+
+    1. `params.js:403` 把 `Choice` 渲染为 `<select><option value="${val}">`；
+    2. DOM 的 `option.value` **必然是字符串**；
+    3. `getParams`（`params.js:509`）只对 `<input>` 做 `Number()` 转换，`<select>` 原样下发字符串。
+
+    于是对 `allowed` 含非字符串值的 `Choice`：前端只能发出字符串形式，
+    若该 Choice 未登记对应别名，引擎**必然拒绝** → 该任务在 Web 端 100% 不可用。
+
+    实测实例：`anova.interactions = Choice((0,"不含交互"),(1,"含两两交互"))` 无别名 →
+    四个可选交互全部报「参数「含两两交互 (0/1)」(interactions) 取值无效: '0'；可选值：0, 1」。
+    同模块的 `ss_type` 因 `aliases={"2":2,"3":3}` 而幸免（`anova.py:38-39` 的注释
+    已写明该风险，却漏了 `interactions`）—— 属「同族修复不完整」。
+
+    ## 判据选择
+
+    `Choice` 的严格语义（整数候选不匹配字符串写法）是**有意设计**，且被
+    `tests/core/test_param_spec_choice_options.py::test_normalization_unaffected_by_labels`
+    钉住（该模块注释记明「这条曾在本模块首版写反过」）。故**不得**为了让本用例通过
+    去放宽 `Choice` —— 正确做法是给缺失的 Choice 补 `aliases`（项目既有机制）。
+    """
+
+    def test_string_form_of_every_option_is_accepted(self):
+        from smartsuite.services.param_labels import derive_param_options, spec_for_task
+
+        offenders: list[str] = []
+        checked = 0
+        for key, opts in derive_param_options().items():
+            name, _, task = key.partition("@")
+            spec = spec_for_task(task)
+            if spec is None:
+                continue
+            field = spec._fields.get(name)
+            if field is None or field.validator is None:
+                continue
+            for value, _label in opts:
+                checked += 1
+                _norm, err = field.validator.check(str(value))
+                if err is not None:
+                    offenders.append(
+                        f"{key}: 前端只能发出 {str(value)!r}，引擎拒绝 —— {err.message}"
+                    )
+        assert checked > 0, "未枚举到任何选项，扫描器失效（本用例会变成恒真断言）"
+        assert not offenders, (
+            "以下选项在前端**可选中**但引擎**必然拒绝**（该任务 Web 端不可用）：\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_anova_interactions_accepts_select_string(self):
+        """`anova.interactions` 必须接受下拉框发出的 `"0"`/`"1"`（P0-2 实例）。"""
+        from smartsuite.services.param_labels import spec_for_task
+
+        spec = spec_for_task("anova")
+        assert spec is not None
+        for raw in ("0", "1"):
+            _params, err = spec.validate({"interactions": raw})
+            assert err is None, f"interactions={raw!r} 应被接受（下拉框只能发出字符串）"
+
+
 class TestRegistryShape:
     """`PARAM_SPECS` 的形状契约。"""
 
