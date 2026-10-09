@@ -38,13 +38,13 @@ const _ready = new Promise((resolve) => {
  *
  * 审查 2026-09-24（P4 步骤④，第二十八轮）：**前端的手写平行字典已全部删除**
  * （原 `PARAM_LABELS` 36 行 + `PARAM_HINTS` 11 行 + `PARAM_META` 167 行）。
- * 前提是后端派生覆盖已达 **124/124** 个默认参数槽位 —— 断言见
+ * 前提是后端派生覆盖已达 **125/125** 个默认参数槽位 —— 断言见
  * `tests/engine/test_param_migration_batch8.py::TestDerivationCoversEverySlot`。
  *
- * ⚠️ 口径（审查 2026-10-09 A-4 更正）：**124** = `DEFAULT_PARAMS` 的参数**槽位数**
+ * ⚠️ 口径（审查 2026-10-09 A-4 更正）：**125** = `DEFAULT_PARAMS` 的参数**槽位数**
  * （`sum(len(v) for v in DEFAULT_PARAMS.values())`）；而 `derive_param_labels()`
- * 目前是 **114 条标签条目**（同一标签被多任务共用时只存一条，故条目数 < 槽位数）。
- * 旧注释把 114 当成槽位数写进这里，属**两个口径混用** —— 数字由
+ * 目前是 **115 条标签条目**（同一标签被多任务共用时只存一条，故条目数 < 槽位数）。
+ * 旧注释把标签条目数当成槽位数写进这里，属**两个口径混用** —— 数字由
  * `tests/scripts/test_params_panel.py::TestParamsPanelSmoke::test_comment_counts_match_measured`
  * 钉住，改参数后必须同步本段（别处不再重复写死数字，只引用本段）。
  *
