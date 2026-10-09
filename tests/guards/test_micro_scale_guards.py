@@ -281,8 +281,63 @@ def test_shapiro_p_constant_column_returns_one_without_warning():
     assert shapiro_p(sample) == pytest.approx(float(sp_stats.shapiro(sample)[1]), rel=1e-12)
 
 
-# ── B-4: 微尺度常量判据 ────────────────────────────────────────────────────
-def test_trend_forecast_pico_scale_not_constant():
+def test_shapiro_p_non_finite_result_is_not_faked_as_normal():
+    """scipy 无法计算时不得把 NaN 伪造成 `1.0`（审查 2026-10-09 P0-3）。
+
+    `1.0` 的语义是「无方差 → 不拒绝正态」；把「无法计算（Σy² 溢出）」也映射成 1.0，
+    会让**强非正态**数据被判「满足正态性」—— 判决随量级翻转（1e152 非正态、
+    1e153 正态），用户据此免做数据变换。正确语义：无法计算 → `NaN`（不可判定），
+    由调用方显式处置（不得伪造 0.0/1.0，见 skills/smartsuite-dev.md 陷阱 9 规则 2）。
+    """
+    rng = np.random.default_rng(11)
+    skewed = rng.exponential(scale=4.0, size=200) + 1.0  # 强右偏，绝非正态
+
+    p_macro = shapiro_p(pd.Series(skewed))
+    assert np.isfinite(p_macro) and p_macro < 0.01, f"前置：常规量级应判强非正态，实际 {p_macro}"
+
+    p_huge = shapiro_p(pd.Series(skewed * 1e155))
+    assert not np.isfinite(p_huge), (
+        f"1e155 量级下 scipy 返回 NaN（Σy² 溢出），shapiro_p 不得返回 {p_huge!r}"
+    )
+
+
+@pytest.mark.parametrize("bad", [np.inf, -np.inf, np.nan])
+def test_shapiro_p_non_finite_input_is_undetermined(bad):
+    """含 ±Inf/NaN 的数据无法判定正态性，不得回落到「正态」。"""
+    assert not np.isfinite(shapiro_p(pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, bad])))
+
+
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning")
+def test_normality_check_does_not_fake_normal_at_overflow_scale():
+    """端到端：同一强右偏数据放大到 1e155 后，不得改口说「满足正态性」。
+
+    ⚠️ 必须显式放宽 RuntimeWarning（同本文件 `test_hedges_g_zero_variance_warns_not_silent`
+    的处置）：`pyproject.toml` 的 `filterwarnings = ["error", ...]` 只作用于 pytest，
+    生产（Web/CLI）不会把 numpy 的 `invalid value encountered` 升为异常。不加这两行时
+    本用例会**空过** —— 实测同一输入在 pytest 下走的是「未归类的异常」分支
+    （status=error、summary 为空），于是"不得声称正态"的断言恒真。这本身就是
+    P0-6 同一条假绿通道，故此处显式声明为生产口径。
+    """
+    rng = np.random.default_rng(11)
+    skewed = rng.exponential(scale=4.0, size=200) + 1.0
+
+    def run(scale):
+        df = pd.DataFrame({"v": skewed * scale})
+        return orchestrate(
+            AnalysisRequest(
+                task="normality_check", data=df, target_col="v", feature_cols=[], params={}
+            )
+        )
+
+    small = run(1.0)
+    huge = run(1e155)
+    assert small.status == "ok" and "0/1 列满足正态性" in small.summary, small.summary
+    assert huge.status == "ok", f"生产口径下应出结果而非异常兜底：{huge.messages}"
+    assert "1/1 列满足正态性" not in huge.summary, f"溢出量级不得被判为正态：{huge.summary}"
+
+    # ── B-4: 微尺度常量判据 ────────────────────────────────────────────────────def test_trend_forecast_pico_scale_not_constant():
     """pico 级波动不得被误判常量，且统计量随量纲同比缩放（审查 2026-09-22 发现 6）。"""
 
     def run(scale):

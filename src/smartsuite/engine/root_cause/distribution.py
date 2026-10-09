@@ -84,7 +84,14 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     # 正态性
     sw_p = shapiro_p(data) if n <= 5000 else None
     # 审查 2026-09-16 C-2：原 `if sw_p` 把合法的 p=0.0 与"未计算(None)"混同 → is not None
-    desc["Shapiro-Wilk p"] = round(sw_p, 4) if sw_p is not None else "N/A"
+    # 审查 2026-10-09 P0-3：不可计算时为 NaN，表内显式写「无法判定」而非 NaN/1.0
+    # （原实现把 NaN 归一为 1.0，与同行 `CV(%)=inf` 自相矛盾）。
+    if sw_p is None:
+        desc["Shapiro-Wilk p"] = "N/A"
+    elif not np.isfinite(sw_p):
+        desc["Shapiro-Wilk p"] = "无法判定"
+    else:
+        desc["Shapiro-Wilk p"] = round(sw_p, 4)
 
     # 审查 2026-09-21 A-1：三分布（Normal/Lognormal/Weibull）的 fit+kstest 与
     # `spc_charts/nonparametric.py` 的同名段落重复。**未合并**的原因：两处产出结构不同
@@ -246,7 +253,9 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             )
             continue
 
-        # 常量/退化输入由 shapiro_p 显式短路（含 NaN 归一），跨 scipy 版本确定性
+        # 常量/退化输入由 shapiro_p 显式短路（零极差 → 1.0）；
+        # **不可计算时返回 NaN**（含 ±Inf/量级溢出），由下方判决显式处置
+        # —— 审查 2026-10-09 P0-3：原实现把 NaN 归一为 1.0，使强非正态数据被判「正态 ✓」。
         sw_p = shapiro_p(d) if n <= 5000 else None
         # Anderson-Darling (更稳健的大样本检验)
         # scipy >= 1.16: method="interpolate" 返回 SignificanceResult (statistic + pvalue)
@@ -281,17 +290,28 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             normality = "正态 ✓"
             recommendation = "无需变换"
         else:
-            normality = f"非正态 (S-W p={sw_p:.4f})" if sw_p is not None else "—"
-            if skew > 1.5:
-                recommendation = "Box-Cox (右偏严重)" if (d > 0).all() else "Yeo-Johnson (右偏严重)"
-            elif skew > 0.5:
-                recommendation = "对数变换 log(x)" if (d > 0).all() else "平方根变换 √(x+const)"
-            elif skew < -1.5:
-                recommendation = "平方变换 x²"
-            elif skew < -0.5:
-                recommendation = "倒数变换 1/x" if (d > 0).all() else "反射+对数变换"
+            # 审查 2026-10-09 P0-3：「S-W 不可计算」不得被表述为「非正态」——
+            # 那是把"无法判定"当成结论（用户会据此做无谓的变换，或反而不查真因）。
+            if sw_p is None:
+                normality = "—"
+                recommendation = "—"
+            elif not np.isfinite(sw_p):
+                normality = "无法判定 (S-W 不可计算)"
+                recommendation = "—（正态性无法判定：请检查非有限值或数据量级）"
             else:
-                recommendation = "Box-Cox / Yeo-Johnson"
+                normality = f"非正态 (S-W p={sw_p:.4f})"
+                if skew > 1.5:
+                    recommendation = (
+                        "Box-Cox (右偏严重)" if (d > 0).all() else "Yeo-Johnson (右偏严重)"
+                    )
+                elif skew > 0.5:
+                    recommendation = "对数变换 log(x)" if (d > 0).all() else "平方根变换 √(x+const)"
+                elif skew < -1.5:
+                    recommendation = "平方变换 x²"
+                elif skew < -0.5:
+                    recommendation = "倒数变换 1/x" if (d > 0).all() else "反射+对数变换"
+                else:
+                    recommendation = "Box-Cox / Yeo-Johnson"
 
         if ad_stat is not None:
             if ad_p is not None:

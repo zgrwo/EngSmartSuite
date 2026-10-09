@@ -300,7 +300,13 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
     residuals = model.resid
     if len(residuals) >= 3 and len(residuals) <= 5000:
         sw_p = shapiro_p(residuals)
-        if sw_p < 0.05:
+        # 审查 2026-10-09 P0-3：`shapiro_p` 现对"不可计算"返回 NaN（原先归一为 1.0）；
+        # NaN 时不再静默 —— 明确告知无法判定，避免用户误以为已通过正态性前提。
+        if not np.isfinite(sw_p):
+            warn_msgs.append(
+                "⚠ 残差正态性检验 (Shapiro-Wilk) 无法计算（数据含非有限值或量级溢出），无法判定"
+            )
+        elif sw_p < 0.05:
             warn_msgs.append(
                 f"⚠ 残差正态性检验 (Shapiro-Wilk) p={sw_p:.4f}<0.05，"
                 "ANOVA 对正态性偏离有一定稳健性，但严重偏离可能影响结果"

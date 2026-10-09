@@ -313,6 +313,10 @@ def _normality_warning(data):
     if n < 3 or n > 5000:
         return None
     sw_p = shapiro_p(data)
+    # 审查 2026-10-09 P0-3：`shapiro_p` 现在对"不可计算"返回 NaN（原先归一为 1.0，
+    # 会把强非正态数据判成"正态 ✓"）。NaN 时不得静默 —— 明确告知无法判定。
+    if not np.isfinite(sw_p):
+        return "⚠ 正态性检验 (Shapiro-Wilk) 无法计算（数据含非有限值或量级溢出），无法判定正态性"
     if sw_p < 0.01:
         return (
             f"⚠ 正态性检验 (Shapiro-Wilk) p={sw_p:.4f}<0.01，"

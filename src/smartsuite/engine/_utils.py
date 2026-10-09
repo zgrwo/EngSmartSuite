@@ -5,6 +5,7 @@
 """
 
 import logging
+import warnings
 
 import numpy as np
 from scipy import stats as sp_stats
@@ -19,16 +20,36 @@ def shapiro_p(data) -> float:
     >=1.18 静默返回 NaN（warnings-as-errors 环境下前者会中断分析）。
     统一语义：无方差数据 W=1 → p=1.0（正态性检验不拒绝）。
 
+    ## 不可判定时返回 NaN（审查 2026-10-09 P0-3）
+
+    原实现把 scipy 的 NaN 一律归一为 `1.0`（`return 1.0 if np.isnan(p) else p`）。
+    但 `:28` 的零极差短路已经接管了"无方差"这一唯一合法场景，故该分支实际只对
+    **真实失败**生效 —— 而 scipy 在下列情形**全部返回 NaN**（实测 1.18.1）：
+    含 `NaN` / `±Inf`、`n < 3`、以及量级过大（`Σy²` 溢出，`|y| ≳ 1e154`）。
+
+    把"无法计算"伪造成 `1.0`（= 不拒绝正态）会让**强右偏**数据被判「满足正态性」，
+    且判决随量级翻转（实测同一份偏度 1.4547 的数据：1e152 判非正态、1e153 判正态），
+    用户据此免做数据变换。违反陷阱 9 规则 2「不可估计时不得伪造 0.0/1.0」。
+
     Args:
         data: 一维数值序列（n >= 3，调用方保证）
 
     Returns:
-        p 值（有限 float；NaN 归一为 1.0）
+        p 值；**不可判定时为 `NaN`** —— 由调用方显式处置（标注"无法判定"或拒绝），
+        不得静默当作"正态"。
     """
     if float(np.max(data)) == float(np.min(data)):
         return 1.0
-    p = float(sp_stats.shapiro(data)[1])
-    return 1.0 if np.isnan(p) else p
+    # 退化输入（含 ±Inf/NaN、n<3、量级溢出）会让 scipy 内部发
+    # `invalid value encountered` / `overflow encountered` RuntimeWarning 并返回 NaN。
+    # 该告警在此**是预期路径**，故就地窄静默 —— 关键收益是**行为一致**：
+    # `pyproject.toml` 的 `filterwarnings = ["error"]` 只作用于 pytest，若不静默，
+    # 同一输入在 pytest 下会变成异常、在生产下才走 NaN 分支，于是"不得伪造正态"的
+    # 断言在 CI 里空过（P0-6 同一条假绿通道）。静默不掩盖问题：结果非有限时
+    # 一律向上传播 NaN。
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return float(sp_stats.shapiro(data)[1])
 
 
 def is_positive_finite(value: float) -> bool:
