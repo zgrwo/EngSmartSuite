@@ -568,6 +568,64 @@ class Spec:
     def required_fields(self) -> list[str]:
         return [n for n, f in self._fields.items() if f.default is _MISSING]
 
+    # ── 未知键检测（审查 2026-10-09 P2-5）──
+
+    def unknown_fields(self, raw: dict[str, Any] | None) -> list[str]:
+        """`raw` 中**本 Spec 不认识**的键（拼写错误 / 不属于本任务），按字典序。
+
+        ## 为什么需要它（实测症状）
+
+        `process_capability(usll=70, lsll=30)` → `status="ok"`、`cp=None`、
+        `cpk=None`、`messages=[]` —— 用户把 `usl` 拼错，得到一个
+        「没有 Cp/Cpk 但成功」的结果，**没有任何错误或提示**。
+
+        根因：`validate()` 只沿着**自己声明的字段**遍历，`raw` 里多出来的键
+        既不报错也不进结果 —— 而 `orchestrator` 合并默认值后，这些键仍原样
+        留在 `req.params` 里，只是没人再看它们一眼。
+
+        ## 语义边界
+
+        - **不阻断校验**：本方法只做检测，`validate()` 的成功/失败判定不变
+          （严格拒绝是另一项决策，见下）。
+        - `None` 值的**已声明**键不算未知（`None` 是合法的"未提供"，见模块 docstring）。
+        - 返回**排序后**的键名，保证输出稳定、可被测试逐字断言。
+
+        ## 接入状态（截至本方法引入时）
+
+        **检测已实现、接入待定**：把结果并入用户可见的 `AnalysisResult.messages`
+        需要改 `services/orchestrator.py` 的 `orchestrate()`（那里才有 Spec 与
+        结果的交汇点），该文件不在引入本方法的那一批文件所有权内。
+        调用方式（供接入方使用）::
+
+            spec = spec_for_task(req.task)
+            if spec is not None and (note := spec.unknown_message(req.params)):
+                ...  # 追加进 result.messages（披露，而非拒绝）
+        """
+        if not raw:
+            return []
+        # 用 `key=str` 兜底：键理论上都是字符串（JSON/YAML 来源），
+        # 但混入非字符串键时 `sorted` 会抛 TypeError —— 检测方法不该自己炸。
+        return sorted((k for k in raw if k not in self._fields), key=str)
+
+    def unknown_message(self, raw: dict[str, Any] | None) -> str | None:
+        """未知键的**用户可见披露文案**（中文）；没有未知键时返回 `None`。
+
+        返回 `None`（而非空串）是刻意的：调用方可直接
+        `if (note := spec.unknown_message(params)): result.messages.append(note)`，
+        不必自己判断空值，也不会追加一条空消息。
+
+        文案里**同时**点名拼错的键与可用参数名 —— 只说"有未知参数"用户改不动，
+        列出可用名才能自我纠正（与 `_format_field_message` 同一条思路）。
+        """
+        unknown = self.unknown_fields(raw)
+        if not unknown:
+            return None
+        listed = "、".join(f"「{k}」" for k in unknown)
+        available = "、".join(self._fields)
+        return (
+            f"参数 {listed} 未被本任务使用（可能拼写有误），已忽略。本任务可用参数：{available}。"
+        )
+
     # ── 校验 ──
 
     def _check_one(

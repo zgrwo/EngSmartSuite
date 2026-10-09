@@ -116,6 +116,40 @@ class TestTasksEndpointProvidesDefaults:
         # process_capability 的 subgroup_col 默认是 ""
         assert d["params"]["process_capability"]["subgroup_col"] == ""
 
+    def test_newly_reachable_params_are_served(self, client):
+        """P2-8 修复的**用户可见效果**：这些键必须出现在下发载荷里。
+
+        面板的控件键集**就是**这里下发的 `params`（`params.js::showParams` 遍历它），
+        所以"补键"是否生效，唯一可信的判据是本端点下发的载荷 —— 光看
+        `TaskSpec.default_params` 只证明了一半。
+
+        审查 2026-10-09 P2-8：本次补齐 6 个参数（值一律 `None`＝"未指定"，与其
+        在引擎里"未提供则由数据估计/回退"的语义一致）。其余 5 个（`spc_attribute.subgroup_col`、
+        `process_capability.transform`、`anomaly_detect.contamination`、
+        `change_point.min_peak_ratio/min_segment`）**有意未补**，理由逐条登记在
+        `tests/services/test_param_spec_registry.py::TestParamReachability`。
+        """
+        d = _payload(client)
+        expected_none_keys = {
+            "spc_attribute": ["n_col"],
+            "spc_cusum": ["mu", "sigma"],
+            "spc_ewma": ["mu", "sigma"],
+            "survival_analysis": ["group_col"],
+        }
+        for task, keys in expected_none_keys.items():
+            served = d["params"][task]
+            missing = [k for k in keys if k not in served]
+            assert not missing, f"{task} 未下发 {missing} —— Web 面板不会有对应控件（P2-8 复发）"
+            assert all(served[k] is None for k in keys), (
+                f"{task} 的 {keys} 默认值应为 None（引擎按'未指定'回退），"
+                f"实际 {[(k, served[k]) for k in keys]}"
+            )
+        # `transform` 是**有意排除**的：它会被 `<select>` 强制选第一个选项（=开启 Box-Cox）
+        assert "transform" not in d["params"]["process_capability"], (
+            "process_capability.transform 不得下发：Choice 渲染的 <select> 无空选项，"
+            "下发即等于强制开启 Box-Cox（见 TestParamReachability.SPEC_ONLY 的说明）"
+        )
+
 
 class TestNoDuplicateFrontendDictionary:
     """**结构验收**：前端不得再持有自己的默认值字典。

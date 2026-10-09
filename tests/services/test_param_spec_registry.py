@@ -151,6 +151,237 @@ class TestEveryUiSelectableValueIsAccepted:
             assert err is None, f"interactions={raw!r} 应被接受（下拉框只能发出字符串）"
 
 
+class TestParamReachability:
+    """参数可达性：`Spec` 声明的东西必须**在 Web 面板上真的能设**（审查 2026-10-09 P2-8）。
+
+    ## 缺陷机制（两条平行来源）
+
+    | 面板的什么 | 来自哪里 |
+    |:---|:---|
+    | **控件键集**（渲染哪些控件） | `TaskSpec.default_params` → `/api/tasks` → `params.js::showParams` 遍历它 |
+    | **标签 / 提示 / 选项** | 引擎模块的 `Spec`（`Opt(..., label=..., hint=...)`） |
+
+    两者一旦不一致，就出现"引擎支持、`Spec` 有中文标签、面板却没有控件"的
+    **不可达参数** —— 用户无从设置，且**不报错、不失败**（属最难发现的一类缺陷）。
+
+    实测（2026-10-09 全量审查）：报告称 7 个任务 13 个参数如此（逐条列出的实为 11 个）。
+    其中 `spc_cusum` 的 `messages` 还在建议用户「通过参数 mu/sigma 指定已知受控状态的
+    参数」—— **提示去设一个 Web 上根本不存在的参数**。
+
+    ## 本轮结果（P2-8 修复的实际边界）
+
+    | 结果 | 参数 | 原因 |
+    |:---|:---|:---|
+    | ✅ 已补键（6 个） | `spc_attribute.n_col`、`spc_cusum.mu/sigma`、`spc_ewma.mu/sigma`、`survival_analysis.group_col` | 引擎侧 `None` 与"不给"逐字等价（逐个读源码 + 实跑核对） |
+    | ⛔ 仍不可达（5 个） | `spc_attribute.subgroup_col`、`process_capability.transform`、`anomaly_detect.contamination`、`change_point.min_peak_ratio/min_segment` | 补键会造出假参数 / 强制开启变换 / 破坏引擎侧 `Spec.defaults() == DEFAULT_PARAMS` 主防线 / 引擎默认值依赖样本量 —— **都需改本批所有权外的文件**，已在 `KNOWN_UNREACHABLE` 逐条登记 |
+
+    ## 判据
+
+    对每个已迁移任务断言 `set(Spec.field_names) ⊆ set(DEFAULT_PARAMS[task])`；
+    差异必须为空，或落在下面**逐条写明理由**的白名单里。
+    """
+
+    #: `Spec` 声明但 `default_params` **有意不渲染**的字段（必须逐条给理由）。
+    SPEC_ONLY: dict[tuple[str, str], str] = {
+        ("spc_attribute", "filter_groups"): (
+            "Web 运行时注入项：由前端分组筛选栏在提交前塞进 params，不是参数面板里"
+            "用户填写的字段（引擎 `attribute_chart` 直接读 `req.params.get('filter_groups')`）。"
+        ),
+        ("spc_attribute", "subgroup_col"): (
+            "**Spec 声明多余**（本轮实测）：`attribute_chart` 全文不读该键 —— 传一个"
+            "不存在的列名，结果与完全不传逐字相同。加进 `default_params` 只会造出"
+            "「面板能设、引擎不看」的假参数（与 `multi_objective.direction` 同族）。"
+            "正确修法是删除该 Spec 字段，而 `engine/spc_charts/attribute.py` 不在本批所有权内。"
+        ),
+        ("process_capability", "transform"): (
+            "**补键会造成静默的默认行为变更**（本轮实测，故有意不加）：该字段是 "
+            "`Choice('boxcox')`，前端把 Choice 渲染为 `<select>` 且**没有空选项**"
+            "（`params.js::buildParamInput` 的 options 分支）；默认值 `None` 匹配不上"
+            "任何 option 的 `selected` → 浏览器自动选第一个 → 用**真实 params.js + DOM 桩**"
+            "实测面板回读为 `{'transform': 'boxcox'}` —— Web 用户被**强制开启** Box-Cox"
+            "（规格限同步变换），既没有开关可关，也与引擎/CLI 默认（不变换）不一致。"
+            "需引擎侧改成 `Choice('', '不做变换', 'boxcox')`，或前端为 None 默认值的 "
+            "Choice 补一个空选项，之后才能补键。"
+        ),
+    }
+
+    #: 审查 P2-8 **举证清单**里尚未可达的参数（登记即承认缺口）。
+    #: 一旦补齐，本表会因「登记过期」而失败，强制移除 —— 缺口不许无声存在。
+    KNOWN_UNREACHABLE: dict[tuple[str, str], str] = {
+        ("spc_attribute", "subgroup_col"): (
+            "引擎不读该键（见 SPEC_ONLY）→ 补键会造假参数；须先由引擎侧删除 Spec 字段。"
+        ),
+        ("process_capability", "transform"): (
+            "`Choice` 渲染出的 `<select>` 无空选项 → 补键等于强制开启 Box-Cox（见 SPEC_ONLY）；"
+            "须先由引擎侧给该 Choice 补「不做变换」选项（`engine/capability.py` 不在本批所有权内）。"
+        ),
+        ("anomaly_detect", "contamination"): (
+            "`Spec` **有意不声明**它（支持 `(0,0.5]` 数值或字符串 'auto' 双形态，见"
+            "`anomaly.py:24-27`）。补键会打破 `tests/engine/test_param_migration_batch5.py`"
+            "的 `Spec.defaults() == DEFAULT_PARAMS[task]` 主防线（精确相等），"
+            "而修该防线必须先给它声明 `Spec` 字段 —— `engine/detection/anomaly.py` 不在本批所有权内。"
+        ),
+        ("change_point", "min_peak_ratio"): (
+            "同上：`change_point` 的 `Spec` 只声明 `n_changepoints`，补键会打破"
+            "`tests/engine/test_param_migration_batch3.py` 的同一条主防线；"
+            "引擎默认值 2.0 已在源码核对（`change_point.py:54`）。"
+        ),
+        ("change_point", "min_segment"): (
+            "**引擎默认值依赖样本量**：`_def_ms = min(max(10, n // 20), (n - 1) // 2)`"
+            "（`change_point.py:48`），`DEFAULT_PARAMS` 只能给静态值 —— 给 `None` 或 `''` 会让"
+            "`params.get('min_segment', _def_ms)` 命中已存在的键而返回 None/''，"
+            "在 `int()` 处报「变点检测参数格式错误」（已实测复现）；给 10 则 n=20 时"
+            "触发 `2*min_segment >= n` 直接报错。须引擎侧改为"
+            "`params.get('min_segment') or _def_ms` 才能补键。"
+        ),
+    }
+
+    #: 审查 P2-8 原文逐条举证的参数（`引擎支持、Web 面板不可达`）。
+    #: 注：报告正文写「13 个参数」，但逐条列出的只有 11 个（2+2+2+1+1+2+1）——
+    #: 本表按**逐条清单**登记，并在报告中记录该口径差异。
+    P28_EVIDENCE: tuple[tuple[str, str], ...] = (
+        ("spc_attribute", "n_col"),
+        ("spc_attribute", "subgroup_col"),
+        ("spc_cusum", "mu"),
+        ("spc_cusum", "sigma"),
+        ("spc_ewma", "mu"),
+        ("spc_ewma", "sigma"),
+        ("process_capability", "transform"),
+        ("anomaly_detect", "contamination"),
+        ("change_point", "min_peak_ratio"),
+        ("change_point", "min_segment"),
+        ("survival_analysis", "group_col"),
+    )
+
+    @staticmethod
+    def _gap(task: str) -> set[str]:
+        """某任务「Spec 声明 − 面板渲染」的字段差集（无 Spec 的任务视为空集）。"""
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+        from smartsuite.services.param_labels import spec_for_task
+
+        spec = spec_for_task(task)
+        if spec is None:
+            return set()
+        return set(spec.field_names) - set(DEFAULT_PARAMS.get(task, {}))
+
+    def test_spec_fields_are_reachable(self):
+        """**核心断言**：`Spec` 的每个字段都要在面板上有控件（白名单除外）。"""
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        offenders: list[str] = []
+        for s in TASK_SPECS:
+            for name in sorted(self._gap(s.key)):
+                if (s.key, name) not in self.SPEC_ONLY:
+                    offenders.append(f"{s.key}.{name}")
+        assert not offenders, (
+            "以下参数 `Spec` 已声明（有中文标签/提示）却不在 `default_params` 里 —— "
+            "Web 面板永远不会渲染它们的控件（用户无从设置、且不报错）：\n  "
+            + "\n  ".join(offenders)
+            + "\n请补 `TaskSpec.default_params` 键；若确属有意不渲染，"
+            "请在 `TestParamReachability.SPEC_ONLY` 登记并写明理由。"
+        )
+
+    def test_spec_only_whitelist_has_reasons_and_no_stale_entries(self):
+        """白名单必须**逐条写明理由**，且不得过期（缺口补齐后必须移除登记）。"""
+        for (task, name), reason in self.SPEC_ONLY.items():
+            assert len(reason.strip()) >= 20, f"{task}.{name} 的白名单理由过于简略: {reason!r}"
+            assert name in self._gap(task), (
+                f"白名单过期：{task}.{name} 现在已在 `default_params` 里（面板可达），"
+                "请从 SPEC_ONLY 移除该登记"
+            )
+
+    def test_p28_evidence_is_reachable_or_registered(self):
+        """审查 P2-8 举证的每个参数：要么已可达，要么在缺口表中登记。"""
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+        unreachable = [
+            (task, name)
+            for task, name in self.P28_EVIDENCE
+            if name not in DEFAULT_PARAMS.get(task, {})
+        ]
+        unregistered = [f"{t}.{n}" for t, n in unreachable if (t, n) not in self.KNOWN_UNREACHABLE]
+        assert not unregistered, (
+            f"P2-8 举证参数仍不可达且未登记原因：{unregistered} —— 补键或登记理由，二者必居其一"
+        )
+        stale = [f"{t}.{n}" for (t, n) in self.KNOWN_UNREACHABLE if n in DEFAULT_PARAMS.get(t, {})]
+        assert not stale, f"缺口登记过期（这些参数已可达，请移出 KNOWN_UNREACHABLE）：{stale}"
+
+    def test_p28_reachable_count_is_pinned(self):
+        """把「本轮补齐了 6 个」钉住 —— 数字变化必须是有意的。
+
+        为什么钉数字：若有人再往 `default_params` 里删键（或把补上的键改回去），
+        上一条用例会因"未登记"而红；但若有人**同时**在图省事地补一条登记，
+        缺口就会无声扩大。这条防止"用登记代替修复"。
+        """
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+        reachable = sorted(
+            f"{t}.{n}" for t, n in self.P28_EVIDENCE if n in DEFAULT_PARAMS.get(t, {})
+        )
+        assert len(reachable) == 6, (
+            f"P2-8 举证参数中可达数应为 6（本轮补齐 n_col / mu,sigma×2 / group_col），"
+            f"实际 {len(reachable)}：{reachable}"
+        )
+        for pinned in (
+            "spc_attribute.n_col",
+            "spc_cusum.mu",
+            "spc_cusum.sigma",
+            "spc_ewma.mu",
+            "spc_ewma.sigma",
+            "survival_analysis.group_col",
+        ):
+            assert pinned in reachable, f"{pinned} 应已可达：{reachable}"
+
+
+class TestUnknownParamDetectionOnRealSpecs:
+    """真实任务 `Spec` 上的未知键检测（审查 2026-10-09 P2-5）。
+
+    复现原文：`process_capability(usll=70, lsll=30)` → `status=ok`、`cp=None`、
+    `cpk=None`、`messages=[]`（`usl=70,lsl=30,bogus_xyz=1` 亦同）。
+
+    ⚠️ **接入待定**：把检测结果并入 `AnalysisResult.messages` 需改
+    `services/orchestrator.py`（不在本批文件所有权内）—— 本组只证明
+    "检测已实现且对真实 Spec 有效"，是否接入由主审查者决定。
+    """
+
+    def test_capability_typo_is_detected(self):
+        """原文实例：`{"usll": 70}` 必须返回 `["usll"]`。"""
+        from smartsuite.engine.capability import PARAM_SPEC
+
+        assert PARAM_SPEC.unknown_fields({"usll": 70}) == ["usll"]
+        assert PARAM_SPEC.unknown_fields({"usll": 70, "lsll": 30}) == ["lsll", "usll"]
+        assert PARAM_SPEC.unknown_fields({"usl": 70, "lsl": 30, "bogus_xyz": 1}) == ["bogus_xyz"]
+
+    def test_capability_typo_message_names_available_params(self):
+        from smartsuite.engine.capability import PARAM_SPEC
+
+        msg = PARAM_SPEC.unknown_message({"usll": 70})
+        assert msg is not None
+        assert "usll" in msg and "usl" in msg, msg
+
+    def test_no_spec_reports_its_own_defaults_as_unknown(self):
+        """**交叉自检**：任何任务的 `Spec.defaults()` 送回去都不得含未知键。
+
+        这条同时防止两类错误：`defaults()` 派生出拼接错的键名，或
+        `default_params` 与 `Spec` 之间出现新的漂移（P2-8 的同族）。
+        """
+        from smartsuite.services.param_labels import spec_for_task
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        offenders: list[str] = []
+        checked = 0
+        for s in TASK_SPECS:
+            spec = spec_for_task(s.key)
+            if spec is None:
+                continue
+            checked += 1
+            unknown = spec.unknown_fields(spec.defaults())
+            if unknown:
+                offenders.append(f"{s.key}: {unknown}")
+        assert checked >= 10, f"只检查到 {checked} 个任务 —— 扫描器可能失效（用例会变恒真）"
+        assert not offenders, f"以下任务的 Spec.defaults() 含自己都不认识的键：{offenders}"
+
+
 class TestRegistryShape:
     """`PARAM_SPECS` 的形状契约。"""
 

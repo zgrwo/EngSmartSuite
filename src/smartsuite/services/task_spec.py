@@ -322,7 +322,16 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.spc_charts.attribute:attribute_chart",
         label="计数型控制图(p/np/c/u)",
         group="过程监控",
-        default_params={"chart_type": "p", "group_col": None},
+        # 审查 2026-10-09 P2-8（参数可达性）：面板的**键集**来自本表，而标签/提示来自
+        # 引擎 `Spec`。`n_col` 已在 `attribute.PARAM_SPEC` 声明（有中文标签+提示）
+        # 却不在本表 → 控件永不渲染，用户无从指定样本量列。
+        # 引擎语义核对（`attribute.py:174` `n_col = _params.n_col`，`Opt` 默认 `None`；
+        # `if n_col and n_col in data.columns`）→ `None` 与"不给"逐字等价，实测结果一致。
+        # ⚠️ `subgroup_col` **有意不加**：`attribute_chart` 全文不读该键（传不存在的
+        # 列名结果与不传逐字相同），加了会造出"面板能设、引擎不看"的假参数。
+        # 它应由引擎侧从 `Spec` 删除（见 tests/services/test_param_spec_registry.py
+        # ::TestParamReachability.SPEC_ONLY 的登记）。
+        default_params={"chart_type": "p", "group_col": None, "n_col": None},
         raw_cat=True,
         x_optional=True,
     ),
@@ -331,7 +340,12 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.spc_charts.cusum:cusum_chart",
         label="CUSUM控制图",
         group="过程监控",
-        default_params={"k": 0.5, "h": 5.0, "group_col": None},
+        # P2-8：`mu`/`sigma` 已在 `cusum.PARAM_SPECS` 声明（默认 `None`＝"由数据估计"），
+        # 且引擎 messages 会建议用户"通过参数 mu/sigma 指定已知受控状态"——
+        # 而面板此前根本没有这两个控件（提示去设一个不存在的参数）。
+        # 引擎语义核对（`cusum.py:55` `user_mu, user_sigma = _p.mu, _p.sigma`）：
+        # `None` 与"不给"等价（实测 summary 逐字相同）。
+        default_params={"k": 0.5, "h": 5.0, "group_col": None, "mu": None, "sigma": None},
         y_only=True,
     ),
     TaskSpec(
@@ -339,7 +353,15 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.spc_charts.ewma:ewma_chart",
         label="EWMA控制图",
         group="过程监控",
-        default_params={"lam": 0.2, "L": 2.7, "group_col": None},
+        # P2-8：同 `spc_cusum` —— `mu`/`sigma` 由 `ewma.PARAM_SPECS` 声明、默认 None，
+        # 引擎读到 None 即回退到数据估计（实测 summary 逐字相同）。
+        default_params={
+            "lam": 0.2,
+            "L": 2.7,
+            "group_col": None,
+            "mu": None,
+            "sigma": None,
+        },
         y_only=True,
     ),
     TaskSpec(
@@ -354,6 +376,17 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
             "usl": None,
             "lsl": None,
             "target": None,
+            # ⚠️ P2-8：`transform` **有意不加**（尽管 `capability.PARAM_SPEC` 已声明它）。
+            # 它是 `Choice("boxcox")`，前端把 `Choice` 渲染成 `<select>` 且**不提供
+            # 空/"不变换"选项**（`params.js::buildParamInput` 的 options 分支）；
+            # `None` 默认值匹配不上任何 option 的 `selected` → 浏览器自动选**第一个**
+            # ——实测（真实 params.js + DOM 桩）：面板下发 `{"transform": "boxcox"}`，
+            # 即 Web 用户会**被强制开启** Box-Cox（规格限同步变换），既无开关可关，
+            # 又与引擎/CLI 的默认口径（不变换）不一致。
+            # 正确修法二选一（都不在本批文件所有权内）：
+            #   ① 引擎侧把该 Choice 写成 `Choice("", "不做变换", "boxcox")`；
+            #   ② `params.js` 为带 None 默认值的 Choice 补一个空选项。
+            # 见 tests/services/test_param_spec_registry.py::TestParamReachability 的登记。
             "subgroup_col": "",
             "subgroup_size": None,
         },
@@ -473,6 +506,12 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.reliability:survival_analysis",
         label="生存分析(Kaplan-Meier)",
         group="高级分析",
+        # P2-8：`group_col`（Log-rank 分组比较）此前**无任何入口** —— 引擎在
+        # `reliability.py:1296-1298` 优先读 `params.group_col`、回退 `feature_cols[1]`，
+        # 但面板不渲染该键，Web 用户无法主动指定分组列（只能靠 X 列的第 2 列碰运气）。
+        # 引擎语义核对：`params.get("group_col")` 得 `None` 时**继续走** `feature_cols[1]`
+        # 回退（实测：`group_col=None` 与不传逐字相同；传真实列名才多出 Log-rank 行）。
+        default_params={"group_col": None},
         raw_cat=True,
     ),
 )

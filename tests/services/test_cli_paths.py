@@ -58,12 +58,52 @@ def _write_yaml(tmp_path, text: str):
 # ── list 子命令 ──
 
 
+def _assert_list_count_matches_registry(out: str) -> None:
+    """P3-1 的严格口径：任务行数必须**恰好等于**注册表大小。
+
+    审查 2026-10-09 P3-1：原断言是 `out.count("\\n  - ") >= 41` ——
+
+    1. 硬编码 `41` 与**唯一基准** `len(TASK_REGISTRY)`（实测 42）不符；
+    2. `>=` 允许**漏注册一个任务**而不报错 —— 负向注入实测（裁掉 1 个任务后跑
+       `list`）：旧断言在 41 行时**通过**，新断言在 41 行时**失败**。
+       这与"引擎有、入口看不到"类缺陷同族，正是弱断言的危害。
+
+    故收敛为 `== len(TASK_REGISTRY)`（数字不再手写），并逐任务点名。
+    """
+    from smartsuite.services.orchestrator import TASK_REGISTRY
+
+    n = len(TASK_REGISTRY)
+    printed = out.count("\n  - ")
+    assert printed == n, f"应列出全部 {n} 个任务（唯一基准 len(TASK_REGISTRY)），实际 {printed} 个"
+
+
 def test_cli_list_prints_all_tasks(monkeypatch, capsys):
     """list 子命令：打印全部注册任务与中文标签（cli.py:89-94）。"""
+    from smartsuite.services.orchestrator import TASK_REGISTRY
+
     out, _ = _run_cli(monkeypatch, capsys, ["list"])
     assert "支持的分析方法" in out
     assert "correlation: 相关性分析" in out, f"应有 correlation 中文标签: {out[:500]}"
-    assert out.count("\n  - ") >= 41, "应列出全部 41 个任务"
+    _assert_list_count_matches_registry(out)
+    missing = [key for key in sorted(TASK_REGISTRY) if f"  - {key}: " not in out]
+    assert not missing, f"list 输出缺少已注册任务（漏注册不会报错？）: {missing}"
+
+
+def test_cli_list_count_guard_catches_one_missing_task(monkeypatch, capsys):
+    """守卫自测：严格口径必须能抓住"漏注册 1 个任务"（P3-1 的旧断言抓不住）。
+
+    负向注入：把注册表裁掉一个任务后跑 `list`，输出恰好少 1 行 ——
+    此时严格口径必须 `AssertionError`（若有人把它改回 `>=`，本用例会失败）。
+    """
+    total = len(cli_module.TASK_REGISTRY)
+    assert total >= 2, f"注册表过小（{total}），注入无意义"
+    monkeypatch.setattr(
+        cli_module, "TASK_REGISTRY", {k: None for k in sorted(cli_module.TASK_REGISTRY)[1:]}
+    )
+    out, _ = _run_cli(monkeypatch, capsys, ["list"])
+    assert out.count("\n  - ") == total - 1, f"注入应恰好漏 1 个任务（共 {total} 个）"
+    with pytest.raises(AssertionError, match="应列出全部"):
+        _assert_list_count_matches_registry(out)
 
 
 # ── 模板加载错误族 ──

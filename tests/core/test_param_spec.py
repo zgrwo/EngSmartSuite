@@ -379,6 +379,59 @@ class TestValidatedParams:
         assert set(ok.as_dict()) == set(_spec().field_names)
 
 
+class TestUnknownFieldDetection:
+    """未知键检测（审查 2026-10-09 P2-5：拼写错误被静默忽略）。
+
+    实测症状：`process_capability(usll=70, lsll=30)` → `status=ok`、`cp=None`、
+    `cpk=None`、`messages=[]`。用户把 `usl` 拼错，拿到一个"没有 Cp/Cpk 但成功"的
+    结果，**没有任何错误或提示**。
+
+    根因：`validate()` 只遍历**自己声明的字段**，`raw` 里多出来的键被静默丢弃
+    （`{**defaults, **req.params}` 之后它们仍原样留在 dict 里，只是没人看）。
+
+    ⚠️ 本组只锁定**检测能力**。是否把结果并入 `AnalysisResult.messages` 需要改
+    `services/orchestrator.py`（不在本批文件所有权内），由主审查者决定 ——
+    即"检测已实现、接入待定"。
+    """
+
+    def test_unknown_fields_lists_typos(self):
+        """拼错的键必须被点出来（按字典序，保证输出稳定可断言）。"""
+        assert _spec().unknown_fields({"usll": 70}) == ["usll"]
+        assert _spec().unknown_fields({"usll": 70, "lsll": 30}) == ["lsll", "usll"]
+        assert _spec().unknown_fields({"zzz": 1, "usll": 2, "model": "linear"}) == ["usll", "zzz"]
+
+    def test_known_keys_are_not_reported(self):
+        """已声明的键（含显式 `None`）不算未知 —— `None` 是合法的"未提供"。"""
+        raw = {"usl": 10, "lsl": None, "alpha": "0.05", "model": "linear", "note": "n"}
+        assert _spec().unknown_fields(raw) == []
+
+    @pytest.mark.parametrize("raw", [None, {}])
+    def test_empty_input_has_no_unknown_fields(self, raw):
+        assert _spec().unknown_fields(raw) == []
+
+    def test_unknown_message_is_chinese_and_names_the_keys(self):
+        """披露文案必须中文、点名拼错的键，并列出可用参数名（用户能自我纠正）。"""
+        msg = _spec().unknown_message({"usll": 70, "usl": 70})
+        assert msg is not None, "有未知键时必须给出披露文案"
+        assert "usll" in msg, msg
+        assert "usl" in msg, f"文案应列出可用参数名帮助纠正: {msg}"
+        assert any("\u4e00" <= ch <= "\u9fff" for ch in msg), f"文案必须含中文: {msg}"
+
+    def test_unknown_message_is_none_when_all_keys_are_known(self):
+        """全部键都认识时应返回 `None`（调用方据此决定要不要披露，避免空消息）。"""
+        assert _spec().unknown_message({"usl": 10, "model": "linear"}) is None
+        assert _spec().unknown_message({}) is None
+
+    def test_validate_success_is_unaffected_by_unknown_keys(self):
+        """**行为契约不变**：未知键仍不阻断校验（严格模式是独立开关，非本次引入）。
+
+        这条钉住"检测是旁路"这一事实 —— 免得有人以为 `validate()` 已经会拒绝拼错。
+        """
+        ok, err = _spec().validate({"usll": 70, "model": "linear"})
+        assert err is None, err
+        assert ok.usl is None, "拼错的 usll 不应被当成 usl"
+
+
 class TestIntrospection:
     """内省输出 —— 将来是五份平行字典的唯一来源，形状必须稳定。"""
 

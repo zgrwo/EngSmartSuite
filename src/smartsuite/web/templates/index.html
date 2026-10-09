@@ -77,6 +77,14 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+<!-- ⚠️ 缓存版本化的**范围**（审查 2026-10-09 P3-5，本轮只记录、不改行为）：
+     下面只有**入口**带 `?v=12`；而 ESM 子模块之间的 import（`app.js` → `./util.js`、
+     `./api.js`、`./params.js`、`./state.js`）用的是**无版本 URL**，浏览器按 URL
+     独立缓存 —— 于是下一轮只改 `params.js` 时，老用户可能继续跑旧面板
+     （`Ctrl+Shift+R` 才能刷掉；本轮无实害，因为这 5 个模块全部是新增/重写）。
+     正确修法：服务端注入构建标识（`url_for('static', filename='app.js', v=BUILD_ID)`
+     并把同一标识传播到子模块的 import URL），涉及 `web/app.py`（不在本批文件所有权内），
+     故本轮只在此登记风险。详见 logs/reports/2026-10-09-release-prep-full-review.md 的 P3-5。 -->
 <script type="module" src="/static/app.js?v=12"></script>
 </body>
 </html>
