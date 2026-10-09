@@ -70,23 +70,26 @@ class TestNonFiniteIsDisclosed:
         assert r.status == "ok"
         assert r.messages == [], f"干净数据不应有提示: {r.messages}"
 
-    def test_nan_is_also_disclosed_as_b1(self):
-        """NaN **也属 B1**，必须一并披露（契约 `boundary-contract.md` §B0–B3）。
+    def test_nan_is_handled_silently_as_missing(self):
+        """NaN 属**缺失语义**（契约 L4），静默按 `dropna` 处理，**不披露**。
 
-        ⚠️ 我首版写的是反向断言（"NaN 属缺失语义，不应披露"）→ **被契约与
-        既有用例共同证伪**：B1 的对象明示为「`NaN`、`±Inf`」两者，
-        且 `tests/engine/test_boundary_guard.py` 的
-        `test_nan_is_treated_as_non_finite` 正钉住这一点。
-        真正该修的是**文案**：它原写「±Inf 视为缺失」而计数里含 NaN，
-        "名"与"量"不符 —— 现已改为「NaN 或 ±Inf」。
+        这一段口径反复过两次，把结论钉死在这里，避免第三次返工：
+
+        - 初版（反向断言「NaN 不应披露」）被当时的契约 B1 行（明示「`NaN`、`±Inf`」）
+          证伪 → 改成「NaN 也披露且点名 NaN」；
+        - 2026-10-09 **口径裁定**：判据是"这个值是不是缺失" —— NaN 是缺失
+          （用户留空/采集失败，`dropna()` 静默处理已是全库语义），
+          ±Inf 是"看起来像数据、数值上不合法"（除零/溢出），必须披露。
+          契约遂拆为 **L4（缺失值，免披露）** 与 **B1（±Inf，必披露）** 两行，
+          本用例与 `test_boundary_guard.py::TestPartitionFinite` 一并按裁定更新。
+
+        注意"静默"仅指**不产生消息**：NaN 行仍会被剔除（与 `dropna` 一致）。
         """
         y = np.linspace(10.0, 60.0, 60).astype(float)
         y[:5] = np.nan
         r = _run(y)
         assert r.status == "ok"
-        assert any("NaN" in str(m) for m in r.messages), (
-            f"NaN 应作为 B1 披露且点名 NaN，实测 {r.messages}"
-        )
+        assert r.messages == [], f"NaN 不得产生披露（缺失语义，静默 dropna）：{r.messages}"
 
 
 class TestNoMisattribution:

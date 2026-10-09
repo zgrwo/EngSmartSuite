@@ -81,25 +81,27 @@ class BoundaryReport:
 
 
 def partition_finite(s: pd.Series) -> tuple[np.ndarray, int]:
-    """返回 (有限值掩码, 非有限值个数)。非数值列按"不可判定"报 0。
+    """返回 (有限值掩码, **±Inf 个数**)。非数值列按"不可判定"报 0。
 
     这是**唯一**允许出现 `np.isfinite` 掩码的地方（源码守卫会检查其他模块）。
 
-    ## 计数口径：`NaN` **计入**（`np.isfinite` 语义）
+    ## 计数口径（2026-10-09 口径裁定）：只计 `±Inf`，**不计 NaN**
 
-    契约依据 `boundary-contract.md` §B0–B3：
+    契约依据 `boundary-contract.md`：
 
-        | B1 | 清洗 | 可安全移除后继续 | 移除 + messages 披露**数量与列名** | `NaN`、`±Inf` |
+        | L4 | 缺失值 | 丢弃后继续 | 无需披露（与 `dropna()` 同语义） | `NaN` |
+        | B1 | 清洗 | 可安全移除后继续 | 移除 + messages 披露**数量与列名** | `±Inf` |
 
-    即 B1 的对象**同时包含 NaN 与 ±Inf**，两者都要披露数量与列名。
+    判据是**"这个值是不是缺失"**：`NaN` 是缺失（用户在 Excel 里留空、采集失败），
+    `dropna()` 静默丢弃它已是全库既有语义，再逐处弹消息只会变成噪音；
+    `±Inf` 则是"看起来像数据、其实数值上不合法"的值（除以 0、溢出），
+    用户看不到它、也想不到它，**必须**披露数量与列名。
 
-    ⚠️ 我曾在 2026-10-09 把这里改成"只计 ±Inf"，理由是"NaN 属缺失语义、
-    应由 dropna 处理"。**那是错的** —— 契约明示 B1 含 NaN，且
-    `tests/engine/test_boundary_guard.py` 有两条用例（`test_counts_non_finite` /
-    `test_nan_is_treated_as_non_finite`）正是钉住这一点。已回退。
-
-    相应地，`non_finite_detail` 的文案必须**同时提到 NaN 与 ±Inf**
-    （原文案只说"±Inf 视为缺失"，与计数不符 —— 这才是真缺陷）。
+    ⚠️ 口径沿革（两次反复，务必保留记录）：本函数最初用 `np.isfinite` 一并计数
+    （名与量不符：只报 ±Inf 却把 NaN 算进去）；2026-10-09 上半场曾改为只计 ±Inf，
+    但当时 `boundary-contract.md` 的 B1 行明示「`NaN`、`±Inf`」，遂**回退**；
+    随后契约按上述 L4/B1 重新裁定，本函数据裁定改为只计 ±Inf。
+    现在的**权威依据是契约的 L4/B1 两行**，不是本注释。
     """
     try:
         arr = s.to_numpy(dtype=float, na_value=np.nan)
@@ -107,7 +109,9 @@ def partition_finite(s: pd.Series) -> tuple[np.ndarray, int]:
         # 非数值列（object/混合）：非有限值概念不适用
         return np.ones(len(s), dtype=bool), 0
     mask = np.isfinite(arr)
-    return mask, int((~mask).sum())
+    # 掩码仍是 isfinite（NaN 需要被剔除，只是**不计入披露**）；
+    # 计数只取 ±Inf，与 `non_finite_detail` 的文案严格一致。
+    return mask, int(np.isinf(arr).sum())
 
 
 def non_finite_detail(n_dropped: int, column: str = "") -> str:
@@ -117,47 +121,45 @@ def non_finite_detail(n_dropped: int, column: str = "") -> str:
     又借 `_utils.non_finite_note` 拼一份**逐字相同**的文案 —— 两份格式独立演化，
     用户会在不同任务里看到格式不一致的同类提示。
 
-    注意 `clean_frame` 的文案是**多列/按行**语义（"含 N 行非有限值"），
+    注意 `clean_frame` 的文案是**多列/按行**语义（"含 N 行…"），
     与本函数（单列语义）刻意不同，故不合并。
     """
     where = f"「{column}」" if column else "数据"
-    # ⚠️ 文案必须与 `partition_finite` 的计数口径一致：该函数用 `np.isfinite`，
-    # **NaN 与 ±Inf 都计入**（契约 `boundary-contract.md` B1 明示两者皆属 B1）。
-    # 原文案只写「±Inf 视为缺失」，而实际数字里含 NaN → 披露的"名"与"量"不符。
-    # 2026-10-09 修正为同时点名两者。
-    return f"⚠ {where}含 {n_dropped} 个非有限值（NaN 或 ±Inf），已剔除后分析"
+    # ⚠️ 文案必须与 `partition_finite` 的计数口径一致：该函数只计 ±Inf
+    # （NaN 属缺失语义、免披露 —— 契约 L4/B1，2026-10-09 口径裁定）。
+    # 反向的历史教训同样记在这里：曾出现"只报 ±Inf 却把 NaN 算进数字里"的名量不符。
+    return f"⚠ {where}含 {n_dropped} 个 ±Inf（非有限值），已剔除后分析"
 
 
 def clean_series(
     s: pd.Series, *, column: str = "", report: BoundaryReport | None = None
 ) -> tuple[pd.Series, int]:
-    """B1 单列清洗：剔除 **NaN 与 ±Inf 两者**（`np.isfinite` 语义）。
+    """B1 单列清洗：剔除 **±Inf**（披露）与 **NaN**（静默，缺失语义）。
 
-    ⚠️ 原 docstring 写「NaN 视为缺失，交由调用方的 dropna 处理」——**与实现不符**
-    （审查 2026-10-09 P2-2）：实测 `clean_series(pd.Series([1.0, nan, 2.0, inf]))`
-    返回 `[1.0, 2.0]`、`n_dropped=2`，NaN 一并丢弃。口径以本模块顶部
-    `partition_finite` 的权威说明为准（契约 `boundary-contract.md` B1 行明示
-    B1 的清洗对象是「`NaN`、`±Inf`」）。
+    ⚠️ 两个动作的**可见性不同**，这是口径裁定的核心：
 
-    与已删除的 `engine/_utils.drop_non_finite` 语义一致；
-    本函数额外产出 `report`，使**披露**不再依赖调用方记得拼文案。
+    - `NaN` → 按 `L4 缺失值` 静默丢弃（与全库 `dropna()` 一致，不产生消息）；
+    - `±Inf` → 按 `B1 清洗` 剔除，并把**数量与列名**写进 `report`。
 
     Returns:
-        (过滤后序列, 剔除个数)
+        (过滤后序列, ±Inf 个数)
     """
-    mask, n_dropped = partition_finite(s)
-    if n_dropped and report is not None:
+    mask, n_inf = partition_finite(s)
+    if n_inf and report is not None:
         report.add(
             BoundaryIssue(
                 level="B1",
                 code="E_DATA_NON_FINITE_DROPPED",
-                detail=non_finite_detail(n_dropped, column),
+                detail=non_finite_detail(n_inf, column),
                 column=column,
             )
         )
-    if not n_dropped:
-        return s, 0
-    return s[mask], n_dropped
+    # 注意：即使 n_inf == 0 也要应用掩码 —— 此时掩码剔的是 NaN（缺失语义，静默）。
+    # 若在此提前 `return s, 0`，NaN 会留在序列里，与其"已被 dropna 语义处理"的
+    # 预期不符（全库 48 个调用点都直接使用返回的序列）。
+    if mask.all():
+        return s, n_inf
+    return s[mask], n_inf
 
 
 def clean_frame(
@@ -167,14 +169,19 @@ def clean_frame(
     report: BoundaryReport | None = None,
     drop_nan: bool = True,
 ) -> tuple[pd.DataFrame, int]:
-    """B1 多列清洗：按行剔除 cols 中任一列非有限的行。cols 须为数值列。
+    """B1 多列清洗：按行剔除 cols 中任一列 ±Inf 的行（NaN 按 `drop_nan` 决定去留）。
 
     `drop_nan=False` 时**只**剔除 ±Inf，NaN 留在原处交由调用方既有的缺失语义处理。
     为什么需要这个开关：`root_cause/correlation.py` 的 `.corr()` 用 pandas 的
     "**成对完整观测**"口径 —— 若在此按行剔除 NaN，一个因子列缺失较多就会把
     整表压成极小样本（实测把「逐因子跳过」退化为「整表样本不足」，
     见 `tests/engine/test_correlation_partial.py::test_insufficient_samples_skimmed_per_factor`）。
-    两种模式**都产出披露**，区别只在文案里点名的对象（`±Inf` 或 `NaN 或 ±Inf`）。
+
+    两种模式**都只在真的含 ±Inf 时披露**，且文案只点名 ±Inf ——
+    NaN 行的去留不影响披露（缺失语义，契约 L4）。
+
+    Returns:
+        (过滤后帧, **含 ±Inf 的行数**)
     """
     if not cols:
         return frame, 0
@@ -182,20 +189,20 @@ def clean_frame(
         arr = frame[cols].to_numpy(dtype=float, na_value=np.nan)
     except (TypeError, ValueError):
         return frame, 0
-    mask = np.isfinite(arr).all(axis=1) if drop_nan else (~np.isinf(arr)).all(axis=1)
-    n_dropped = int((~mask).sum())
-    if n_dropped and report is not None:
-        kinds = "NaN 或 ±Inf" if drop_nan else "±Inf"
+    inf_rows = np.isinf(arr).any(axis=1)
+    mask = (~np.isinf(arr)).all(axis=1) if not drop_nan else np.isfinite(arr).all(axis=1)
+    n_inf = int(inf_rows.sum())
+    if n_inf and report is not None:
         report.add(
             BoundaryIssue(
                 level="B1",
                 code="E_DATA_NON_FINITE_DROPPED",
-                detail=f"⚠ 数据含 {n_dropped} 行非有限值（{kinds}），已剔除后分析",
+                detail=f"⚠ 数据含 {n_inf} 行 ±Inf（非有限值），已剔除后分析",
             )
         )
-    if not n_dropped:
-        return frame, 0
-    return frame[mask], n_dropped
+    if mask.all():
+        return frame, n_inf
+    return frame[mask], n_inf
 
 
 def check_n(
@@ -418,7 +425,7 @@ def check_finite_param(
         return None, None
     try:
         num = float(value)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         issue = BoundaryIssue(
             level="B0",
             code="E_PARAM_NOT_NUMERIC",

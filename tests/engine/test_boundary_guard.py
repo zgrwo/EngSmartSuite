@@ -27,12 +27,24 @@ from smartsuite.engine._guard import (
 
 
 class TestPartitionFinite:
-    def test_counts_non_finite(self):
+    def test_counts_only_inf_not_nan(self):
+        """计数**只含 ±Inf**，NaN 不计（2026-10-09 口径裁定：契约 L4/B1）。
+
+        判据是"这个值是不是缺失"：NaN 是缺失（`dropna()` 静默处理已是全库语义），
+        ±Inf 是"看起来像数据、数值上不合法"（除零/溢出），必须披露数量与列名。
+        """
         s = pd.Series([1.0, np.inf, 2.0, -np.inf, np.nan, 3.0])
         mask, n = partition_finite(s)
-        # NaN 与 ±Inf 都算非有限
-        assert n == 3
+        # ±Inf 有 2 个；NaN 有 1 个但**不计入**
+        assert n == 2
+        # 掩码仍是 isfinite：NaN 仍要被剔除（只是不进披露的数字）
         assert list(mask) == [True, False, True, False, False, True]
+
+    def test_nan_only_reports_zero(self):
+        s = pd.Series([1.0, np.nan, 2.0])
+        mask, n = partition_finite(s)
+        assert n == 0
+        assert list(mask) == [True, False, True]
 
     def test_all_finite(self):
         s = pd.Series([1.0, 2.0, 3.0])
@@ -62,12 +74,25 @@ class TestCleanSeries:
         assert len(msgs) == 1
         assert "测量" in msgs[0] and "2" in msgs[0]
 
-    def test_nan_is_treated_as_non_finite(self):
-        """NaN 与 ±Inf 一并剔除（np.isfinite 语义），披露计数含 NaN。"""
+    def test_nan_is_dropped_silently(self):
+        """NaN 仍被剔除（缺失语义），但**不产生披露**、计数为 0。"""
         s = pd.Series([1.0, np.nan, 2.0])
-        out, n = clean_series(s)
-        assert n == 1
+        report = BoundaryReport()
+        out, n = clean_series(s, report=report)
+        assert out.tolist() == [1.0, 2.0], "NaN 必须仍被剔除（与 dropna 语义一致）"
+        assert n == 0
+        assert report.messages() == [], f"NaN 不得产生披露：{report.messages()}"
+
+    def test_inf_and_nan_together_counts_only_inf(self):
+        """名与量必须一致：数字只数 ±Inf，文案也只说 ±Inf。"""
+        s = pd.Series([1.0, np.nan, np.inf, 2.0])
+        report = BoundaryReport()
+        out, n = clean_series(s, column="y", report=report)
         assert out.tolist() == [1.0, 2.0]
+        assert n == 1
+        msg = report.messages()[0]
+        assert "1 个 ±Inf" in msg, msg
+        assert "NaN" not in msg, f"文案不得再点名 NaN：{msg}"
 
     def test_no_drop_no_message(self):
         report = BoundaryReport()

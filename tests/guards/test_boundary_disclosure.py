@@ -420,18 +420,20 @@ class TestMigrationIsComplete:
         for name in ("clean_series", "clean_frame", "BoundaryReport", "non_finite_detail"):
             assert hasattr(_guard, name), f"_guard 缺少 {name}"
 
-    def test_clean_series_matches_the_old_semantics(self):
-        """`clean_series` 的**行为**必须与已删除的旧实现一致（语义未变，只换了家）。
+    def test_clean_series_matches_the_ruled_semantics(self):
+        """`clean_series` 的**行为**：NaN 与 ±Inf 都剔除，但计数（=披露）只数 ±Inf。
 
-        期望值来自旧实现的契约（在删除前的测试里固定过）：
-        `NaN` 与 `±Inf` 一并视为非有限并剔除，返回 (过滤后序列, 剔除数)。
+        2026-10-09 口径裁定（契约拆为 L4 缺失值 / B1 ±Inf 两行）改变的是
+        **披露口径**，不是清洗动作 —— 两者都从返回序列里消失，
+        差别只在"报不报、报几个"：`n_dropped` 现在只数 ±Inf（本例 2），
+        NaN 静默按缺失语义丢弃。
         """
         from smartsuite.engine._guard import clean_series
 
         s = pd.Series([1.0, np.inf, -np.inf, 2.0, np.nan])
         cleaned, n_dropped = clean_series(s)
-        assert n_dropped == 3
-        assert cleaned.tolist() == [1.0, 2.0]
+        assert n_dropped == 2, "计数只数 ±Inf（NaN 免披露）"
+        assert cleaned.tolist() == [1.0, 2.0], "NaN 仍必须被剔除（dropna 语义）"
 
     def test_clean_series_no_change_keeps_same_object(self):
         """无剔除时**返回原对象**（避免调用方无意间复制大数据）。
@@ -596,7 +598,8 @@ _TASK_INPUTS: dict[str, tuple[str, list[str], dict]] = {
 }
 
 #: 披露判据词 —— 引擎的**唯一**披露文案由 `_guard.non_finite_detail` 产出
-#: （「含 N 个非有限值（NaN 或 ±Inf）」），故这里只认这两种写法。
+#: （「含 N 个 ±Inf（非有限值）」）。2026-10-09 口径裁定后 NaN 免披露（契约 L4），
+#: 故此处只认 ±Inf 一路写法；`非有限值` 作为兼容词保留。
 _DISCLOSURE_WORDS = ("非有限值", "±Inf")
 
 
