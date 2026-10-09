@@ -840,3 +840,134 @@ def test_decision_tree_max_depth_inf_no_overflow_error():
         _req("decision_tree", df, target="y", features=["x"], params={"max_depth": 3})
     )
     assert r_ok.status == "ok", r_ok.messages
+
+
+# ── 14. 非有限统计量不得被表述为确定结论（审查 2026-10-09 P0-4）──
+
+
+def _variance_frame(poison=None, scale=1.0):
+    rng = np.random.default_rng(3)
+    vals = list(rng.normal(10, 1, 40) * scale)
+    if poison is not None:
+        vals[0] = poison
+    return pd.DataFrame({"y": vals, "g": ["A"] * 20 + ["B"] * 20})
+
+
+def test_variance_test_inf_cleaned_and_disclosed_not_nan_verdict():
+    """±Inf 应被入口清洗并披露，而不是让 p 变 NaN 后写成「方差不齐」。
+
+    审查 2026-10-09 P0-4：`dropna()` 不剔除 ±Inf → `scipy.levene` 返回 NaN →
+    `"方差齐性 ✓" if lev_p >= alpha else f"方差不齐 (p={lev_p:.4f})"` 中
+    `NaN >= alpha` 恒为 False → 落进 else 分支，把**无法判定**写成确定结论
+    「方差不齐 (p=nan)」（status=ok、messages 为空）。
+    """
+    from smartsuite.services.orchestrator import orchestrate
+
+    r = orchestrate(
+        _req(
+            "variance_test",
+            _variance_frame(np.inf),
+            target="y",
+            features=["g"],
+            params={"group_col": "g"},
+        )
+    )
+    assert r.status == "ok", r.messages
+    joined = " ".join(r.messages or [])
+    assert "非有限" in joined, f"±Inf 剔除必须披露数量与列名：{r.messages}"
+    assert "nan" not in r.summary.lower(), f"结论不得带 NaN：{r.summary}"
+    verdict = r.tables["variance_tests"]["结论"].tolist()
+    assert all("nan" not in str(v).lower() for v in verdict), verdict
+
+
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning")
+def test_variance_test_overflow_scale_verdict_is_not_definitive():
+    """量级溢出使检验统计量非有限时，不得给出「方差不齐」这类确定结论。
+
+    （清洗救不了量级溢出：数据本身都是有限值，但 Σy² 溢出 → p = NaN。）
+    """
+    from smartsuite.services.orchestrator import orchestrate
+
+    r = orchestrate(
+        _req(
+            "variance_test",
+            _variance_frame(scale=1e300),
+            target="y",
+            features=["g"],
+            params={"group_col": "g"},
+        )
+    )
+    joined = r.summary + " " + " ".join(r.messages or [])
+    assert "方差不齐" not in joined, f"不可判定时不得断言方差不齐：{joined[:160]}"
+    if r.status == "ok":
+        verdict = r.tables["variance_tests"]["结论"].tolist()
+        assert all("无法判定" in str(v) for v in verdict), verdict
+
+
+def test_variance_test_group_stats_have_no_non_finite():
+    """结果表的数值列不得渗漏 inf/nan（D5 输出保洁）。"""
+    from smartsuite.services.orchestrator import orchestrate
+
+    r = orchestrate(
+        _req(
+            "variance_test",
+            _variance_frame(np.inf),
+            target="y",
+            features=["g"],
+            params={"group_col": "g"},
+        )
+    )
+    df = r.tables["group_statistics"]
+    for col in ("样本量", "均值", "标准差", "方差", "IQR"):
+        vals = pd.to_numeric(df[col], errors="coerce")
+        assert vals.notna().all(), f"{col} 含非有限/不可解析值：{df[col].tolist()}"
+
+
+# ── 15. 计数型控制图的控制限必须有限（审查 2026-10-09 P0-5）──
+
+
+def test_spc_attribute_c_chart_inf_not_silent_false_negative():
+    """c 图遇 +Inf 不得输出 `CL=inf` 并宣称「超出控制限 0/100 个点」。
+
+    审查 2026-10-09 P0-5：±Inf 穿透 `dropna()` → c̄ 被拉成 inf → CL/UCL 全 inf →
+    判据 `stat > ucl` 在 ucl=inf 时恒为 False → **假阴性**（明显的失控点被报成 0 个），
+    且 Inf 渗漏进 `control_stats` 表（实测 101 个非有限值）。
+    """
+    from smartsuite.services.orchestrator import orchestrate
+
+    rng = np.random.default_rng(42)
+    base = pd.DataFrame({"y": rng.poisson(50, 100).astype(float)})
+    poisoned = base.copy()
+    poisoned.loc[poisoned.index[0], "y"] = np.inf
+
+    r_ok = orchestrate(_req("spc_attribute", base, target="y", params={"chart_type": "c"}))
+    assert r_ok.status == "ok", r_ok.messages
+
+    r = orchestrate(_req("spc_attribute", poisoned, target="y", params={"chart_type": "c"}))
+    assert r.status == "ok", r.messages
+    joined = " ".join(r.messages or [])
+    assert "非有限" in joined, f"±Inf 剔除必须披露：{r.messages}"
+    assert "inf" not in r.summary.lower(), f"控制限不得为 inf：{r.summary}"
+    df = r.tables["control_stats"]
+    num = df.select_dtypes("number")
+    bad = int((~np.isfinite(num.to_numpy(dtype=float))).sum()) if num.size else 0
+    assert bad == 0, f"control_stats 含 {bad} 个非有限值"
+
+
+@pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
+def test_spc_attribute_overflow_scale_limits_rejected():
+    """控制限**确实**非有限时必须显式拒绝，不得给出「超限 N/M」的结论。
+
+    构造：全部取值为 `1.7e308`（单个值有限，但求和溢出为 inf）→ c̄ = inf → CL/UCL = inf。
+    ⚠️ 注意不要用 `poisson(50) * 1e300` 构造：那种数据各值都有限、求和也不溢出，
+    控制限仍是有限值（c 图的 3√c̄ 本来就不随数据线性缩放），**不是缺陷** ——
+    审查时曾把它误列为可疑项，此处记录以避免下一个审查者复检踩坑。
+    """
+    from smartsuite.services.orchestrator import orchestrate
+
+    df = pd.DataFrame({"y": [1.7e308] * 100})
+    r = orchestrate(_req("spc_attribute", df, target="y", params={"chart_type": "c"}))
+    assert r.status == "error", f"控制限非有限应显式拒绝：{r.summary[:120]}"
+    assert any("控制限" in m for m in r.messages), r.messages

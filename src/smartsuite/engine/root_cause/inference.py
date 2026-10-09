@@ -11,6 +11,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Opt, Spec
 from smartsuite.core.param_specs_common import ALPHA, CI_LEVEL, GROUP_COL
+from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, clean_frame
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import safe_float as _safe_float
 
@@ -172,7 +173,16 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
             task="variance_test", status="error", messages=["需要提供分组列 (group_col)"]
         )
 
-    sub = req.data[[req.target_col, group_col]].dropna()
+    # ── 边界处置（B1）：±Inf 必须清洗并披露 ──
+    # 审查 2026-10-09 P0-4：`dropna()` **不剔除 ±Inf**（Inf 不是 NaN），故 ±Inf 穿透后
+    # 使 `scipy.levene/bartlett` 返回 NaN。旧实现把 NaN 判决写成确定结论
+    # 「方差不齐 (p=nan)」（`NaN >= alpha` 恒为 False 落进 else 分支），
+    # 且 status=ok、messages 为空。
+    _report = BoundaryReport()
+    sub, _n_dropped = clean_frame(
+        req.data[[req.target_col, group_col]], [req.target_col], report=_report
+    )
+    sub = sub.dropna()
     groups = sub[group_col].unique()
     if len(groups) < 2:
         return AnalysisResult(task="variance_test", status="error", messages=["至少需要 2 个分组"])
@@ -208,16 +218,33 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # 判定
-    if lev_p is not None:
-        levene_result = "方差齐性 ✓" if lev_p >= alpha else f"方差不齐 (p={lev_p:.4f})"
-    else:
-        levene_result = "N/A"
-    if bart_p is not None:
-        bartlett_result = "方差齐性 ✓" if bart_p >= alpha else f"方差不齐 (p={bart_p:.4f})"
-    else:
-        bartlett_result = "N/A"
+    # 审查 2026-10-09 P0-4：统计量非有限（量级溢出等）时 `p >= alpha` 恒为 False，
+    # 旧实现会落进 else 分支把「无法判定」写成确定结论「方差不齐 (p=nan)」。
+    # 不可判定必须显式标注（陷阱 9 规则 2：不得伪造结论）。
+    def _verdict(p) -> str:
+        if p is None:
+            return "N/A"
+        if not np.isfinite(p):
+            return "无法判定（检验统计量非有限）"
+        return "方差齐性 ✓" if p >= alpha else f"方差不齐 (p={p:.4f})"
 
-    # 各组建模统计
+    levene_result = _verdict(lev_p)
+    bartlett_result = _verdict(bart_p)
+    if (lev_p is not None and not np.isfinite(lev_p)) or (
+        bart_p is not None and not np.isfinite(bart_p)
+    ):
+        _report.add(
+            BoundaryIssue(
+                level="B3",
+                code="E_NUMERIC_TEST_STAT_UNDEFINED",
+                detail=(
+                    "⚠ 方差齐性检验统计量非有限（数据量级过大导致平方和溢出），"
+                    "结论标注为「无法判定」—— 请先做单位换算或中心化"
+                ),
+            )
+        )
+
+    # 各组建模统计（D5 输出保洁：非有限值不得渗漏进结果表）
     desc_rows = []
     for g, d in valid_groups:
         desc_rows.append(
@@ -254,9 +281,11 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
             f"方差齐性检验: Levene {levene_result}"
             + (f", Bartlett {bartlett_result}" if bart_p is not None else "")
         ),
+        messages=_report.messages(),
         metadata={
             "levene_p": float(lev_p) if lev_p is not None else None,
             "bartlett_p": float(bart_p) if bart_p is not None else None,
             "n_groups": len(valid_groups),
+            "boundary_codes": _report.codes(),
         },
     )

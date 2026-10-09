@@ -7,6 +7,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Opt, Spec
+from smartsuite.engine._guard import BoundaryReport, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import _adjust_xlabels, round_for_display
 from smartsuite.engine.spc_charts._shared import _natural_sort_key
@@ -78,6 +79,15 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
     data = req.data.copy()
     y_col = req.target_col
     _text_mapped = False  # 文本二值列被映射为 0/1 时置 True（用于下游语义提示）
+
+    # ── 边界处置（B1）：目标列的 ±Inf 必须清洗并披露 ──
+    # 审查 2026-10-09 P0-5：`dropna()` 不剔除 ±Inf，p/np/c/u 的均值被拉成 inf，
+    # 使 CL/UCL 全为 inf、判据 `stat > ucl` 恒 False → 假阴性「超出控制限 0/100 个点」。
+    _report = BoundaryReport()
+    if y_col in data.columns and pd.api.types.is_numeric_dtype(data[y_col]):
+        _cleaned, _n_non_finite = clean_series(data[y_col], column=y_col, report=_report)
+        if _n_non_finite:
+            data = data.loc[_cleaned.index]
 
     # 审查 2026-08-19 #2.8：常见中文二值串（合格/不合格、是/否）映射为 0/1，
     # 使 p/np 图可直接用于质量记录列（此前只能吃数值列）
@@ -326,6 +336,28 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         agg["ucl"] = cl + 3 * np.sqrt(cl / agg["n_vals"].values)
         agg["lcl"] = np.maximum(0, cl - 3 * np.sqrt(cl / agg["n_vals"].values))
 
+    # 违规定位（**先做控制限有限性后置断言**）
+    # 审查 2026-10-09 P0-5：±Inf 曾穿透 `dropna()` 把 c̄ 拉成 inf → CL/UCL 全 inf；
+    # 判据 `stat > ucl` 在 ucl=inf 时恒为 False → 报「超出控制限 0/100 个点」
+    # （假阴性），且 Inf 渗漏进 `control_stats` 表（101 个非有限值）。
+    _limits = [
+        float(cl),
+        float(ucl_const) if ucl_const is not None else None,
+        float(agg["ucl"].max()),
+        float(agg["lcl"].min()),
+    ]
+    _bad_limits = [v for v in _limits if v is not None and not np.isfinite(v)]
+    if _bad_limits:
+        return AnalysisResult(
+            task="spc_attribute",
+            status="error",
+            messages=[
+                "控制限计算为非有限值（数据量级过大或含极端值），无法给出控制图结论；"
+                "请先检查目标列是否存在异常量级后重试",
+                *_report.messages(),
+            ],
+        )
+
     # 违规检测
     agg_viol = agg[agg["stat"].notna()]
     above = agg_viol["stat"].values > agg_viol["ucl"].values
@@ -487,6 +519,7 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
         tables={"control_stats": pd.DataFrame(table_rows)},
         figures=[fig],
         summary=summary,
+        messages=_report.messages(),
         metadata={
             "chart_type": chart_type,
             "cl": float(cl),
@@ -495,5 +528,6 @@ def attribute_chart(req: AnalysisRequest) -> AnalysisResult:
             "groups": [str(g) for g in all_group_names if g != "_default"],
             "text_binary_mapped": _text_mapped,
             "nan_group_rows_dropped": _nan_dropped,
+            "boundary_codes": _report.codes(),
         },
     )

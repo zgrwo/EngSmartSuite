@@ -15,6 +15,7 @@ from smartsuite.engine._constants import (
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
+from smartsuite.engine._guard import BoundaryReport, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.detection._shared import iqr_outlier_mask
@@ -210,13 +211,19 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # ── 单变量异常检测 (IQR / Z-score) ──
-    data = req.data[req.target_col].dropna()
+    # 边界处置（B1）：`dropna()` **不剔除 ±Inf**（Inf 不是 NaN）。
+    # 审查 2026-10-09 P0-7：+Inf 使 `np.std` 变成 NaN，Grubbs 的
+    # `if not np.isfinite(sigma) ... break` 在**首次迭代前**就退出 →
+    # 静默返回「检测到 0 个异常点」（status=ok、messages 为空）。
+    _report = BoundaryReport()
+    data, _n_dropped = clean_series(req.data[req.target_col], column=req.target_col, report=_report)
+    data = data.dropna()
     data_std = data.std(ddof=1)  # 统一计算，供所有方法和可视化使用
     if len(data) < 5:
         return AnalysisResult(
             task="anomaly_detect",
             status="error",
-            messages=["有效数据不足(至少5个点)"],
+            messages=["有效数据不足(至少5个点)", *_report.messages()],
         )
 
     if method == "grubbs":
@@ -240,7 +247,22 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         for _ in range(max_outliers):
             mu = np.mean(vals)
             sigma = np.std(vals, ddof=1)
-            if not np.isfinite(sigma) or sigma <= 0:
+            # 审查 2026-10-09 P0-7：原先把「σ 非有限」与「σ ≤ 0」并入同一个 `break`
+            # → 量级溢出时迭代尚未开始就退出，静默返回 0 个异常。
+            # 二者语义不同，必须分开：
+            #   · σ 精确为 0（剔除后剩余值全同）→ 无可检出的异常，break 正确；
+            #   · σ 非有限（平方和溢出）→ **无法判定**，B0 拒绝并说明量级问题。
+            if not np.isfinite(sigma):
+                return AnalysisResult(
+                    task="anomaly_detect",
+                    status="error",
+                    messages=[
+                        "Grubbs 检验无法判定：数据量级过大导致标准差溢出（非有限），"
+                        "请先做单位换算或中心化后重试",
+                        *_report.messages(),
+                    ],
+                )
+            if sigma <= 0:
                 break
             g_scores = np.abs(vals - mu) / sigma
             max_idx = np.argmax(g_scores)
@@ -368,5 +390,10 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
         tables={"anomalies": anomalies},
         figures=[fig],
         summary=f"检测到 {mask.sum()} 个异常点 (方法: {method})",
-        metadata={"anomaly_count": int(mask.sum()), "method": method},
+        messages=_report.messages(),
+        metadata={
+            "anomaly_count": int(mask.sum()),
+            "method": method,
+            "boundary_codes": _report.codes(),
+        },
     )
