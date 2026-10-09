@@ -172,8 +172,8 @@ class TestParamReachability:
 
     | 结果 | 参数 | 原因 |
     |:---|:---|:---|
-    | ✅ 已补键（6 个） | `spc_attribute.n_col`、`spc_cusum.mu/sigma`、`spc_ewma.mu/sigma`、`survival_analysis.group_col` | 引擎侧 `None` 与"不给"逐字等价（逐个读源码 + 实跑核对） |
-    | ⛔ 仍不可达（5 个） | `spc_attribute.subgroup_col`、`process_capability.transform`、`anomaly_detect.contamination`、`change_point.min_peak_ratio/min_segment` | 补键会造出假参数 / 强制开启变换 / 破坏引擎侧 `Spec.defaults() == DEFAULT_PARAMS` 主防线 / 引擎默认值依赖样本量 —— **都需改本批所有权外的文件**，已在 `KNOWN_UNREACHABLE` 逐条登记 |
+    | ✅ 已补键（7 个） | `spc_attribute.n_col`、`spc_cusum.mu/sigma`、`spc_ewma.mu/sigma`、`survival_analysis.group_col`、`process_capability.transform` | 引擎侧 `None` 与"不给"逐字等价（逐个读源码 + 实跑核对）；`transform` 另需引擎侧 `Choice` 补「不做变换」空值选项（否则补键 = 强制开启 Box-Cox） |
+    | ⛔ 仍不可达（4 个） | `spc_attribute.subgroup_col`、`anomaly_detect.contamination`、`change_point.min_peak_ratio/min_segment` | 补键会造出假参数 / 破坏引擎侧 `Spec.defaults() == DEFAULT_PARAMS` 主防线 / 引擎默认值依赖样本量 —— **都需改 engine 侧**，已在 `KNOWN_UNREACHABLE` 逐条登记 |
 
     ## 判据
 
@@ -193,16 +193,10 @@ class TestParamReachability:
             "「面板能设、引擎不看」的假参数（与 `multi_objective.direction` 同族）。"
             "正确修法是删除该 Spec 字段，而 `engine/spc_charts/attribute.py` 不在本批所有权内。"
         ),
-        ("process_capability", "transform"): (
-            "**补键会造成静默的默认行为变更**（本轮实测，故有意不加）：该字段是 "
-            "`Choice('boxcox')`，前端把 Choice 渲染为 `<select>` 且**没有空选项**"
-            "（`params.js::buildParamInput` 的 options 分支）；默认值 `None` 匹配不上"
-            "任何 option 的 `selected` → 浏览器自动选第一个 → 用**真实 params.js + DOM 桩**"
-            "实测面板回读为 `{'transform': 'boxcox'}` —— Web 用户被**强制开启** Box-Cox"
-            "（规格限同步变换），既没有开关可关，也与引擎/CLI 默认（不变换）不一致。"
-            "需引擎侧改成 `Choice('', '不做变换', 'boxcox')`，或前端为 None 默认值的 "
-            "Choice 补一个空选项，之后才能补键。"
-        ),
+        # （`process_capability.transform` 曾登记于此：2026-10-09 已修 —— 引擎侧
+        #   `Choice` 补了「不做变换」空值选项、`default_params` 补了 `transform: ""`，
+        #   故它现在**可达**，登记已按「过期即失败」的机制移除。
+        #   见 TestCapabilityTransformReachableWithoutForcingBoxCox。）
     }
 
     #: 审查 P2-8 **举证清单**里尚未可达的参数（登记即承认缺口）。
@@ -210,10 +204,6 @@ class TestParamReachability:
     KNOWN_UNREACHABLE: dict[tuple[str, str], str] = {
         ("spc_attribute", "subgroup_col"): (
             "引擎不读该键（见 SPEC_ONLY）→ 补键会造假参数；须先由引擎侧删除 Spec 字段。"
-        ),
-        ("process_capability", "transform"): (
-            "`Choice` 渲染出的 `<select>` 无空选项 → 补键等于强制开启 Box-Cox（见 SPEC_ONLY）；"
-            "须先由引擎侧给该 Choice 补「不做变换」选项（`engine/capability.py` 不在本批所有权内）。"
         ),
         ("anomaly_detect", "contamination"): (
             "`Spec` **有意不声明**它（支持 `(0,0.5]` 数值或字符串 'auto' 双形态，见"
@@ -318,8 +308,8 @@ class TestParamReachability:
         reachable = sorted(
             f"{t}.{n}" for t, n in self.P28_EVIDENCE if n in DEFAULT_PARAMS.get(t, {})
         )
-        assert len(reachable) == 6, (
-            f"P2-8 举证参数中可达数应为 6（本轮补齐 n_col / mu,sigma×2 / group_col），"
+        assert len(reachable) == 7, (
+            f"P2-8 举证参数中可达数应为 7（本轮补齐 n_col / mu,sigma×2 / group_col / transform），"
             f"实际 {len(reachable)}：{reachable}"
         )
         for pinned in (
@@ -405,3 +395,49 @@ class TestRegistryShape:
             mod = __import__(module, fromlist=["PARAM_SPECS"])
             for key in getattr(mod, "PARAM_SPECS", {}):
                 assert key in TASK_REGISTRY, f"{module} 的 PARAM_SPECS 键 {key!r} 不是已注册任务"
+
+
+class TestCapabilityTransformReachableWithoutForcingBoxCox:
+    """`process_capability.transform` 必须在面板可达，**且默认不开启变换**。
+
+    审查 2026-10-09 P2-8 的举证清单把它列为「引擎支持但 Web 不可达」。但**直接补键
+    会引入回归**：原 `Choice("boxcox")` 只有一个选项，`params.js::buildParamInput`
+    把它渲染成**无空选项**的 `<select>`，默认 `None` 匹配不上任何 `selected`
+    → 浏览器自动选第一个 → 面板回读 `{"transform":"boxcox"}`，即 **Web 用户被强制
+    开启 Box-Cox 且关不掉**（与 CLI / 引擎默认不一致）。
+
+    故修法是两手同时做：① `Choice` 增加「不做变换」空值选项；② 默认值为该空值。
+    本用例同时钉住这两点，防止只做一半（补了键却强制了变换）。
+    """
+
+    def test_transform_is_reachable_and_defaults_to_no_transform(self):
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+        cfg = DEFAULT_PARAMS.get("process_capability", {})
+        assert "transform" in cfg, "transform 应已补进 default_params（否则面板不渲染）"
+        assert cfg["transform"] in ("", None), (
+            f"默认必须为「不做变换」，否则 Web 用户会被强制开启 Box-Cox：{cfg['transform']!r}"
+        )
+
+    def test_choice_has_empty_option_and_accepts_it(self):
+        from smartsuite.services.param_labels import spec_for_task
+
+        spec = spec_for_task("process_capability")
+        assert spec is not None
+        _params, err = spec.validate({"transform": ""})
+        assert err is None, f"Choice 必须接受空值（「不做变换」）：{err and err.message}"
+        _params, err = spec.validate({"transform": "boxcox"})
+        assert err is None, f"Choice 仍须接受 boxcox：{err and err.message}"
+
+        import importlib.util as _ilu
+        from pathlib import Path as _Path
+
+        _root = _Path(__file__).resolve().parents[2]
+        _m = _ilu.spec_from_file_location(
+            "verify_frontend_params", _root / "scripts" / "verify_frontend_params.py"
+        )
+        _vfp = _ilu.module_from_spec(_m)
+        assert _m and _m.loader
+        _m.loader.exec_module(_vfp)
+        opts = _vfp.check()
+        assert not opts, f"前端参数门禁应保持全绿：{opts}"

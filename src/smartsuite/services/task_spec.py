@@ -376,17 +376,13 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
             "usl": None,
             "lsl": None,
             "target": None,
-            # ⚠️ P2-8：`transform` **有意不加**（尽管 `capability.PARAM_SPEC` 已声明它）。
-            # 它是 `Choice("boxcox")`，前端把 `Choice` 渲染成 `<select>` 且**不提供
-            # 空/"不变换"选项**（`params.js::buildParamInput` 的 options 分支）；
-            # `None` 默认值匹配不上任何 option 的 `selected` → 浏览器自动选**第一个**
-            # ——实测（真实 params.js + DOM 桩）：面板下发 `{"transform": "boxcox"}`，
-            # 即 Web 用户会**被强制开启** Box-Cox（规格限同步变换），既无开关可关，
-            # 又与引擎/CLI 的默认口径（不变换）不一致。
-            # 正确修法二选一（都不在本批文件所有权内）：
-            #   ① 引擎侧把该 Choice 写成 `Choice("", "不做变换", "boxcox")`；
-            #   ② `params.js` 为带 None 默认值的 Choice 补一个空选项。
-            # 见 tests/services/test_param_spec_registry.py::TestParamReachability 的登记。
+            # 审查 2026-10-09 P2-8：`transform` 现已在面板可达。
+            # 关键前提（否则是回归而非修复）：`capability.PARAM_SPECS` 的该 `Choice`
+            # 已补「不做变换」空值选项、默认值取空值 —— 因为前端把 `Choice` 渲染成
+            # `<select>`，`None` 匹配不上任何 `selected`，浏览器会自动选**第一个**
+            # 选项（实测会下发 `{"transform":"boxcox"}`，即强制开启 Box-Cox）。
+            # 现默认值与首个选项同为 ""，面板回读仍为「不做变换」。
+            "transform": "",
             "subgroup_col": "",
             "subgroup_size": None,
         },

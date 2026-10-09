@@ -258,7 +258,12 @@ class TestSpecObjectContract:
 
         d = PARAM_SPEC.defaults()
         assert d["usl"] is None and d["lsl"] is None and d["target"] is None
-        assert d["transform"] is None
+        # 审查 2026-10-09 P2-8：`transform` 的缺省由 `None` 改为 `""`（「不做变换」）。
+        # 原因：面板把它渲染为 `<select>`，`None` 匹配不上任何 `selected` → 浏览器
+        # 自动选第一个选项；若第一个选项是 boxcox，Web 用户就被**强制开启**变换。
+        # 故 Choice 补了空值选项且默认取该空值。引擎判定仍是 `transform == "boxcox"`，
+        # 故 `""` 与 `None` 行为逐字等价（实测 cp 与 boxcox_lambda 完全相同）。
+        assert d["transform"] in ("", None)
         assert d["subgroup_col"] in (None, "")
         assert d["subgroup_size"] is None
 

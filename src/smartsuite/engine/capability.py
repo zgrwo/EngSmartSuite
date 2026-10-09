@@ -38,8 +38,15 @@ PARAM_SPEC = Spec(
     ),
     lsl=Opt(Finite(), label="规格下限 (LSL)", hint="通常为 0 或设计下限"),
     target=Opt(Finite(), label="Cpm 目标值", hint="给出后额外计算 Taguchi 能力指数 Cpm"),
+    # 审查 2026-10-09 P2-8：原先只有 `Choice("boxcox")` 一个选项，而
+    # `params.js::buildParamInput` 把 Choice 渲染成**无空选项**的 `<select>` ——
+    # 一旦把 `transform` 补进面板（default_params），默认 None 匹配不上任何
+    # `selected`，浏览器自动选第一个 → 回读 `{"transform":"boxcox"}`，
+    # **Web 用户被强制开启 Box-Cox 且关不掉**。故必须显式提供「不做变换」选项，
+    # 默认值取该空值（与引擎 `if transform == "boxcox"` 的判定一致）。
     transform=Opt(
-        Choice("boxcox"),
+        Choice(("", "不做变换"), ("boxcox", "Box-Cox 正态化")),
+        default="",
         label="正态化变换",
         hint="仅对全为正值的数据可用；规格限会同步变换",
     ),
