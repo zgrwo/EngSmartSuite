@@ -14,9 +14,11 @@ from smartsuite.engine._palette import PALETTE
 logger = logging.getLogger(__name__)
 
 # ── 声明式参数契约（P4 步骤③，第二十二轮）──
-# 只声明 `n_changepoints`：`min_segment` 的默认值**依赖样本量**
-# （`_def_ms = min(max(10, n // 20), (n - 1) // 2)`），属依赖数据的规则，
-# 按设计留在引擎（`Spec` 只做与数据无关的校验）。
+# 审查 2026-10-09 P2-8 收口：原先只声明 `n_changepoints`，`min_segment` /
+# `min_peak_ratio` **不在面板上** —— 用户无从调整"最小段长度/峰值比"，
+# 只能吃引擎内部默认值。现补声明（两者 default 均为 None = 走引擎内部规则）。
+# `min_segment` 的默认值**依赖样本量**（`_def_ms = min(max(10, n // 20), (n - 1) // 2)`），
+# 属依赖数据的规则，仍按设计留在引擎；`None` 由引擎落回该规则。
 PARAM_SPECS = {
     "change_point": Spec(
         n_changepoints=Opt(
@@ -24,7 +26,17 @@ PARAM_SPECS = {
             default=5,
             label="变点数",
             hint="期望检测的变点上限；至少 1",
-        )
+        ),
+        min_segment=Opt(
+            default=None,
+            label="最小段长度",
+            hint="每个分段至少包含的观测数；留空由引擎按样本量自动确定",
+        ),
+        min_peak_ratio=Opt(
+            default=None,
+            label="峰值比阈值",
+            hint="CUSUM 峰值相对噪声的倍数下限；留空用 2.0（越小越敏感）",
+        ),
     ),
 }
 
@@ -54,12 +66,25 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
         )
 
     _def_ms = min(max(10, n // 20), (n - 1) // 2)  # 保证 2*min_segment < n（n=20 时默认 9 而非 10）
-    min_segment = req.params.get("min_segment", _def_ms)
+    # 审查 2026-10-09 P2-8：两参数已补进面板，`default_params` 里为 `None`（未指定）
+    # —— 必须显式判空才能落回内部默认值：`params.get(k, _def_ms)` 在"键存在且值为 None"
+    # 时返回 **None**（不是 _def_ms），随后 `int(None)` 报「参数格式错误」，
+    # 把"用户没填"变成报错（这一条已在 P2-8 的缺口登记里实测复现过）。
+    #
+    # ⚠️ 这里**不能用 `or`**（我第一版就是 `or`，被两处守卫同时否掉）：
+    #   ① `falsy_audit` 把 `params.get(k) or <数值>` 判为 HIGH —— 这正是它存在的理由：
+    #      `0`/`''` 会被静默替换成兜底值；
+    #   ② `test_change_point_min_segment_zero_rejected` 钉住 `min_segment=0` 必须
+    #      **被拒绝**（否则会产生位于 0 的伪变点）。`or` 会让 0 变成默认值而放过。
+    # 正解：只把 `None`/空串当"未指定"，其余原样透传给下游校验。
+    _ms = req.params.get("min_segment")
+    min_segment = _def_ms if _ms is None or _ms == "" else _ms
     max_cp = req.params.get("n_changepoints", 5)
     # 标准化峰值阈值（审查 2026-08-19 #2.6）：CUSUM 统计量量纲为 σ√L，
     # 与单点量纲的 data_range 比较是量纲错误；改为与 σ√L 比较。
     # 噪声下 max|W(t)|（布朗桥最大值）期望 ≈1.2，默认 2.0 对应每段约 5% 误报率。
-    min_peak_ratio = req.params.get("min_peak_ratio", 2.0)
+    _mpr = req.params.get("min_peak_ratio")
+    min_peak_ratio = 2.0 if _mpr is None or _mpr == "" else _mpr
 
     # 参数类型安全转换 (CLI/YAML 传入字符串时防护)
     try:

@@ -30,7 +30,10 @@ PARAM_SPEC = Spec(
     ),
     group_col=Opt(label="分组列", hint="按该列分出多条序列（多机台/多产线）"),
     n_col=Opt(label="样本量列", hint="每组的检验数；不给时按行数计"),
-    subgroup_col=Opt(label="子组列", hint="长格式子组标识"),
+    # 审查 2026-10-09 P2-8：原声明过 `subgroup_col`（"长格式子组标识"）——**本函数
+    # 全文不读该键**（实测传一个不存在的列名，结果与完全不传逐字相同）。它是纯粹的
+    # 死声明：留着会让人以为"面板能设"，补进 `default_params` 更会造出一个假参数
+    # （与 `multi_objective.direction` 同族的"Spec 多余声明"）。故直接删除。
     filter_groups=Opt(label="分组筛选", hint="仅保留指定分组的序列"),
 )
 

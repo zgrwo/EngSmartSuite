@@ -160,13 +160,18 @@ class TestParamSpecContract:
     """迁移目标：`PARAM_SPEC` 对象及其与引擎的一致性。"""
 
     def test_spec_declares_expected_fields(self):
+        """`subgroup_col` 已于 2026-10-09（审查 P2-8）删除 —— 它是**死声明**。
+
+        `attribute_chart` 全文不读该键（实测传一个不存在的列名，结果与完全不传
+        逐字相同）。留着它会让人以为"面板能设"，补进 `default_params` 更会造出
+        一个假参数，故按"Spec 只声明引擎真的会读的字段"原则删除。
+        """
         from smartsuite.engine.spc_charts.attribute import PARAM_SPEC
 
         assert set(PARAM_SPEC.field_names) == {
             "chart_type",
             "group_col",
             "n_col",
-            "subgroup_col",
             "filter_groups",
         }, PARAM_SPEC.field_names
 

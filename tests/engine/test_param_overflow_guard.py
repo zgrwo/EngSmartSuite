@@ -120,9 +120,11 @@ class TestLassoAlphaIsNotSilentlyDefaulted:
             assert r.status == "ok", f"params={params}: {r.messages}"
             return float(r.metadata["best_alpha"])
 
-        auto, explicit_one, absent = _alpha_of({"alpha_lasso": "auto"}), _alpha_of(
-            {"alpha_lasso": 1.0}
-        ), _alpha_of({})
+        auto, explicit_one, absent = (
+            _alpha_of({"alpha_lasso": "auto"}),
+            _alpha_of({"alpha_lasso": 1.0}),
+            _alpha_of({}),
+        )
         assert auto != pytest.approx(explicit_one), (
             f"'auto' 与显式 1.0 结果相同（{auto}）—— 说明 'auto' 仍被静默兜成了 1.0"
         )

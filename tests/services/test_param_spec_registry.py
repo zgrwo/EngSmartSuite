@@ -29,6 +29,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from smartsuite.services.param_labels import spec_for_task
@@ -182,8 +184,8 @@ class TestParamReachability:
 
     | 结果 | 参数 | 原因 |
     |:---|:---|:---|
-    | ✅ 已补键（7 个） | `spc_attribute.n_col`、`spc_cusum.mu/sigma`、`spc_ewma.mu/sigma`、`survival_analysis.group_col`、`process_capability.transform` | 引擎侧 `None` 与"不给"逐字等价（逐个读源码 + 实跑核对）；`transform` 另需引擎侧 `Choice` 补「不做变换」空值选项（否则补键 = 强制开启 Box-Cox） |
-    | ⛔ 仍不可达（4 个） | `spc_attribute.subgroup_col`、`anomaly_detect.contamination`、`change_point.min_peak_ratio/min_segment` | 补键会造出假参数 / 破坏引擎侧 `Spec.defaults() == DEFAULT_PARAMS` 主防线 / 引擎默认值依赖样本量 —— **都需改 engine 侧**，已在 `KNOWN_UNREACHABLE` 逐条登记 |
+    | ✅ 已补键（10 个） | `spc_attribute.n_col`、`spc_cusum.mu/sigma`、`spc_ewma.mu/sigma`、`survival_analysis.group_col`、`process_capability.transform`、`anomaly_detect.contamination`、`change_point.min_segment/min_peak_ratio` | 引擎侧 `None` 与"不给"逐字等价（逐个读源码 + 实跑核对）。其中 3 个需要引擎侧一并改语义：`transform` 需 `Choice` 补「不做变换」空值选项（否则补键 = 强制开启 Box-Cox）；`contamination`/`min_segment`/`min_peak_ratio` 需把 `params.get(k, default)` 改为 `or default`（键存在且值为 `None` 时前者返回 `None`，`int(None)` 会报格式错误） |
+    | ✅ 已删除（1 个） | `spc_attribute.subgroup_col` | **Spec 多余声明**：`attribute_chart` 全文不读该键（传不存在的列名结果逐字相同）。已由引擎侧删除该字段 —— 补进面板只会造出"能设但没用"的假参数 |
 
     ## 判据
 
@@ -197,51 +199,32 @@ class TestParamReachability:
             "Web 运行时注入项：由前端分组筛选栏在提交前塞进 params，不是参数面板里"
             "用户填写的字段（引擎 `attribute_chart` 直接读 `req.params.get('filter_groups')`）。"
         ),
-        ("spc_attribute", "subgroup_col"): (
-            "**Spec 声明多余**（本轮实测）：`attribute_chart` 全文不读该键 —— 传一个"
-            "不存在的列名，结果与完全不传逐字相同。加进 `default_params` 只会造出"
-            "「面板能设、引擎不看」的假参数（与 `multi_objective.direction` 同族）。"
-            "正确修法是删除该 Spec 字段，而 `engine/spc_charts/attribute.py` 不在本批所有权内。"
-        ),
+        # （`spc_attribute.subgroup_col` 曾登记于此：2026-10-09 已由引擎侧**删除该 Spec
+        #   字段**（它本就是死声明），故不再是"有意不渲染"而是"不存在"，登记已移除。）
         # （`process_capability.transform` 曾登记于此：2026-10-09 已修 —— 引擎侧
         #   `Choice` 补了「不做变换」空值选项、`default_params` 补了 `transform: ""`，
         #   故它现在**可达**，登记已按「过期即失败」的机制移除。
         #   见 TestCapabilityTransformReachableWithoutForcingBoxCox。）
     }
 
-    #: 审查 P2-8 **举证清单**里尚未可达的参数（登记即承认缺口）。
-    #: 一旦补齐，本表会因「登记过期」而失败，强制移除 —— 缺口不许无声存在。
-    KNOWN_UNREACHABLE: dict[tuple[str, str], str] = {
-        ("spc_attribute", "subgroup_col"): (
-            "引擎不读该键（见 SPEC_ONLY）→ 补键会造假参数；须先由引擎侧删除 Spec 字段。"
-        ),
-        ("anomaly_detect", "contamination"): (
-            "`Spec` **有意不声明**它（支持 `(0,0.5]` 数值或字符串 'auto' 双形态，见"
-            "`anomaly.py:24-27`）。补键会打破 `tests/engine/test_param_migration_batch5.py`"
-            "的 `Spec.defaults() == DEFAULT_PARAMS[task]` 主防线（精确相等），"
-            "而修该防线必须先给它声明 `Spec` 字段 —— `engine/detection/anomaly.py` 不在本批所有权内。"
-        ),
-        ("change_point", "min_peak_ratio"): (
-            "同上：`change_point` 的 `Spec` 只声明 `n_changepoints`，补键会打破"
-            "`tests/engine/test_param_migration_batch3.py` 的同一条主防线；"
-            "引擎默认值 2.0 已在源码核对（`change_point.py:54`）。"
-        ),
-        ("change_point", "min_segment"): (
-            "**引擎默认值依赖样本量**：`_def_ms = min(max(10, n // 20), (n - 1) // 2)`"
-            "（`change_point.py:48`），`DEFAULT_PARAMS` 只能给静态值 —— 给 `None` 或 `''` 会让"
-            "`params.get('min_segment', _def_ms)` 命中已存在的键而返回 None/''，"
-            "在 `int()` 处报「变点检测参数格式错误」（已实测复现）；给 10 则 n=20 时"
-            "触发 `2*min_segment >= n` 直接报错。须引擎侧改为"
-            "`params.get('min_segment') or _def_ms` 才能补键。"
-        ),
-    }
+    #: 审查 P2-8 **举证清单**里尚未可达的参数 —— 2026-10-09 **已清空**。
+    #:
+    #: 11 项举证的最终处置：10 项补进面板、1 项确认是 Spec 多余声明并删除。
+    #: 机制保留：日后若发现新缺口，必须具名登记并写明理由；`test_p28_evidence_is_reachable_or_registered`
+    #: 会因"未登记"而红，`test_p28_reachable_count_is_pinned` 会因"数字变了"而红 ——
+    #: 缺口不许无声存在，也不许用登记代替修复。
+    KNOWN_UNREACHABLE: dict[tuple[str, str], str] = {}
 
     #: 审查 P2-8 原文逐条举证的参数（`引擎支持、Web 面板不可达`）。
     #: 注：报告正文写「13 个参数」，但逐条列出的只有 11 个（2+2+2+1+1+2+1）——
     #: 本表按**逐条清单**登记，并在报告中记录该口径差异。
     P28_EVIDENCE: tuple[tuple[str, str], ...] = (
         ("spc_attribute", "n_col"),
-        ("spc_attribute", "subgroup_col"),
+        # ⚠️ `("spc_attribute", "subgroup_col")` 已从举证清单**移除**（2026-10-09）：
+        # 复核确认它**不是可达性缺口** —— `attribute_chart` 全文不读该键，
+        # 它是 Spec 里的死声明（传不存在的列名，结果与完全不传逐字相同）。
+        # 正确处置是删除该 Spec 字段（已做），而不是给它补一个"能设但没用"的控件。
+        # 这条留档很重要：审查报告把它列为"引擎支持、Web 不可达"，属**误报**。
         ("spc_cusum", "mu"),
         ("spc_cusum", "sigma"),
         ("spc_ewma", "mu"),
@@ -318,8 +301,9 @@ class TestParamReachability:
         reachable = sorted(
             f"{t}.{n}" for t, n in self.P28_EVIDENCE if n in DEFAULT_PARAMS.get(t, {})
         )
-        assert len(reachable) == 7, (
-            f"P2-8 举证参数中可达数应为 7（本轮补齐 n_col / mu,sigma×2 / group_col / transform），"
+        assert len(reachable) == 10, (
+            f"P2-8 举证参数中可达数应为 10（n_col / mu,sigma×2 / group_col / transform /"
+            f" contamination / min_segment / min_peak_ratio；另 1 项确认为多余声明已删除），"
             f"实际 {len(reachable)}：{reachable}"
         )
         for pinned in (
@@ -380,6 +364,101 @@ class TestUnknownParamDetectionOnRealSpecs:
                 offenders.append(f"{s.key}: {unknown}")
         assert checked >= 10, f"只检查到 {checked} 个任务 —— 扫描器可能失效（用例会变恒真）"
         assert not offenders, f"以下任务的 Spec.defaults() 含自己都不认识的键：{offenders}"
+
+
+class TestNewlyReachableParamsAreActuallyHonored:
+    """补进面板的 4 个参数必须**真的生效**，而不只是"键存在"（审查 P2-8 收口）。
+
+    只断言"DEFAULT_PARAMS 里有这个键"是弱证据 —— 引擎完全可能忽略它。
+    故每个参数都断言**行为随取值改变**，并覆盖 `None`（未指定）不报错。
+    """
+
+    @staticmethod
+    def _frame():
+        rng = np.random.default_rng(9)
+        y = np.concatenate([rng.normal(50, 2, 100), rng.normal(60, 2, 100)])
+        y[5] = 200.0
+        return pd.DataFrame({"y": y, "x": rng.normal(0, 1, 200)})
+
+    def _isoforest(self, **params):
+        from smartsuite.core.contracts import AnalysisRequest
+        from smartsuite.services.orchestrator import orchestrate
+
+        return orchestrate(
+            AnalysisRequest(
+                task="anomaly_detect",
+                data=self._frame(),
+                target_col="y",
+                feature_cols=["x"],
+                params={"method": "isolation_forest", **params},
+            )
+        )
+
+    def test_contamination_changes_the_verdict(self):
+        """污染率必须真的驱动异常点数量（而非被忽略）。"""
+        none_r = self._isoforest(contamination=None)
+        assert none_r.status == "ok", none_r.messages
+        # None = 未指定 → 落回引擎默认 0.05（**不得**因 float(None) 报错）
+        assert none_r.metadata["contamination"] == pytest.approx(0.05)
+        base = none_r.metadata["anomaly_count"]
+
+        high = self._isoforest(contamination=0.2)
+        assert high.status == "ok", high.messages
+        assert high.metadata["anomaly_count"] > base, (
+            f"污染率 0.2 应比默认 0.05 命中更多异常点：{base} → {high.metadata['anomaly_count']}"
+        )
+
+    def test_contamination_auto_sentinel_still_works(self):
+        r = self._isoforest(contamination="auto")
+        assert r.status == "ok", r.messages
+        assert str(r.metadata["contamination"]).lower() == "auto"
+
+    def test_change_point_new_params_accept_none_and_values(self):
+        """`min_segment` / `min_peak_ratio` 的 `None` 必须落回引擎内部默认值。
+
+        ⚠️ 这是本组最容易出错的一个：`params.get(k, default)` 在"键存在且值为 None"
+        时返回 **None**（不是 default），随后 `int(None)` 会报「参数格式错误」——
+        即"用户没填"变成报错。故引擎侧改用了 `or`，本用例钉住它。
+        """
+        from smartsuite.core.contracts import AnalysisRequest
+        from smartsuite.services.orchestrator import orchestrate
+
+        for params in ({}, {"min_segment": None, "min_peak_ratio": None}, {"min_segment": 30}):
+            r = orchestrate(
+                AnalysisRequest(
+                    task="change_point",
+                    data=self._frame(),
+                    target_col="y",
+                    feature_cols=[],
+                    params=params,
+                )
+            )
+            assert r.status == "ok", f"params={params}: {r.messages}"
+            assert "变点" in r.summary, f"params={params}: {r.summary}"
+
+    def test_spc_attribute_still_runs_after_spec_field_removal(self):
+        """删除 `subgroup_col` 死声明后，`spc_attribute` 行为不得变化。"""
+        from smartsuite.core.contracts import AnalysisRequest
+        from smartsuite.services.orchestrator import orchestrate
+
+        rng = np.random.default_rng(4)
+        r = orchestrate(
+            AnalysisRequest(
+                task="spc_attribute",
+                data=pd.DataFrame({"y": rng.poisson(20, 120).astype(float)}),
+                target_col="y",
+                feature_cols=[],
+                params={"chart_type": "c"},
+            )
+        )
+        assert r.status == "ok", r.messages
+        assert "控制图" in r.summary
+
+        from smartsuite.engine.spc_charts.attribute import PARAM_SPEC
+
+        assert "subgroup_col" not in PARAM_SPEC.field_names, (
+            "subgroup_col 是死声明（引擎全文不读），不应重新出现"
+        )
 
 
 class TestRegistryShape:

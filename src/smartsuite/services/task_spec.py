@@ -401,7 +401,9 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.detection.anomaly:anomaly_detect",
         label="异常检测",
         group="过程监控",
-        default_params={"method": "iqr", "alpha": 0.05, "max_outliers": 5},
+        # 审查 2026-10-09 P2-8 收口：补 `contamination`（孤立森林污染率）——
+        # 原先不在面板上，Web 用户只能吃 0.05 默认值。引擎把 None 当"未指定 → 0.05"。
+        default_params={"method": "iqr", "alpha": 0.05, "max_outliers": 5, "contamination": None},
         x_optional=True,
     ),
     TaskSpec(
@@ -409,7 +411,10 @@ TASK_SPECS: tuple[TaskSpec, ...] = (
         func_path="smartsuite.engine.detection.change_point:change_point_detect",
         label="变点检测",
         group="过程监控",
-        default_params={"n_changepoints": 5},
+        # 审查 2026-10-09 P2-8 收口：补 `min_segment` / `min_peak_ratio` ——
+        # 原先两者都不在面板上（用户无从调整灵敏度），引擎把 None 落回内部规则
+        # （`min_segment` 依赖样本量，见 `change_point.py` 的 `_def_ms`）。
+        default_params={"n_changepoints": 5, "min_segment": None, "min_peak_ratio": None},
         y_only=True,
     ),
     TaskSpec(

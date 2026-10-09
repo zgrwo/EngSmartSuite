@@ -24,8 +24,11 @@ logger = logging.getLogger(__name__)
 
 # ── 声明式参数契约（P4 步骤③，第二十四轮）──
 # 契约：docs/governance/improvement-plan.md §六
-# 只声明 `DEFAULT_PARAMS` 里的三个参数。`contamination` 不在默认值表里且
-# 支持 `(0,0.5]` 数值**或字符串 "auto"** 双形态，故有意不声明 → 原样透传。
+# 审查 2026-10-09 P2-8 收口：`contamination` 原先**有意不声明**（理由：支持
+# `(0,0.5]` 数值**或字符串 "auto"** 双形态，声明了怕校验过窄）。代价是它**不在
+# 面板上**（面板键集来自 `default_params`）—— 用户无从设置孤立森林的污染率，
+# 只能吃 0.05 默认值。现改为声明 `Opt(default=None)`（不做过窄校验，双形态都放行），
+# 引擎侧把 `None` 当作"未指定 → 0.05"。
 PARAM_SPECS = {
     "anomaly_detect": Spec(
         method=Opt(
@@ -45,6 +48,11 @@ PARAM_SPECS = {
             default=5,
             label="最多异常点数",
             hint="Grubbs 检验逐点剔除的上限；至少 1",
+        ),
+        contamination=Opt(
+            default=None,
+            label="污染率（孤立森林）",
+            hint="预期异常占比，0~0.5 之间；也可填 auto 由引擎估计；留空用 0.05",
         ),
     ),
 }
@@ -76,7 +84,13 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             )
         from sklearn.ensemble import IsolationForest
 
-        contamination = req.params.get("contamination", 0.05)
+        # 审查 2026-10-09 P2-8：`contamination` 已补进面板（`default_params` 里为
+        # `None` = "未指定"），故这里必须把 None 显式落回原默认值 0.05 ——
+        # 否则 `float(None)` 会抛 TypeError，把"用户没填"变成报错。
+        # ⚠️ 用显式判空而**不是** `or`：`falsy_audit` 把 `params.get(k) or <数值>`
+        # 判为 HIGH（`0` 会被静默替换），且 `contamination=0` 本就该走下游校验被拒。
+        _c = req.params.get("contamination")
+        contamination = 0.05 if _c is None or _c == "" else _c
         # 审查 2026-09-01 N-3：CLI/YAML 字符串参数需转换——numeric 字符串转 float，
         # "auto"（sklearn 合法）保留原值；非法字符串返回中文错误而非 sklearn 原始异常
         if isinstance(contamination, str):
