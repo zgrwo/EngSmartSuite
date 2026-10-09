@@ -205,7 +205,11 @@ class Finite(Validator):
             return None, Violation(f"应为{self.expectation}，不接受布尔值: {raw!r}", "NOT_NUMERIC")
         try:
             val = float(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError：`float(10**400)` 会抛「int too large to convert to float」，
+            # 而它**不是** ValueError/TypeError 的子类 —— 漏捕会让 400 位整数参数
+            # 一路穿到 orchestrator 的兜底 except，被归因成「数值溢出。[数据]」（审查
+            # 2026-10-09 P1-3：把**参数**问题说成**数据**问题，用户会去查数据）。
             return None, Violation(
                 f"应为{self.expectation}，当前值无法解析: {raw!r}", "NOT_NUMERIC"
             )
@@ -240,7 +244,8 @@ class Integer(Validator):
             return None, Violation(f"应为{self.expectation}，不接受布尔值: {raw!r}", "NOT_INTEGER")
         try:
             val = float(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # 同 `Finite.check`：OverflowError 不是 ValueError/TypeError 的子类（P1-3）
             return None, Violation(
                 f"应为{self.expectation}，当前值无法解析: {raw!r}", "NOT_INTEGER"
             )

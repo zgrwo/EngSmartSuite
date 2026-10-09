@@ -81,7 +81,7 @@ def safe_float(value, default: float) -> float:
         return default
     try:
         result = float(value)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         logger.debug("参数值转换失败: %r → 使用默认值 %s", value, default)
         return default
     # 审查 2026-08-19 #2.6：float("nan")/float("inf") 不抛异常但会产生

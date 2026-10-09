@@ -101,6 +101,17 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
     total_points = n_points ** len(ranges)
     if total_points > 50000:
         n_points = max(2, int(50000 ** (1.0 / len(ranges))))
+
+    # 审查 2026-10-09 P1-8：夹紧原先是**静默**的（`_n_points_requested` 存了原值却从未
+    # 被任何文案使用 = 死变量），用户以为按自己给的 `n_points` 跑了网格 ——
+    # 而网格密度直接决定"最优参数"的精度（这是 B2 降级，契约要求用户可见）。
+    _grid_notes: list[str] = []
+    if n_points != _n_points_requested:
+        _grid_notes.append(
+            f"⚠ 网格密度已按上限调整：请求 n_points={_n_points_requested}，"
+            f"实际每维 {n_points} 点（共 {n_points ** len(ranges)} 个组合；"
+            "上限 30/维且总组合数 ≤ 50000）。最优参数的精度按实际网格计算。"
+        )
     direction = _g.direction  # 已由 PARAM_SPECS 校验并取用
     _gs_cmap = "RdYlGn" if direction == "maximize" else "RdYlGn_r"
 
@@ -268,12 +279,15 @@ def grid_search(req: AnalysisRequest) -> AnalysisResult:
                 f"最优参数: {best}, 预测值: {pred_best:.4f}。"
                 f"CV R²={cv_r2:.3f}, 最优 α={best_alpha:.3f}"
             ),
+            messages=_grid_notes,
             metadata={
                 "optimal_params": best,
                 "optimal_value": pred_best,
                 "cv_r2": cv_r2,
                 "best_alpha": best_alpha,
                 "top_candidates": top_candidates,
+                "n_points_requested": _n_points_requested,
+                "n_points_used": n_points,
             },
         )
     except Exception:
@@ -342,7 +356,7 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
     # 审查 2026-08-19 #2.6：权重元素需数值化（字符串权重 → np.sum TypeError）
     try:
         weights = [float(w) for w in weights]
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return AnalysisResult(
             task="multi_objective",
             status="error",

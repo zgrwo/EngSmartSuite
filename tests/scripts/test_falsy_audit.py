@@ -360,3 +360,54 @@ def test_unparsable_file_is_reported_not_skipped(tmp_path, monkeypatch):
     assert code == 1, f"存在未审计文件时门禁必须 FAIL: {out[:400]}"
     assert "broken.py" in out, f"输出应点名无法解析的文件: {out[:400]}"
     assert "无法解析" in out
+
+
+class TestJsNumericFallbackIsAudited:
+    """前端 `*.js` 的数值兜底必须纳入审计（审查 2026-10-09 P3-7）。
+
+    同一个 falsy 陷阱在 JS 里更常见（`||` 就是"惯用默认值写法"）：
+    `input.value || 10` 在用户填 **0** 时会静默变成 10 —— 与 Python 侧
+    `params.get(k) or <数值>` 是同一个 bug，而原门禁只扫 Python。
+    """
+
+    def _audit(self, tmp_path, code: str):
+        f = tmp_path / "sample.js"
+        f.write_text(code, encoding="utf-8")
+        return falsy_audit.audit_js_file(f)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "const n = el.value || 10;",
+            "const k = params['n_points'] || 8;",
+            "const a = getParam('alpha') || 0.05;",
+            "const x = parseFloat(t.value) || 1;",
+            "const y = Number(v) || 3;",
+        ],
+    )
+    def test_numeric_fallback_on_user_input_is_high(self, tmp_path, code):
+        findings = self._audit(tmp_path, code)
+        assert findings, f"未拦截：{code}"
+        assert findings[0]["risk"] == "HIGH", findings
+        assert findings[0]["type"] == "js_falsy_numeric_fallback"
+
+    def test_non_numeric_fallback_is_not_reported(self, tmp_path):
+        """钉住"为什么只有数值兜底才危险"：`|| 'auto'` 不丢 0 的语义，不该报。"""
+        assert self._audit(tmp_path, "const n = el.value || 'auto';") == []
+
+    def test_comment_is_not_a_finding(self, tmp_path):
+        assert self._audit(tmp_path, "// 曾写成 el.value || 10，已修\n") == []
+
+    def test_clean_js_has_no_findings(self, tmp_path):
+        assert self._audit(tmp_path, "const n = Number(el.value);\nif (n > 0) { use(n); }\n") == []
+
+    def test_real_static_directory_is_scanned_by_main(self, monkeypatch, tmp_path):
+        """端到端负向注入：真实 static/ 里出现该模式 → main() 必须 exit 1。"""
+        injected = tmp_path / "static"
+        injected.mkdir()
+        (injected / "evil.js").write_text("const n = el.value || 10;\n", encoding="utf-8")
+        monkeypatch.setattr(falsy_audit, "_JS_STATIC_DIR", injected)
+        monkeypatch.setattr(falsy_audit, "SCAN_PATHS", [])
+        code, out = _run_main_expect_exit()
+        assert code == 1, f"JS 数值兜底必须阻断门禁：{out[:400]}"
+        assert "evil.js" in out

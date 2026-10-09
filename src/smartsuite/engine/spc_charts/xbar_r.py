@@ -437,7 +437,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
         if spec_val is not None:
             try:
                 sv = float(spec_val)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 return AnalysisResult(
                     task="spc_xbar",
                     status="error",
@@ -461,7 +461,7 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
     if target_spec is not None:
         try:
             tv = float(target_spec)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             return AnalysisResult(
                 task="spc_xbar",
                 status="error",

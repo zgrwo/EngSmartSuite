@@ -344,3 +344,38 @@ def test_run_task_buttons_carry_task_name():
         assert "data-task=" in tag, f"run-task 按钮缺 data-task 属性: {tag}"
     # Jinja 插值的任务名必须来自 task 循环变量
     assert re.search(r'data-task="\{\{\s*t\s*\}\}"', html), "data-task 未由 Jinja 注入任务名"
+
+
+class TestStaticAssetsAreNotStronglyCached:
+    """静态资源必须禁用强缓存，否则"只改了子模块"那一轮用户会跑旧面板（审查 P3-5）。
+
+    起因：`index.html` 只给入口 `app.js?v=12` 带了版本号，而 ES module 的子模块
+    import 是**静态 specifier**（`import { fmtCellNum } from './util.js'`）——
+    版本号**注入不进去**。于是只改 `params.js` 时，老用户浏览器继续用缓存的旧
+    params.js，而 app.js 已是新的：面板行为与代码不一致，**且无任何报错**。
+
+    修法是釜底抽薪：`SEND_FILE_MAX_AGE_DEFAULT = 0`（等价 `Cache-Control: no-cache`
+    ＋ ETag 条件请求），一次覆盖入口与全部子模块 —— 比逐个文件加 `?v=` 可靠
+    （后者漏一个就复发）。
+    """
+
+    def test_flask_static_cache_is_disabled(self):
+        src = (_WEB / "app.py").read_text(encoding="utf-8")
+        assert re.search(r'SEND_FILE_MAX_AGE_DEFAULT"\s*\]\s*=\s*0\b', src), (
+            "app.py 必须设置 SEND_FILE_MAX_AGE_DEFAULT = 0：ES module 子模块无法注入"
+            "版本号，强缓存会让老用户继续跑旧的 params.js/util.js（无报错、难排查）"
+        )
+
+    def test_versioned_entry_alone_is_not_treated_as_sufficient(self):
+        """反向锚点：入口带 `?v=` 是必要但不充分的 —— 若有人删掉 no-cache 只留版本号，
+        上一条会红；本用例把"为什么不够"钉在测试里，防止被当作冗余配置删掉。"""
+        html = _HTML.read_text(encoding="utf-8")
+        assert re.search(r"app\.js\?v=", html) or re.search(r"app\.js\?v=", html), (
+            "index.html 的入口仍应带版本号（缓存失效的第一道保险）"
+        )
+        js = "\n".join(p.read_text(encoding="utf-8") for p in sorted(_STATIC.glob("*.js")))
+        # 子模块 import 是静态 specifier —— 这一行就是"版本号注不进去"的证据
+        assert re.search(r"from\s+['\"]\./\w+\.js['\"]", js), (
+            "预期存在静态子模块 import；若前端改为动态 import 且能注入版本号，"
+            "本用例与 no-cache 的必要性都可重新评估"
+        )

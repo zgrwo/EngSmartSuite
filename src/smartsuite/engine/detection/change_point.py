@@ -65,7 +65,7 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
     try:
         min_segment = int(min_segment)
         min_peak_ratio = float(min_peak_ratio)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return AnalysisResult(
             task="change_point",
             status="error",

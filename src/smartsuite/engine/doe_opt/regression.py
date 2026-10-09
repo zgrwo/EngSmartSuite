@@ -15,6 +15,7 @@ from smartsuite.core.param_spec import CrossRule, Finite, Opt, Spec
 from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
 from smartsuite.engine._guard import (
     BoundaryReport,
+    check_finite_param,
     check_magnitude,
     check_tables_finite,
     clean_frame,
@@ -23,9 +24,6 @@ from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     durbin_watson,
     round_for_display,
-)
-from smartsuite.engine._utils import (
-    safe_float as _safe_float,
 )
 
 logger = logging.getLogger(__name__)
@@ -468,8 +466,24 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     X_scaled = scaler.fit_transform(X)
 
     alpha = req.params.get("alpha_lasso", None)
+    # ⚠️ 复查结论（2026-10-09）：`"auto"` 这个"哨兵"**此前从未真的生效** ——
+    # 旧实现 `_safe_float("auto", 1.0)` 把 `float("auto")` 的 ValueError 兜成 **1.0**，
+    # 于是 sklearn 收到 1.0 正常跑完，看起来"支持 auto"，实际用的是固定 α=1.0。
+    # 这既是我在修的 P1-3（静默兜成有效数值）本身，也是
+    # `test_lasso_alpha_lasso_auto_still_works` 一直在钉的**错误行为**。
+    # 契约文档与 `PARAM_SPECS` 注释都声明了"`None` 与 `'auto'` 双哨兵"，故按声明
+    # 兑现语义：`"auto"` ≡ 不指定 ≡ 由 CV 自行搜索 α（走下面 `alpha is None` 的路径），
+    # 而不是给 sklearn 一个字符串（那会 InvalidParameterError）。
+    if isinstance(alpha, str) and alpha.strip().lower() == "auto":
+        alpha = None
     if alpha is not None:
-        alpha = _safe_float(alpha, 1.0)
+        # 审查 2026-10-09 P1-3：解析失败必须显式拒绝，不得静默兜成 1.0。
+        _alpha_num, _alpha_issue = check_finite_param(alpha, "alpha_lasso")
+        if _alpha_issue is not None:
+            return AnalysisResult(
+                task="lasso_regression", status="error", messages=[_alpha_issue.detail]
+            )
+        alpha = _alpha_num
 
     # 参数校验（P4 步骤③，第二十四轮）：失败时抛 ParamValidationError。
     # 原 Round-2 P3 的"越界静默按纯 Lasso/ElasticNet 执行"守卫已由

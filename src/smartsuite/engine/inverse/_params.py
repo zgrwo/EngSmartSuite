@@ -39,7 +39,7 @@ def _parse_request_rows(value, limit: int | None = None) -> tuple[list[dict], in
             return [], 0
         try:
             value = json.loads(value)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             raise ValueError("参数「request_rows」不是有效的 JSON 字符串") from None
     if not isinstance(value, list):
         raise ValueError('参数「request_rows」必须是对象列表（每行形如 {"列名": 数值}）')
@@ -151,7 +151,7 @@ def _parse_json_param(params, key, messages, fallback_note) -> dict:
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             parsed = None
         if isinstance(parsed, dict):
             return parsed

@@ -163,6 +163,7 @@ EngSmartSuite/
 │   │   ├── test_engine_bootstrap.py #  引擎包根初始化（MATPLOTLIB_FONT_PATH 分支）
 │   │   ├── test_engine_input_guards.py # 引擎输入防护（审查修复钉死）
 │   │   ├── test_boundary_guard.py  #   边界处理原语单测（_guard.py 的 B0–B3 行为）
+│   │   ├── test_param_overflow_guard.py # 参数解析的溢出/静默兜底（P1-3/P1-8 回归防线）
 │   │   ├── test_capability_ci_coverage.py # 能力指数 CI 的覆盖率检验（MR-σ 有效自由度）
 │   │   ├── test_survival_event_semantics.py # 生存分析事件列语义（文本编码不猜）
 │   │   ├── test_survival_nonfinite.py #  生存分析的非有限值清洗与披露（含污染复现）
@@ -193,6 +194,7 @@ EngSmartSuite/
 │   │   ├── test_orchestrator.py
 │   │   ├── test_task_spec_derivation.py
 │   │   ├── test_param_spec_registry.py # PARAM_SPECS 按任务解析（防同模块邻居 Spec 泄漏）
+│   │   ├── test_orchestrator_param_disclosure.py # 未知参数名披露（P2-5 回归防线）
 │   │   ├── test_data_io.py
 │   │   ├── test_audit.py
 │   │   ├── test_audit_truncation.py # audit 导出截断（长文本/长表显式标注）
@@ -227,6 +229,7 @@ EngSmartSuite/
 │   │   └── test_packaging.py       #   打包契约（PEP 561 py.typed 分发）
 │   ├── guards/                     #   跨层回归防线（审查修复钉死；engine/services/web 变更必跑）
 │   │   ├── test_micro_scale_guards.py     # 微尺度绝对阈值同族/展示层/哨兵
+│   │   ├── test_dependency_declarations.py # 直接 import 的第三方包必须直接声明（P3-6）
 │   │   ├── test_task_requirements_ssot.py # 列需求单一来源（防前端手写集合回流）
 │   │   ├── test_acf_lasso_guards.py       # ACF 与 Lasso 微尺度相对判据
 │   │   ├── test_capability_spc_guards.py  # 能力/SPC/DOE 防护（规格限哨兵/相对判据/分组校验）

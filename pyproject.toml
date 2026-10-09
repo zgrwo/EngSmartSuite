@@ -41,11 +41,19 @@ dependencies = [
     "matplotlib>=3.7",
     "pyyaml>=6.0",
     "pydantic>=2.0",
+    # 审查 2026-10-09 P3-6：`services/reporter.py` 直接 `from PIL import Image`
+    # （图片尺寸探测），此前仅作为 matplotlib 的传递依赖存在 —— matplotlib 上游
+    # 一旦换掉 Pillow 或改为可选，报告导出会在运行时报 ImportError。
+    # 直接 import 的包必须直接声明（同一原则见下方 werkzeug）。
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
 web = [
     "flask>=3.0",
+    # 审查 2026-10-09 P3-6：`web/app.py` 直接 `from werkzeug.exceptions import HTTPException`
+    # （全局异常处理器），此前靠 flask 的传递依赖带入 —— 直接 import 必须直接声明。
+    "werkzeug>=3.0",
     "pyarrow>=14.0",
 ]
 report = [
@@ -69,10 +77,12 @@ dev = [
 ]
 all = [
     "flask>=3.0",
+    "werkzeug>=3.0",
     "pyarrow>=14.0",
     "python-pptx>=0.6",
     "reportlab>=4.0",
     "openpyxl>=3.0",
+    "Pillow>=10.0",
 ]
 
 [project.scripts]

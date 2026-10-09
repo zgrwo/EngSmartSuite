@@ -2,6 +2,7 @@
 
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
@@ -94,11 +95,31 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
         )
 
     defaults = DEFAULT_PARAMS.get(req.task, {})
+    # 审查 2026-10-09 P2-5：未知参数名（绝大多数是拼写错误）此前被**静默忽略** ——
+    # 实测 `usll=70` 被丢弃、分析照常 status=ok，用户以为规格上限生效了、
+    # 实际算的是"没有规格限"的能力指数。故对**用户原始入参**做未知键检测并披露
+    # （只披露不拒绝：多余键不会让结果算错，只会让用户的意图落空，
+    #  拒绝会把「多带了一个无关键」的合法调用打成失败）。
+    _unknown_note: str | None = None
+    try:
+        from smartsuite.services.param_labels import spec_for_task
+
+        _spec = spec_for_task(req.task)
+        if _spec is not None and hasattr(_spec, "unknown_message"):
+            _unknown_note = _spec.unknown_message(req.params)
+    except Exception:  # pragma: no cover - 检测本身绝不能影响主流程
+        logger.debug("未知参数检测失败（不影响分析）", exc_info=True)
+
     merged = _normalize_empty_params({**defaults, **req.params}, defaults)
     req = req.model_copy(update={"params": merged})
 
     try:
         result = TASK_REGISTRY[req.task](req)
+        if _unknown_note:
+            # ⚠️ `AnalysisResult` 是 **dataclass**（`core/contracts.py:47`），
+            # 不是 pydantic 模型 —— 没有 `model_copy`（用它会 AttributeError，
+            # 被下面的兜底 except 吞成「成因未归类的异常」，把参数披露变成报错）。
+            result = replace(result, messages=[*(result.messages or []), _unknown_note])
         elapsed = time.monotonic() - t0
         logger.info(
             "分析任务完成: task=%s, status=%s, elapsed=%.2fs",

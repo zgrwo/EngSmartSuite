@@ -29,27 +29,40 @@ jobs:
         language: [python]
     steps:
       - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
       - name: 依赖漏洞扫描（pip-audit）
         # 检查项目已解析依赖是否含已知 CVE（补 CodeQL 静态分析盲区；来源：VibeCodingTemplate）。
         # 关键：先安装项目依赖再 audit（否则审计的是 runner 环境而非项目依赖 = no-op）。
         # ⚠️ 不能审计整个环境：runner 预装系统包会报几十个与本项目无关的 CVE 假阳性。
-        # 必须定向审计项目声明依赖（pyproject 提取）。
+        # 必须定向审计项目依赖。
         # 安装失败 → 显式失败（exit 1），不用 `|| true` 吞掉——否则"已扫描"是假象。
+        #
+        # 审查 2026-10-09 P2-15：**改为审计 `uv.lock` 的锁定版本**。
+        # 原实现审计 pyproject 的**声明区间**（`pandas>=2.0` 这类），pip-audit 会把它
+        # 解析成"当前最新版"——与 uv.lock 里实际安装的版本可能不同，
+        # 于是"锁定版有 CVE、最新版已修"这类**真实漏报**不会被发现（反之也会误报），
+        # 门禁结论与实际发布物脱钩。现在优先用锁定集；拿不到锁定集就**失败**，
+        # 而不是悄悄退回未锁定口径。
         if: matrix.language == 'python'
         run: |
           python -m pip install pip-audit
           python -m pip install -e ".[dev]" || { echo "::error::项目依赖安装失败，无法审计"; exit 1; }
-          if [ -f requirements.txt ]; then
+          if [ -f uv.lock ]; then
+            # --no-emit-project：排除本项目自身（它不在 PyPI 上，pip-audit 无法查询）
+            uv export --frozen --no-emit-project --format requirements-txt > locked-reqs.txt \
+              || { echo "::error::uv export 失败，无法得到锁定依赖集（拒绝在未锁定口径下审计）"; exit 1; }
+            if [ ! -s locked-reqs.txt ]; then
+              echo "::error::锁定依赖集为空，pip-audit 审计将退化为 no-op"
+              exit 1
+            fi
+            echo "锁定依赖条目数: $(grep -c . locked-reqs.txt)"
+            python -m pip_audit -r locked-reqs.txt || { echo "::error::pip-audit 在 uv.lock 锁定版本中发现已知 CVE，请升级"; exit 1; }
+            rm -f locked-reqs.txt
+          elif [ -f requirements.txt ]; then
+            echo "::warning::未找到 uv.lock，退回审计 requirements.txt（口径可能与实际安装不同）"
             python -m pip_audit -r requirements.txt || { echo "::error::pip-audit 发现已知 CVE 依赖，请升级"; exit 1; }
-          elif [ -f pyproject.toml ]; then
-            # 提取 dependencies + 全部 extras（dev/web/report/docs/all，审查 2026-09-19 G-1：
-            # 此前只含 dev，flask/reportlab/pptx 等 extras 依赖的 CVE 在 PR 阶段无覆盖）；
-            # 单行 python -c（避免 YAML block scalar 内多行缩进破坏解析）
-            python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); p=d.get('project',{}); o=p.get('optional-dependencies',{}); deps=list(p.get('dependencies') or [])+[x for v in o.values() for x in v]; print('\n'.join(deps))" > pip-audit-deps.txt
-            python -m pip_audit -r pip-audit-deps.txt || { echo "::error::pip-audit 发现已知 CVE 依赖，请升级"; exit 1; }
-            rm -f pip-audit-deps.txt
           else
-            echo "::error::未找到 pyproject.toml 或 requirements.txt，pip-audit 无法审计项目依赖"
+            echo "::error::未找到 uv.lock 或 requirements.txt，pip-audit 无法审计项目依赖"
             exit 1
           fi
       - uses: github/codeql-action/init@v4

@@ -85,7 +85,7 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
             else:
                 try:
                     contamination = float(contamination)
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, OverflowError):
                     return AnalysisResult(
                         task="anomaly_detect",
                         status="error",

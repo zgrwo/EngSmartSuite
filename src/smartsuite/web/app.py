@@ -288,6 +288,17 @@ app.config["PERMANENT_SESSION_LIFETIME"] = (
     config.SESSION_LIFETIME_SECONDS
 )  # 1 小时；限制 CSRF token 重用窗口
 
+# 审查 2026-10-09 P3-5：静态资源**禁用强缓存**，由 ETag 做条件请求。
+#
+# 起因：`index.html` 只给入口 `app.js?v=12` 带了版本号，而 ES module 的
+# **子模块 import 是静态 specifier**（`import { fmtCellNum } from './util.js'`），
+# 无法注入版本 —— 于是"只改了 params.js"这一轮，老用户的浏览器会继续用缓存里的
+# 旧 params.js，而 app.js 已是新的 → 面板行为与代码不一致，且**无任何报错**。
+# 本应用是单用户本地工具（`SEND_FILE_MAX_AGE_DEFAULT` 默认 12 小时的收益为零），
+# 故直接关闭强缓存：每次带 ETag 条件请求，未变则 304，变了立刻生效。
+# 这同时覆盖了入口与全部子模块，比逐个文件加 `?v=` 更彻底（后者漏一个就复发）。
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # 0 = no-cache（仍带 ETag 条件请求）
+
 
 @app.after_request
 def _security_headers(resp):

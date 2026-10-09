@@ -31,7 +31,7 @@ def _safe_json_dict(value, name: str) -> dict:
             return {}
         try:
             parsed = json.loads(value)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             parsed = None
         if isinstance(parsed, dict):
             return parsed

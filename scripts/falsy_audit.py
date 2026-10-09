@@ -27,6 +27,7 @@
 """
 
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -395,8 +396,71 @@ def _iter_scan_files():
             yield path
 
 
+# ── JS 侧审计（审查 2026-10-09 P3-7）───────────────────────────────────────
+#
+# 背景：本门禁原先只覆盖 Python，而前端有 ~1200 行 JS —— 同一个 falsy 陷阱在 JS 里
+# 同样成立（甚至更常见，因为 `||` 在 JS 里是"惯用默认值写法"）：
+#
+#     const n = input.value || 10        // 用户填 0 → 变成 10（静默改值）
+#     const k = params[k] || 1           // 参数 0 → 变成 1
+#     const a = parseFloat(x) || 0.05    // 合法输入 0 → 变成 0.05
+#
+# ⚠️ 为什么**不**做通用 `||` 扫描：JS 里 `x || default` 是标准写法，
+# 通配会产生上百条噪音（噪音门禁必然被绕过）。这里只针对**危险的那一类**：
+# 左侧是"用户输入/参数读取"（`DOM 值` / `params[...]` / `getParam(...)` /
+# `parseFloat(...)`），右侧是**数值字面量** —— 此时 `0` 被静默替换成另一个数，
+# 与 Python 侧 `params.get(k) or <数值>` 是同一个 bug。
+_JS_NUMERIC_FALLBACK_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\.value\s*\|\|\s*[-+]?[\d.]", "输入框 .value 的数值兜底（用户填 0 会被静默替换）"),
+    (r"params\s*\[[^\]]+\]\s*\|\|\s*[-+]?[\d.]", "params[...] 的数值兜底（参数 0 会被静默替换）"),
+    (r"getParam\w*\([^)]*\)\s*\|\|\s*[-+]?[\d.]", "getParam() 的数值兜底（参数 0 会被静默替换）"),
+    (
+        r"parseFloat\([^)]*\)\s*\|\|\s*[-+]?[\d.]",
+        "parseFloat() 的数值兜底（合法输入 0 会被静默替换）",
+    ),
+    (
+        r"Number\([^)]*\)\s*\|\|\s*[-+]?[\d.]",
+        "Number() 的数值兜底（合法输入 0 会被静默替换）",
+    ),
+)
+
+_JS_STATIC_DIR = WEB_DIR / "static"
+
+
+def audit_js_file(filepath: Path) -> list[dict]:
+    """JS 单文件的数值兜底审计（正则级，不做 AST —— JS 无需解析语义即可判定）。"""
+    findings: list[dict] = []
+    try:
+        lines = filepath.read_text(encoding="utf-8-sig").splitlines()
+    except OSError:  # pragma: no cover - 读取失败由上层处理
+        return findings
+    for lineno, line in enumerate(lines, start=1):
+        # 去掉行注释后再判定（`// 见 params.get(k) || 10` 不该被当成缺陷）
+        code = line.split("//", 1)[0]
+        for pattern, why in _JS_NUMERIC_FALLBACK_PATTERNS:
+            if re.search(pattern, code):
+                findings.append(
+                    {
+                        "file": _rel_path(filepath),
+                        "line": lineno,
+                        "var": code.strip()[:70],
+                        "risk": "HIGH",
+                        "type": "js_falsy_numeric_fallback",
+                        "detail": why,
+                        "code": code.strip()[:110],
+                    }
+                )
+                break  # 一行只报一次
+    return findings
+
+
+def _iter_js_files():
+    if _JS_STATIC_DIR.is_dir():
+        yield from sorted(_JS_STATIC_DIR.rglob("*.js"))
+
+
 def main():
-    """主入口：扫描 SCAN_PATHS（engine + services + web + cli）。"""
+    """主入口：扫描 SCAN_PATHS（engine + services + web + cli）+ 前端 `*.js`。"""
     import io
 
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -404,6 +468,8 @@ def main():
     all_findings = []
     for py_file in _iter_scan_files():
         all_findings.extend(audit_file(py_file))
+    for js_file in _iter_js_files():
+        all_findings.extend(audit_js_file(js_file))
 
     # 按风险排序
     risk_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
