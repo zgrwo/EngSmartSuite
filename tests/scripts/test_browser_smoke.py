@@ -35,8 +35,10 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -69,11 +71,32 @@ class TestBrowserSmoke:
         for marker in ("--remote-debugging-port", "WebSocket", "script-src"):
             assert marker in text, f"脚本里缺少关键机制 {marker!r}"
 
-    def test_script_skips_cleanly_without_browser(self):
-        """在无 Edge 的环境里必须**打印 SKIP 并以 0 退出**（正确的降级，而非 fail）。"""
+    def test_env_unsatisfied_is_not_reported_as_pass(self):
+        """环境不满足必须与「通过」用**不同**退出码（审查 2026-10-09 P1-13）。
+
+        旧行为：无 Edge / 无解释器时 `process.exit(0)` —— 与通过同码，
+        于是 Linux/macOS CI 上真浏览器冒烟**永久空跑却显示为通过**，
+        报告与文档会把这一层算作已有防线。
+        """
         text = _SCRIPT.read_text(encoding="utf-8")
-        assert "process.exit(0)" in text, "缺少无浏览器时的优雅退出"
-        assert "SKIP" in text, "缺少无浏览器时的说明输出"
+        assert "EXIT_ENV_UNSATISFIED" in text, "缺少「环境不满足」的独立退出码"
+        assert "process.exit(EXIT_ENV_UNSATISFIED)" in text, (
+            "无浏览器/无解释器时应以 EXIT_ENV_UNSATISFIED 退出，而非 0"
+        )
+        assert "process.exit(0)" not in text, "不得再用退出码 0 表示环境不满足（会与「通过」混淆）"
+
+    def test_interpreter_is_probed_cross_platform(self):
+        """解释器不得写死 Windows venv 布局（审查 2026-10-09 P0-11 根因）。"""
+        text = _SCRIPT.read_text(encoding="utf-8")
+        assert "'Scripts'" not in text and '"Scripts"' not in text, (
+            "不得硬编码 Windows venv 布局；应走 scripts/_probe_python.mjs"
+        )
+        assert "resolvePython" in text, "应通过共享探测模块解析解释器"
+
+    def test_env_is_passed_to_the_script(self):
+        """包装测试必须把 `sys.executable` 注入给脚本（权威解释器来源）。"""
+        src = Path(__file__).resolve().read_text(encoding="utf-8")
+        assert "SMARTSUITE_PYTHON" in src, "包装测试应注入 SMARTSUITE_PYTHON"
 
     @pytest.mark.skipif(_node() is None, reason="未安装 Node")
     @pytest.mark.skipif(not _has_edge(), reason="未安装 Microsoft Edge（真浏览器冒烟需真实浏览器）")
@@ -90,6 +113,7 @@ class TestBrowserSmoke:
         这样既保留真浏览器验证的价值，又不把 flaky 变成红灯。
         """
         last = None
+        env = {**os.environ, "SMARTSUITE_PYTHON": sys.executable}
         for attempt in (1, 2):
             proc = subprocess.run(
                 [_node() or "node", str(_SCRIPT)],
@@ -99,9 +123,10 @@ class TestBrowserSmoke:
                 encoding="utf-8",
                 errors="replace",
                 timeout=240,
+                env=env,
             )
             out = (proc.stdout or "") + (proc.stderr or "")
-            if "SKIP" in out:
+            if proc.returncode == 2 or "SKIP" in out:
                 pytest.skip(f"冒烟脚本自述环境不满足：{out.strip()[:200]}")
             if proc.returncode == 0:
                 # 断言脚本**真的跑了**那些关键步骤（防"空跑通过"）
@@ -119,6 +144,8 @@ class TestBrowserSmoke:
         code, out = last if last else (None, "")
         if code == 1:
             pytest.fail(f"真浏览器冒烟发现问题：\n{out[-3000:]}")
+        if code == 2:
+            pytest.skip(f"冒烟脚本自述环境不满足（退出码 2）：{out.strip()[:200]}")
         pytest.skip(
             f"真浏览器进程在并发环境下崩溃（退出码 {code}，重试 1 次仍失败）—— "
             f"环境问题而非断言失败，单独运行 `node scripts/check_browser_smoke.mjs` 可复核"

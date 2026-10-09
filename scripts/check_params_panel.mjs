@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 // 参数面板的半运行时冒烟：用 DOM 桩**真实加载** params.js，灌入后端真实载荷，
 // 断言渲染出的控件类型与文案。
 //
@@ -20,8 +20,11 @@ import os from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { missingPythonMessage, resolvePython } from './_probe_python.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
-const STATIC = resolve(HERE, '..', 'src', 'smartsuite', 'web', 'static');
+const REPO_ROOT = resolve(HERE, '..');
+const STATIC = resolve(REPO_ROOT, 'src', 'smartsuite', 'web', 'static');
 
 const problems = [];
 function check(ok, msg) {
@@ -92,7 +95,14 @@ const params = await import(pathToFileURL(resolve(STATIC, 'params.js')).href);
 // 说明：`stdio: 'ignore'` + 临时文件（而非管道捕获）—— 在受限沙箱下，
 // 程序无法打开命名管道，`execFileSync` 的默认 `pipe` 会 EPERM。
 const PAYLOAD = (() => {
-  const py = resolve(HERE, '..', '.venv', 'Scripts', 'python.exe');
+  // 审查 2026-10-09 P0-11：原先写死 `.venv/Scripts/python.exe`（Windows 专属布局），
+  // 在 Linux/macOS（`.venv/bin/python`）与无仓库内 venv 的干净检出中抛未捕获 ENOENT
+  // → ci.yml quick 必红。改为跨平台探测；找不到时给中文 FAIL 而非堆栈。
+  const py = resolvePython({ repoRoot: REPO_ROOT });
+  if (!py) {
+    console.error(missingPythonMessage('check_params_panel.mjs'));
+    process.exit(1);
+  }
   const out = resolve(os.tmpdir(), `ss-params-payload-${process.pid}.json`);
   const code = `
 import json, sys
@@ -111,7 +121,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=False)
 `;
   execFileSync(py, ['-c', code, out], {
-    cwd: resolve(HERE, '..'),
+    cwd: REPO_ROOT,
     env: { ...process.env, PYTHONPATH: 'src' },
     stdio: 'ignore',
   });

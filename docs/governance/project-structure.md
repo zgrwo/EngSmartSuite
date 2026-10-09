@@ -271,6 +271,7 @@ EngSmartSuite/
 │       ├── test_params_panel.py         #   参数面板半运行时冒烟（P4 步骤④，需 Node）
 │       ├── test_browser_smoke.py         #   真浏览器冒烟（Edge + CDP）的 pytest 包装
 │       ├── test_truth_coverage.py        #   真值覆盖率门禁的包装 + 扫描器自证
+│       ├── test_python_probe.py          #   跨平台解释器探测自测（P0-11 回归防线）
 │       └── test_ci_layer_coverage.py    #   PR 门禁覆盖守卫（测试目录/文件须接入 quick job）
 │
 ├── benchmarks/                     # 性能基准（pytest-benchmark，非测试防线）
@@ -394,6 +395,7 @@ EngSmartSuite/
 │   ├── verify_cross_consistency.py #   Web/CLI 交叉一致性
 │   ├── verify_frontend_params.py   #   前后端参数键集静态一致性（扫描 static/*.js 全部）
 │   ├── check_js_modules.mjs        #   前端 ES module 导入/导出与依赖图校验（Node）
+│   ├── _probe_python.mjs           #   跨平台 Python 解释器探测（门禁脚本共用的唯一入口）
 │   ├── check_params_panel.mjs       #   参数面板半运行时冒烟（步骤④：删字典后仍能渲染）
 │   ├── check_export_flow.mjs        #   前端导出链路半运行时冒烟（Node + DOM 桩加载真实模块）
 │   ├── check_browser_smoke.mjs      #   真浏览器冒烟（系统 Edge + CDP，零依赖）

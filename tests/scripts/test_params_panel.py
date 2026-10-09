@@ -25,7 +25,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -46,6 +48,10 @@ def _node() -> str | None:
 class TestParamsPanelSmoke:
     def test_params_panel_smoke_passes(self):
         assert CHECKER.exists(), f"缺少冒烟脚本: {CHECKER}"
+        # 审查 2026-10-09 P0-11：把**权威解释器**注入给脚本。
+        # 脚本原先写死 `.venv/Scripts/python.exe`（Windows 专属布局），在 Linux/macOS
+        # 与任何无仓库内 venv 的干净检出中抛未捕获 ENOENT → 退出码 1 → 本断言失败
+        # → ci.yml quick（每个 PR）必红。
         r = subprocess.run(
             [_node(), str(CHECKER)],
             capture_output=True,
@@ -53,9 +59,18 @@ class TestParamsPanelSmoke:
             encoding="utf-8",
             errors="replace",
             timeout=180,
+            env={**os.environ, "SMARTSUITE_PYTHON": sys.executable},
         )
         assert r.returncode == 0, f"参数面板冒烟失败：\n{r.stdout}\n{r.stderr}"
         assert "OK" in r.stdout, r.stdout
+
+    def test_interpreter_is_probed_cross_platform(self):
+        """冒烟脚本不得硬编码 Windows venv 布局，必须走共享探测模块。"""
+        text = CHECKER.read_text(encoding="utf-8")
+        assert "'Scripts'" not in text and '"Scripts"' not in text, (
+            "check_params_panel.mjs 不得硬编码 `.venv/Scripts`；应走 scripts/_probe_python.mjs"
+        )
+        assert "resolvePython" in text, "应通过共享探测模块解析解释器"
 
     def test_smoke_script_is_not_trivial(self):
         """冒烟脚本本身必须做实质工作（防止被掏空后永远通过）。"""

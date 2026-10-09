@@ -18,13 +18,23 @@
 // 这是第三十九轮那次收紧最需要的回归证据。
 //
 // 用法：node scripts/check_browser_smoke.mjs
-// 退出码：0 = 通过；1 = 发现问题（逐条打印）
+// 退出码：0 = 通过；1 = 发现问题（逐条打印）；2 = 环境不满足（无 Edge / 无解释器，
+//         由 `tests/scripts/test_browser_smoke.py` 映射为显式 skip）
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  EXIT_ENV_UNSATISFIED,
+  EXIT_OK,
+  EXIT_PROBLEMS,
+  missingPythonMessage,
+  resolvePython,
+} from './_probe_python.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -34,29 +44,48 @@ function check(ok, msg) {
   if (!ok) problems.push(msg);
   return ok;
 }
+
+/** 取一个当前空闲的本地端口（避免固定端口被陈旧进程占用，审查 2026-10-09 G-07）。 */
+function freePort() {
+  return new Promise((res, rej) => {
+    const srv = createServer();
+    srv.on('error', rej);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => res(port));
+    });
+  });
+}
 function note(msg) {
   console.log(`  · ${msg}`);
 }
 
 // ── 环境：找 Edge / Python ────────────────────────────────────────
+// 审查 2026-10-09 P0-11 / P1-13：
+//   · 解释器改为跨平台探测（原先写死 `.venv/Scripts/python.exe`，POSIX 与 CI 必失败）；
+//   · 「环境不满足」不再用退出码 0 冒充通过 —— 改为 EXIT_ENV_UNSATISFIED，
+//     由包装测试映射为显式 skip，避免"永久空跑却算防线"。
 const EDGE_CANDIDATES = [
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
 const EDGE = EDGE_CANDIDATES.find((p) => existsSync(p));
-const PYTHON = join(ROOT, '.venv', 'Scripts', 'python.exe');
+const PYTHON = resolvePython({ repoRoot: ROOT });
 
 if (!EDGE) {
-  console.log('SKIP: 未找到 Microsoft Edge —— 真浏览器冒烟无法运行');
-  process.exit(0);
+  console.log('SKIP: 未找到 Microsoft Edge —— 真浏览器冒烟无法运行（环境不满足）');
+  process.exit(EXIT_ENV_UNSATISFIED);
 }
-if (!existsSync(PYTHON)) {
-  console.log(`SKIP: 未找到 ${PYTHON}`);
-  process.exit(0);
+if (!PYTHON) {
+  console.log(`SKIP: ${missingPythonMessage('check_browser_smoke.mjs')}`);
+  process.exit(EXIT_ENV_UNSATISFIED);
 }
 
-const PORT = 8791;
-const CDP_PORT = 9333;
+// 端口改为**动态空闲端口**（审查 2026-10-09 G-07）：原先 Flask 固定 8791、CDP 固定 9333，
+// 实测本机有两个 10-08/10-09 启动的陈旧 Edge 长期占用 9333，导致
+// `waitForHttp(9333/json/version)` 命中**旧浏览器** —— 冒烟结果与被测构建脱钩。
+const PORT = await freePort();
+const CDP_PORT = await freePort();
 const PROFILE = mkdtempSync(join(tmpdir(), 'ss-browser-'));
 const CSV = join(PROFILE, 'smoke.csv');
 
@@ -75,7 +104,15 @@ const procs = [];
 function cleanup() {
   for (const p of procs) {
     try {
-      p.kill();
+      // 审查 2026-10-09 G-07：`p.kill()` 只杀直接子进程，Edge 会派生出渲染/GPU 子进程，
+      // 实测本机累积 18 个残留 Edge 进程与 34 个 `ss-browser-*` 目录。
+      // Windows 上用 taskkill /T 杀整棵树；POSIX 下 p.kill() 已足够（无 job object 时
+      // 亦无法更强，故保持一致语义）。
+      if (process.platform === 'win32' && p.pid) {
+        spawnSync('taskkill', ['/PID', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        p.kill();
+      }
     } catch {
       /* 已退出 */
     }
@@ -83,7 +120,7 @@ function cleanup() {
   try {
     rmSync(PROFILE, { recursive: true, force: true });
   } catch {
-    /* 忽略 */
+    /* 忽略：Windows 下文件可能仍被刚被杀死的进程短暂占用 */
   }
 }
 process.on('exit', cleanup);
@@ -174,8 +211,10 @@ async function main() {
 
   const base = `http://127.0.0.1:${PORT}`;
   if (!(await waitForHttp(base))) {
-    console.log(`SKIP: Flask 服务未在 ${PORT} 起来（可能是端口占用）\n${serverErr.slice(0, 400)}`);
-    return 0;
+    // 端口已改为动态空闲端口，因此"起不来"不再是端口占用所致的常态，
+    // 而是真实问题 → 记为 FAIL（审查 2026-10-09 P1-13：基建失败不得算通过）
+    problems.push(`Flask 服务未在 ${PORT} 起来：${serverErr.slice(0, 400)}`);
+    return EXIT_PROBLEMS;
   }
   note(`Flask 已启动 ${base}`);
 
@@ -197,13 +236,13 @@ async function main() {
 
   if (!(await waitForHttp(`http://127.0.0.1:${CDP_PORT}/json/version`))) {
     problems.push('Edge 远程调试端口未就绪');
-    return 1;
+    return EXIT_PROBLEMS;
   }
   const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
   const page = targets.find((t) => t.type === 'page');
   if (!page) {
     problems.push('CDP 未找到 page target');
-    return 1;
+    return EXIT_PROBLEMS;
   }
   note(`Edge 已启动（CDP :${CDP_PORT}）`);
 
@@ -366,17 +405,17 @@ async function main() {
   if (problems.length) {
     console.log(`\nFAIL: 真浏览器冒烟发现 ${problems.length} 个问题`);
     for (const p of problems) console.log(`  ✗ ${p}`);
-    return 1;
+    return EXIT_PROBLEMS;
   }
   console.log('\nOK: 真浏览器冒烟通过（Edge headless + CDP：上传→选列→分析→渲染 + CSP 生效）');
-  return 0;
+  return EXIT_OK;
 }
 
-let code = 1;
+let code = EXIT_PROBLEMS;
 try {
   code = await main();
 } catch (e) {
   console.log(`FAIL: 真浏览器冒烟抛异常 —— ${e.message}`);
-  code = 1;
+  code = EXIT_PROBLEMS;
 }
 process.exit(code);
