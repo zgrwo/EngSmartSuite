@@ -422,10 +422,14 @@ export function buildParamInput(k, v, task) {
   let inputType = 'text';
   let step = '';
   if (typeof v === 'number') { inputType = 'number'; step = v < 1 ? '0.01' : '1'; }
+  // 审查 2026-10-09 P0-1：`null` 默认值（TaskSpec 用 None 表示"未指定"）若直接插值
+  // 会渲染成字面量 `value="null"`，`getParams` 再把它当用户输入原样下发 →
+  // 7 个任务硬报错（usl/lsl/group_col 无法解析）、2 个任务静默错数
+  // （proportion_ci 点估计 0.0000、lasso R² 0.785 vs 0.981）。归一为空控件即可。
   return `<div class="param-item" id="param-item_${k}">
     <label class="param-label" for="${id}">${label}</label>
     ${hint ? `<div class="param-hint">${hint}</div>` : ''}
-    <input type="${inputType}" id="${id}" value="${v}" step="${step}"
+    <input type="${inputType}" id="${id}" value="${v ?? ''}" step="${step}"
       class="param-input" placeholder="${hint || ''}">
   </div>`;
 }
@@ -481,7 +485,11 @@ export function getParams(task) {
     const el = document.getElementById('param_'+k);
     if (!el) return;
     let v = el.value.trim();
-    if (v === '') return;
+    // 审查 2026-10-09 P0-1：哨兵值统一视为"未填"（与空串同义）。
+    // 渲染侧已归一（`value="${v ?? ''}"`），这里再兜一道 —— 任何上游把 `null`/`undefined`
+    // 变成字符串的路径都不得把字面量送给引擎（`isNaN('null')` 为真会跳过数值转换，
+    // 于是 `params["usl"] === "null"` → Spec 校验报"无法解析"）。
+    if (v === '' || v === 'null' || v === 'undefined' || v === 'NaN') return;
 
     if (k === 'ranges') {
       // 审查 2026-08-19 H1：提示格式为"料温:180,220"（逗号分隔上下限），

@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -77,6 +78,85 @@ class TestParamsPanelSmoke:
         src = CHECKER.read_text(encoding="utf-8")
         for marker in ("buildParamInput", "hydrateParams", "COLUMN_PARAMS", "derive_param_labels"):
             assert marker in src, f"冒烟脚本未覆盖 {marker}"
+
+    def test_roundtripped_payload_is_accepted_by_engine_specs(self, tmp_path):
+        """面板**能发出**的载荷，引擎的参数契约必须接受（审查 2026-10-09 P1-2）。
+
+        JS 侧只能证明"没有下发字面量 null"；能否被引擎接受只有 Python 侧的
+        `Spec` 说了算。本用例把 `getParams` 的真实回读结果落盘，逐任务逐字段
+        交给 `Spec.validate_or_raise`/字段校验器判定 —— 这才是完整往返。
+
+        它能拦住的两类回归：
+          · `None` 默认值被渲染成 `"null"`（P0-1）；
+          · `Choice` 的整数值被 `<select>` 字符串化而引擎无别名（P0-2）。
+        """
+        dump = tmp_path / "roundtripped.json"
+        r = subprocess.run(
+            [_node(), str(CHECKER)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            env={
+                **os.environ,
+                "SMARTSUITE_PYTHON": sys.executable,
+                "SMARTSUITE_PARAMS_DUMP": str(dump),
+            },
+        )
+        assert r.returncode == 0, f"参数面板冒烟失败：\n{r.stdout}\n{r.stderr}"
+        assert dump.is_file(), f"脚本未落盘往返载荷：\n{r.stdout}"
+
+        payload = json.loads(dump.read_text(encoding="utf-8"))
+        assert payload, "往返载荷为空，扫描器失效"
+
+        from smartsuite.services.param_labels import spec_for_task
+
+        offenders: list[str] = []
+        checked = 0
+        for task, sent in payload.items():
+            spec = spec_for_task(task)
+            if spec is None or not sent:
+                continue
+            checked += 1
+            _params, err = spec.validate(sent)
+            if err is not None:
+                offenders.append(f"{task}: {err.message}（实发 {sent!r}）")
+        assert checked > 0, "未校验任何任务，断言将恒真"
+        assert not offenders, (
+            "以下任务的面板载荷被引擎拒绝（Web 默认流程会失败）：\n  " + "\n  ".join(offenders)
+        )
+
+    def test_switching_tasks_does_not_leak_previous_values(self, tmp_path):
+        """切换任务后不得残留上一个任务同名的控件值（防跨任务串值）。
+
+        `elements` 是脚本内的全局桩，`getParams` 按 `param_<k>` 取元素；
+        若某任务缺某控件而脏值仍在，就会把别的任务的值发出去。
+        这里断言：只渲染 A 任务的控件后，B 任务的回读结果里不含 A 的键。
+        """
+        dump = tmp_path / "roundtripped.json"
+        r = subprocess.run(
+            [_node(), str(CHECKER)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=180,
+            env={
+                **os.environ,
+                "SMARTSUITE_PYTHON": sys.executable,
+                "SMARTSUITE_PARAMS_DUMP": str(dump),
+            },
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        payload = json.loads(dump.read_text(encoding="utf-8"))
+
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+        for task, sent in payload.items():
+            declared = set(DEFAULT_PARAMS.get(task, {}))
+            extra = set(sent) - declared
+            assert not extra, f"{task} 的载荷含未声明键（跨任务串值？）: {sorted(extra)}"
 
     def test_payload_comes_from_python_not_hardcoded(self):
         """载荷必须由 Python **真实生成** —— 否则又成了一份会漂移的平行副本。

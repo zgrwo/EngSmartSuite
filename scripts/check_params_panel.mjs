@@ -15,7 +15,7 @@
 // 退出码：0 = 通过；1 = 发现问题
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -180,10 +180,98 @@ check(params.paramsHydrated() === true, 'paramsHydrated() 应为 true');
   check(/COLUMN_PARAMS/.test(src), 'COLUMN_PARAMS（列选择器表）应保留');
 }
 
+// ── 断言 6：默认值往返（渲染 → 浏览器取值 → getParams → 引擎可接受）──
+// 审查 2026-10-09 P0-1：旧断言只覆盖"渲染出来的 HTML 长什么样"，**没有一条**覆盖
+// 「渲染出的默认值能被原样读回并送给引擎」。于是 `value="${v}"` 把 `None` 默认值
+// 写成了字面量 `null`：`getParams` 只丢空串（`:484`），`isNaN('null')` 为真
+// 使数值转换被跳过（`:509`）→ 字符串 `"null"` 原样下发 → 9 个任务默认流程失效
+// （7 个硬报错：usl/lsl/group_col 无法解析；2 个静默错数：proportion_ci 0.0000、
+// lasso R² 0.785 vs 0.981）。
+{
+  /** 按浏览器语义取控件当前值：select 取 selected（无则首个）option 的 value。 */
+  function browserValueOf(html) {
+    const sel = html.match(/<select[^>]*>([\s\S]*?)<\/select>/);
+    if (sel) {
+      const opts = [...sel[1].matchAll(/<option value="([^"]*)"([^>]*)>/g)];
+      if (!opts.length) return { tag: 'SELECT', value: '' };
+      const chosen = opts.find((o) => /\bselected\b/.test(o[2])) ?? opts[0];
+      return { tag: 'SELECT', value: chosen[1] };
+    }
+    const inp = html.match(/<input[^>]*\bvalue="([^"]*)"/);
+    return { tag: 'INPUT', value: inp ? inp[1] : '' };
+  }
+
+  const badLiteral = [];
+  const typeDrift = [];
+  let roundtripped = 0;
+
+  for (const task of Object.keys(PAYLOAD.params)) {
+    const cfg = PAYLOAD.params[task] || {};
+    const tags = {};
+    // 每个任务前清空 DOM 桩：真实浏览器里 `showParams` 会整体替换 `param-body` 的
+    // innerHTML，故面板**只含当前任务**的控件。共用一份 elements 映射会让上一个
+    // 任务同名键（如 method 在 correlation/doe_design/anomaly_detect 三处语义不同）
+    // 的值泄漏到本任务 —— 那是桩的假象，不是产品缺陷。
+    elements.clear();
+    for (const [k, v] of Object.entries(cfg)) {
+      const { tag, value } = browserValueOf(params.buildParamInput(k, v, task));
+      tags[k] = tag;
+      const node = el(`param_${k}`);
+      node.tagName = tag;
+      node.value = value;
+    }
+    const sent = params.getParams(task);
+    for (const [k, v] of Object.entries(sent)) {
+      roundtripped += 1;
+      if (v === 'null' || v === 'undefined' || v === 'NaN') {
+        badLiteral.push(`${task}.${k}=${JSON.stringify(v)}`);
+      }
+    }
+    for (const [k, v] of Object.entries(cfg)) {
+      // 仅对 `<input>` 判类型漂移：`<select>` 的 option.value 天生是字符串，
+      // 其字符串形式能否被引擎接受由 Python 侧结构门禁保证
+      // （tests/services/test_param_spec_registry.py::TestEveryUiSelectableValueIsAccepted）。
+      if (tags[k] === 'INPUT' && typeof v === 'number' && k in sent && typeof sent[k] !== 'number') {
+        typeDrift.push(`${task}.${k}: 默认 ${v}(number) → 下发 ${JSON.stringify(sent[k])}(${typeof sent[k]})`);
+      }
+    }
+  }
+
+  check(roundtripped > 0, '往返扫描未覆盖任何参数（断言将恒真，扫描器失效）');
+  check(
+    badLiteral.length === 0,
+    `面板下发了字面量 null/undefined：${badLiteral.slice(0, 8).join(', ')}` +
+      `${badLiteral.length > 8 ? ` …共 ${badLiteral.length} 处` : ''}`,
+  );
+  check(typeDrift.length === 0, `数值默认值被字符串化：${typeDrift.slice(0, 8).join('; ')}`);
+  console.log(`  · 往返覆盖 ${roundtripped} 个键`);
+
+  // 审查 2026-10-09 P1-2：把回读结果落盘，供 Python 侧断言「面板能发出的载荷，
+  // 引擎的参数契约必须接受」。JS 只能证明"没有字面量 null"，能否被引擎接受
+  // 只有 Python 侧的 Spec 说了算 —— 两层合起来才是完整往返。
+  const dumpPath = process.env.SMARTSUITE_PARAMS_DUMP;
+  if (dumpPath) {
+    const payload = {};
+    for (const task of Object.keys(PAYLOAD.params)) {
+      const cfg = PAYLOAD.params[task] || {};
+      elements.clear(); // 同上：逐任务隔离，模拟面板整体重建
+      for (const [k, v] of Object.entries(cfg)) {
+        const { tag, value } = browserValueOf(params.buildParamInput(k, v, task));
+        const node = el(`param_${k}`);
+        node.tagName = tag;
+        node.value = value;
+      }
+      payload[task] = params.getParams(task);
+    }
+    writeFileSync(dumpPath, JSON.stringify(payload, null, 1), 'utf8');
+    console.log(`  · 往返载荷已落盘 ${dumpPath}`);
+  }
+}
+
 // ── 输出 ────────────────────────────────────────────────────────
 if (problems.length) {
   console.error('FAIL: 参数面板冒烟未通过');
   for (const p of problems) console.error('  - ' + p);
   process.exit(1);
 }
-console.log('OK: 参数面板冒烟通过（真实加载 params.js + 后端真实载荷 + 5 组断言）');
+console.log('OK: 参数面板冒烟通过（真实加载 params.js + 后端真实载荷 + 6 组断言）');

@@ -343,6 +343,56 @@ def test_duplicate_marker_check_is_clean_in_real_repo():
     assert vfp.find_duplicate_markers() == []
 
 
+class TestRealCallDetectionIsNotSubstringSearch:
+    """「必须真的调用 `hydrateParams`」不得是子串搜索（审查 2026-10-09 P1-10）。
+
+    旧实现用 `"hydrateParams(" in js_text` / `"/api/tasks" in js_text`。但
+    `params.js` 的**注释**（`:13`、`:23`、`:121`、`:127`…）与**函数定义**
+    （`:130 export function hydrateParams(payload) {`）本身就含这些子串 ——
+    于是 `app.js` 里**唯一真实调用**被改名后门禁仍 `EXIT=0`（实测 I3 注入）。
+    这与 `TASK_PARAMS` 字面量检测（已剥注释）不一致，属同族实现不同标准。
+    """
+
+    def test_renamed_hydrate_call_is_detected(self, monkeypatch, tmp_path):
+        _mutated_static(
+            monkeypatch,
+            tmp_path,
+            lambda t: t.replace(
+                "if (!hydrateParams(await r.json()))", "if (!hydrateParamsX(await r.json()))"
+            ),
+        )
+        problems = vfp.check()
+        assert any("hydrateParams" in p for p in problems), (
+            f"真实调用被改名但门禁未报（注释/定义满足了子串判定）：{problems}"
+        )
+
+    def test_renamed_api_tasks_request_is_detected(self, monkeypatch, tmp_path):
+        _mutated_static(
+            monkeypatch, tmp_path, lambda t: t.replace("fetch('/api/tasks')", "fetch('/api/taskz')")
+        )
+        problems = vfp.check()
+        assert any("/api/tasks" in p for p in problems), (
+            f"真实请求被改名但门禁未报（注释满足了子串判定）：{problems}"
+        )
+
+    def test_helper_ignores_comments_and_declarations(self):
+        """助手级判据：注释、docstring、函数定义都不算「调用」。"""
+        fn = getattr(vfp, "_has_js_call", None)
+        assert fn is not None, "缺少 _has_js_call 助手（P1-10：子串判定会把注释当成调用）"
+        assert fn("// hydrateParams()\n", "hydrateParams") is False
+        assert fn("/** 由 `hydrateParams()` 灌入 */\n", "hydrateParams") is False
+        assert (
+            fn("export function hydrateParams(payload) { return true; }\n", "hydrateParams")
+            is False
+        )
+        assert fn("if (!hydrateParams(await r.json())) {}", "hydrateParams") is True
+
+        lit = getattr(vfp, "_has_js_literal_call", None)
+        assert lit is not None, "缺少 _has_js_literal_call 助手"
+        assert lit("// 见 /api/tasks 下发\n", "/api/tasks") is False
+        assert lit("const r = await fetch('/api/tasks');", "/api/tasks") is True
+
+
 def test_missing_static_files_raises(monkeypatch, tmp_path):
     """static/ 下无 JS → 明确报错，不静默返回空文本（否则门禁永远通过）。"""
     monkeypatch.setattr(vfp, "STATIC_DIR", tmp_path)

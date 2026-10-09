@@ -334,6 +334,38 @@ def _check_inverse_prefixes(frontend_prefixes: dict[str, list[str]] | None) -> l
     return problems
 
 
+def _strip_js_comments(src: str) -> str:
+    """去掉 JS 注释（块注释 + 行注释）。
+
+    审查 2026-10-09 P1-10：`hydrateParams` / `/api/tasks` 的「是否存在」判定
+    原先是裸子串搜索，而 `params.js` 的注释与函数定义本身就含这些子串 ——
+    真实调用被改名后门禁仍全绿。判定前必须先剥注释（与 `TASK_PARAMS`
+    字面量检测同口径）。
+    """
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.DOTALL)
+    return "\n".join(line.split("//", 1)[0] for line in src.splitlines())
+
+
+def _has_js_call(src: str, name: str) -> bool:
+    """`src` 中是否存在对 `name` 的**调用**（排除注释与 `function/const/let/var` 定义）。"""
+    code = _strip_js_comments(src)
+    decl_before = re.compile(r"(?:function|const|let|var)\s+$")
+    for m in re.finditer(rf"(?<![\w.$]){re.escape(name)}\s*\(", code):
+        if decl_before.search(code[: m.start()]):
+            continue  # 定义（`export function hydrateParams(` 等），不是调用
+        return True
+    return False
+
+
+def _has_js_literal_call(src: str, literal: str) -> bool:
+    """`src` 中是否把 `literal` 作为**调用实参**使用（如 `fetch('/api/tasks')`）。
+
+    仅匹配引号包裹的字面量出现在 `调用名(` 之后的情形 —— 注释里的提及不算。
+    """
+    code = _strip_js_comments(src)
+    return re.search(rf"[\w.]+\s*\(\s*['\"]{re.escape(literal)}['\"]", code) is not None
+
+
 def _check_single_source_architecture() -> list[str]:
     """真实代码库的架构检查（`js_path=None` 时）。
 
@@ -362,12 +394,14 @@ def _check_single_source_architecture() -> list[str]:
     problems.extend(find_duplicate_markers())
 
     js_text = collect_frontend_js()
-    if "hydrateParams(" not in js_text:
+    # 审查 2026-10-09 P1-10：必须是**真实调用/请求**，不能是注释或定义里的子串
+    # （旧实现 `"hydrateParams(" in js_text` 对 params.js 的注释与定义恒真 → 假绿）。
+    if not _has_js_call(js_text, "hydrateParams"):
         problems.append(
             "static/*.js 未调用 hydrateParams() —— 默认值不会到位，"
             "所有任务会退化成'无参数'（静默功能缺失）"
         )
-    if "/api/tasks" not in js_text:
+    if not _has_js_literal_call(js_text, "/api/tasks"):
         problems.append("static/*.js 未请求 /api/tasks —— 默认值来源缺失")
 
     # 服务端必须真的下发 params（与 tests/integration/test_api_tasks_params.py 呼应）
