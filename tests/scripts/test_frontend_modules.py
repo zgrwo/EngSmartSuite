@@ -109,3 +109,28 @@ class TestModuleDistribution:
             )
             assert "require(" not in code, f"{p.name} 含 CommonJS require("
             assert "module.exports" not in code, f"{p.name} 含 CommonJS module.exports"
+
+
+class TestNumericFormattingIsScaleAware:
+    """表格数值展示必须走 `fmtCellNum`，不得裸用 `toFixed`（审查 2026-10-09 P1-7）。
+
+    `util.js::fmtCellNum` 是量纲感知的（微尺度 <5e-5 改科学计数），而裸 `toFixed(3)`
+    会把 `1.23e-9` 渲染成 `0.000` —— 用户看到整列 0（历史 O-1 在 Web 侧的残留）。
+    实测：`app.js` 的普通结果表用 `fmtCellNum`，但**相关性合并矩阵**那一处漏改。
+    """
+
+    def test_no_bare_tofixed_in_table_renderers(self):
+        offenders = []
+        for p in sorted(STATIC.glob("*.js")):
+            # util.js 是 `fmtCellNum` 的**实现处**，内部当然用 toFixed（它就是那条
+            # 尺度感知规则的落地）—— 唯一合法例外。
+            if p.name == "util.js":
+                continue
+            for i, line in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
+                code = line.split("//", 1)[0]
+                if ".toFixed(" in code and "fmtCellNum" not in code:
+                    offenders.append(f"{p.name}:{i} {line.strip()[:90]}")
+        assert not offenders, (
+            "以下位置裸用 toFixed（微尺度会渲染成 0.000，应改用 util.js 的 fmtCellNum）：\n  "
+            + "\n  ".join(offenders)
+        )

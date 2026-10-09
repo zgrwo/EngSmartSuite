@@ -210,7 +210,7 @@ function renderResults(results) {
     const hdr = '<th></th>' + tbl.columns.map(c => `<th>${escHtml(String(c))}</th>`).join('');
     const rows = tbl.data.map((row, i) =>
       `<tr><td><b>${escHtml(String(tbl.index[i]||''))}</b></td>${row.map(v =>
-        `<td class="${Math.abs(v)>0.2?'cell-strong':'cell-normal'}">${typeof v==='number'?v.toFixed(3):escHtml(String(v))}</td>`
+        `<td class="${Math.abs(v)>0.2?'cell-strong':'cell-normal'}">${typeof v==='number'?fmtCellNum(v):escHtml(String(v))}</td>`
       ).join('')}</tr>`
     ).join('');
     html += `<div class="result-card">
