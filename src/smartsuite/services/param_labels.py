@@ -34,8 +34,11 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import logging
+from functools import cache, lru_cache
+from pathlib import Path
 from typing import Any
 
 from smartsuite.services.task_spec import TASK_SPECS
@@ -61,6 +64,90 @@ def _spec_for_task(func_path: str) -> Any | None:
         logger.warning("无法导入 %s", module_path)
         return None
     return getattr(module, "PARAM_SPEC", None)
+
+
+@lru_cache(maxsize=1)
+def _global_param_vocabulary_cached() -> frozenset[str]:
+    """全任务参数名词汇表（所有 Spec 字段 ∪ 所有面板默认键）—— 见下方公开包装。"""
+    from smartsuite.services.orchestrator import DEFAULT_PARAMS
+
+    names: set[str] = set()
+    for _spec in TASK_SPECS:
+        names |= set(DEFAULT_PARAMS.get(_spec.key, {}))
+        _s = spec_for_task(_spec.key)
+        if _s is not None:
+            names |= set(_s.field_names)
+    return frozenset(names)
+
+
+def global_param_vocabulary() -> frozenset[str]:
+    """**全任务**参数名词汇表（本产品"存在这个参数名"的判据）。
+
+    用途：把"其他任务会用到、本任务不读"的键与"哪里都不认识（真拼错）"分开措辞 ——
+    否则 `anova(group_col="g")` 会被报成"可能拼写有误"，而 `group_col` 在本产品里
+    是通用参数名，用户这么写并不算错（只是 anova 的分组列取自数据而非参数）。
+    """
+    return _global_param_vocabulary_cached()
+
+
+@cache
+def engine_read_param_keys(task_key: str) -> frozenset[str]:
+    """**引擎实际会读取**的参数键（AST 静态提取自该任务的引擎模块）。
+
+    ## 为什么需要它（我在 P2-5 上踩的坑）
+
+    `Spec.unknown_fields` 原先以"Spec 声明的字段"为已知集 —— 于是一批
+    **引擎确实读取、但从未在 Spec 里声明**的参数被误判为拼写错误：
+
+        survival_analysis.event_col / event_value
+        bootstrap_ci.group_col、grid_search.ranges、multi_objective.objectives …
+        filter_groups（前端分组筛选栏注入）、alpha_lasso、objectives/weights
+
+    实测误报面 **15 个任务**。这直接撞「禁止错误归因」红线：用户按帮助文档
+    填了 `event_col`，系统却告诉他"这个参数没被使用，可能拼写有误" ——
+    比不提示更糟（他会去改一个本来就对的参数）。
+
+    ## 判据：以"引擎读不读"为准，而不是"Spec 声明没有"
+
+    `params.get("<字面量>")` 的字符串字面量就是引擎的真实读取面，
+    与 Spec 是否声明无关（Spec 是**校验与展示**契约，不是读取清单）。
+    两者取并集才是"已知参数"。
+
+    ## 为什么用 AST 而不是运行时探测
+
+    运行时需要构造能触发每条分支的输入（不可能穷举）。AST 读取是**保守但可靠**的
+    下界：漏掉的键仍可能被误报，但不会把已知键误报掉（每个键都由真实代码路径证明）。
+    配套 `tests/services/test_orchestrator_param_disclosure.py` 钉住"零误报"与
+    "扫描器非空"（防它退化成恒真）。
+    """
+    matches = [s for s in TASK_SPECS if s.key == task_key]
+    if not matches:
+        return frozenset()
+    module_path = matches[0].func_path.split(":", 1)[0]
+    try:
+        module = importlib.import_module(module_path)
+        src_file = getattr(module, "__file__", None)
+        if not src_file:
+            return frozenset()
+        tree = ast.parse(Path(src_file).read_text(encoding="utf-8-sig"))
+    except (ImportError, OSError, SyntaxError):  # pragma: no cover - 由其他门禁负责
+        logger.debug("无法静态提取 %s 的参数读取面", module_path, exc_info=True)
+        return frozenset()
+
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        # `xxx.get("<字面量>")`，其中 xxx 形如 `params` / `req.params` / `_params`
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr != "get" or not node.args:
+            continue
+        target = ast.unparse(node.func.value)
+        if not target.split(".")[-1].endswith("params"):
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            keys.add(first.value)
+    return frozenset(keys)
 
 
 def spec_for_task(task_key: str) -> Any | None:

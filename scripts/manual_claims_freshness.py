@@ -16,6 +16,7 @@ user-manual/（按章拆页）——审查注入 2a 实证：手册值 −0.050�
 """
 
 import re
+from pathlib import Path
 
 # 分析方法 → 手册章节号（与 user-manual/（按章拆页）的 ### 标题对应）
 SECTION_BY_ANALYSIS = {
@@ -294,3 +295,60 @@ def check_manual_freshness(manual_text: str, claims: list[tuple]) -> list[str]:
                         f"（子值 {part}）——手册数值可能已被编辑"
                     )
     return problems
+
+
+def _main() -> int:
+    """独立运行入口（审查 2026-10-09 自查发现）。
+
+    ⚠️ 本模块此前**没有 `if __name__ == "__main__"`** —— 于是
+    `python scripts/manual_claims_freshness.py` 是个**静默 no-op 且 exit 0**：
+    它什么都不检查却报"成功"。而 `docs/governance/ai-review-prompt.md` 把它列为
+    可独立运行的验证命令，照做的人会以为新鲜度已校验过（**惰性门禁**，比没有门禁
+    更危险 —— 它给人虚假的安全感）。
+
+    真实校验路径是 `verify_manual_claims.py`（它在进程内调用 `check_manual_freshness`
+    并计入 FAIL），本入口是为"单独快速校验"补的，两者共用同一实现。
+    """
+    import io
+    import sys as _sys
+
+    _sys.stdout = io.TextIOWrapper(_sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+    claims = _load_claims_local()
+    if not claims:
+        print("[FAIL] 未能加载任何 CLAIM —— 无法校验新鲜度（拒绝在无输入下报成功）")
+        return 1
+    problems = check_manual_freshness(_read_manual_text_local(), claims)
+    if problems:
+        print(f"[FAIL] 手册新鲜度校验：{len(problems)} 项问题")
+        for item in problems:
+            print(f"  - {item}")
+        return 1
+    print(f"[OK] 手册新鲜度校验通过（{len(claims)} 条 CLAIM 均能在手册中定位到快照值）")
+    return 0
+
+
+def _read_manual_text_local() -> str:
+    """合并 docs/user-manual/[0-9]*.md 章节文件（与 verify_manual_claims 同口径）。"""
+    _root = Path(__file__).resolve().parents[1]
+    manual_dir = _root / "docs" / "user-manual"
+    parts = [p.read_text(encoding="utf-8") for p in sorted(manual_dir.glob("[0-9]*.md"))]
+    return "\n".join(parts)
+
+
+def _load_claims_local() -> list[tuple[str, str, object]]:
+    """复用 `verify_manual_claims.py` 的 CLAIM 登记（唯一来源，禁止在本文件重抄）。"""
+    import runpy
+
+    try:
+        mod = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "scripts" / "verify_manual_claims.py")
+        )
+    except Exception as exc:  # pragma: no cover - 由 verify_manual_claims 自己报错
+        print(f"[FAIL] 无法加载 CLAIM 登记：{exc}")
+        return []
+    return list(mod.get("CLAIM_LOG") or [])
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

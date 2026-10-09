@@ -73,6 +73,64 @@ class TestUnknownParamIsDisclosed:
         assert any("移动极差法" in str(m) for m in r.messages), r.messages
 
 
+class TestNoFalsePositivesOnEngineReadKeys:
+    """**零误报**是这条披露的生命线（我第一版就踩了）。
+
+    引擎里有一批参数**确实读取、却从未在 Spec 声明**：`filter_groups`（图表分组筛选）、
+    `ranges` / `objectives` / `weights`（结构化入参）、`alpha_lasso`、`group_col`
+    （部分任务）…… 若"已知集"只取 Spec 字段，这些合法参数会被说成
+    「未被本任务使用（可能拼写有误）」—— **错误归因**，用户会去改一个本来就对的参数，
+    比不提示更糟。故已知集 = `Spec 字段 ∪ 面板默认值 ∪ 引擎读取面（AST 提取）`。
+    """
+
+    def test_no_task_flags_its_own_engine_read_keys(self):
+        from smartsuite.services.orchestrator import DEFAULT_PARAMS
+        from smartsuite.services.param_labels import engine_read_param_keys, spec_for_task
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        offenders: list[str] = []
+        for spec_meta in TASK_SPECS:
+            spec = spec_for_task(spec_meta.key)
+            if spec is None:
+                continue
+            read = engine_read_param_keys(spec_meta.key)
+            known = set(DEFAULT_PARAMS.get(spec_meta.key, {})) | set(read)
+            flagged = spec.unknown_fields(
+                {k: 1 for k in read if k not in set(DEFAULT_PARAMS.get(spec_meta.key, {}))},
+                extra_known=known,
+            )
+            if flagged:
+                offenders.append(f"{spec_meta.key}: {flagged}")
+        assert not offenders, (
+            "以下任务的「引擎确实读取的参数」被误报为拼写错误（错误归因）：\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_scanner_is_not_vacuous(self):
+        """扫描器必须真的提取到键 —— 否则上一条会因"读取面为空"而恒真（假绿）。"""
+        from smartsuite.services.param_labels import engine_read_param_keys
+        from smartsuite.services.task_spec import TASK_SPECS
+
+        total = sum(len(engine_read_param_keys(s.key)) for s in TASK_SPECS)
+        assert total >= 20, f"只提取到 {total} 个引擎读取键 —— 扫描器可能已失效"
+        assert "filter_groups" in engine_read_param_keys("box_chart"), (
+            "box_chart 的分组筛选参数应被提取到（已知读取点）"
+        )
+
+    def test_indirectly_read_key_is_still_flagged_correctly(self):
+        """反例钉住：`event_col` **不是**参数（引擎取 `feature_cols[0]`），应被点名。
+
+        这条防止我把"零误报"修过头 —— 下一步若有人为了让消息更少而把所有键都
+        塞进白名单，本用例会红。
+        """
+        from smartsuite.services.param_labels import engine_read_param_keys, spec_for_task
+
+        spec = spec_for_task("survival_analysis")
+        known = set(engine_read_param_keys("survival_analysis"))
+        assert "event_col" not in known, "event_col 来自 feature_cols，不是 params 键"
+        assert spec.unknown_fields({"event_col": "e"}, extra_known=known) == ["event_col"]
+
+
 class TestUnknownMessageBuilder:
     """`Spec.unknown_message` 的单元判据。"""
 

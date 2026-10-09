@@ -145,7 +145,30 @@ def anova_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # Round-2 #A2：常量目标列 → R²=-inf 且浮点噪声被当显著效应（虚假 p<0.05）
-    if req.data[req.target_col].nunique(dropna=True) <= 1:
+    #
+    # 审查 2026-10-09 P2-3 收口：原先只判 `nunique(dropna=True) <= 1` —— **全 NaN 列**
+    # 的 nunique 为 0，于是整列为空被报成「常量列（无变异）」。那不是"没变异"，
+    # 是"没有任何观测"，两者排查方向完全不同（前者去查量测分辨力，后者去查数据导入）。
+    # 归因口径与 `_guard.explain_undefined_sigma`/`check_non_constant` 统一。
+    _tgt = req.data[req.target_col]
+    if _tgt.notna().sum() == 0:
+        return AnalysisResult(
+            task="anova",
+            status="error",
+            messages=[
+                f"目标列「{req.target_col}」整列为空（没有任何有效观测），无法做 ANOVA；"
+                "请检查数据导入与缺失值处理。"
+            ],
+        )
+    if _tgt.notna().sum() < 2:
+        return AnalysisResult(
+            task="anova",
+            status="error",
+            messages=[
+                f"目标列「{req.target_col}」有效观测不足 2 个，无法做 ANOVA；请补充数据后重试。"
+            ],
+        )
+    if _tgt.nunique(dropna=True) <= 1:
         return AnalysisResult(
             task="anova",
             status="error",

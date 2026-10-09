@@ -76,7 +76,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -575,8 +575,18 @@ class Spec:
 
     # ── 未知键检测（审查 2026-10-09 P2-5）──
 
-    def unknown_fields(self, raw: dict[str, Any] | None) -> list[str]:
+    def unknown_fields(
+        self, raw: dict[str, Any] | None, *, extra_known: Iterable[str] = ()
+    ) -> list[str]:
         """`raw` 中**本 Spec 不认识**的键（拼写错误 / 不属于本任务），按字典序。
+
+        `extra_known`：**引擎实际会读取**的键（调用方传入，见
+        `services/param_labels.engine_read_param_keys`）。为什么必须有它 ——
+        有一批参数引擎确实读取、却从未在 Spec 里声明（`event_col` / `ranges` /
+        `objectives` / `filter_groups` / `alpha_lasso` …）：
+        实测若只以 Spec 字段为已知集，会在 **15 个任务**上把合法参数说成
+        「未被本任务使用（可能拼写有误）」—— 那是**错误归因**（用户会去改一个
+        本来就对的参数），比不提示更糟。故已知集 = `Spec 字段 ∪ 面板默认值 ∪ extra_known`。
 
         ## 为什么需要它（实测症状）
 
@@ -590,46 +600,64 @@ class Spec:
 
         ## 语义边界
 
-        - **不阻断校验**：本方法只做检测，`validate()` 的成功/失败判定不变
-          （严格拒绝是另一项决策，见下）。
-        - `None` 值的**已声明**键不算未知（`None` 是合法的"未提供"，见模块 docstring）。
+        - **不阻断校验**：本方法只做检测，`validate()` 的成功/失败判定不变。
+        - `None` 值的**已声明**键不算未知（`None` 是合法的"未提供"）。
         - 返回**排序后**的键名，保证输出稳定、可被测试逐字断言。
-
-        ## 接入状态（截至本方法引入时）
-
-        **检测已实现、接入待定**：把结果并入用户可见的 `AnalysisResult.messages`
-        需要改 `services/orchestrator.py` 的 `orchestrate()`（那里才有 Spec 与
-        结果的交汇点），该文件不在引入本方法的那一批文件所有权内。
-        调用方式（供接入方使用）::
-
-            spec = spec_for_task(req.task)
-            if spec is not None and (note := spec.unknown_message(req.params)):
-                ...  # 追加进 result.messages（披露，而非拒绝）
         """
-        if not raw:
-            return []
+        known = set(self._fields) | set(extra_known)
         # 用 `key=str` 兜底：键理论上都是字符串（JSON/YAML 来源），
         # 但混入非字符串键时 `sorted` 会抛 TypeError —— 检测方法不该自己炸。
-        return sorted((k for k in raw if k not in self._fields), key=str)
+        return sorted((k for k in (raw or {}) if k not in known), key=str)
 
-    def unknown_message(self, raw: dict[str, Any] | None) -> str | None:
+    def unknown_message(
+        self,
+        raw: dict[str, Any] | None,
+        *,
+        extra_known: Iterable[str] = (),
+        known_elsewhere: Iterable[str] = (),
+    ) -> str | None:
         """未知键的**用户可见披露文案**（中文）；没有未知键时返回 `None`。
 
         返回 `None`（而非空串）是刻意的：调用方可直接
-        `if (note := spec.unknown_message(params)): result.messages.append(note)`，
+        `if (note := spec.unknown_message(params, extra_known=...)): ...`，
         不必自己判断空值，也不会追加一条空消息。
 
-        文案里**同时**点名拼错的键与可用参数名 —— 只说"有未知参数"用户改不动，
-        列出可用名才能自我纠正（与 `_format_field_message` 同一条思路）。
+        ## 两级措辞（`known_elsewhere`）
+
+        同一个键可能"在别的任务里是合法参数、在本任务里没人读"。典型：
+        `anova(group_col="g")` —— anova 的分组列取自数据（`sig_factors[0][0] or cols[0]`），
+        `group_col` 对它确实是空操作；但它是本产品通用的参数名，用户这么写**不是拼错**。
+
+        把两者混为一谈会造成**错误指控**（"可能拼写有误" → 用户去改一个本来就没写错的键）。
+        故按 `known_elsewhere` 拆成两句：
+
+        - 在别处合法 → 「本任务不使用该参数（其他任务会用到），已忽略」
+        - 哪里都不认识 → 「未被本任务使用（可能拼写有误），已忽略」
+
+        前者仍然有用（告诉用户这个键在本任务不生效），后者才真的在报拼写错误。
         """
-        unknown = self.unknown_fields(raw)
+        unknown = self.unknown_fields(raw, extra_known=extra_known)
         if not unknown:
             return None
-        listed = "、".join(f"「{k}」" for k in unknown)
+        _elsewhere = set(known_elsewhere)
+        not_here = [k for k in unknown if k in _elsewhere]
+        typos = [k for k in unknown if k not in _elsewhere]
+        parts: list[str] = []
+        if not_here:
+            parts.append(
+                "参数 "
+                + "、".join(f"「{k}」" for k in not_here)
+                + " 未被本任务使用（其他任务会用到该参数名），已忽略。"
+            )
+        if typos:
+            parts.append(
+                "参数 "
+                + "、".join(f"「{k}」" for k in typos)
+                + " 未被本任务使用（可能拼写有误），已忽略。"
+            )
         available = "、".join(self._fields)
-        return (
-            f"参数 {listed} 未被本任务使用（可能拼写有误），已忽略。本任务可用参数：{available}。"
-        )
+        parts.append(f"本任务可用参数：{available}。")
+        return "".join(parts)
 
     # ── 校验 ──
 

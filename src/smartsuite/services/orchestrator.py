@@ -102,11 +102,27 @@ def orchestrate(req: AnalysisRequest) -> AnalysisResult:
     #  拒绝会把「多带了一个无关键」的合法调用打成失败）。
     _unknown_note: str | None = None
     try:
-        from smartsuite.services.param_labels import spec_for_task
+        from smartsuite.services.param_labels import (
+            engine_read_param_keys,
+            global_param_vocabulary,
+            spec_for_task,
+        )
 
         _spec = spec_for_task(req.task)
         if _spec is not None and hasattr(_spec, "unknown_message"):
-            _unknown_note = _spec.unknown_message(req.params)
+            # ⚠️ 必须传 `extra_known`：有一批参数引擎**确实读取**却从未在 Spec 声明
+            # （`event_col` / `ranges` / `objectives` / `filter_groups` / `alpha_lasso` …）。
+            # 只以 Spec 字段为已知集实测会在 **15 个任务**上把合法参数说成
+            # 「未被本任务使用（可能拼写有误）」—— 那是错误归因，比不提示更糟
+            # （用户会去改一个本来就对的参数）。已知集 = Spec ∪ 面板默认值 ∪ 引擎读取面。
+            _known = set(DEFAULT_PARAMS.get(req.task, {})) | set(engine_read_param_keys(req.task))
+            # `known_elsewhere`：本产品**别处**合法的参数名（全局词汇表）。
+            # 用于把"其他任务会用到、本任务不读"与"哪里都不认识（真拼错）"分开措辞 ——
+            # 否则 `anova(group_col=...)` 会被指控为拼写错误（见 Spec.unknown_message）。
+            _elsewhere = {k for k in global_param_vocabulary() if k not in _known}
+            _unknown_note = _spec.unknown_message(
+                req.params, extra_known=_known, known_elsewhere=_elsewhere
+            )
     except Exception:  # pragma: no cover - 检测本身绝不能影响主流程
         logger.debug("未知参数检测失败（不影响分析）", exc_info=True)
 
