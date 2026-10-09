@@ -86,6 +86,13 @@ E_<域>_<原因>
 | 18 | 正态性两处判据不一致（SW p<0.01 vs `sw or ad`） | B3 | 统一判据或标注口径 | `E_NUMERIC_NORMALITY_RULE` | ⚠待规范 |
 | 19 | 数值溢出（通用） | B0 | 拒绝 + **指出哪个参数/数据的量级** | `E_NUMERIC_OVERFLOW` | ⚠待规范（当前误报"极端值"） |
 | 20 | 多组 log-rank（>2 组） | B2 | 静默不做的现状 → 明确披露"未做" | `E_DESIGN_LOGRANK_SKIPPED` | ⚠待规范（当前静默） |
+| 21 | **量级上界**（`log10 max|s| > 150`，`Σy²` 溢出为 Inf） | B0 | 拒绝 + 点名量级 + 建议单位换算/中心化 | `E_SCALE_EXTREME_MAGNITUDE` | ✅已规范（`_guard.check_magnitude`，2026-10-09 P1-4；10 个任务接线） |
+| 22 | 结果表渗出 inf/nan（出口保洁） | B0 | 出口后置断言：表内非有限即拒绝 | `E_NUMERIC_OUTPUT_NON_FINITE` / `E_NUMERIC_MODEL_DEGENERATE` | ✅已规范（`_guard.check_tables_finite`，2026-10-09 P2-10） |
+| 23 | 切片/分组后的退化列（全 NaN / 单有效值） | B0 | 归因优先级：常量 → 整列为空 → 样本不足 → 非有限 → 兜底 | `E_DATA_EMPTY_COLUMN` / `E_DATA_INSUFFICIENT_N` / `E_DATA_CONSTANT_COLUMN` | ✅已规范（`_guard._degenerate_column_code` 单一实现，2026-10-09 P2-3） |
+| 24 | 分组列 / 子组列名不存在于数据中 | B0 | 拒绝 + 列出可用列 | `E_DESIGN_COLUMN_NOT_FOUND` | ✅已规范（`spc_cusum`/`spc_ewma`/`spc_xbar` 已前置校验，2026-10-09 P2-4） |
+
+> 状态列口径：`✅已规范` = 代码已实现且有用例钉住；`⚠待规范` = 契约已登记但实现未达标。
+> 上表 21–24 为本轮（2026-10-09 发版前全量审查的修复轮）新增/收口项。
 
 ## 契约的执行点
 

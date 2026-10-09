@@ -13,7 +13,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Opt, Spec
 from smartsuite.core.param_specs_common import ALPHA, CI_LEVEL, GROUP_COL
-from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, clean_frame
+from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, check_magnitude, clean_frame
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import safe_float as _safe_float
 
@@ -210,6 +210,14 @@ def variance_test(req: AnalysisRequest) -> AnalysisResult:
         req.data[[req.target_col, group_col]], [req.target_col], report=_report
     )
     sub = sub.dropna()
+    # 审查 2026-10-09 P1-4：量级上界守卫（B0）。×1e300 时 Levene/Bartlett 的平方和
+    # 溢出 → 统计量非有限。此前只做披露（结论标「无法判定」）但不拒绝；
+    # 现与其余任务口径一致地明确拒绝 —— 用户得到可执行的修复建议，
+    # 而不是一张没有结论的表。
+    if (
+        issue := check_magnitude(sub[req.target_col], what=f"「{req.target_col}」", report=_report)
+    ) is not None:
+        return AnalysisResult(task="variance_test", status="error", messages=[issue.detail])
     groups = sub[group_col].unique()
     if len(groups) < 2:
         return AnalysisResult(task="variance_test", status="error", messages=["至少需要 2 个分组"])

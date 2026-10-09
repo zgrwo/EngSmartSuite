@@ -376,9 +376,12 @@ class TestRealCallDetectionIsNotSubstringSearch:
         )
 
     def test_helper_ignores_comments_and_declarations(self):
-        """助手级判据：注释、docstring、函数定义都不算「调用」。"""
-        fn = getattr(vfp, "_has_js_call", None)
-        assert fn is not None, "缺少 _has_js_call 助手（P1-10：子串判定会把注释当成调用）"
+        """助手级判据：注释、docstring、函数定义都不算「调用」。
+
+        直接调用助手指令（不先 `assert fn is not None`）—— 助手缺失时 AttributeError
+        会以报错形式暴露，比"存在性断言"更能说明问题，也避免弱断言被判 WARN。
+        """
+        fn = vfp._has_js_call
         assert fn("// hydrateParams()\n", "hydrateParams") is False
         assert fn("/** 由 `hydrateParams()` 灌入 */\n", "hydrateParams") is False
         assert (
@@ -387,8 +390,7 @@ class TestRealCallDetectionIsNotSubstringSearch:
         )
         assert fn("if (!hydrateParams(await r.json())) {}", "hydrateParams") is True
 
-        lit = getattr(vfp, "_has_js_literal_call", None)
-        assert lit is not None, "缺少 _has_js_literal_call 助手"
+        lit = vfp._has_js_literal_call
         assert lit("// 见 /api/tasks 下发\n", "/api/tasks") is False
         assert lit("const r = await fetch('/api/tasks');", "/api/tasks") is True
 

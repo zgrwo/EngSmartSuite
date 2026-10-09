@@ -141,14 +141,24 @@ class TestEveryUiSelectableValueIsAccepted:
         )
 
     def test_anova_interactions_accepts_select_string(self):
-        """`anova.interactions` 必须接受下拉框发出的 `"0"`/`"1"`（P0-2 实例）。"""
+        """`anova.interactions` 必须接受下拉框发出的 `"0"`/`"1"`（P0-2 实例）。
+
+        断言不止"无错误"：还要求**归一化结果**正确（`"0"` → 整数 `0`），
+        否则"接受了但解析成别的值"会溜过去。
+        """
         from smartsuite.services.param_labels import spec_for_task
 
         spec = spec_for_task("anova")
         assert spec is not None
-        for raw in ("0", "1"):
-            _params, err = spec.validate({"interactions": raw})
+        for raw, expected in (("0", 0), ("1", 1)):
+            params, err = spec.validate({"interactions": raw})
             assert err is None, f"interactions={raw!r} 应被接受（下拉框只能发出字符串）"
+            assert params.interactions == expected, (
+                f"interactions={raw!r} 应归一为 {expected}，实际 {params.interactions!r}"
+            )
+        # 别名不得放宽"非法值"的拒绝语义
+        _params, bad = spec.validate({"interactions": "9"})
+        assert bad is not None and bad.code == "E_PARAM_NOT_IN_CHOICES", bad
 
 
 class TestParamReachability:

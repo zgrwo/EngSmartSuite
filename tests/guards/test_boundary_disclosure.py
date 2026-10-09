@@ -42,6 +42,8 @@ reliability.py:457/891、distribution.py:46）。
 from __future__ import annotations
 
 import ast
+import contextlib
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -49,7 +51,11 @@ import pandas as pd
 import pytest
 
 from smartsuite.core.contracts import AnalysisRequest
-from smartsuite.services.orchestrator import orchestrate
+from smartsuite.services.orchestrator import (
+    NO_DATA_TASKS,
+    TASK_REGISTRY,
+    orchestrate,
+)
 
 _ENGINE = Path(__file__).resolve().parents[2] / "src" / "smartsuite" / "engine"
 
@@ -518,3 +524,309 @@ class TestBreakingChangesAreRecorded:
         """破坏性变更与行为变更必须分开（前者要 minor 版本 + `!`，后者不需要）。"""
         section = self._section()
         assert "minor" in section, "应说明破坏性变更需要 minor 版本号"
+
+
+# ══════════════════════════════════════════════════════════════
+# P0-8 全任务门禁：±Inf 注入必须「披露」或「拒绝」
+# ══════════════════════════════════════════════════════════════
+
+#: 全任务输入配置 —— `(target_col, feature_cols, params)`。
+#: 判据（见 `test_configuration_covers_every_data_task`）：本表必须覆盖
+#: `TASK_REGISTRY - NO_DATA_TASKS`，否则新增任务会**静默逃过**下面的门禁。
+_TASK_INPUTS: dict[str, tuple[str, list[str], dict]] = {
+    "correlation": ("y", ["x1", "x2", "x3"], {}),
+    "anova": ("y", ["g"], {}),
+    "hypothesis_test": ("y", ["g2"], {"group_col": "g2"}),
+    "decision_tree": ("y", ["x1", "x2"], {}),
+    "vif": ("", ["x1", "x2", "x3"], {}),
+    "regression": ("y", ["x1", "x2"], {}),
+    "response_surface": ("y", ["x1", "x2"], {}),
+    "doe_analysis": ("y", ["x1", "x2"], {}),
+    "roc_analysis": ("yb", ["x1"], {}),
+    "logistic_regression": ("yb", ["x1"], {}),
+    "lasso_regression": ("y", ["x1", "x2", "x3"], {}),
+    "robust_regression": ("y", ["x1"], {}),
+    "quantile_regression": ("y", ["x1"], {}),
+    "spc_xbar": ("y", ["g"], {}),
+    "spc_attribute": ("yb", [], {"chart_type": "p"}),
+    "spc_cusum": ("y", [], {}),
+    "spc_ewma": ("y", [], {}),
+    "process_capability": ("y", [], {"usl": 60.0, "lsl": 40.0}),
+    "trend_forecast": ("y", [], {}),
+    "anomaly_detect": ("y", [], {"method": "zscore"}),
+    "change_point": ("y", [], {}),
+    "outlier_consensus": ("y", ["x1"], {}),
+    "bootstrap_ci": ("y", [], {"n_bootstrap": 200}),
+    "median_ci": ("y", [], {}),
+    "contingency": ("g", ["g2"], {}),
+    "proportion_ci": ("yb", [], {}),
+    "variance_test": ("y", ["g"], {"group_col": "g"}),
+    "cohens_kappa": ("", ["k1", "k2"], {}),
+    "cronbach_alpha": ("", ["x1", "x2", "x3"], {}),
+    "distribution_summary": ("y", [], {}),
+    "normality_check": ("y", ["x1"], {}),
+    "survival_analysis": ("t", ["e"], {"event_col": "e"}),
+    "gage_rr": ("y", ["part", "oper"], {"part_col": "part", "operator_col": "oper"}),
+    "tolerance_interval": ("y", [], {}),
+    "grid_search": ("y", ["x1"], {"ranges": {"x1": [-1, 1]}, "n_points": 5}),
+    "multi_objective": (
+        "y",
+        ["x1", "x2"],
+        {
+            "objectives": [
+                {"col": "y", "direction": "minimize"},
+                {"col": "x2", "direction": "maximize"},
+            ]
+        },
+    ),
+    "inverse_solve": (
+        "",
+        [],
+        {
+            "incoming_cols": "x1",
+            "variable_cols": "x2",
+            "output_cols": "y",
+            "model": "linear",
+            "request_rows": [{"x1": 0.5, "y": 50.0}],
+        },
+    ),
+    "spc_nonparametric": ("y", [], {}),
+    "box_chart": ("y", ["g"], {}),
+    "scatter_plot": ("y", ["x1"], {"fit": "linear"}),
+}
+
+#: 披露判据词 —— 引擎的**唯一**披露文案由 `_guard.non_finite_detail` 产出
+#: （「含 N 个非有限值（NaN 或 ±Inf）」），故这里只认这两种写法。
+_DISCLOSURE_WORDS = ("非有限值", "±Inf")
+
+
+def _base_frame(n: int = 60) -> pd.DataFrame:
+    """覆盖全部任务列角色的合成数据（连续 / 二值 / 分组 / 两类评分 / 生存 / MSA）。"""
+    rng = np.random.default_rng(11)
+    return pd.DataFrame(
+        {
+            "y": rng.normal(50, 2.0, n),
+            "yb": rng.integers(0, 2, n).astype(float),
+            "x1": rng.normal(0, 1, n),
+            "x2": rng.normal(5, 2, n),
+            "x3": rng.normal(2, 1, n),
+            "g": (["A", "B", "C"] * (n // 3 + 1))[:n],
+            "g2": (["P", "Q"] * (n // 2 + 1))[:n],
+            "k1": rng.integers(0, 2, n).astype(float),
+            "k2": rng.integers(0, 2, n).astype(float),
+            "t": rng.exponential(10, n).astype(float),
+            "e": rng.integers(0, 2, n).astype(float),
+            "part": np.repeat(np.arange(1, 11), n // 10).astype(float),
+            "oper": (["甲", "乙"] * (n // 2 + 1))[:n],
+        }
+    )
+
+
+def _injected_columns(task: str, frame: pd.DataFrame) -> list[str]:
+    """该任务真正消费的**数值**列（目标列 + 特征列）。
+
+    只往这些列注入 —— 否则会误判：`contingency` 只读两个类别列，
+    往无关列注入 +Inf 后它当然"没有反应"，但那不是静默。
+    """
+    target, features, _params = _TASK_INPUTS[task]
+    names = ([target] if target else []) + list(features)
+    return [c for c in names if c in frame.columns and pd.api.types.is_numeric_dtype(frame[c])]
+
+
+def _injected_frame(task: str) -> pd.DataFrame:
+    """该任务的数值输入列各注入 3 个 `+Inf`（与 `_frame_with_inf` 的旧单列形态区分）。"""
+    frame = _base_frame()
+    for col in _injected_columns(task, frame):
+        frame[col] = frame[col].astype(float)
+        frame.loc[frame.index[:3], col] = np.inf
+    return frame
+
+
+def _run(task: str, frame: pd.DataFrame):
+    """在**生产 warnings 口径**下跑一次任务。
+
+    ⚠️ 这不是可选项：`pyproject.toml` 的 `filterwarnings=["error"]` 只作用于 pytest。
+    若不在 `simplefilter("default")` 下运行，含 ±Inf 的输入会让 numpy/pandas 的
+    `RuntimeWarning` 升为异常 → orchestrator 兜底成泛化的 `status="error"` →
+    「必须披露或拒绝」的断言**被 `status=="error"` 这一半空过**，
+    而这恰恰是生产下静默的那批任务（实测：normality_check / change_point /
+    outlier_consensus / doe_analysis / cronbach_alpha / cohens_kappa 全部假绿）。
+    """
+    target, features, params = _TASK_INPUTS[task]
+    with warnings.catch_warnings():
+        warnings.simplefilter("default")
+        result = orchestrate(
+            AnalysisRequest(
+                task=task,
+                data=frame,
+                target_col=target,
+                feature_cols=features,
+                params=params,
+            )
+        )
+    for fig in result.figures or []:
+        with contextlib.suppress(Exception):  # 图形释放失败不应影响断言
+            fig.clear()
+    return result
+
+
+#: 有数值输入可注入的任务（无则门禁对该任务无意义）
+_INJECTABLE = tuple(t for t in sorted(_TASK_INPUTS) if _injected_columns(t, _base_frame()))
+
+
+class TestConfigCoversEveryTask:
+    """先证明门禁**真的覆盖了全部任务** —— 否则下面的零违规毫无意义。"""
+
+    def test_configuration_covers_every_data_task(self):
+        expected = set(TASK_REGISTRY) - set(NO_DATA_TASKS)
+        assert set(_TASK_INPUTS) == expected, (
+            "任务输入配置与注册表不一致（本门禁对缺失的任务完全失明）："
+            f"缺 {sorted(expected - set(_TASK_INPUTS))}，"
+            f"多 {sorted(set(_TASK_INPUTS) - expected)}"
+        )
+
+    def test_every_task_has_an_injectable_numeric_column(self):
+        """除纯类别输入的任务外，每个任务都应至少有一个数值列可注入。"""
+        skipped = {t for t in _TASK_INPUTS if t not in _INJECTABLE}
+        assert skipped <= {"contingency", "inverse_solve"}, (
+            f"这些任务没有任何可注入的数值列，门禁对它们空过：{sorted(skipped)}"
+        )
+
+
+class TestAllTasksDiscloseNonFiniteInjection:
+    """**全任务参数化断言**（审查 2026-10-09 P0-8 的防再漏）。
+
+    契约 B1 要求：`±Inf` 必须「移除 + `messages` 披露数量与列名」。
+    本组把"哪些任务静默"从**人工抽样估计**（治理文档曾自述 4 个，实测 11 个）
+    改为**门禁强制**：每个任务对 ±Inf 注入都必须
+
+      ① `status="error"`（明确拒绝），或
+      ② 用户可见处出现披露（「非有限值」）。
+
+    两者都不满足 = 静默传播 —— 用户看到 `n=60` 而实际有效样本已变，
+    或看到基于 Inf 的错误结论。
+    """
+
+    @pytest.mark.parametrize("task", _INJECTABLE)
+    def test_clean_baseline_succeeds_without_spurious_disclosure(self, task):
+        """先证明基线为 ok，**且**没有凭空加披露 —— 否则下面的断言会失去意义。
+
+        两件事合在一个用例里（原为两条）：
+        ① 基线非 ok 时，`test_inf_injection_is_disclosed_or_rejected` 会因"本来就失败"
+           而空过（`status == "error"` 那一半恒真）；
+        ② 反向噪音判据：干净数据不得出现「非有限值」披露，否则提示退化为噪音、
+           用户会学会忽略它（和没有提示一样糟）。
+
+        真实值断言（非仅状态）：任务名如实回填、非空 summary、且不带任何披露词。
+        """
+        result = _run(task, _base_frame())
+        assert result.status == "ok", (
+            f"[{task}] 干净数据基线不是 ok（门禁将失去意义）："
+            f"status={result.status} messages={result.messages}"
+        )
+        assert result.task == task, f"[{task}] 结果任务名错填为 {result.task!r}"
+        assert str(result.summary).strip(), f"[{task}] summary 为空"
+        blob = " ".join(result.messages or [])
+        assert not any(w in blob for w in _DISCLOSURE_WORDS), (
+            f"[{task}] 干净数据却给出非有限值披露（提示退化为噪音）：{result.messages}"
+        )
+
+    @pytest.mark.parametrize("task", _INJECTABLE)
+    def test_inf_injection_is_disclosed_or_rejected(self, task):
+        cols = _injected_columns(task, _base_frame())
+        result = _run(task, _injected_frame(task))
+        blob = " ".join(result.messages or [])
+        disclosed = any(w in blob for w in _DISCLOSURE_WORDS)
+        assert result.status == "error" or disclosed, (
+            f"[{task}] ±Inf 被**静默**处理（注入列 {cols}）：status={result.status}、"
+            f"messages 无任何披露。契约 B1 要求「移除 + 披露数量与列名」；"
+            f"应在入口调用 _guard.clean_series/clean_frame(report=...) 并把 "
+            f"report.messages() 并入 AnalysisResult.messages。\n"
+            f"summary={str(result.summary)[:120]}\n实际 messages={result.messages}"
+        )
+
+
+#: 审查 2026-10-09 P1-4 实测「同一数据 ×1e300 结论级翻转 / 表内渗漏 inf-nan」的任务。
+#: 修法：入口 `_guard.check_magnitude` → B0 拒绝（`E_SCALE_EXTREME_MAGNITUDE`）。
+_EXTREME_MAGNITUDE_ALL = (
+    "normality_check",
+    "variance_test",
+    "spc_nonparametric",
+    "doe_analysis",
+    "anomaly_detect",
+    "outlier_consensus",
+    "distribution_summary",
+    "trend_forecast",
+    "quantile_regression",
+    "response_surface",
+)
+
+#: P1-4 的**已知缺口** —— 这两个任务所在文件（`root_cause/inference.py`、
+#: `detection/anomaly.py`）不在本批所有权内（由并行 agent 持有），故未接入
+#: `check_magnitude`。**每条必须具名理由**，并由
+#: `test_known_gap_is_still_a_real_gap` 断言"确实仍是缺口"：
+#: 上游一旦补齐守卫，该用例会 FAIL 并要求删除条目 —— 清单不得漂移成谎言。
+#: 量级上界守卫（P1-4）的**已收口缺口**登记 —— 当前为空。
+#:
+#: 2026-10-09 收口：原先登记的两项已由主审查者补 `_guard.check_magnitude`（B0 拒绝）：
+#:   · `variance_test`（`root_cause/inference.py`）—— 原先只披露不拒绝；
+#:   · `anomaly_detect`（`detection/anomaly.py`）—— 原先 ×1e300 静默返回「0 个异常点」。
+#: 机制保留：日后若发现新缺口，必须**具名登记并写明理由**；`test_known_gap_is_still_a_real_gap`
+#: 会持续断言「它确实仍是缺口」，一旦上游补齐就报红要求删除条目 —— 防清单漂移成谎言。
+_EXTREME_MAGNITUDE_KNOWN_GAPS: dict[str, str] = {}
+
+_EXTREME_MAGNITUDE_TASKS = tuple(
+    t for t in _EXTREME_MAGNITUDE_ALL if t not in _EXTREME_MAGNITUDE_KNOWN_GAPS
+)
+
+
+class TestExtremeMagnitudeIsRejected:
+    """1e153+ 巨量级必须 B0 拒绝，且**说明量级原因**（不得给结论、不得泛化报错）。
+
+    微尺度（量纲下界）方向已有系统性加固，量纲上界此前**无任何守卫**：
+    `Σy²` 在 `|y| ≳ 1e154` 时溢出为 Inf，随后 NaN 被"False 分支"或
+    "NaN 原样入表"处置 —— 判决静默翻转（1e152 判非正态、1e153 判正态）。
+    """
+
+    @staticmethod
+    def _scaled() -> pd.DataFrame:
+        frame = _base_frame()
+        for col in ("y", "x1", "x2", "x3"):
+            frame[col] = frame[col] * 1e300
+        return frame
+
+    def test_gap_registry_partitions_the_target_set(self):
+        """缺口表 + 在测集合必须恰好等于 P1-4 的全部目标任务（防漏测也防重复）。"""
+        assert set(_EXTREME_MAGNITUDE_TASKS) | set(_EXTREME_MAGNITUDE_KNOWN_GAPS) == set(
+            _EXTREME_MAGNITUDE_ALL
+        )
+        assert not set(_EXTREME_MAGNITUDE_TASKS) & set(_EXTREME_MAGNITUDE_KNOWN_GAPS)
+        for task, reason in _EXTREME_MAGNITUDE_KNOWN_GAPS.items():
+            assert len(reason) >= 20, f"缺口 {task} 的理由太短：{reason!r}"
+
+    @pytest.mark.parametrize("task", sorted(_EXTREME_MAGNITUDE_KNOWN_GAPS))
+    def test_known_gap_is_still_a_real_gap(self, task):
+        """缺口条目必须**仍然成立** —— 若上游已修好，本用例 FAIL 要求删条目。"""
+        result = _run(task, self._scaled())
+        blob = " ".join(result.messages or [])
+        fixed = result.status == "error" and "量级" in blob
+        assert not fixed, (
+            f"[{task}] 已不再满足缺口判据（status=error 且披露了量级原因）——"
+            f"说明上游已补齐守卫，请从 `_EXTREME_MAGNITUDE_KNOWN_GAPS` 删除该条目"
+            f"并移回 `_EXTREME_MAGNITUDE_TASKS`。messages={result.messages}"
+        )
+
+    @pytest.mark.parametrize("task", _EXTREME_MAGNITUDE_TASKS)
+    def test_extreme_magnitude_is_rejected_with_reason(self, task):
+        result = _run(task, self._scaled())
+        assert result.status == "error", (
+            f"[{task}] ×1e300 数据必须 B0 拒绝（当前给出结论，判决随量级翻转）："
+            f"status={result.status} summary={str(result.summary)[:120]}"
+        )
+        blob = " ".join(result.messages or [])
+        assert "量级" in blob, (
+            f"[{task}] 拒绝理由未指向**量级**（用户按泛化文案排查不到真因）：{result.messages}"
+        )
+        assert "单位换算" in blob or "中心化" in blob, (
+            f"[{task}] B0 拒绝必须给出可执行建议（换算单位 / 中心化）：{result.messages}"
+        )

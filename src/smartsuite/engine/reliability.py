@@ -9,6 +9,7 @@ from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Finite, Opt, Spec
+from smartsuite.core.param_specs_common import GROUP_COL
 from smartsuite.engine._constants import EPSILON
 from smartsuite.engine._guard import BoundaryIssue, BoundaryReport, clean_frame, clean_series
 from smartsuite.engine._palette import PALETTE
@@ -82,6 +83,13 @@ PARAM_SPECS = {
             hint="留空则取第二个因子列",
         ),
     ),
+    # 审查 2026-10-09 P2-8 收口：`group_col` 已补进面板（`task_spec.default_params`），
+    # 因此必须在此声明 Spec 才能派生出中文标签 —— 否则
+    # `tests/engine/test_param_migration_batch8.py::TestDerivationCoversEverySlot`
+    # 的「每个默认参数槽位都有派生标签」会红，用户会看到英文键名 `group_col`。
+    # 本任务尚未迁移到 `validate_or_raise`（声明仅用于标签派生，与其它未迁移任务同形）；
+    # `default=None` 与 `task_spec` 的 `group_col: None` 一致。
+    "survival_analysis": Spec(group_col=GROUP_COL),
 }
 
 
@@ -1179,7 +1187,10 @@ def _weibull_fit_censored(times, events):
 
     is_fail = e == 1
 
-    def _nll(a, b, *, complex_a=False, complex_b=False):
+    # 审查 2026-10-09 P3-9：原签名带 `*, complex_a=False, complex_b=False` 两个
+    # 关键字参数，全仓无调用方传入（vulture 实测为 unused variable）—— 复步长梯度
+    # 依赖的是 `np.exp/np.power/np.log` 对复数入参天然成立，与这两个开关无关，故删除。
+    def _nll(a, b):
         beta = np.exp(a)
         eta = np.exp(b)
         with np.errstate(all="ignore"):
@@ -1187,7 +1198,7 @@ def _weibull_fit_censored(times, events):
             ub = np.power(u, beta)
             lu = np.log(u)
             val = np.sum(np.where(is_fail, -(a - b + (beta - 1.0) * lu - ub), ub))
-        return val  # 复数输入时返回复数
+        return val  # 复数入参时返回复数（供复步长梯度使用）
 
     def _grad(a, b, h=1e-30):
         """复步长梯度：∂nll/∂a 与 ∂nll/∂b。"""

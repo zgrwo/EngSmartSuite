@@ -15,7 +15,7 @@ from smartsuite.engine._constants import (
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
-from smartsuite.engine._guard import BoundaryReport, clean_series
+from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.detection._shared import iqr_outlier_mask
@@ -218,6 +218,10 @@ def anomaly_detect(req: AnalysisRequest) -> AnalysisResult:
     _report = BoundaryReport()
     data, _n_dropped = clean_series(req.data[req.target_col], column=req.target_col, report=_report)
     data = data.dropna()
+    # 审查 2026-10-09 P1-4：量级上界守卫。×1e300 时 σ 溢出为 inf → 旧实现静默返回
+    # 「检测到 0 个异常点」（status=ok、messages 为空）—— 一个看不出问题的假结论。
+    if (issue := check_magnitude(data, what=f"「{req.target_col}」", report=_report)) is not None:
+        return AnalysisResult(task="anomaly_detect", status="error", messages=[issue.detail])
     data_std = data.std(ddof=1)  # 统一计算，供所有方法和可视化使用
     if len(data) < 5:
         return AnalysisResult(

@@ -367,6 +367,12 @@ def test_attribute_nan_group_rows_excluded():
 
 # ── 7. change_point / survival 小缺陷 ──
 def test_change_point_default_min_segment_runs_on_n20():
+    """n=20 时默认 `min_segment`（=min(max(10, n//20), (n-1)//2)=9）必须可用。
+
+    原缺陷：默认 `min_segment=10` 在 n=20 时使每次候选切分都留不出一段 ≥10 的点，
+    直接报错。修法后应正常出**单段**结果表；此处钉住真实数值（分段边界、样本数、
+    段均值），而不只是"没报错"。
+    """
     from smartsuite.engine.detection import change_point_detect
 
     np.random.seed(3)
@@ -374,6 +380,20 @@ def test_change_point_default_min_segment_runs_on_n20():
     df = pd.DataFrame({"y": y})
     r = change_point_detect(_req("change_point", df, target="y"))
     assert r.status == "ok", f"n=20 默认 min_segment 不应报错: {r.messages}"
+
+    # 真实值断言：n 如实上报、默认阈值下未达显著 → 单段覆盖全部 20 点
+    assert r.metadata["n"] == 20
+    assert r.metadata["n_changepoints"] == 0
+    assert r.metadata["n_segments"] == 1
+    assert "未检测到显著变点" in r.summary and "(n=20)" in r.summary, r.summary
+
+    seg = r.tables["segment_statistics"]
+    assert len(seg) == 1, seg
+    row = seg.iloc[0]
+    assert (int(row["起始"]), int(row["结束"]), int(row["样本数"])) == (0, 19, 20), row.to_dict()
+    # 段均值必须等于数据均值（单段覆盖全样本 → 无截断/无偏移）；
+    # 表内走 `round_for_display`（**字符串**展示值、4 位小数），故先转 float 再按显示精度比
+    assert float(row["均值"]) == pytest.approx(float(np.mean(y)), abs=1e-4), row.to_dict()
 
 
 def test_survival_median_zero_not_read_as_na():
@@ -882,10 +902,17 @@ def test_variance_test_inf_cleaned_and_disclosed_not_nan_verdict():
 
 @pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
 @pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning")
-def test_variance_test_overflow_scale_verdict_is_not_definitive():
-    """量级溢出使检验统计量非有限时，不得给出「方差不齐」这类确定结论。
+def test_variance_test_overflow_scale_is_rejected_not_definitive():
+    """量级溢出使检验统计量非有限 → 必须 **B0 拒绝**，不得给出任何确定/含混结论。
 
     （清洗救不了量级溢出：数据本身都是有限值，但 Σy² 溢出 → p = NaN。）
+
+    行为演进：本用例最初断言「出结果但结论标为『无法判定』」（当时 P1-4 只做到披露）；
+    2026-10-09 收口后 `check_magnitude` 前置拒绝，故改为断言 **error + 点名量级** ——
+    与其余任务口径一致，用户拿到的是可执行的修复建议。
+
+    ⚠️ 上方两个 marker 显式声明**生产口径**，故此处做**无条件硬断言** ——
+    不得用 `if status == "ok"` 包裹（那会让引擎报错时用例空转，正是 P0-6 的假绿通道）。
     """
     from smartsuite.services.orchestrator import orchestrate
 
@@ -898,11 +925,10 @@ def test_variance_test_overflow_scale_verdict_is_not_definitive():
             params={"group_col": "g"},
         )
     )
-    joined = r.summary + " " + " ".join(r.messages or [])
-    assert "方差不齐" not in joined, f"不可判定时不得断言方差不齐：{joined[:160]}"
-    if r.status == "ok":
-        verdict = r.tables["variance_tests"]["结论"].tolist()
-        assert all("无法判定" in str(v) for v in verdict), verdict
+    assert r.status == "error", f"量级溢出应被 B0 拒绝：{r.summary[:120]}"
+    joined = " ".join(r.messages or [])
+    assert "量级过大" in joined, f"必须点名真实原因（量级），而不是泛化文案：{r.messages}"
+    assert "单位换算" in joined or "中心化" in joined, f"必须给可执行建议：{r.messages}"
 
 
 def test_variance_test_group_stats_have_no_non_finite():
@@ -1009,3 +1035,114 @@ def test_proportion_ci_valid_success_value_still_works():
         r = orchestrate(_req("proportion_ci", df, target="y", params={"success_value": sv}))
         assert r.status == "ok", f"success_value={sv!r}: {r.messages}"
         assert r.metadata["p_hat"] == pytest.approx(0.24, abs=1e-9)
+
+
+# ── 17. normality_check 的 A-D p 表外必须给开区间，判决口径只述 S-W（审查 2026-10-09 P1-9）──
+
+
+def _normality_row(result, col="y"):
+    df = result.tables["normality_results"]
+    return df[df["列名"] == col].iloc[0].to_dict()
+
+
+class TestNormalityAndersonDarlingIsNotFaked:
+    """`scipy.stats.anderson(method="interpolate")` 的 p 由 **5 点临界值表**线性插值，
+    **表外一律钳到端点**（实测 40 次采样取值集合仅 `{0.01, 0.0241, 0.1430, 0.15}`；
+    极端样本 stat=11.09 也输出 `p=0.0100`）。
+
+    把钳制端点当"真 p"展示等于**伪造精度**（skill 陷阱 9 规则 2「不可估计时不得
+    伪造 0.0/1.0」），且 α=0.01 时读表者按 `p < α` 判决会**永不拒绝**。
+    修法：表外给**开区间**（`p≤0.01` / `p≥0.15`）+ 标注超出表范围；
+    判决口径统一为 Shapiro-Wilk 并在输出中标注（契约边界清单 #18）。
+    """
+
+    _AD_LO, _AD_HI = 0.01, 0.15
+
+    @staticmethod
+    def _run(data: np.ndarray, alpha: float | None = None):
+        from smartsuite.services.orchestrator import orchestrate
+
+        params = {} if alpha is None else {"alpha": alpha}
+        return orchestrate(
+            _req("normality_check", pd.DataFrame({"y": data}), target="y", params=params)
+        )
+
+    @staticmethod
+    def _strongly_non_normal():
+        """零膨胀 + 单个极端值：S-W 与 A-D 都会给出远小于 0.01 的真 p。"""
+        rng = np.random.default_rng(5)
+        return np.concatenate([rng.normal(0, 0.01, 39), [50.0]])
+
+    def test_extreme_non_normal_ad_is_reported_as_open_interval(self):
+        """真 p 远小于 0.01 时，展示必须是 `≤0.01`（开区间），不能是 `=0.0100`。"""
+        r = self._run(self._strongly_non_normal())
+        assert r.status == "ok", r.messages
+        ad = _normality_row(r)["Anderson-Darling"]
+        assert f"p={self._AD_LO:.4f}" not in ad, (
+            f"A-D p 被钳制在 {self._AD_LO} 却被当作真 p 展示（伪造精度）：{ad}"
+        )
+        assert f"≤{self._AD_LO:g}" in ad or f"<{self._AD_LO:g}" in ad, ad
+        assert "超出" in ad and "表" in ad, f"表外必须标注超出临界值表范围：{ad}"
+
+    def test_well_behaved_normal_ad_is_reported_as_open_interval(self):
+        """真 p 大于 0.15 时同理：展示 `≥0.15`，不得写成 `=0.1500`。"""
+        rng = np.random.default_rng(7)
+        r = self._run(rng.normal(0, 1, 50))
+        assert r.status == "ok", r.messages
+        ad = _normality_row(r)["Anderson-Darling"]
+        assert f"p={self._AD_HI:.4f}" not in ad, (
+            f"A-D p 被钳制在 {self._AD_HI} 却被当作真 p 展示：{ad}"
+        )
+        assert f"≥{self._AD_HI:g}" in ad or f">{self._AD_HI:g}" in ad, ad
+
+    def test_no_clamped_endpoint_is_ever_shown_as_exact(self):
+        """扫描多种样本：任何一行都不得把两个钳制端点当作精确 p 展示。"""
+        rng = np.random.default_rng(11)
+        samples = {
+            "y": np.concatenate([rng.normal(0, 0.01, 39), [50.0]]),
+            "x1": rng.normal(0, 1, 40),
+        }
+        from smartsuite.services.orchestrator import orchestrate
+
+        r = orchestrate(_req("normality_check", pd.DataFrame(samples), target="y", features=["x1"]))
+        assert r.status == "ok", r.messages
+        for _i, row in r.tables["normality_results"].iterrows():
+            ad = str(row["Anderson-Darling"])
+            for endpoint in (self._AD_LO, self._AD_HI):
+                assert f"p={endpoint:.4f}" not in ad, (
+                    f"列「{row['列名']}」把钳制端点 {endpoint} 当真 p 展示：{ad}"
+                )
+
+    def test_verdict_criterion_is_shapiro_wilk_and_stated(self):
+        """判决口径必须**唯一且标注**：原 `sw_normal or ad_normal` 让被钳制的
+        A-D 结果参与判决，与 summary 宣称的判据不一致（契约边界清单 #18）。"""
+        r = self._run(self._strongly_non_normal())
+        assert r.metadata.get("verdict_rule") == "shapiro-wilk", r.metadata
+        assert "Shapiro-Wilk" in r.summary, f"summary 必须标注判据：{r.summary}"
+        row = _normality_row(r)
+        assert "S-W" in str(row["正态性"]), f"「正态性」列必须标注 S-W 口径：{row['正态性']}"
+        assert not str(row["正态性"]).startswith("正态"), row["正态性"]
+
+    def test_alpha_001_strongly_non_normal_is_rejected(self):
+        """α=0.01 下强非正态必须判「非正态」（原 A-D 钳制使读表者永不拒绝）。"""
+        r = self._run(self._strongly_non_normal(), alpha=0.01)
+        assert r.status == "ok", r.messages
+        row = _normality_row(r)
+        assert "非正态" in str(row["正态性"]), row["正态性"]
+        assert row["建议变换"] != "无需变换", row
+
+    def test_normal_data_still_passes(self):
+        """对照：真正的正态样本不得被上面的改动误伤（防修得过严）。"""
+        rng = np.random.default_rng(3)
+        r = self._run(rng.normal(0, 1, 60))
+        assert r.status == "ok", r.messages
+        assert str(_normality_row(r)["正态性"]).startswith("正态"), _normality_row(r)
+
+    def test_ad_failure_does_not_change_the_verdict(self):
+        """A-D 不可算（stat 为 N/A）时判决仍由 S-W 给出 —— 口径唯一的直接体现。"""
+        rng = np.random.default_rng(9)
+        r = self._run(rng.normal(0, 1, 60))
+        assert r.status == "ok", r.messages
+        row = _normality_row(r)
+        assert "N/A" in str(row["Anderson-Darling"]) or "stat=" in str(row["Anderson-Darling"])
+        assert str(row["正态性"]).startswith("正态"), row["正态性"]

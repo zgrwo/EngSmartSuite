@@ -123,9 +123,11 @@ class TestTasksEndpointProvidesDefaults:
         所以"补键"是否生效，唯一可信的判据是本端点下发的载荷 —— 光看
         `TaskSpec.default_params` 只证明了一半。
 
-        审查 2026-10-09 P2-8：本次补齐 6 个参数（值一律 `None`＝"未指定"，与其
-        在引擎里"未提供则由数据估计/回退"的语义一致）。其余 5 个（`spc_attribute.subgroup_col`、
-        `process_capability.transform`、`anomaly_detect.contamination`、
+        审查 2026-10-09 P2-8：本次补齐 7 个参数。其中 6 个值一律 `None`（"未指定"，
+        与其在引擎里"未提供则由数据估计/回退"的语义一致）；`process_capability.transform`
+        例外 —— 它必须是 `""`（「不做变换」），因为在 `<select>` 里 `None` 匹配不上任何
+        `selected`，浏览器会自动选第一个选项（=开启 Box-Cox）。故同时断言它的**取值**。
+        其余 4 个（`spc_attribute.subgroup_col`、`anomaly_detect.contamination`、
         `change_point.min_peak_ratio/min_segment`）**有意未补**，理由逐条登记在
         `tests/services/test_param_spec_registry.py::TestParamReachability`。
         """
@@ -144,10 +146,11 @@ class TestTasksEndpointProvidesDefaults:
                 f"{task} 的 {keys} 默认值应为 None（引擎按'未指定'回退），"
                 f"实际 {[(k, served[k]) for k in keys]}"
             )
-        # `transform` 是**有意排除**的：它会被 `<select>` 强制选第一个选项（=开启 Box-Cox）
-        assert "transform" not in d["params"]["process_capability"], (
-            "process_capability.transform 不得下发：Choice 渲染的 <select> 无空选项，"
-            "下发即等于强制开启 Box-Cox（见 TestParamReachability.SPEC_ONLY 的说明）"
+        # `transform` 现在**可以**下发，但默认值必须是「不做变换」空值 ——
+        # 若下发 None，`<select>` 会自动选中第一个选项（=强制开启 Box-Cox）。
+        assert d["params"]["process_capability"].get("transform") == "", (
+            "process_capability.transform 的默认值必须是 ''（不做变换）："
+            "None 会让浏览器自动选中首个选项（=强制开启 Box-Cox）"
         )
 
 
