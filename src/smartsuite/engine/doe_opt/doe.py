@@ -13,6 +13,12 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, CrossRule, Integer, Opt, Spec
 from smartsuite.core.param_specs_common import ALPHA
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    check_magnitude,
+    check_tables_finite,
+    clean_frame,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     round_for_display,
@@ -145,11 +151,23 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     df = req.data[[req.target_col] + cols].dropna()
+    # ── 边界处置（B0/B1）：±Inf 与量级上界（审查 2026-10-09 P0-8 / P1-4 / P2-10）──
+    # `dropna()` 不剔除 ±Inf —— 实测注入 3 个 +Inf 后 `effect_estimates` 全 nan、
+    # summary 却写「显著因子: 0/0」（等价宣称"无显著因子"），且 `messages=[]`。
+    _boundary = BoundaryReport()
+    df, _n_non_finite = clean_frame(df, [req.target_col] + cols, report=_boundary)
+    if check_magnitude(df[req.target_col], what=f"目标列「{req.target_col}」", report=_boundary):
+        return AnalysisResult(
+            task="doe_analysis",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
     if len(df) < 3:
         return AnalysisResult(
             task="doe_analysis",
             status="error",
-            messages=[f"有效样本({len(df)})不足"],
+            messages=[f"有效样本({len(df)})不足"] + _boundary.messages(),
         )
 
     grand_mean = float(df[req.target_col].mean())
@@ -425,11 +443,36 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
         else valid_effects
     )
 
+    # ── 出口侧后置断言（P2-10）──
+    # 效应表全为非有限值时必须拒绝：原实现只把 `failed_factors` 写进 metadata，
+    # 用户看到的仍是「显著因子: 0/N」——那是把"算不出来"当成"没有显著因子"。
+    if check_tables_finite(
+        {"effect_estimates": output_table},
+        what="「doe_analysis」效应表",
+        code="E_NUMERIC_MODEL_DEGENERATE",
+        report=_boundary,
+    ):
+        return AnalysisResult(
+            task="doe_analysis",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
+
+    warn_msgs = _boundary.messages()
+    if fail_count > 0:
+        # 计数从 metadata 提到用户可见处（P2-10）：metadata 用户看不到
+        warn_msgs.append(
+            f"⚠ 有 {fail_count} 个因子无法估计效应（数据在该因子上退化），"
+            f"「显著因子: {sig_count}/{len(valid_effects)}」的统计基数不含它们"
+        )
+
     return AnalysisResult(
         task="doe_analysis",
         tables={"effect_estimates": output_table},
         figures=[fig],
         summary=summary,
+        messages=warn_msgs,
         metadata={
             "grand_mean": grand_mean,
             "failed_factors": fail_count,
@@ -438,6 +481,7 @@ def doe_analysis(req: AnalysisRequest) -> AnalysisResult:
             "lenth_pse": pse,
             "lenth_me": me,
             "significant_count": sig_count,
+            "boundary_codes": _boundary.codes(),
         },
     )
 

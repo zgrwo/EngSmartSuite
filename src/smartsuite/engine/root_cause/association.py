@@ -16,6 +16,7 @@ from smartsuite.engine._constants import (
     CRAMERS_V_SMALL,
     EPSILON,
 )
+from smartsuite.engine._guard import BoundaryReport, clean_frame
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import threshold_label
 
@@ -247,9 +248,15 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(task="cohens_kappa", status="error", messages=["需要 2 个评定者列"])
 
     c1, c2 = req.feature_cols[0], req.feature_cols[1]
-    sub = req.data[[c1, c2]].dropna()
+    # ── 边界处置（B1）：±Inf 必须清洗并披露（审查 2026-10-09 P0-8）──
+    # `dropna()` 不剔除 ±Inf —— 实测注入 3 个 +Inf 后 `status=ok`/`messages=[]`，
+    # 用户看到 n=60 而实际参与一致性计算的样本已变（B1 契约要求披露数量与列名）。
+    _boundary = BoundaryReport()
+    sub, _n_non_finite = clean_frame(req.data, [c1, c2], report=_boundary)
     if len(sub) < 3:
-        return AnalysisResult(task="cohens_kappa", status="error", messages=["有效数据不足"])
+        return AnalysisResult(
+            task="cohens_kappa", status="error", messages=["有效数据不足"] + _boundary.messages()
+        )
 
     # 构建一致性矩阵
     ctab = pd.crosstab(sub[c1], sub[c2])
@@ -311,12 +318,14 @@ def cohens_kappa(req: AnalysisRequest) -> AnalysisResult:
             ),
         },
         summary=f"Cohen's Kappa={kappa:.3f} ({level}), p_o={p_o:.1%}, n={n}",
+        messages=_boundary.messages(),
         metadata={
             "kappa": float(kappa),
             "p_o": float(p_o),
             "p_e": float(p_e),
             "z": float(z_kappa),
             "level": level,
+            "boundary_codes": _boundary.codes(),
         },
     )
 
@@ -333,11 +342,19 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
             task="cronbach_alpha", status="error", messages=["至少需要 2 个题项列"]
         )
 
-    sub = req.data[items].dropna()
+    # ── 边界处置（B1）：±Inf 必须清洗并披露（审查 2026-10-09 P0-8）──
+    # 实测注入 3 个 +Inf 后 `status=ok`/`messages=[]`，且 α 退化为 nan 却仍给出
+    # 「(不可接受)」的判读 —— 用户看不到"已剔除 N 个非有限值"。
+    _boundary = BoundaryReport()
+    sub, _n_non_finite = clean_frame(req.data[items], items, report=_boundary)
     k = len(items)
     n = len(sub)
     if n < 3:
-        return AnalysisResult(task="cronbach_alpha", status="error", messages=["有效数据不足"])
+        return AnalysisResult(
+            task="cronbach_alpha",
+            status="error",
+            messages=["有效数据不足"] + _boundary.messages(),
+        )
 
     # 各项方差 + 总分方差
     item_vars = sub.var(ddof=1).values
@@ -433,6 +450,12 @@ def cronbach_alpha(req: AnalysisRequest) -> AnalysisResult:
             "item_analysis": pd.DataFrame(alpha_if_deleted),
         },
         summary=f"Cronbach's α={alpha:.3f} ({level}), {k} 题项, n={n}",
-        metadata={"alpha": float(alpha), "k": k, "n": n, "level": level},
-        messages=warn_msgs,
+        metadata={
+            "alpha": float(alpha),
+            "k": k,
+            "n": n,
+            "level": level,
+            "boundary_codes": _boundary.codes(),
+        },
+        messages=_boundary.messages() + warn_msgs,
     )

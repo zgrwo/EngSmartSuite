@@ -11,6 +11,7 @@
 
 import re
 import secrets
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -222,28 +223,185 @@ def _inf_frame(n_per_group: int = 20) -> pd.DataFrame:
     return pd.DataFrame({"v": vals, "g": ["A"] * n_per_group})
 
 
+def _run_with_warning_policy(req_kwargs: dict, policy: str):
+    """在指定 warnings 过滤器下跑一次分析。
+
+    ⚠️ **为什么必须显式设口径**（本文件最重要的一课，P0-6）：
+    `pyproject.toml` 的 `filterwarnings = ["error", ...]` **只作用于 pytest**，
+    生产（Web/CLI）不会把 numpy/pandas/scipy 的 `RuntimeWarning` 升为异常。
+    于是**同一退化输入在 pytest 下走「异常兜底」分支、在生产下才走真实分支**：
+
+        生产  → 「所有分组标准差均为零（常量数据）」（错误归因，守卫本该抓到）
+        pytest → 「分析执行失败…（成因未归类）」（不含"常量"，**否定式断言空过**）
+
+    即：一条*否定式*断言（`"常量" not in blob`）在 CI 里是**零信息**的 ——
+    任何"更泛化的错误"都能满足它。本文件因此改为**正向断言**，
+    并显式声明生产口径（与 `tests/guards/test_micro_scale_guards.py:252`、
+    `tests/engine/test_edge_cases.py:850` 的既有做法一致）。
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter(policy)
+        return orchestrate(AnalysisRequest(data=_inf_frame(), **req_kwargs))
+
+
 class TestInfNotBlamedAsConstant:
-    """含 ±Inf 的数据不得被报告为「常量列 / 标准差为零」。"""
+    """含 ±Inf 的数据：必须**如实披露剔除**，且不得被报告为「常量列」。
+
+    这组用例同时是 P0-6「守卫假绿」的修复：原断言为否定式
+    （`"常量" not in blob`）且被 warnings-as-errors 改变了代码路径，
+    在 CI 里**必然通过**（实测：`-W ignore` 下同一条用例才 FAIL）。
+    """
 
     @pytest.mark.parametrize("label,req_kwargs", _INF_TASKS, ids=[t[0] for t in _INF_TASKS])
-    def test_inf_never_reported_as_constant_column(self, label, req_kwargs):
-        df = _inf_frame()
-        r = orchestrate(AnalysisRequest(data=df, **req_kwargs))
+    def test_inf_is_disclosed_and_never_blamed_as_constant(self, label, req_kwargs):
+        """正向断言：含 +Inf 时**必须出现**「非有限值」披露（而非仅仅"没有说常量"）。"""
+        r = _run_with_warning_policy(req_kwargs, "default")
         blob = " ".join(r.messages or [])
         assert "常量" not in blob and "标准差为 0" not in blob and "标准差为零" not in blob, (
             f"[{label}] 错误归因：含 +Inf 的数据被报为常量列。messages={r.messages}"
+        )
+        assert "非有限值" in blob, (
+            f"[{label}] 剔除了 ±Inf 却未向用户披露（B1 契约要求「移除 + 披露数量与列名」）。"
+            f"status={r.status} messages={r.messages}"
+        )
+        assert "1" in blob, f"[{label}] 披露必须含剔除数量（实测 1 个）：{r.messages}"
+
+    @pytest.mark.parametrize("label,req_kwargs", _INF_TASKS, ids=[t[0] for t in _INF_TASKS])
+    def test_verdict_is_identical_under_both_warning_policies(self, label, req_kwargs):
+        """生产口径与 pytest 口径必须给出**同一结论** —— 这是假绿通道的正面封堵。
+
+        生产：`filterwarnings` 默认为 default（Web/CLI 用户所见）。
+        pytest：`pyproject.toml` 把第三方 `RuntimeWarning` 升为 error。
+
+        两种口径下都必须：① 不误报常量；② 如实披露非有限值剔除。
+        """
+        for policy, tag in (("default", "生产口径"), ("error", "pytest 口径")):
+            r = _run_with_warning_policy(req_kwargs, policy)
+            blob = " ".join(r.messages or [])
+            assert "常量" not in blob, f"[{label}/{tag}] 错误归因：{r.messages}"
+            assert "非有限值" in blob, (
+                f"[{label}/{tag}] 两种 warnings 口径给出了不同结论 —— "
+                f"这正是 P0-6 假绿的成因。status={r.status} messages={r.messages}"
+            )
+
+
+class TestMissingColumnIsRejected:
+    """P2-4：不存在的列名不得被静默忽略（B0 拒绝 + 列出可用列）。
+
+    对照健康：`process_capability(subgroup_col=…)`、`hypothesis_test(group_col=…)`、
+    `correlation`、`anova` 都已显式报错 —— 只有 `spc_cusum`/`spc_ewma` 的
+    `group_col` 与 `spc_xbar` 的 `feature_cols` 会静默退化，用户以为已按分组分析。
+    """
+
+    _DF = pd.DataFrame(
+        {
+            "v": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] * 4,
+            "线别": (["A"] * 12 + ["B"] * 12),
+        }
+    )
+
+    @pytest.mark.parametrize("task", ["spc_cusum", "spc_ewma"])
+    def test_unknown_group_col_is_rejected(self, task):
+        r = orchestrate(
+            AnalysisRequest(task=task, data=self._DF, target_col="v", params={"group_col": "产线"})
+        )
+        assert r.status == "error", (
+            f"{task}(group_col='产线') 应拒绝：数据中无该列，实际 status={r.status} "
+            f"messages={r.messages}"
+        )
+        blob = " ".join(r.messages)
+        assert "产线" in blob, f"错误消息应点名不存在的列：{r.messages}"
+        assert "线别" in blob, f"错误消息应列出可用列供用户改选：{r.messages}"
+
+    def test_unknown_feature_col_in_xbar_is_rejected(self):
+        """`spc_xbar(feature_cols=['不存在子组列'])` 此前静默退化为 i_chart。"""
+        r = orchestrate(
+            AnalysisRequest(
+                task="spc_xbar",
+                data=self._DF,
+                target_col="v",
+                feature_cols=["不存在的子组列"],
+            )
+        )
+        assert r.status == "error", (
+            f"spc_xbar(feature_cols=['不存在的子组列']) 应拒绝，实际 status={r.status} "
+            f"metadata.chart_type={r.metadata.get('chart_type')}"
+        )
+        blob = " ".join(r.messages)
+        assert "不存在的子组列" in blob and "线别" in blob, r.messages
+
+    def test_absent_group_col_still_runs(self):
+        """反向：**未提供** group_col 是合法用法，不得被上面的校验误伤。
+
+        真实值断言：未分组时全部数据进单一「全部」组 —— 组数=1、统计表分组名=「全部」、
+        且均值等于整列均值（证明没有漏掉任何一行）。
+        """
+        r = orchestrate(AnalysisRequest(task="spc_cusum", data=self._DF, target_col="v"))
+        assert r.status == "ok", r.messages
+        assert r.metadata["n_groups"] == 1, r.metadata
+        assert r.metadata["groups"] == [], r.metadata
+        stats = r.tables["cusum_stats"]
+        assert stats["分组"].tolist() == ["全部"], stats.to_dict()
+        assert float(stats["均值(μ)"].iloc[0]) == pytest.approx(
+            float(self._DF["v"].mean()), abs=1e-4
         )
 
 
 class TestBoundaryContractSourceGuard:
     """源码级防线：错误归因与清洗重复不得回流。"""
 
-    # 输入清洗的两种既有合法形态（见 docs/governance/boundary-contract.md「执行点」）
-    _SANCTIONED = ("drop_non_finite", "clean_series", "clean_frame")
-    # 输入清洗特征：`<标识符> = <标识符>[np.isfinite(<标识符>)]`
-    # 注意**不**匹配 `mask = ...`（掩码构建，见 partition_finite）与
-    # `x = arr[bool_mask]`（已是布尔掩码，非 isfinite 直判）
-    _INPUT_CLEANUP = re.compile(r"^\s*(\w+)\s*=\s*\1\[np\.isfinite\(\1\)\]")
+    # 输入清洗的**唯一**合法实现（见 docs/governance/boundary-contract.md「执行点」）
+    _SANCTIONED = ("clean_series", "clean_frame", "check_magnitude", "check_tables_finite")
+
+    #: 输入清洗特征族（P1-6：原正则只认 `x = x[np.isfinite(x)]` 一种形态，漏名/替换/掩码全漏）
+    _INPUT_CLEANUP_PATTERNS = (
+        # ① 同名形态：`x = x[np.isfinite(x)]`
+        re.compile(r"^\s*(\w+)\s*=\s*\1\[\s*np\.isfinite\(\1\)\s*\]"),
+        # ② **漏名形态**（P1-6 盲区）：`finite = arr[np.isfinite(arr)]`
+        re.compile(r"^\s*\w+\s*=\s*\w+\[\s*np\.isfinite\(\w+\)\s*\]"),
+        # ③ 掩码形态：`mask = np.isfinite(v1) & np.isfinite(v2)`
+        re.compile(r"^\s*\w+\s*=\s*np\.isfinite\("),
+        # ④ ±Inf → NaN 后 dropna：`.replace([np.inf, -np.inf], np.nan)`
+        re.compile(r"\.replace\(\s*\[?\s*np\.inf"),
+    )
+
+    #: 已登记的例外 —— **每一条必须具名理由**（无理由的白名单等于没有守卫）。
+    #: 由 `test_whitelist_entries_are_live_and_justified` 强制"仍在命中 + 理由非空"。
+    _INPUT_CLEANUP_WHITELIST = {
+        "spc_charts/attribute.py": (
+            "`_unequal_sample_sizes` 只从**样本量列**取 min/max 做 B0 一致性校验，"
+            "清洗结果不参与分析口径（且该文件本轮由并行 agent 持有，不可改）"
+        ),
+        "root_cause/modeling.py": (
+            "VIF 绘图轴范围：只按有限值定 xlim 以免 matplotlib 抛错，数值表仍如实给出 inf"
+        ),
+        "inverse/_report.py": (
+            "`_feature_scales` 只计算各特征列的量级判据 max|x|（不剔除任何行），"
+            "非有限时回退 1.0 —— 属内部数值归一，无 B1 披露义务"
+        ),
+        "inverse/_models.py": (
+            "速率模型对**辅助时间列/配对标**做行筛选（缺有效时间的行已由 "
+            "`logger.warning` 记录行数），不改变用户所选目标列的样本口径；"
+            "该文件不在本批所有权内 —— ⚠ 已知缺口：其披露目前仅到日志，未进 messages"
+        ),
+    }
+
+    @classmethod
+    def _scan(cls, root: Path) -> dict[str, list[int]]:
+        """扫描输入清洗特征族 -> `{相对路径: [行号...]}`（`_guard`/`_utils` 是执行点本身）。"""
+        hits: dict[str, list[int]] = {}
+        for path in sorted(root.rglob("*.py")):
+            if path.name in {"_guard.py", "_utils.py"}:
+                continue
+            src = path.read_text(encoding="utf-8")
+            lines = [
+                i
+                for i, line in enumerate(src.splitlines(), start=1)
+                if any(p.search(line) for p in cls._INPUT_CLEANUP_PATTERNS)
+            ]
+            if lines:
+                hits[str(path.relative_to(root)).replace("\\", "/")] = lines
+        return hits
 
     def test_no_constant_blame_without_non_finite_cleanup(self):
         """若模块报「标准差为 0/零」，它必须能区分「常量」与「含非有限值」。
@@ -268,21 +426,45 @@ class TestBoundaryContractSourceGuard:
         )
 
     def test_input_cleanup_is_reported(self):
-        """做了输入级 ±Inf 清洗的模块，必须同时向用户披露（B1 契约要求）。
+        """做了输入级 ±Inf 清洗的模块，必须向用户披露（B1）或已具名登记为例外。
 
         未披露的静默清洗会让用户看到"N=20"却不知道实际只用 19 个观测。
         """
         offenders = []
-        for path in _ENGINE.rglob("*.py"):
-            if path.name in {"_guard.py", "_utils.py"}:
+        for rel, lines in self._scan(_ENGINE).items():
+            if rel in self._INPUT_CLEANUP_WHITELIST:
                 continue
-            src = path.read_text(encoding="utf-8")
-            cleans_input = any(self._INPUT_CLEANUP.match(line) for line in src.splitlines())
-            if not cleans_input:
+            src = (_ENGINE / rel).read_text(encoding="utf-8")
+            if any(k in src for k in (*self._SANCTIONED, "BoundaryReport")):
                 continue
-            discloses = any(k in src for k in (*self._SANCTIONED, "BoundaryReport"))
-            if not discloses:
-                offenders.append(str(path.relative_to(_ENGINE)))
+            offenders.append(f"{rel}:{lines}")
         assert not offenders, (
-            f"以下模块做了输入级非有限值清洗但未披露（应在 messages 中给出剔除数量）: {offenders}"
+            "以下模块做了输入级非有限值清洗但未披露（应改用 _guard 的 "
+            "clean_series/clean_frame，并在 messages 给出剔除数量）:\n  " + "\n  ".join(offenders)
         )
+
+    def test_scanner_detects_every_known_cleanup_form(self, tmp_path):
+        """**负向注入**：四种清洗形态各写一份"违规样本"，扫描器必须全部抓到。
+
+        没有这条，上面的零违规就与"扫描器失效"无法区分（P1-6 的教训：
+        原正则漏掉 `finite = arr[np.isfinite(arr)]`，于是 attribute.py 静默过关）。
+        """
+        forms = {
+            "same_name.py": "def f(s):\n    s = s[np.isfinite(s)]\n    return s\n",
+            "renamed.py": "def f(arr):\n    finite = arr[np.isfinite(arr)]\n    return finite\n",
+            "pairwise.py": "def f(a, b):\n    mask = np.isfinite(a) & np.isfinite(b)\n    return mask\n",
+            "replace.py": "def f(s):\n    return s.replace([np.inf, -np.inf], np.nan).dropna()\n",
+        }
+        for name, body in forms.items():
+            (tmp_path / name).write_text(body, encoding="utf-8")
+        hits = self._scan(tmp_path)
+        missing = sorted(set(forms) - set(hits))
+        assert not missing, f"扫描器漏掉这些清洗形态（正是 P1-6 的盲区）: {missing}"
+
+    def test_whitelist_entries_are_live_and_justified(self):
+        """白名单不得过期，也不得写成"无理由"—— 无理由的白名单等于删掉守卫。"""
+        hits = self._scan(_ENGINE)
+        stale = sorted(set(self._INPUT_CLEANUP_WHITELIST) - set(hits))
+        assert not stale, f"白名单里这些条目已不再命中（应删除，否则守卫被悄悄放宽）: {stale}"
+        for rel, reason in self._INPUT_CLEANUP_WHITELIST.items():
+            assert len(reason) >= 20, f"白名单 {rel} 的理由太短，不足以说明为何合规：{reason!r}"

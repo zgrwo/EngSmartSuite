@@ -13,6 +13,12 @@ from statsmodels.tools.sm_exceptions import SingularMatrixWarning
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import CrossRule, Finite, Opt, Spec
 from smartsuite.engine._constants import DW_NEGATIVE_AUTOCORR, DW_POSITIVE_AUTOCORR
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    check_magnitude,
+    check_tables_finite,
+    clean_frame,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import (
     durbin_watson,
@@ -778,9 +784,26 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
             task="quantile_regression", status="error", messages=["需要至少 1 个因子列"]
         )
 
-    sub = req.data[[req.target_col] + cols].dropna()
+    # ── 边界处置（B0/B1）：±Inf 与量级上界（审查 2026-10-09 P0-8 / P1-4 / P2-10）──
+    # `dropna()` 不剔除 ±Inf —— 实测 +Inf 时 `coefficients` 12 个 nan 而 summary
+    # 仍写「Q50 (中位数) 回归完成」；×1e300 时表内 8 处非有限、判决随量级翻转。
+    _boundary = BoundaryReport()
+    sub, _n_non_finite = clean_frame(
+        req.data[[req.target_col] + cols], [req.target_col] + cols, report=_boundary
+    )
+    if check_magnitude(sub[req.target_col], what=f"目标列「{req.target_col}」", report=_boundary):
+        return AnalysisResult(
+            task="quantile_regression",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
     if len(sub) < len(cols) + 2:
-        return AnalysisResult(task="quantile_regression", status="error", messages=["有效样本不足"])
+        return AnalysisResult(
+            task="quantile_regression",
+            status="error",
+            messages=["有效样本不足"] + _boundary.messages(),
+        )
 
     # 参数校验（P4 步骤③，第二十二轮）：失败时抛 ParamValidationError，
     # 由 orchestrator 统一转成 status="error" + 中文文案。
@@ -813,14 +836,37 @@ def quantile_regression(req: AnalysisRequest) -> AnalysisResult:
         )
         summary = f"{q_label} 回归完成，{len(coef_df) - 1} 个变量"
 
+        # 出口侧后置断言（P2-10）：系数/标准误/p 值全为非有限值时必须拒绝，
+        # 不得让「回归完成」与一张全 nan 的表同时出现。
+        if check_tables_finite(
+            {"coefficients": coef_df},
+            what="「quantile_regression」系数表",
+            code="E_NUMERIC_MODEL_DEGENERATE",
+            report=_boundary,
+        ):
+            return AnalysisResult(
+                task="quantile_regression",
+                status="error",
+                messages=_boundary.messages(),
+                metadata={"boundary_codes": _boundary.codes()},
+            )
+
         return AnalysisResult(
             task="quantile_regression",
             tables={"coefficients": coef_df},
             summary=summary,
-            metadata={"quantile": quantile, "n_samples": len(sub), "n_features": len(cols)},
+            messages=_boundary.messages(),
+            metadata={
+                "quantile": quantile,
+                "n_samples": len(sub),
+                "n_features": len(cols),
+                "boundary_codes": _boundary.codes(),
+            },
         )
     except Exception:
         logger.debug("分位数回归拟合失败", exc_info=True)
         return AnalysisResult(
-            task="quantile_regression", status="error", messages=["分位数回归拟合失败"]
+            task="quantile_regression",
+            status="error",
+            messages=["分位数回归拟合失败"] + _boundary.messages(),
         )

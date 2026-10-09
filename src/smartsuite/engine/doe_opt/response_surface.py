@@ -9,6 +9,12 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Opt, Spec
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    check_magnitude,
+    check_tables_finite,
+    clean_frame,
+)
 from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
@@ -46,6 +52,19 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
             "如需要，请手动选择 2 个关键因子。"
         )
     df = req.data[[req.target_col, c1, c2]].dropna()
+    # ── 边界处置（B0/B1）：±Inf 与量级上界（审查 2026-10-09 P1-4 / P2-10）──
+    # `dropna()` 不剔除 ±Inf —— 实测 +Inf 时 `coefficients` 6 inf + 21 nan 而
+    # summary 仍写「R²=nan…预测Y=nan」；×1e300 时只报泛化的「响应面模型未能求解」，
+    # 用户看不出真因是量级（错误归因）。
+    _boundary = BoundaryReport()
+    df, _n_non_finite = clean_frame(df, [req.target_col, c1, c2], report=_boundary)
+    if check_magnitude(df[req.target_col], what=f"目标列「{req.target_col}」", report=_boundary):
+        return AnalysisResult(
+            task="response_surface",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
     if len(df) < 7:
         return AnalysisResult(
             task="response_surface",
@@ -53,7 +72,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=[
                 f"有效样本不足：二次响应面模型含 6 个参数，至少需要 7 个数据点"
                 f"（当前 {len(df)} 个，残差自由度为 0 会导致标准误为 NaN）"
-            ],
+            ]
+            + _boundary.messages(),
         )
 
     # 审查 2026-08-19 #1.4：常量目标列 → R²=-inf 且误报诊断
@@ -61,7 +81,8 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         return AnalysisResult(
             task="response_surface",
             status="error",
-            messages=[f"目标列「{req.target_col}」为常量列（方差为 0），响应面模型无意义"],
+            messages=[f"目标列「{req.target_col}」为常量列（方差为 0），响应面模型无意义"]
+            + _boundary.messages(),
         )
 
     try:
@@ -204,9 +225,24 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
         f"预测{req.target_col}={opt_z:.4f}"
     )
 
+    # 出口侧后置断言（P2-10）：系数表含 inf/nan 时必须拒绝，
+    # 不得让「R²=nan…预测Y=nan」的假结论连同表格一起交给用户。
+    if check_tables_finite(
+        {"coefficients": coef_df},
+        what="「response_surface」系数表",
+        code="E_NUMERIC_MODEL_DEGENERATE",
+        report=_boundary,
+    ):
+        return AnalysisResult(
+            task="response_surface",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
+
     return AnalysisResult(
         task="response_surface",
-        messages=rsm_warn_msgs,
+        messages=_boundary.messages() + rsm_warn_msgs,
         tables={
             "coefficients": coef_df,
             "model_fit": pd.DataFrame(
@@ -232,5 +268,6 @@ def response_surface_analysis(req: AnalysisRequest) -> AnalysisResult:
             "optimal_x2": opt_x2,
             "optimal_z": opt_z,
             "direction": direction,
+            "boundary_codes": _boundary.codes(),
         },
     )

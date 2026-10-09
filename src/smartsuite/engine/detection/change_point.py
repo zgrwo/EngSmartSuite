@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Integer, Opt, Spec
+from smartsuite.engine._guard import BoundaryReport, clean_series
 from smartsuite.engine._palette import PALETTE
 
 logger = logging.getLogger(__name__)
@@ -36,13 +37,20 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
         min_segment: 最小段长度 (默认 10)
         n_changepoints: 最多检测的变点数 (默认 5)
     """
-    data = req.data[req.target_col].dropna()
+    # ── 边界处置（B1）：±Inf 必须清洗并披露（审查 2026-10-09 P0-8）──
+    # `dropna()` 不剔除 ±Inf —— 实测注入 3 个 +Inf 后 summary 与「NaN 对照」逐字
+    # 同为「未检测到显著变点，过程整体平稳」，且 `messages=[]`（B1 契约被绕过）。
+    _boundary = BoundaryReport()
+    data, _n_non_finite = clean_series(
+        req.data[req.target_col], column=req.target_col, report=_boundary
+    )
+    data = data.dropna()
     n = len(data)
     if n < 20:
         return AnalysisResult(
             task="change_point",
             status="error",
-            messages=["有效数据不足(至少20个点)"],
+            messages=["有效数据不足(至少20个点)"] + _boundary.messages(),
         )
 
     _def_ms = min(max(10, n // 20), (n - 1) // 2)  # 保证 2*min_segment < n（n=20 时默认 9 而非 10）
@@ -245,10 +253,12 @@ def change_point_detect(req: AnalysisRequest) -> AnalysisResult:
         tables={"segment_statistics": pd.DataFrame(segment_stats)},
         figures=[fig],
         summary=summary,
+        messages=_boundary.messages(),
         metadata={
             "changepoints": changepoints,
             "n_changepoints": len(changepoints),
             "n_segments": len(segment_stats),
             "n": n,
+            "boundary_codes": _boundary.codes(),
         },
     )

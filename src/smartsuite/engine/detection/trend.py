@@ -16,7 +16,7 @@ from smartsuite.engine._constants import (
     DW_SAFE_LOWER,
     DW_SAFE_UPPER,
 )
-from smartsuite.engine._guard import BoundaryReport, clean_series
+from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import durbin_watson, round_for_display
 
@@ -111,6 +111,11 @@ def trend_forecast(req: AnalysisRequest) -> AnalysisResult:
                 *_report.messages(),
             ],
         )
+
+    # 量级上界（审查 2026-10-09 P1-4）：×1e300 时 `Σ(x-x̄)²`/`Σy²` 溢出为 Inf，
+    # 斜率与预测表随之全为非有限值，而 summary 仍照常写「趋势下降 (斜率=…)」。
+    if check_magnitude(data, what=f"目标列「{req.target_col}」", report=_report):
+        return AnalysisResult(task="trend_forecast", status="error", messages=_report.messages())
 
     # Round-2 #A3b：常量序列 → sklearn R²=1.0 假完美拟合
     # 审查 2026-09-05 B1：绝对阈值 1e-12 误判微尺度数据（std~1e-13，如单位换算后的

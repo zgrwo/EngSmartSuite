@@ -18,6 +18,7 @@ from smartsuite.engine._constants import (
     SIG_HIGH,
     SIG_MODERATE,
 )
+from smartsuite.engine._guard import BoundaryReport, clean_frame
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.root_cause._shared import _correlation_ci, _effect_size_label
@@ -65,7 +66,8 @@ def _significance_stars(p):
 
 def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     """相关性矩阵分析（Pearson/Spearman），含多重比较校正和显著性标记。"""
-    if req.target_col not in req.data.columns:
+    frame = req.data
+    if req.target_col not in frame.columns:
         return AnalysisResult(
             task="correlation",
             status="error",
@@ -73,10 +75,10 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
     # 去重：防止 target_col 同时出现在 feature_cols 中导致重复列
     cols = list(dict.fromkeys(req.feature_cols + [req.target_col]))
-    cols = [c for c in cols if c in req.data.columns]
+    cols = [c for c in cols if c in frame.columns]
 
     # 校验所有列为数值型，避免非数值列静默失败
-    non_numeric = [c for c in cols if not pd.api.types.is_numeric_dtype(req.data[c])]
+    non_numeric = [c for c in cols if not pd.api.types.is_numeric_dtype(frame[c])]
     if non_numeric:
         return AnalysisResult(
             task="correlation",
@@ -94,12 +96,21 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             messages=["至少需要 1 个因子列与目标列进行相关性分析，当前无有效因子列"],
         )
 
+    # ── 边界处置（B1）：±Inf 必须清洗并**披露**（审查 2026-10-09 P0-8 / P1-6）──
+    # 原实现只在 p 值循环里手写成对 `np.isfinite` 掩码，**没有任何披露** ——
+    # 用户看到 n=60 而实际参与计算的样本已变（实测 summary 与「NaN 对照」逐字相同）。
+    # `drop_nan=False`：NaN 保留给 pandas `.corr()` 的**成对完整观测**口径，
+    # 否则一个因子的缺失会压垮整表样本（见 `_guard.clean_frame` 的说明）。
+    _boundary = BoundaryReport()
+    frame, _n_non_finite = clean_frame(frame, cols, report=_boundary, drop_nan=False)
+
     # 最小样本守卫：n<3 时任意两列 |r|=1 的“伪完美相关”会误导结论（允许部分列缺失）
-    if req.data[cols].dropna(how="all").shape[0] < 3:
+    if frame[cols].dropna(how="all").shape[0] < 3:
         return AnalysisResult(
             task="correlation",
             status="error",
-            messages=["有效样本不足(至少3行含数据)，相关分析在极小样本下无意义"],
+            messages=["有效样本不足(至少3行含数据)，相关分析在极小样本下无意义"]
+            + _boundary.messages(),
         )
 
     # 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError，
@@ -107,13 +118,13 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     # 原白名单检查已由 `Choice` 表达并**给出可选值的中文文案**（供下拉框显示）。
     method = PARAM_SPECS["correlation"].validate_or_raise(req.params).method
     if method == "spearman":
-        corr = req.data[cols].corr(method="spearman")
+        corr = frame[cols].corr(method="spearman")
         corr_label = "Spearman ρ"
     elif method == "kendall":
-        corr = req.data[cols].corr(method="kendall")
+        corr = frame[cols].corr(method="kendall")
         corr_label = "Kendall τ"
     else:
-        corr = req.data[cols].corr(method="pearson")
+        corr = frame[cols].corr(method="pearson")
         corr_label = "Pearson r"
 
     # p 值矩阵
@@ -122,22 +133,24 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         for c2 in cols:
             # 常量列防护：nunique<=1 时相关性/检验无定义，直接 NaN（与其他函数一致，
             # 避免 pearsonr/spearmanr/kendalltau 返回 NaN 后混入校正矩阵）
-            if req.data[c1].nunique(dropna=True) <= 1 or req.data[c2].nunique(dropna=True) <= 1:
+            if frame[c1].nunique(dropna=True) <= 1 or frame[c2].nunique(dropna=True) <= 1:
                 pmat.loc[c1, c2] = np.nan
                 continue
             # 审查 2026-09-22 发现 4：pandas `.corr()` 对 ±Inf 按缺失成对剔除，
             # 原 mask 只查 notna → r 有限而 p 为 NaN（同一表内自相矛盾）。
-            # 统一 isfinite 口径：带 Inf 的行不参与 p 值计算，与 r 矩阵一致。
-            _v1 = req.data[c1].to_numpy(dtype=float, na_value=np.nan)
-            _v2 = req.data[c2].to_numpy(dtype=float, na_value=np.nan)
-            mask = np.isfinite(_v1) & np.isfinite(_v2)
+            # 审查 2026-10-09 P1-6：±Inf 已在**入口**由 `_guard.clean_frame(drop_nan=False)`
+            # 按行剔除并披露，故此处只需处理 **NaN 的成对缺失**（与 `.corr()` 的
+            # 「成对完整观测」口径一致）—— 不再手写非有限值清洗。
+            _v1 = frame[c1].to_numpy(dtype=float, na_value=np.nan)
+            _v2 = frame[c2].to_numpy(dtype=float, na_value=np.nan)
+            mask = ~np.isnan(_v1) & ~np.isnan(_v2)
             if mask.sum() >= 3:
                 if method == "spearman":
-                    _, p = sp_stats.spearmanr(req.data.loc[mask, c1], req.data.loc[mask, c2])
+                    _, p = sp_stats.spearmanr(frame.loc[mask, c1], frame.loc[mask, c2])
                 elif method == "kendall":
-                    _, p = sp_stats.kendalltau(req.data.loc[mask, c1], req.data.loc[mask, c2])
+                    _, p = sp_stats.kendalltau(frame.loc[mask, c1], frame.loc[mask, c2])
                 else:
-                    _, p = sp_stats.pearsonr(req.data.loc[mask, c1], req.data.loc[mask, c2])
+                    _, p = sp_stats.pearsonr(frame.loc[mask, c1], frame.loc[mask, c2])
                 pmat.loc[c1, c2] = p
             else:
                 pmat.loc[c1, c2] = np.nan
@@ -183,11 +196,9 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     if pd.isna(top_value):
         # 审查 2026-08-19 #2.6/#3.4：原消息一律指向目标列，但常量特征列
         # （或有效样本不足）同样会导致 top_value=NaN，消息须指向真实原因
-        const_cols = [
-            c for c in cols if c != req.target_col and req.data[c].nunique(dropna=True) <= 1
-        ]
+        const_cols = [c for c in cols if c != req.target_col and frame[c].nunique(dropna=True) <= 1]
         # Round-2 #A2m：目标列本身为常量时消息应指向目标列而非误称"特征列"
-        target_const = req.data[req.target_col].nunique(dropna=True) <= 1
+        target_const = frame[req.target_col].nunique(dropna=True) <= 1
         if const_cols and not target_const:
             msg = (
                 f"特征列「{const_cols[0]}」为常量列（无变异），无法计算相关性分析。"
@@ -263,7 +274,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                             # 对角线：单列直方图。注意 df[[cv1, cv2]] 在 cv1==cv2 时
                             # 会选中两个同名列 → sub[cv1] 返回 2D → matplotlib≥3.9
                             # hist 严格校验 color 报错（此前被 try 吞掉致图缺失）
-                            vals = req.data[cv1].dropna().values
+                            vals = frame[cv1].dropna().values
                             if len(vals) < 2:
                                 continue
                             ax.hist(
@@ -275,7 +286,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
                             )
                             ax.set_title(cv1, fontsize=9)
                             continue
-                        sub = req.data[[cv1, cv2]].dropna()
+                        sub = frame[[cv1, cv2]].dropna()
                         if len(sub) < 2:
                             continue
                         ax.scatter(
@@ -353,9 +364,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
     control_vars = [
         c
         for c in control_vars
-        if c in req.data.columns
-        and c != req.target_col
-        and pd.api.types.is_numeric_dtype(req.data[c])
+        if c in frame.columns and c != req.target_col and pd.api.types.is_numeric_dtype(frame[c])
     ]
     direction = "正相关" if top_value >= 0 else "负相关"
     summary_parts = [
@@ -372,7 +381,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         partial_results = []
         for fc in feature_cols_only:
             all_vars = [req.target_col, fc] + control_vars
-            sub = req.data[all_vars].dropna()
+            sub = frame[all_vars].dropna()
             if len(sub) < len(control_vars) + 3:
                 continue
             # 回归 target ~ control_vars，取残差
@@ -488,6 +497,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=figures,
         summary="。".join(summary_parts),
+        messages=_boundary.messages(),
         metadata={
             "target_correlations": target_corr.to_dict(),
             "method": method,
@@ -500,8 +510,7 @@ def correlation_analysis(req: AnalysisRequest) -> AnalysisResult:
             "effect_size": float(top_value),
             "effect_name": corr_label,
             "effect_label": _effect_size_label(float(top_value), "correlation"),
-            "effect_size_ci": _correlation_ci(
-                float(top_value), int(req.data[cols].dropna().shape[0])
-            ),
+            "effect_size_ci": _correlation_ci(float(top_value), int(frame[cols].dropna().shape[0])),
+            "boundary_codes": _boundary.codes(),
         },
     )

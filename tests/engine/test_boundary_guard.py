@@ -13,11 +13,15 @@ from smartsuite.engine._guard import (
     BoundaryIssue,
     BoundaryReport,
     check_finite_param,
+    check_magnitude,
     check_n,
     check_non_constant,
+    check_tables_finite,
     clean_frame,
     clean_series,
+    degenerate_tables,
     explain_undefined_sigma,
+    non_finite_tables,
     partition_finite,
 )
 
@@ -133,6 +137,190 @@ class TestCheckNonConstant:
         assert check_non_constant(pd.Series([np.inf, np.inf])) is not None
 
 
+class TestNonConstantAttribution:
+    """审查 2026-10-09 P2-3：三种退化列必须给出**不同**错误码，不得都叫"常量列"。
+
+    契约边界清单 #5/#6/#7 把「常量列」「样本量不足」「整列为空」列为三种情形。
+    原实现把后两者都折进 `E_DATA_CONSTANT_COLUMN`，于是：
+    - 用户按"常量列"排查一个空列，永远查不到原因（错误归因）；
+    - 与同模块 `explain_undefined_sigma` 对**同一输入**给出的
+      「有效观测不足 2 个」自相矛盾（同文件两个 SSOT 打架）。
+    """
+
+    def test_all_nan_column_is_empty_not_constant(self):
+        report = BoundaryReport()
+        issue = check_non_constant(pd.Series([np.nan, np.nan]), what="目标列「Y」", report=report)
+        assert issue is not None
+        assert issue.code == "E_DATA_EMPTY_COLUMN", (
+            f"整列为空应报 E_DATA_EMPTY_COLUMN（区别于「样本不足」），实际 {issue.code}"
+        )
+        assert "为空" in issue.detail, issue.detail
+        assert "常量" not in issue.detail, f"整列为空不是常量列——那是错误归因：{issue.detail}"
+
+    def test_empty_series_is_empty_column(self):
+        issue = check_non_constant(pd.Series([], dtype=float))
+        assert issue is not None and issue.code == "E_DATA_EMPTY_COLUMN"
+
+    def test_single_valid_observation_is_insufficient_n(self):
+        """恰好 1 个有效值：无法断言"所有观测相同"，那是样本量问题（越权推断防线）。"""
+        issue = check_non_constant(pd.Series([7.0]))
+        assert issue is not None
+        assert issue.code == "E_DATA_INSUFFICIENT_N", issue.code
+        assert "常量" not in issue.detail, issue.detail
+
+    def test_one_value_plus_nan_is_insufficient_n(self):
+        issue = check_non_constant(pd.Series([7.0, np.nan]))
+        assert issue is not None and issue.code == "E_DATA_INSUFFICIENT_N"
+
+    def test_two_equal_values_is_constant(self):
+        """≥2 个有效值且全部相同 → 才是真正的常量列。"""
+        issue = check_non_constant(pd.Series([5.0, 5.0, np.nan]))
+        assert issue is not None and issue.code == "E_DATA_CONSTANT_COLUMN"
+
+    def test_codes_match_explain_undefined_sigma_on_same_input(self):
+        """同一输入，两个入口的归因必须一致（本模块内不得自相矛盾）。"""
+        for s in (pd.Series([np.nan, np.nan]), pd.Series([7.0, np.nan]), pd.Series([5.0, 5.0])):
+            a = check_non_constant(s)
+            b = explain_undefined_sigma(s)
+            assert a is not None
+            assert a.code == b.code, f"输入 {s.tolist()}：{a.code} vs {b.code}"
+
+
+class TestCheckMagnitude:
+    """审查 2026-10-09 P1-4：量纲上界此前**无任何守卫**。
+
+    同一份数据仅乘 1e300（相对关系不变）时，`Σy²` 溢出为 Inf，
+    多个任务的判决静默翻转（1e153 判正态 / 1e152 判非正态）。
+    守卫必须是**相对的**（只看量级），且不影响微尺度数据。
+    """
+
+    def test_normal_magnitude_passes(self):
+        assert check_magnitude(pd.Series([50.0, 51.0, 49.0])) is None
+
+    def test_large_but_safe_magnitude_passes(self):
+        """1e9 量级的真实工程数据（如 Pa 单位应力）必须照常可用。"""
+        assert check_magnitude(pd.Series([1e9, 2e9, 3e9])) is None
+
+    def test_at_cap_passes(self):
+        assert check_magnitude(pd.Series([1e150, 1.0])) is None
+
+    def test_extreme_magnitude_rejected(self):
+        report = BoundaryReport()
+        issue = check_magnitude(pd.Series([1e300, 1.0]), what="目标列「y」", report=report)
+        assert issue is not None
+        assert issue.code == "E_SCALE_EXTREME_MAGNITUDE"
+        assert issue.level == "B0"
+        assert "1e300" in issue.detail or "量级" in issue.detail
+        assert report.codes() == ["E_SCALE_EXTREME_MAGNITUDE"]
+
+    def test_detail_tells_the_user_what_to_do(self):
+        """B0 拒绝必须带**可执行建议**（契约「输出要求」列）。"""
+        issue = check_magnitude(pd.Series([-1e300]))
+        assert issue is not None
+        assert "单位换算" in issue.detail and "中心化" in issue.detail, issue.detail
+
+    @pytest.mark.parametrize("scale", [1e-12, 1e-9, 1.0, 1e6, 1e12])
+    def test_micro_and_mid_scale_pass(self, scale):
+        """微尺度（历史 P0 方向）与中等量级都不得被这条守卫误伤。"""
+        assert check_magnitude(pd.Series([scale, 2 * scale])) is None
+
+    def test_non_finite_only_series_passes(self):
+        """全为 ±Inf/NaN 时无有限峰值 —— 归因交给 `check_non_constant`，不得越权。"""
+        assert check_magnitude(pd.Series([np.inf, np.inf])) is None
+        assert check_magnitude(pd.Series([np.nan])) is None
+
+    def test_non_finite_does_not_mask_peak(self):
+        """峰值只看有限值：含一个 +Inf 的 1e300 数据仍应被读出真实量级。"""
+        issue = check_magnitude(pd.Series([1e300, np.inf, 1.0]))
+        assert issue is not None and issue.code == "E_SCALE_EXTREME_MAGNITUDE"
+
+    def test_non_numeric_column_passes(self):
+        assert check_magnitude(pd.Series(["甲", "乙"])) is None
+
+    def test_without_report_does_not_raise(self):
+        issue = check_magnitude(pd.Series([1e300]))
+        assert issue is not None
+        assert issue.code == "E_SCALE_EXTREME_MAGNITUDE" and issue.level == "B0"
+        assert "1e300" in issue.detail or "1e+300" in issue.detail, issue.detail
+
+
+class TestOutputTablesAreFinite:
+    """出口侧后置断言：结果表**退化**时必须能被判出（P1-4 / P2-10）。
+
+    判据是"含 ±Inf"或"数值块全部非有限"，**不是**"见到 NaN 就拒绝" ——
+    本仓哨兵契约把 `NaN` 定义为"无法判定"这一合法出口
+    （`doe_analysis` 完全共线时把 `t值/p值` 写成 NaN + 「无法判定」，
+    `tests/guards/test_micro_scale_guards.py::test_doe_analysis_perfect_fit_not_fabricated_zero_t`
+    专门钉住它）。一刀切会把已固化的正确语义改坏 —— 本类同时钉住两个方向。
+    """
+
+    def test_clean_tables_pass(self):
+        assert check_tables_finite({"t": pd.DataFrame({"a": [1.0, 2.0]})}) is None
+
+    def test_all_nan_numeric_block_rejected(self):
+        """数值块全是 NaN → 模型一个参数都没估出来，等价于"没有结果"。"""
+        report = BoundaryReport()
+        issue = check_tables_finite(
+            {"coefficients": pd.DataFrame({"coef": [np.nan, np.nan]})},
+            what="「response_surface」",
+            report=report,
+        )
+        assert issue is not None
+        assert issue.level == "B0"
+        assert "coefficients" in issue.detail
+        assert report.messages() == [issue.detail]
+
+    def test_inf_in_numeric_column_rejected(self):
+        """Inf 从不是合法哨兵 —— 即使同表还有有限值也必须拒绝。"""
+        issue = check_tables_finite({"t": pd.DataFrame({"a": [1.0, np.inf]})})
+        assert issue is not None and "t" in issue.detail
+        assert "±Inf" in issue.detail
+
+    def test_lone_nan_sentinel_is_allowed(self):
+        """**反向**：单个 NaN 是既定的"无法判定"哨兵，不得拒绝（防修得过严）。
+
+        反例现场：`doe_analysis` 完全共线（残差≈0）时 `t值=NaN`、
+        同表 `效应` 仍是有限值 —— 这是刻意保留的语义，不是缺陷。
+        """
+        df = pd.DataFrame({"因子": ["g"], "效应": [4.0], "t值": [np.nan], "p值": [np.nan]})
+        assert check_tables_finite({"effect_estimates": df}) is None
+
+    def test_text_placeholder_is_not_a_violation(self):
+        """「N/A」/「无法判定」等**文本**占位同样合法（表必须能如实说"算不出"）。"""
+        df = pd.DataFrame({"Shapiro-Wilk p": ["无法判定", "N/A"]})
+        assert check_tables_finite({"t": df}) is None
+
+    def test_custom_code_is_used(self):
+        issue = check_tables_finite(
+            {"coefficients": pd.DataFrame({"a": [np.nan]})}, code="E_NUMERIC_MODEL_DEGENERATE"
+        )
+        assert issue is not None and issue.code == "E_NUMERIC_MODEL_DEGENERATE"
+
+    def test_non_finite_tables_counts_by_name(self):
+        bad = non_finite_tables(
+            {
+                "ok": pd.DataFrame({"a": [1.0]}),
+                "bad": pd.DataFrame({"a": [np.nan, np.inf, 1.0]}),
+            }
+        )
+        assert bad == {"bad": 2}, bad
+
+    def test_degenerate_tables_explains_the_reason(self):
+        reasons = degenerate_tables(
+            {
+                "all_nan": pd.DataFrame({"a": [np.nan, np.nan]}),
+                "has_inf": pd.DataFrame({"a": [1.0, -np.inf]}),
+                "sentinel_ok": pd.DataFrame({"a": [4.0, np.nan]}),
+            }
+        )
+        assert set(reasons) == {"all_nan", "has_inf"}, reasons
+        assert "非有限" in reasons["all_nan"]
+        assert "±Inf" in reasons["has_inf"]
+
+    def test_non_dataframe_entries_are_ignored(self):
+        assert non_finite_tables({"meta": "不是表"}) == {}
+
+
 class TestCheckFiniteParam:
     def test_none_returns_none_pair(self):
         val, issue = check_finite_param(None, "k")
@@ -206,6 +394,31 @@ class TestExplainUndefinedSigma:
             explain_undefined_sigma(pd.Series([1.0, 2.0])).code,
         }
         assert len(codes) == 4, f"四种情形应给出 4 个不同错误码，实际 {codes}"
+
+    def test_priority_constant_beats_non_finite(self):
+        """优先级第一档：≥2 个有效值且全同 → 常量（即使含 ±Inf）。
+
+        实现与 docstring 的**唯一**权威顺序是：
+            常量 → 样本量 → 非有限值 → 兜底
+        （审查 2026-10-09 P2-2：docstring 曾把「非有限值」排在「样本量」前，与实现相反）。
+        """
+        assert explain_undefined_sigma(pd.Series([np.inf, np.inf])).code == (
+            "E_DATA_CONSTANT_COLUMN"
+        )
+
+    def test_priority_insufficient_n_beats_non_finite(self):
+        """优先级第二档：有效观测 < 2 → 样本量。
+
+        `[5.0, NaN]` 剔除 NaN 后只剩 1 个有效值，属样本量问题；
+        先判"含非有限值"会把用户引向错误的排查方向（错误归因）。
+        """
+        issue = explain_undefined_sigma(pd.Series([5.0, np.nan]))
+        assert issue.code == "E_DATA_INSUFFICIENT_N", issue.code
+
+    def test_priority_non_finite_beats_fallback(self):
+        """优先级第三档：有效值足够、非常量、但含 ±Inf → 非有限值。"""
+        issue = explain_undefined_sigma(pd.Series([5.0, np.inf]))
+        assert issue.code == "E_DATA_NON_FINITE_BLOCKS_SIGMA", issue.code
 
 
 class TestBoundaryReport:

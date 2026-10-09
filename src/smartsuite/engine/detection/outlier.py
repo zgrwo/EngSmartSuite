@@ -11,6 +11,7 @@ from smartsuite.engine._constants import (
     IQR_OUTLIER_MULTIPLIER,
     ZSCORE_OUTLIER_THRESHOLD,
 )
+from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 from smartsuite.engine.detection._shared import iqr_outlier_mask
@@ -23,13 +24,27 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
 
     只有当 ≥2 种方法都判定为异常时，才标记为"高置信异常"。
     """
-    data = req.data[req.target_col].dropna()
+    # ── 边界处置（B0/B1）：±Inf 与量级上界（审查 2026-10-09 P0-8 / P1-4）──
+    # `dropna()` 不剔除 ±Inf —— 实测注入 3 个 +Inf 后 `status=ok`、`messages=[]`；
+    # ×1e300 时「3 个高置信」静默变成「0 个高置信」（结论级翻转）。
+    _boundary = BoundaryReport()
+    data, _n_non_finite = clean_series(
+        req.data[req.target_col], column=req.target_col, report=_boundary
+    )
+    data = data.dropna()
     n = len(data)
     if n < 10:
         return AnalysisResult(
             task="outlier_consensus",
             status="error",
-            messages=["有效数据不足(至少10个点)"],
+            messages=["有效数据不足(至少10个点)"] + _boundary.messages(),
+        )
+    if check_magnitude(data, what=f"目标列「{req.target_col}」", report=_boundary):
+        return AnalysisResult(
+            task="outlier_consensus",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
         )
 
     # ── 方法 1: IQR ──
@@ -176,11 +191,13 @@ def outlier_consensus(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=summary,
+        messages=_boundary.messages(),
         metadata={
             "iqr_count": int(iqr_mask.sum()),
             "zscore_count": int(z_mask.sum()),
             "isoforest_count": int(iso_mask.sum()),
             "high_confidence_count": int(high_conf.sum()),
             "total_flagged": int(any_flag.sum()),
+            "boundary_codes": _boundary.codes(),
         },
     )

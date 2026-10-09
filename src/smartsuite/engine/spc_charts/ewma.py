@@ -8,6 +8,12 @@ from matplotlib.figure import Figure
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Finite, Opt, Spec
 from smartsuite.core.param_specs_common import GROUP_COL
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    check_magnitude,
+    clean_series,
+    explain_undefined_sigma,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine.spc_charts._shared import _resolve_groups
 
@@ -47,7 +53,33 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         sigma: 过程标准差 (如未提供，从数据估计)
         group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
     """
-    group_vals, group_names, has_groups, y_col, _all_groups_meta = _resolve_groups(req)
+    # ── 0. 列名存在性前置校验（审查 2026-10-09 P2-4）──
+    # 与 CUSUM 同因同解：`_resolve_groups` 对不存在的分组列静默退化为单系列。
+    _group_col = req.params.get("group_col")
+    if _group_col and _group_col not in req.data.columns:
+        return AnalysisResult(
+            task="spc_ewma",
+            status="error",
+            messages=[
+                f"分组列「{_group_col}」不存在于数据中。可用列: {list(req.data.columns)[:10]}"
+            ],
+        )
+
+    group_vals, group_names, has_groups, _same_y_col, _all_groups_meta = _resolve_groups(req)
+
+    # ── 1. 边界处置（B0/B1）—— 与 CUSUM 完全同构（P0-6 / P1-4）──
+    _boundary = BoundaryReport()
+    y_col = req.target_col
+    _series, _n_non_finite = clean_series(req.data[y_col], column=y_col, report=_boundary)
+    data = req.data.loc[_series.index] if _n_non_finite else req.data
+    _mag = check_magnitude(_series, what=f"目标列「{y_col}」", report=_boundary)
+    if _mag is not None:
+        return AnalysisResult(
+            task="spc_ewma",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
 
     # 公共参数 (ewma)
     # 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError，
@@ -71,9 +103,12 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     all_group_names = []
     skipped_insufficient: list[str] = []
     skipped_zero_var: list[str] = []
+    # σ 不可估计的分组（归因文案来自 `_guard.explain_undefined_sigma`）——
+    # **不得**与「零方差」共用列表（P0-6 的错误归因）。
+    skipped_sigma: list[str] = []
     for gname in group_names:
-        mask = group_vals == gname if has_groups else pd.Series(True, index=req.data.index)
-        gdata = req.data.loc[mask, y_col].dropna()
+        mask = group_vals == gname if has_groups else pd.Series(True, index=data.index)
+        gdata = data.loc[mask, y_col].dropna()
         if len(gdata) < 3:
             skipped_insufficient.append(str(gname))
             continue
@@ -85,7 +120,12 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
             mu = float(gdata.mean())
             sigma = float(gdata.std(ddof=1))
         # 审查 2026-09-16 D-1：同 CUSUM——微尺度分组不再误判零方差跳过
-        if not np.isfinite(sigma) or sigma <= 0:
+        # 审查 2026-10-09 P0-6：拆开「σ 非有限」与「σ == 0」，前者走正确归因
+        if not np.isfinite(sigma):
+            issue = explain_undefined_sigma(gdata, what=f"分组「{gname}」")
+            skipped_sigma.append(issue.detail)
+            continue
+        if sigma <= 0:
             skipped_zero_var.append(str(gname))
             continue
 
@@ -123,10 +163,24 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         )
 
     if len(group_results) < 1:
+        # 归因按**实际原因**复述（P0-6）：原文案在「唯一分组被跳过」时无条件写
+        # 「有效数据不足(每组至少3个点)」—— 该组实有 20~100 个点时文案为假。
+        causes: list[str] = []
+        if skipped_sigma:
+            causes.append(f"标准差不可估计（{skipped_sigma[0]}）")
+        if skipped_zero_var:
+            causes.append("标准差为零（常量数据）")
+        if skipped_insufficient:
+            causes.append("有效数据不足（每组至少需要 3 个点）")
+        detail = (
+            "所有分组均无法计算 EWMA：" + "；".join(causes)
+            if causes
+            else "无有效分组，无法计算 EWMA"
+        )
         return AnalysisResult(
             task="spc_ewma",
             status="error",
-            messages=["有效数据不足(每组至少3个点)"],
+            messages=[detail] + _boundary.messages(),
         )
 
     # 图表
@@ -141,6 +195,10 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
     if skipped_zero_var:
         warn_msgs.append(
             f"⚠ 以下分组标准差为零（常量值），已跳过 EWMA 计算: {', '.join(skipped_zero_var)}"
+        )
+    if skipped_sigma:
+        warn_msgs.append(
+            "⚠ 以下分组的标准差不可估计，已跳过 EWMA 计算: " + "；".join(skipped_sigma)
         )
     if skipped_insufficient:
         warn_msgs.append(
@@ -249,6 +307,7 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         "total_violations": total_violations,
         "n_groups": len(group_results),
         "groups": [str(g) for g in _all_groups_meta if g != "_default"],
+        "boundary_codes": _boundary.codes(),
     }
     if len(group_results) == 1:
         meta["mu"] = group_results[0]["mu"]
@@ -262,6 +321,6 @@ def ewma_chart(req: AnalysisRequest) -> AnalysisResult:
         tables={"ewma_stats": pd.DataFrame(stats_rows)},
         figures=[fig],
         summary="".join(summary_parts),
-        messages=warn_msgs,
+        messages=_boundary.messages() + warn_msgs,
         metadata=meta,
     )

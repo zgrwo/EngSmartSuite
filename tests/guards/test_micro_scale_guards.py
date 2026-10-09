@@ -319,6 +319,16 @@ def test_normality_check_does_not_fake_normal_at_overflow_scale():
     本用例会**空过** —— 实测同一输入在 pytest 下走的是「未归类的异常」分支
     （status=error、summary 为空），于是"不得声称正态"的断言恒真。这本身就是
     P0-6 同一条假绿通道，故此处显式声明为生产口径。
+
+    ## 2026-10-09 更新（审查 P1-4）：期望从「出结果」改为「B0 拒绝」
+
+    本用例原先断言 `huge.status == "ok"` 且只是"不得声称正态" —— 那是**量级上界
+    尚无守卫**时的现状记录。P1-4 落地后，`normality_check` 入口调用了
+    `_guard.check_magnitude`（`log10(max|y|) > 150` → `E_SCALE_EXTREME_MAGNITUDE`），
+    1e155 属**必须拒绝**的量级（该量级下 `Σy²` 溢出为 Inf，判决随量级翻转：
+    实测同一份偏度 1.4547 的数据 1e152 判非正态、1e153 判正态）。
+    故期望改为：**要么 B0 拒绝并说明量级原因，要么出结果且不得声称正态** ——
+    两者都满足"不得伪造正态"这一原始意图，且拒绝路径必须给出可执行建议。
     """
     rng = np.random.default_rng(11)
     skewed = rng.exponential(scale=4.0, size=200) + 1.0
@@ -334,8 +344,12 @@ def test_normality_check_does_not_fake_normal_at_overflow_scale():
     small = run(1.0)
     huge = run(1e155)
     assert small.status == "ok" and "0/1 列满足正态性" in small.summary, small.summary
-    assert huge.status == "ok", f"生产口径下应出结果而非异常兜底：{huge.messages}"
-    assert "1/1 列满足正态性" not in huge.summary, f"溢出量级不得被判为正态：{huge.summary}"
+    blob = " ".join(huge.messages or [])
+    if huge.status == "error":
+        assert "量级" in blob, f"拒绝理由必须指向量级（否则用户排查不到真因）：{huge.messages}"
+        assert "单位换算" in blob or "中心化" in blob, f"B0 拒绝须给可执行建议：{huge.messages}"
+    else:
+        assert "1/1 列满足正态性" not in huge.summary, f"溢出量级不得被判为正态：{huge.summary}"
 
     # ── B-4: 微尺度常量判据 ────────────────────────────────────────────────────def test_trend_forecast_pico_scale_not_constant():
     """pico 级波动不得被误判常量，且统计量随量纲同比缩放（审查 2026-09-22 发现 6）。"""

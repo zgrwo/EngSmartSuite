@@ -8,6 +8,12 @@ from matplotlib.figure import Figure
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Finite, Opt, Spec
 from smartsuite.core.param_specs_common import GROUP_COL
+from smartsuite.engine._guard import (
+    BoundaryReport,
+    check_magnitude,
+    clean_series,
+    explain_undefined_sigma,
+)
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine.spc_charts._shared import _resolve_groups
 
@@ -44,7 +50,40 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         sigma: 过程标准差 (如未提供，从数据估计；建议使用已知受控状态的 σ)
         group_col: 分组依据 (可选，不同值=不同颜色的线，共享坐标轴)
     """
-    group_vals, group_names, has_groups, y_col, _all_groups_meta = _resolve_groups(req)
+    # ── 0. 列名存在性前置校验（审查 2026-10-09 P2-4）──
+    # `_resolve_groups` 对不存在的分组列会**静默退化**为单系列（has_groups=False），
+    # 用户以为已按分组分析却得到单条线 —— 与 process_capability/hypothesis_test/
+    # correlation/anova 的显式报错不一致（同样的错误在不同任务下表现不同）。
+    _group_col = req.params.get("group_col")
+    if _group_col and _group_col not in req.data.columns:
+        return AnalysisResult(
+            task="spc_cusum",
+            status="error",
+            messages=[
+                f"分组列「{_group_col}」不存在于数据中。可用列: {list(req.data.columns)[:10]}"
+            ],
+        )
+
+    # ── 1. 边界处置（B0/B1）──
+    # 审查 2026-10-09 P0-6：入口原为 `dropna()`（不剔除 ±Inf）→ σ=NaN 落入
+    # 「零方差」分支，把「数据含 Inf」误归因为「常量数据（标准差为零）」，
+    # 用户按提示去查常量列永远查不到原因（违反 boundary-contract 硬性要求 2）。
+    _boundary = BoundaryReport()
+    y_col = req.target_col
+    _series, _n_non_finite = clean_series(req.data[y_col], column=y_col, report=_boundary)
+    data = req.data.loc[_series.index] if _n_non_finite else req.data
+    # 量级上界（P1-4）：Σy² 在 |y| ≳ 1e154 时溢出为 Inf，σ 随之变 NaN —— 同一条
+    # 「σ 不可算」路径，但原因完全不同（量级而非常量），必须单独归因。
+    _mag = check_magnitude(_series, what=f"目标列「{y_col}」", report=_boundary)
+    if _mag is not None:
+        return AnalysisResult(
+            task="spc_cusum",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
+        )
+
+    group_vals, group_names, has_groups, _same_y_col, _all_groups_meta = _resolve_groups(req)
 
     # 公共参数 (cusum)
     # 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError，
@@ -68,9 +107,12 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
     max_n = 0
     skipped_zero_var: list[str] = []
     skipped_insufficient: list[str] = []
+    # σ 不可估计的分组 —— 归因文案由 `_guard.explain_undefined_sigma` 产出，
+    # **不再**与「零方差」共用同一个列表（那正是 P0-6 的错误归因）
+    skipped_sigma: list[str] = []
     for gname in group_names:
-        mask = group_vals == gname if has_groups else pd.Series(True, index=req.data.index)
-        gdata = req.data.loc[mask, y_col].dropna()
+        mask = group_vals == gname if has_groups else pd.Series(True, index=data.index)
+        gdata = data.loc[mask, y_col].dropna()
         if len(gdata) < 5:
             skipped_insufficient.append(str(gname))
             continue
@@ -82,9 +124,17 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         else:
             mu = float(gdata.mean())
             sigma = float(gdata.std(ddof=1))
-        # 审查 2026-09-16 D-1：原 `sigma < EPSILON` 把微尺度分组误判零方差跳过；
-        # 仅当 σ 精确为 0/非有限/非正（用户给定）时才跳过
-        if not np.isfinite(sigma) or sigma <= 0:
+        # 审查 2026-09-16 D-1：原 `sigma < EPSILON` 把微尺度分组误判零方差跳过。
+        # 审查 2026-10-09 P0-6：原实现把「σ 非有限」与「σ ≤ 0」并入同一条
+        # 「标准差为零（常量值）」—— 两者**原因完全不同**：
+        #   σ == 0（精确）→ 真的是常量；
+        #   σ 非有限     → 数据含 ±Inf / 量级溢出 / 有效观测不足，与"常量"无关。
+        # 原文案把用户引向"去查常量列"，永远查不到原因（违反契约硬性要求 2）。
+        if not np.isfinite(sigma):
+            issue = explain_undefined_sigma(gdata, what=f"分组「{gname}」")
+            skipped_sigma.append(issue.detail)
+            continue
+        if sigma <= 0:
             skipped_zero_var.append(str(gname))
             continue
 
@@ -123,21 +173,33 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         warn_msgs.append(
             f"⚠ 以下分组标准差为零（常量值），已跳过 CUSUM 计算: {', '.join(skipped_zero_var)}"
         )
+    if skipped_sigma:
+        warn_msgs.append(
+            "⚠ 以下分组的标准差不可估计，已跳过 CUSUM 计算: " + "；".join(skipped_sigma)
+        )
     if skipped_insufficient:
         warn_msgs.append(
             f"⚠ 以下分组有效数据不足（<5 个点），已跳过: {', '.join(skipped_insufficient)}"
         )
     if len(group_results) < 1:
-        if skipped_zero_var and not skipped_insufficient:
-            detail = "所有分组标准差均为零（常量数据），无法计算 CUSUM"
-        elif not skipped_zero_var and skipped_insufficient:
-            detail = "所有分组有效数据不足（每组至少需要 5 个点）"
-        else:
-            detail = "无有效分组：部分分组标准差为零，部分数据不足"
+        # 归因按**实际原因**组合复述 —— 原文案在「仅有 σ 不可估计」时也会说
+        # 「所有分组标准差均为零（常量数据）」，那是错误归因（P0-6）。
+        causes: list[str] = []
+        if skipped_sigma:
+            causes.append(f"标准差不可估计（{skipped_sigma[0]}）")
+        if skipped_zero_var:
+            causes.append("标准差为零（常量数据）")
+        if skipped_insufficient:
+            causes.append("有效数据不足（每组至少需要 5 个点）")
+        detail = (
+            "所有分组均无法计算 CUSUM：" + "；".join(causes)
+            if causes
+            else "无有效分组，无法计算 CUSUM"
+        )
         return AnalysisResult(
             task="spc_cusum",
             status="error",
-            messages=[detail] + warn_msgs,
+            messages=[detail] + warn_msgs + _boundary.messages(),
         )
 
     # 图表
@@ -267,12 +329,13 @@ def cusum_chart(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary="".join(summary_parts),
-        messages=warn_msgs,
+        messages=_boundary.messages() + warn_msgs,
         metadata={
             "k": k,
             "h": h,
             "total_alarms": total_alarms,
             "n_groups": len(group_results),
             "groups": [str(g) for g in _all_groups_meta if g != "_default"],
+            "boundary_codes": _boundary.codes(),
         },
     )

@@ -9,6 +9,7 @@ from scipy import stats as sp_stats
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Opt, Spec
+from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display
 
@@ -46,14 +47,32 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         side: "two-sided"(默认) | "upper"(越小越好,只设上限) | "lower"(越大越好,只设下限)
     """
     # 审查 2026-08-19 #1.5：dropna 不过滤 ±Inf，norm.fit 对 Inf 直接抛异常
-    data = req.data[req.target_col].replace([np.inf, -np.inf], np.nan).dropna()
+    # 审查 2026-10-09 P1-6：原实现是手写 `replace([np.inf,-np.inf], np.nan).dropna()`
+    # —— 绕过 `_guard` 且**无任何披露**（用户看到 n 变小却不知为何）。
+    # 第三十六轮/本轮的收口要求：输入清洗只有 `_guard` 一个执行点。
+    _boundary = BoundaryReport()
+    data, _n_non_finite = clean_series(
+        req.data[req.target_col], column=req.target_col, report=_boundary
+    )
     n = len(data)
 
     if n < 10:
         return AnalysisResult(
             task="spc_nonparametric",
             status="error",
-            messages=[f"有效数据不足(至少10个点, 当前{n}个)"],
+            messages=[f"有效数据不足(至少10个点, 当前{n}个)"] + _boundary.messages(),
+        )
+
+    # 量级上界（审查 2026-10-09 P1-4）：×1e300 时 `Σy²` 溢出为 Inf，
+    # 拟合分布的控制限随之变成天文数字，summary 反而写「过程稳定 ✓」——
+    # 判决与量纲不符，必须 B0 拒绝而不是给结论。
+    _mag = check_magnitude(data, what=f"目标列「{req.target_col}」", report=_boundary)
+    if _mag is not None:
+        return AnalysisResult(
+            task="spc_nonparametric",
+            status="error",
+            messages=_boundary.messages(),
+            metadata={"boundary_codes": _boundary.codes()},
         )
 
     # 参数校验（P4 步骤③，第二十三轮）：失败时抛 ParamValidationError，
@@ -316,6 +335,7 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
         },
         figures=[fig],
         summary=summary,
+        messages=_boundary.messages(),
         metadata={
             "cl": cl,
             "ucl": ucl,
@@ -326,5 +346,6 @@ def spc_nonparametric(req: AnalysisRequest) -> AnalysisResult:
             "n": n,
             "n_violations": n_violations,
             "is_stable": is_stable,
+            "boundary_codes": _boundary.codes(),
         },
     )

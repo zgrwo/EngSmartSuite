@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Choice, Integer, Opt, Spec
+from smartsuite.engine._guard import BoundaryReport, clean_frame
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import is_positive_finite, round_for_display
 
@@ -369,12 +370,19 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             status="error",
             messages=[f"优化目标列不存在于数据中: {', '.join(missing_cols)}"],
         )
-    valid_mask = req.data[obj_cols].notna().all(axis=1)
+    # ── 边界处置（B1）：±Inf 必须清洗并披露（审查 2026-10-09 P0-8）──
+    # `.notna()` 不剔除 ±Inf —— 实测注入 3 个 +Inf 后 `status=ok`、`messages=[]`，
+    # summary 直接输出「最优: {'x1': inf, 'x2': inf}, 得分: 0.0000」（假最优解）。
+    # 掩码保持与 `req.data` 等长（`isin` 逐元素判定），否则下方
+    # `np.flatnonzero(valid_mask)` 的位置会与 `req.data.iloc[...]` 错位。
+    _boundary = BoundaryReport()
+    _clean, _n_non_finite = clean_frame(req.data, obj_cols, report=_boundary)
+    valid_mask = req.data[obj_cols].notna().all(axis=1) & req.data.index.isin(_clean.index)
     if valid_mask.sum() == 0:
         return AnalysisResult(
             task="multi_objective",
             status="error",
-            messages=["所有目标列均包含缺失值"],
+            messages=["所有目标列均包含缺失值"] + _boundary.messages(),
         )
 
     scores = np.zeros(len(req.data))
@@ -565,9 +573,11 @@ def multi_objective_opt(req: AnalysisRequest) -> AnalysisResult:
             f"综合评分最优: {best_params}, 得分: {scores[best_row_iloc]:.4f}。"
             + (f"Pareto 前沿包含 {len(pareto_idx)} 个非支配解" if len(objectives) == 2 else "")
         ),
+        messages=_boundary.messages(),
         metadata={
             "optimal_params": best_params,
             "composite_score": float(scores[best_row_iloc]),
             "pareto_count": int(len(pareto_idx)) if len(objectives) == 2 else None,
+            "boundary_codes": _boundary.codes(),
         },
     )

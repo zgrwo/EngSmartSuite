@@ -11,7 +11,7 @@ from scipy import stats as sp_stats
 from smartsuite.core.contracts import AnalysisRequest, AnalysisResult
 from smartsuite.core.param_spec import Integer, Opt, Spec
 from smartsuite.core.param_specs_common import ALPHA
-from smartsuite.engine._guard import BoundaryReport, clean_series
+from smartsuite.engine._guard import BoundaryReport, check_magnitude, clean_series
 from smartsuite.engine._palette import PALETTE
 from smartsuite.engine._utils import round_for_display, shapiro_p
 
@@ -48,9 +48,17 @@ def distribution_summary(req: AnalysisRequest) -> AnalysisResult:
     report = BoundaryReport()
     data, _n_inf = clean_series(data, column=req.target_col, report=report)
     n = len(data)
+    # 量级上界（审查 2026-10-09 P1-4）：×1e300 时 `Σy²` 溢出为 Inf，
+    # summary 会把 5e301 的均值原样打印并给出拟合结论（量级噪音，非结论）。
+    if check_magnitude(data, what=f"目标列「{req.target_col}」", report=report) is not None:
+        return AnalysisResult(
+            task="distribution_summary", status="error", messages=report.messages()
+        )
     if n < 3:
         return AnalysisResult(
-            task="distribution_summary", status="error", messages=["有效数据不足(至少3个点)"]
+            task="distribution_summary",
+            status="error",
+            messages=["有效数据不足(至少3个点)"] + report.messages(),
         )
 
     # 描述性统计（Any：混存数值与文本展示值，如 Shapiro-Wilk p="N/A"，供 Web 序列化）
@@ -235,9 +243,26 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
     # 参数校验（P4 步骤③）：失败时抛 ParamValidationError
     alpha = PARAM_SPECS["normality_check"].validate_or_raise(req.params).alpha
 
+    # ── 边界处置（B0/B1）：逐列清洗 ±Inf 并披露，再判量级上界 ──
+    # 审查 2026-10-09 P0-8：原实现只用 `dropna()`（不剔除 ±Inf）→ `shapiro_p`
+    # 因 Inf 返回 NaN，任务却静默给出「0/2 列满足正态性」这类判决外结论。
+    # 审查 2026-10-09 P1-4：×1e300 时判决随量级翻转，必须 B0 拒绝（见 `check_magnitude`）。
+    _boundary = BoundaryReport()
+    _clean: dict[str, pd.Series] = {}
+    for col in cols:
+        _d, _ = clean_series(req.data[col].dropna(), column=col, report=_boundary)
+        _clean[col] = _d
+        if check_magnitude(_d, what=f"列「{col}」", report=_boundary) is not None:
+            return AnalysisResult(
+                task="normality_check",
+                status="error",
+                messages=_boundary.messages(),
+                metadata={"boundary_codes": _boundary.codes()},
+            )
+
     results = []
     for col in cols:
-        d = req.data[col].dropna()
+        d = _clean[col]
         n = len(d)
         if n < 3:
             results.append(
@@ -260,6 +285,16 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         # Anderson-Darling (更稳健的大样本检验)
         # scipy >= 1.16: method="interpolate" 返回 SignificanceResult (statistic + pvalue)
         # scipy <  1.16: 不支持 method 参数，需回退到 critical_values 判定
+        #
+        # 审查 2026-10-09 P1-9：`method="interpolate"` 的 p 由 **5 点临界值表线性插值**，
+        # **表外一律钳到端点** —— 实测取值集合仅 {0.01, 0.0107, 0.0126, 0.0128, 0.021,
+        # 0.1086, 0.1231, 0.15}；极端样本（stat=11.09）也输出 `p=0.0100`。
+        # 把钳制值当"真 p"展示等于**伪造精度**（陷阱 9 规则 2），且 α=0.01 时
+        # `p < α` 恒为 False → 判决永远不拒绝。故改**开区间语义**：
+        #   p == 0.01 → "≤0.01"；p == 0.15 → "≥0.15"（标注"超出 scipy 临界值表范围"）。
+        # 同时**判决口径只述 Shapiro-Wilk**（原 `sw_normal or ad_normal` 会让
+        # 被钳制的 A-D 结果影响结论，两处判据不一致 —— 契约边界清单 #18）。
+        _AD_LO, _AD_HI = 0.01, 0.15
         try:
             try:
                 ad_result = sp_stats.anderson(d, dist="norm", method="interpolate")
@@ -272,22 +307,19 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             else:
                 # 旧版 scipy 无 pvalue，用 5% 临界值近似判定
                 ad_p = None
-            # scipy < 1.16 无 pvalue：临界值近似固定 5% 会让 alpha 参数失效
-            # （Round-2 批次D #2e），A-D 不参与判定，仅展示统计量；SW 已提供 p 值
-            ad_normal = ad_p > alpha if ad_p is not None else None
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)
-            ad_stat, ad_p, ad_normal = None, None, None
+            ad_stat, ad_p = None, None
 
         skew = float(d.skew())
         kurt = float(d.kurtosis())
 
-        # 判断和建议变换 (综合 S-W 和 A-D)
-        sw_normal = sw_p is not None and sw_p > alpha
-        is_normal = sw_normal or (ad_normal if ad_normal is not None else False)
+        # 判决：**只看 Shapiro-Wilk**（A-D 仅作参考列，不参与判决）
+        sw_normal = sw_p is not None and bool(np.isfinite(sw_p)) and sw_p > alpha
+        is_normal = sw_normal
 
         if is_normal:
-            normality = "正态 ✓"
+            normality = f"正态 ✓ (S-W p={sw_p:.4f} > α={alpha})"
             recommendation = "无需变换"
         else:
             # 审查 2026-10-09 P0-3：「S-W 不可计算」不得被表述为「非正态」——
@@ -299,7 +331,7 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
                 normality = "无法判定 (S-W 不可计算)"
                 recommendation = "—（正态性无法判定：请检查非有限值或数据量级）"
             else:
-                normality = f"非正态 (S-W p={sw_p:.4f})"
+                normality = f"非正态 (S-W p={sw_p:.4f} ≤ α={alpha})"
                 if skew > 1.5:
                     recommendation = (
                         "Box-Cox (右偏严重)" if (d > 0).all() else "Yeo-Johnson (右偏严重)"
@@ -313,13 +345,17 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
                 else:
                     recommendation = "Box-Cox / Yeo-Johnson"
 
-        if ad_stat is not None:
-            if ad_p is not None:
-                ad_info = f"A-D stat={ad_stat:.3f}, p={ad_p:.4f}"
-            else:
-                ad_info = f"A-D stat={ad_stat:.3f} (p 需查表)"
-        else:
+        # A-D 展示：表外值一律写成**开区间**，不得把钳制端点当"真 p"（P1-9）
+        if ad_stat is None:
             ad_info = "N/A"
+        elif ad_p is None:
+            ad_info = f"A-D stat={ad_stat:.3f} (p 需查表)"
+        elif ad_p <= _AD_LO:
+            ad_info = f"A-D stat={ad_stat:.3f}, p≤{_AD_LO:g}（超出 scipy 临界值表范围）"
+        elif ad_p >= _AD_HI:
+            ad_info = f"A-D stat={ad_stat:.3f}, p≥{_AD_HI:g}（超出 scipy 临界值表范围）"
+        else:
+            ad_info = f"A-D stat={ad_stat:.3f}, p={ad_p:.4f}（参考值，不参与判决）"
         results.append(
             {
                 "列名": col,
@@ -335,13 +371,13 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
 
     results_df = pd.DataFrame(results)
 
-    # Q-Q 子图矩阵
+    # Q-Q 子图矩阵（用**清洗后**的列数据：±Inf 会让 probplot 产生无效点）
     n_cols_plot = min(len(cols), 6)
     n_rows = (n_cols_plot + 2) // 3
     fig = Figure(figsize=(4 * min(3, n_cols_plot), 3.5 * n_rows))
     for i, col in enumerate(cols[:n_cols_plot]):
         ax = fig.add_subplot(n_rows, min(3, n_cols_plot), i + 1)
-        d = req.data[col].dropna()
+        d = _clean[col]
         sp_stats.probplot(d, dist="norm", plot=ax)
         # probplot 默认英文轴标签，统一改为中文
         ax.set_xlabel("理论分位数", fontsize=9)
@@ -349,12 +385,16 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         ax.set_title(col, fontsize=9)
     fig.tight_layout()
 
-    # 汇总
+    # 汇总（判决口径必须在用户可见处标注 —— 契约边界清单 #18）
     normal_count = sum(1 for r in results if str(r.get("正态性", "")).startswith("正态"))
-    summary = f"正态性评估: {normal_count}/{len(cols)} 列满足正态性。" + (
-        f" 偏度最大列: {results_df.dropna(subset=['偏度']).sort_values('偏度', key=lambda x: x.str.replace('-', '').astype(float)).iloc[-1]['列名']}"
-        if len(results_df.dropna(subset=["偏度"])) > 0
-        else ""
+    summary = (
+        f"正态性评估: {normal_count}/{len(cols)} 列满足正态性（判据: Shapiro-Wilk p>α；"
+        f"Anderson-Darling 仅作参考，不参与判决）。"
+        + (
+            f" 偏度最大列: {results_df.dropna(subset=['偏度']).sort_values('偏度', key=lambda x: x.str.replace('-', '').astype(float)).iloc[-1]['列名']}"
+            if len(results_df.dropna(subset=["偏度"])) > 0
+            else ""
+        )
     )
 
     return AnalysisResult(
@@ -362,9 +402,12 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         tables={"normality_results": results_df},
         figures=[fig],
         summary=summary,
+        messages=_boundary.messages(),
         metadata={
             "n_columns": len(cols),
             "normal_count": normal_count,
             "recommendations": {r["列名"]: r["建议变换"] for r in results},
+            "verdict_rule": "shapiro-wilk",
+            "boundary_codes": _boundary.codes(),
         },
     )

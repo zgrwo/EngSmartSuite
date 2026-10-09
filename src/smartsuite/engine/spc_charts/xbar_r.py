@@ -53,6 +53,16 @@ def xbar_r_chart(req: AnalysisRequest) -> AnalysisResult:
 
     # ── 1. 提取 X 列（横坐标）──
     x_col = req.feature_cols[0] if req.feature_cols else None
+    # 审查 2026-10-09 P2-4：不存在的 X 列此前被**静默忽略**，退化为
+    # 「按行号顺序的 I 图」（`chart_type='i_chart'`、`subgroup_size=1`）——
+    # 用户以为按自己的子组列出图，实际口径完全不同。与 group_col 同一处理：B0 拒绝。
+    for _fc in req.feature_cols or []:
+        if _fc and _fc not in data.columns:
+            return AnalysisResult(
+                task="spc_xbar",
+                status="error",
+                messages=[f"X 列「{_fc}」不存在于数据中。可用列: {list(data.columns)[:10]}"],
+            )
     if x_col and x_col in data.columns:
         x_vals = data[x_col]
     else:
