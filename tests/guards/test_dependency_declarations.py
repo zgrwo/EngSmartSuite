@@ -103,19 +103,35 @@ class TestEveryDirectDependencyIsDeclared:
         declared = _declared_distributions()
         dist_map = packages_distributions()
         offenders: list[str] = []
-        checked = 0
+        checked_modules: set[str] = set()
         for module, files in sorted(_imported_top_level_modules().items()):
             dists = dist_map.get(module) or []
             dist = _IMPORT_TO_DIST.get(module) or (dists[0] if dists else None)
             if dist is None:
                 # 未安装/无法映射：不妄判（CI 的 dev 环境装了全部依赖）
                 continue
-            checked += 1
+            checked_modules.add(module)
             if dist.lower() in declared or dist in ALLOWED_UNDECLARED:
                 continue
             where = ", ".join(str(p.relative_to(ROOT)) for p in sorted(files))
             offenders.append(f"{module}（发行包 {dist}）← {where}")
-        assert checked >= 8, f"只检查到 {checked} 个第三方依赖 —— 扫描器可能失效（用例会变恒真）"
+        # ── 反空转判据（2026-10-10 改为实测标定，原为写死的 `checked >= 8`）──
+        #
+        # 原判据的问题：数字是拍出来的（本机 3.12 实测 **15**），而 `full` 矩阵的 **3.10 腿**
+        # 解析出 pandas 2.x / numpy 2.2 分叉、装的 extras 更少（无 pptx/reportlab/openpyxl 等
+        # office 依赖）⇒ 实测只有 **6** 个模块能映射到发行包，于是三条 3.10 腿
+        # （ubuntu/macos/windows）**全部假红**。而"6"并不代表扫描器失效 ——
+        # 它正是那个环境里真实的第三方导入面。
+        #
+        # 本判据要防的是"扫描器悄悄退化成什么都查不到、用例恒真"，故下限取 **5**：
+        # 最瘦的环境实测 6，仍有 1 的余量；一旦扫描器整体崩掉（返回 0–2 个）即 FAIL。
+        # 曾经试过更"聪明"的写法 —— 要求 `_IMPORT_TO_DIST` 里已安装的模块都被检查到 ——
+        # 但那张表是**映射兜底表**，不代表源码会 import 它（`pytest` 就是装了但 src 不导入），
+        # 该写法在本机即假红，已弃用。
+        assert len(checked_modules) >= 5, (
+            f"只检查到 {len(checked_modules)} 个第三方依赖 —— 扫描器可能整体失效（用例会变恒真）："
+            f"{sorted(checked_modules)}"
+        )
         assert not offenders, (
             "以下包被直接 import 但未在 pyproject.toml 声明"
             "（传递依赖不是承诺，上游一变就会在用户机器上 ImportError）：\n  "
