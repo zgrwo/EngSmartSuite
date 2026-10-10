@@ -521,6 +521,7 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
             messages=["有效样本不足"] + _boundary.messages(),
         )
 
+    from sklearn.exceptions import ConvergenceWarning
     from sklearn.linear_model import ElasticNetCV, LassoCV
     from sklearn.preprocessing import StandardScaler
 
@@ -563,33 +564,44 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
     l1_ratio = PARAM_SPECS["lasso_regression"].validate_or_raise(req.params).l1_ratio
 
     _lasso_max_iter = 5000
-    if alpha is not None:
-        if l1_ratio < 1.0:
-            # 用户既指定了 alpha 又指定了 l1_ratio → 使用 ElasticNet
-            from sklearn.linear_model import ElasticNet
+    # 审查 2026-10-10（远端 CI 的 py3.10 分叉实测）：sklearn 估计器在迭代上限内未收敛时
+    # 会发 `ConvergenceWarning` —— 它是**告警**（结果仍可用，只是 α 路径未完全收敛），
+    # 但在 `-W error` 口径下会变成异常逃出引擎，被 orchestrator 兜底成「未归类的异常」，
+    # **把"未完全收敛"错误归因成"引擎缺陷/数据异常"**。按契约这是 **B3 近似**：
+    # 应当"计算 + 标注口径"，既不静默也不当成失败。故就地捕获并**披露** ——
+    # 这同时消除了"Windows 有中文字体/Linux 没有""sklearn 版本不同"这类环境耦合的假失败。
+    _convergence_notes: list[str] = []
+    with warnings.catch_warnings(record=True) as _caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        if alpha is not None:
+            if l1_ratio < 1.0:
+                # 用户既指定了 alpha 又指定了 l1_ratio → 使用 ElasticNet
+                from sklearn.linear_model import ElasticNet
 
-            model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, max_iter=_lasso_max_iter).fit(
-                X_scaled, y
-            )
+                model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, max_iter=_lasso_max_iter).fit(
+                    X_scaled, y
+                )
+            else:
+                from sklearn.linear_model import Lasso
+
+                model = Lasso(alpha=alpha, max_iter=_lasso_max_iter).fit(X_scaled, y)
+            best_alpha = alpha
+            train_r2 = None
+        elif l1_ratio < 1.0:
+            # cv 下限 2：len(sub)//3 可能为 1 → sklearn InvalidParameterError（审查 2026-08-19 #1.4）
+            _cv = max(2, min(5, len(sub) // 3))
+            model = ElasticNetCV(
+                l1_ratio=[l1_ratio], cv=_cv, max_iter=_lasso_max_iter, random_state=42
+            ).fit(X_scaled, y)
+            best_alpha = float(model.alpha_)
+            train_r2 = float(model.score(X_scaled, y))
         else:
-            from sklearn.linear_model import Lasso
+            _cv = max(2, min(5, len(sub) // 3))
+            model = LassoCV(cv=_cv, max_iter=_lasso_max_iter, random_state=42).fit(X_scaled, y)
+            best_alpha = float(model.alpha_)
+            train_r2 = float(model.score(X_scaled, y))
 
-            model = Lasso(alpha=alpha, max_iter=_lasso_max_iter).fit(X_scaled, y)
-        best_alpha = alpha
-        train_r2 = None
-    elif l1_ratio < 1.0:
-        # cv 下限 2：len(sub)//3 可能为 1 → sklearn InvalidParameterError（审查 2026-08-19 #1.4）
-        _cv = max(2, min(5, len(sub) // 3))
-        model = ElasticNetCV(
-            l1_ratio=[l1_ratio], cv=_cv, max_iter=_lasso_max_iter, random_state=42
-        ).fit(X_scaled, y)
-        best_alpha = float(model.alpha_)
-        train_r2 = float(model.score(X_scaled, y))
-    else:
-        _cv = max(2, min(5, len(sub) // 3))
-        model = LassoCV(cv=_cv, max_iter=_lasso_max_iter, random_state=42).fit(X_scaled, y)
-        best_alpha = float(model.alpha_)
-        train_r2 = float(model.score(X_scaled, y))
+    _n_unconverged = sum(1 for w in _caught if issubclass(w.category, ConvergenceWarning))
 
     # 系数
     coefs = model.coef_
@@ -610,6 +622,16 @@ def lasso_regression(req: AnalysisRequest) -> AnalysisResult:
             convergence_warning = (
                 "⚠ Lasso 模型在最大迭代次数内未收敛，系数可能不准确，建议增大 max_iter 或调整 alpha"
             )
+    # 补充通道（审查 2026-10-10）：sklearn 可能**发告警但 `n_iter_` 未达上限**
+    # （例如弹性网的子问题各自收敛计数不同）。上面的 `n_iter_` 判据会漏掉这种情形，
+    # 而告警本身已由上面的 `catch_warnings(record=True)` 捕获 —— 用它兜底，
+    # 保证「未完全收敛」这件事**只有一条披露通道、但检测不留死角**（避免双报）。
+    if not convergence_warning and _n_unconverged:
+        convergence_warning = (
+            f"⚠ 正则化路径未完全收敛（sklearn 报告 {_n_unconverged} 次 ConvergenceWarning），"
+            "系数与最优 α 为**近似解**（B3 近似，非失败）；如需更精确可先缩小特征量级差异"
+            "或提高迭代上限"
+        )
 
     coef_df = pd.DataFrame(
         {

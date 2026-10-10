@@ -304,6 +304,15 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
         # 同时**判决口径只述 Shapiro-Wilk**（原 `sw_normal or ad_normal` 会让
         # 被钳制的 A-D 结果影响结论，两处判据不一致 —— 契约边界清单 #18）。
         _AD_LO, _AD_HI = 0.01, 0.15
+        # `ad_p_bound`：**旧版 scipy 的开区间边界**（"lo"=p≤_AD_LO / "hi"=p≥_AD_HI）。
+        # 审查 2026-10-10（远端 CI 的 py3.10 分叉）：scipy < 1.16 的 `anderson` 没有
+        # `pvalue` 字段，原实现直接令 `ad_p = None` 并渲染「（p 需查表）」—— 于是
+        # **P1-9 的"表外必须写成开区间、不得把钳制端点当真 p"在旧 scipy 上失效**，
+        # 同一份数据在新旧 scipy 上给出两套口径（实测 3.10 分叉上 stat=14.948 渲染成
+        # 「p 需查表」，而 3.12 渲染成「p≤0.01」）。
+        # 注释原本就说"用 5% 临界值近似判定"，但那条近似**没有真的实现** —— 现补齐：
+        # 只推**超出表范围**的两端（表内仍标"需查表"，绝不伪造精确 p）。
+        ad_p_bound: str | None = None
         try:
             try:
                 ad_result = sp_stats.anderson(d, dist="norm", method="interpolate")
@@ -314,8 +323,26 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
             if hasattr(ad_result, "pvalue") and ad_result.pvalue is not None:
                 ad_p = float(ad_result.pvalue)
             else:
-                # 旧版 scipy 无 pvalue，用 5% 临界值近似判定
+                # 旧版 scipy 无 pvalue：用**临界值表**推两端开区间（跨版本口径一致）
                 ad_p = None
+                try:
+                    # ⚠️ **不要按 `significance_level` 排序后取首末**：它是**百分数**
+                    # （15/10/5/2.5/1），而临界值随显著性升高而**递减**，排序后首元素对应
+                    # 最严（最小）临界值、末元素对应最宽（最大）临界值 —— 取反会把
+                    # 表内值误判成"表外"（实测 stat=0.917 被误渲染成 `p≤0.01`，
+                    # 而正确结论是"表内、旧 scipy 无法插值"）。直接用 min/max 最稳。
+                    _crit = [float(c) for c in ad_result.critical_values]
+                    _stat_v = float(ad_result.statistic)
+                    if _stat_v >= max(_crit):
+                        # 比最严临界值还大 ⇒ p 比表中最小显著性水平更小
+                        ad_p_bound = "lo"
+                    elif _stat_v <= min(_crit):
+                        # 比最宽临界值还小 ⇒ p 比表中最大显著性水平更大
+                        ad_p_bound = "hi"
+                    # 表内：旧 scipy 无插值能力，`ad_p_bound` 保持 None ⇒ 渲染"需查表"
+                    # （**不伪造精确 p**，这是 P1-9 的底线）
+                except Exception:  # pragma: no cover - 表结构异常时退化为"需查表"
+                    ad_p_bound = None
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)
             ad_stat, ad_p = None, None
@@ -355,16 +382,27 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
                     recommendation = "Box-Cox / Yeo-Johnson"
 
         # A-D 展示：表外值一律写成**开区间**，不得把钳制端点当"真 p"（P1-9）
+        # 两端判定优先用精确 p（新版 scipy），其次用临界值表推出的边界（旧版 scipy），
+        # 表内一律标"需查表" —— 绝不为了「看起来完整」而伪造一个精确 p。
         if ad_stat is None:
             ad_info = "N/A"
-        elif ad_p is None:
-            ad_info = f"A-D stat={ad_stat:.3f} (p 需查表)"
-        elif ad_p <= _AD_LO:
-            ad_info = f"A-D stat={ad_stat:.3f}, p≤{_AD_LO:g}（超出 scipy 临界值表范围）"
-        elif ad_p >= _AD_HI:
-            ad_info = f"A-D stat={ad_stat:.3f}, p≥{_AD_HI:g}（超出 scipy 临界值表范围）"
         else:
-            ad_info = f"A-D stat={ad_stat:.3f}, p={ad_p:.4f}（参考值，不参与判决）"
+            _bound = ad_p_bound
+            if ad_p is not None:
+                if ad_p <= _AD_LO:
+                    _bound = "lo"
+                elif ad_p >= _AD_HI:
+                    _bound = "hi"
+                else:
+                    _bound = None
+            if _bound == "lo":
+                ad_info = f"A-D stat={ad_stat:.3f}, p≤{_AD_LO:g}（超出 scipy 临界值表范围）"
+            elif _bound == "hi":
+                ad_info = f"A-D stat={ad_stat:.3f}, p≥{_AD_HI:g}（超出 scipy 临界值表范围）"
+            elif ad_p is not None:
+                ad_info = f"A-D stat={ad_stat:.3f}, p={ad_p:.4f}（参考值，不参与判决）"
+            else:
+                ad_info = f"A-D stat={ad_stat:.3f} (p 需查表)"
         results.append(
             {
                 "列名": col,

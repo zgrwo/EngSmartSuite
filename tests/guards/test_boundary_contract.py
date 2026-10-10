@@ -241,9 +241,25 @@ def _run_with_warning_policy(req_kwargs: dict, policy: str):
     任何"更泛化的错误"都能满足它。本文件因此改为**正向断言**，
     并显式声明生产口径（与 `tests/guards/test_micro_scale_guards.py:252`、
     `tests/engine/test_edge_cases.py:850` 的既有做法一致）。
+
+    ⚠️⚠️ **`policy="error"` 必须复刻 `pyproject.toml` 的完整过滤器，而不是裸
+    `simplefilter("error")`**（2026-10-10 远端 CI 实测踩到）：
+    `simplefilter()` 会**清空**既有规则，包括 `pyproject.toml` 里那条
+    `ignore:Glyph .* missing from font:UserWarning`。于是：
+      - Windows 本机装了中文字体 → matplotlib 不告警 → 用例通过；
+      - Linux runner **没有中文字体** → 每条画图路径都告警 → 被升为异常 →
+        引擎报「未归类的异常」→ 本用例 FAIL（**这是环境差异，不是引擎缺陷**）。
+    依赖系统字体的断言是**环境耦合的假失败**，故此处显式复刻 pyproject 的忽略规则，
+    让"pytest 口径"与真实 pytest 运行一致。
     """
     with warnings.catch_warnings():
         warnings.simplefilter(policy)
+        if policy == "error":
+            # 与 pyproject.toml 的 filterwarnings 保持一致（顺序敏感：忽略项要后加）
+            warnings.filterwarnings(
+                "ignore", message=r"Glyph .* missing from font", category=UserWarning
+            )
+            warnings.filterwarnings("ignore", message=r"Tight layout not applied")
         return orchestrate(AnalysisRequest(data=_inf_frame(), **req_kwargs))
 
 
