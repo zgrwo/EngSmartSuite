@@ -341,7 +341,10 @@ def normality_check(req: AnalysisRequest) -> AnalysisResult:
                         ad_p_bound = "hi"
                     # 表内：旧 scipy 无插值能力，`ad_p_bound` 保持 None ⇒ 渲染"需查表"
                     # （**不伪造精确 p**，这是 P1-9 的底线）
-                except Exception:  # pragma: no cover - 表结构异常时退化为"需查表"
+                except Exception:
+                    # 表结构异常（旧/新版 scipy 字段名不同）→ 退化为"需查表"。
+                    # 必须记日志：项目红线要求 catch 块有日志/重抛/返回错误值。
+                    logger.debug("A-D 临界值表结构异常，退化为「需查表」", exc_info=True)
                     ad_p_bound = None
         except Exception:
             logger.debug("Anderson-Darling 检验失败", exc_info=True)

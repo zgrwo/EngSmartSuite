@@ -165,6 +165,7 @@ EngSmartSuite/
 │   │   ├── test_engine_input_guards.py # 引擎输入防护（审查修复钉死）
 │   │   ├── test_boundary_guard.py  #   边界处理原语单测（_guard.py 的 B0–B3 行为）
 │   │   ├── test_param_overflow_guard.py # 参数解析的溢出/静默兜底（P1-3/P1-8 回归防线）
+│   │   ├── test_cross_env_robustness.py # 跨环境健壮性（旧 scipy 的 A-D 开区间 / sklearn 未收敛告警）
 │   │   ├── test_capability_ci_coverage.py # 能力指数 CI 的覆盖率检验（MR-σ 有效自由度）
 │   │   ├── test_survival_event_semantics.py # 生存分析事件列语义（文本编码不猜）
 │   │   ├── test_survival_multigroup_logrank.py # 多组（>2）log-rank 未做的 B2 披露（契约 #20）
