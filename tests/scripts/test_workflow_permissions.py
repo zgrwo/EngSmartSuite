@@ -77,17 +77,55 @@ class TestDocsWorkflowPermissions:
 
 
 class TestCiConcurrencyByEvent:
-    """`ci.yml` 的取消策略必须按事件区分（G-14）。"""
+    """`ci.yml` 的取消策略必须**让 main 的 run 无法互相取消**（G-14 + 2026-10-10 复修）。
 
-    def test_cancel_in_progress_is_not_a_bare_true(self):
-        conc = _load("ci.yml").get("concurrency") or {}
-        value = conc.get("cancel-in-progress")
-        assert value is not True, (
-            "ci.yml 的 cancel-in-progress 不得是无条件 true —— "
-            "main push 上取消会丢弃正在跑的 full 全矩阵且不会重跑"
+    ## 这条门禁被实测证伪过一次，值得留档
+
+    首版（G-14）的判据是「`cancel-in-progress` 不得是裸 `true`，应按事件表达式取值」，
+    实现写成 `${{ github.event_name == 'pull_request' }}`。**它没起作用**：
+    远端实测 main 上两次推送**互相取消**（前一个 run 在后一个创建 2 分钟后被取消，
+    随后新 run 也被取消，两次的 `full` 全矩阵都没跑）。
+
+    原因是 GitHub Actions 把该表达式渲染成**字符串 `"false"`**，
+    而 `cancel-in-progress` 对**非空字符串强制为真** —— 那行实际等价于 `cancel-in-progress: true`。
+    也就是说：**旧判据检查的是"字段长什么样"，而字段长什么样并不能决定行为。**
+
+    故判据改为检查**真正决定行为的东西**：非 PR 事件的 concurrency **group 名必须每次唯一**
+    （含 `github.run_id`）。组名唯一 ⇒ 任何 run 都进不了别人的组 ⇒ 取消逻辑无从生效，
+    这与 `cancel-in-progress` 的取值无关（也就绕开了那个类型转换陷阱）。
+    """
+
+    @staticmethod
+    def _group() -> str:
+        return str((_load("ci.yml").get("concurrency") or {}).get("group") or "")
+
+    def test_main_push_group_is_unique_per_run(self):
+        """**核心不变式**：非 PR 的 run 必须各自成组（含 `github.run_id`）。"""
+        group = self._group()
+        assert "github.run_id" in group, (
+            "ci.yml 的 concurrency group 必须含 `github.run_id`（非 PR 事件下每次推送唯一）—— "
+            "否则连续两次 main 推送会互相取消，正在跑的 full 全矩阵丢失且不会重跑。"
+            f"实际 group={group!r}"
         )
-        assert "${{" in str(value), f"应按事件表达式取值，实际 {value!r}"
-        assert "pull_request" in str(value), f"表达式应只在 PR 上取消，实际 {value!r}"
+
+    def test_pr_runs_still_share_a_group_for_dedup(self):
+        """PR 仍要能互相取消（省资源）：同一 PR 的多次推送必须落进同一组。"""
+        group = self._group()
+        assert "pull_request" in group, f"group 应按事件区分 PR 与 push，实际 {group!r}"
+        assert "'pr'" in group or '"pr"' in group, (
+            f"PR 分支应落进稳定的组名（不随 run 变化），实际 {group!r}"
+        )
+
+    def test_cancel_flag_is_explicit_boolean(self):
+        """`cancel-in-progress` 必须是**字面布尔**（不依赖表达式渲染）。
+
+        这是上一条避坑的配套：既然表达式会被渲染成字符串并被强制转换，
+        就把"取不取消"完全交给组名决定，字段本身写死布尔值。
+        """
+        value = (_load("ci.yml").get("concurrency") or {}).get("cancel-in-progress")
+        assert isinstance(value, bool), (
+            f"cancel-in-progress 应为字面布尔（避免字符串强制转换陷阱），实际 {value!r}"
+        )
 
     def test_release_workflow_never_cancels(self):
         """对照项：发版链的"不可中断"不得被顺手改掉（保持项）。"""

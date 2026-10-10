@@ -65,9 +65,24 @@ on:
 # 连续两次 push、或第二次只改文档时，第一次的代码矩阵结果被取消且**不会被重跑**
 # ⇒ 发版时可能"拿不到 main 的完整矩阵结论"。对照 release.yml 的
 # `cancel-in-progress: false`（发版不可中断）。故仅 PR 取消。
+#
+# ⚠️ 审查 2026-10-10（远端实测，两次运行互相取消后定位）：
+# 原写法 `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`
+# **没有达到"仅 PR 取消"的意图** —— 实测 main 上两次推送互相取消
+# （`5297465` 的 run 在该 commit 之后 2 分钟被取消，随后新 run 也被取消；
+# 两次的 `full` 矩阵都没跑）。原因是该表达式被渲染成**字符串 `"false"`**，
+# 而本字段把**非空字符串强制为真**（GitHub Actions 已知的布尔强制转换陷阱）——
+# 也就是说这行实际上等价于 `cancel-in-progress: true`。
+#
+# 修法：**不再依赖该字段的类型转换**，把"PR / main"的区分编码进 **group 名**：
+#   · PR   —— 同一 PR 的多次推送落进同一组 ⇒ `true` 生效、旧 run 被取消（符合意图）；
+#   · main —— 每次推送带 `run_id` ⇒ 组名唯一 ⇒ 任何 run 都无法取消另一个 run。
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: >-
+    ${{ github.workflow }}-${{ github.ref }}-${{
+      github.event_name == 'pull_request' && 'pr' || github.run_id
+    }}
+  cancel-in-progress: true
 
 # 最小权限：本工作流只读仓库内容（Security hardening 最佳实践）
 permissions:
