@@ -40,8 +40,22 @@ def shapiro_p(data) -> float:
     """
     if float(np.max(data)) == float(np.min(data)):
         return 1.0
-    # 退化输入（含 ±Inf/NaN、n<3、量级溢出）会让 scipy 内部发
-    # `invalid value encountered` / `overflow encountered` RuntimeWarning 并返回 NaN。
+    # 审查 2026-10-10（远端 CI 实测）：原先**依赖 scipy 自己传播 NaN** —— 而
+    # `scipy.stats.shapiro` 对"含 ±Inf"与"量级溢出"两类输入的返回**随构建而变**：
+    # Windows/scipy 1.18 返回 NaN（守卫通过），**Linux/该腿的 scipy 返回有限值**
+    # （实测 1e155 下返回 `3.78e-14`、含 `inf` 时返回有限 p）→ 同一份代码在两条 CI 腿上
+    # 结论不同，守卫在 Linux 上失败。**"不可判定"必须由我们确定性判定，不能外包给第三方库**。
+    _arr = np.asarray(data, dtype=float)
+    if not np.all(np.isfinite(_arr)):
+        # 含 NaN/±Inf：样本不是有效观测，S-W 统计量无从谈起
+        return float("nan")
+    _max_abs = float(np.max(np.abs(_arr))) if _arr.size else 0.0
+    if np.isfinite(_max_abs) and _max_abs > 0 and np.log10(_max_abs) > 154:
+        # Σy² 在 float64 下必然溢出（1e154² = 1e308 ≈ 上界）⇒ 统计量不可计算。
+        # 该判据只依赖浮点表示范围，**与环境无关**（见 boundary-contract #21 同源理由）。
+        return float("nan")
+    # 退化输入（n<3 等）会让 scipy 内部发 `invalid value encountered` /
+    # `overflow encountered` RuntimeWarning 并返回 NaN。
     # 该告警在此**是预期路径**，故就地窄静默 —— 关键收益是**行为一致**：
     # `pyproject.toml` 的 `filterwarnings = ["error"]` 只作用于 pytest，若不静默，
     # 同一输入在 pytest 下会变成异常、在生产下才走 NaN 分支，于是"不得伪造正态"的
