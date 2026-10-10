@@ -92,7 +92,13 @@ jobs:
   # ── 快速检查：lint + 导入 + 核心测试（每次 push 触发）──
   quick:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 审查 2026-10-10：原为 10 分钟 —— 实测**撞上超时**（"exceeded the maximum execution
+    # time of 10m0s"，10m17s 被杀，被杀瞬间正在跑 `tests/scripts/`）。被杀的不是失败步骤：
+    # 此前每一步全绿（services 613 / core 101 / guards 447 / security 25 / crossval 15 / golden 73）。
+    # 原因是**测试总量增长**（3031 → 3618，+19%）把这份"分层跑全部快速测试"的作业推过了上限。
+    # 提到 20 分钟给增长留余量 —— 超时被杀的代价是整个下游（e2e/full/quality 全部
+    # `needs: quick`）拿不到任何结论，比多占几分钟 runner 昂贵得多。
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -327,7 +333,7 @@ jobs:
     needs: quick
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -373,7 +379,7 @@ jobs:
     # 测试总量增长（3031 → 3610+，+19%）把这份"全量 + 覆盖率"的作业推过了 10 分钟；
     # 同一份覆盖率作业在 quality.yml 里实测 12m0s / 12m15s（该 job 未设超时故未暴露）。
     # 故提到 15 分钟（与 `full` 一致），给增长留出余量而不是"贴着上限跑"。
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
