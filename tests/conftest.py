@@ -54,11 +54,23 @@ _os.environ["PYTHONUTF8"] = "1"
 #
 # 本仓库有 **38 处** `text=True` 的子进程调用点（10 个测试文件），逐个补
 # `encoding="utf-8"` 既啰嗦又容易漏（且已有部分调用点写了对的、重复传参会 SyntaxError）。
-# 改为在会话级把 `getpreferredencoding` 固定为 UTF-8 —— 一处生效、与 `PYTHONUTF8=1`
+# 改为在会话级把默认编码固定为 UTF-8 —— 一处生效、与 `PYTHONUTF8=1`
 # 在真实进程启动时的效果一致，语义上就是"这个测试会话按 UTF-8 处理文本"。
+#
+# ⚠️ **关于 `getencoding` 的实测更正（2026-10-10）**：一度想用"补 `locale.getencoding`"
+# 覆盖 `Path.write_text()` 的默认编码 —— **探针证明这条无效**：`io.TextIOWrapper` 的默认
+# 编码取自 **C 层**，monkeypatch Python 层的 `locale.getencoding` 影响不到它
+# （实测把 `getencoding` 改成 `cp1252` 后 `write_text("// 已接线")` **照样成功**）。
+# 故"测试自己读写临时文本文件"这条路径**只能显式传 `encoding="utf-8"`** ——
+# 本仓库 12 处已逐一手工补齐（其中 6 处在 `test_ci_layer_coverage.py`，
+# 远端报的 `position 3-6` 正对应 `write_text("// 已接线\n")` 的第 3–6 位）。
+# 保留本补丁是因为它对**纯 Python 层**调用 `locale.getencoding()` 的代码仍有效，
+# 但**不得**把它当成 write_text/read_text 的保险。
 import locale as _locale
 
 _locale.getpreferredencoding = lambda do_setlocale=True: "utf-8"  # noqa: ARG005
+if hasattr(_locale, "getencoding"):  # Python 3.11+
+    _locale.getencoding = lambda: "utf-8"  # noqa: ARG005
 
 import numpy as np
 import pandas as pd

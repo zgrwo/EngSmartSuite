@@ -470,8 +470,13 @@ class TestGateScriptsAreWired:
         """**负向注入**：新增孤儿门禁（无任何调用方）必须被点名。"""
         scripts = tmp_path / "scripts"
         scripts.mkdir()
-        (scripts / "check_wired.mjs").write_text("// 已接线\n")
-        (scripts / "zz_orphan_gate.py").write_text("print('orphan')\nraise SystemExit(1)\n")
+        # ⚠️ 必须显式 `encoding="utf-8"`：默认编码在 en-US 的 Windows runner 上是 cp1252，
+        # 写含中文的字面量会 `UnicodeEncodeError`（远端实测 position 3-6 就是「已接线」）。
+        # 且**不能靠会话级 locale 补丁兜住** —— `TextIOWrapper` 的默认编码取自 C 层。
+        (scripts / "check_wired.mjs").write_text("// 已接线\n", encoding="utf-8")
+        (scripts / "zz_orphan_gate.py").write_text(
+            "print('orphan')\nraise SystemExit(1)\n", encoding="utf-8"
+        )
         missing = unwired_gate_scripts(
             scripts, {"check_wired.mjs"}, {}, tests_scripts_dir=tmp_path / "none"
         )
@@ -486,7 +491,7 @@ class TestGateScriptsAreWired:
         """
         scripts = tmp_path / "scripts"
         scripts.mkdir()
-        (scripts / "verify_r2g_ghost.py").write_text("raise SystemExit(1)\n")
+        (scripts / "verify_r2g_ghost.py").write_text("raise SystemExit(1)\n", encoding="utf-8")
         tests = tmp_path / "tst"
         tests.mkdir()
         (tests / "test_ghost_wired.py").write_text(
@@ -506,7 +511,7 @@ class TestGateScriptsAreWired:
         """**反面守卫**：真正被 subprocess 执行的路径字面量必须算接线。"""
         scripts = tmp_path / "scripts"
         scripts.mkdir()
-        (scripts / "verify_r2g_real.py").write_text("print('ok')\n")
+        (scripts / "verify_r2g_real.py").write_text("print('ok')\n", encoding="utf-8")
         tests = tmp_path / "tst"
         tests.mkdir()
         (tests / "test_real_wired.py").write_text(
@@ -525,7 +530,7 @@ class TestGateScriptsAreWired:
         """**反面守卫**：具名冻结的门禁脚本不得被判为孤儿（否则冻结表形同虚设）。"""
         scripts = tmp_path / "scripts"
         scripts.mkdir()
-        (scripts / "helper.mjs").write_text("// 共用助手\n")
+        (scripts / "helper.mjs").write_text("// 共用助手\n", encoding="utf-8")
         missing = unwired_gate_scripts(
             scripts,
             set(),
@@ -638,7 +643,7 @@ class TestScriptInventoryIsExplicit:
         """**负向注入（G-6b 原形）**：命名落在模式外的新脚本必须被点名。"""
         scripts = tmp_path / "scripts"
         scripts.mkdir()
-        (scripts / "r2g_silent_orphan.py").write_text("raise SystemExit(1)\n")
+        (scripts / "r2g_silent_orphan.py").write_text("raise SystemExit(1)\n", encoding="utf-8")
         missing = unclassified_scripts(scripts, {})
         assert missing == ["r2g_silent_orphan.py"], f"模式外脚本未被点名: {missing}"
 
