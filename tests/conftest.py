@@ -19,6 +19,47 @@ for _var in (
 ):
     _os.environ.setdefault(_var, "1")
 
+# 子进程 **stdio 编码**统一为 UTF-8（2026-10-10，远端 Windows 矩阵实测根因）。
+#
+# 症状：`full (windows-latest, 3.13)` 上 `test_ci_layer_coverage` / `test_gate_floor_pinning`
+# / `test_verify_cross_consistency` 等以 subprocess 起新解释器的用例成片失败，报
+#   `UnicodeEncodeError: 'charmap' codec can't encode characters ... character maps to <undefined>`
+# （`test_gate_floor_pinning` 的表现更隐蔽：子进程崩了 → 捕获到的输出是**空串** →
+#   `assert 'FAIL' in ''` 失败，看起来像"门禁没拦住"，其实是子进程根本没跑成）。
+#
+# 根因：GitHub 的 Windows runner 是 **en-US（cp1252）** 本地化，Python 子进程默认用
+# `locale.getpreferredencoding()` 打开 stdout，**写中文即抛异常**；而中文文案在本项目里
+# 无处不在（错误消息、门禁输出、图表标签）。本机之所以"能过"，是因为开发机的 ANSI 代码页
+# 是 cp936（能编码中文）—— **又一次"只在本机能过"**。
+#
+# 修法：在**会话级**给所有子进程固定 UTF-8。子进程继承本进程的环境变量，故一处设置即可
+# 覆盖全部（无需逐个 `subprocess.run` 改参数）。
+# 补 `PYTHONUTF8=1`（Python UTF-8 模式）：即使某处没走 stdio、而是直接以默认编码读写文本
+# 文件，也保持 UTF-8 一致，避免同类问题换一种形式复现。
+#
+# ⚠️ 这里用**直接赋值**而不是 `setdefault`：本文件上方对 BLAS 线程数用 `setdefault`
+# 是"尊重用户显式设置"，但 stdio 编码不同 —— 环境里存在的 `cp1252` 之类的值**正是缺陷
+# 本身**，继承它就会重现"本机能过、runner 崩"的分裂。测试会话要求 UTF-8 stdio 是硬前提。
+# 这样也让验证可复现：`$env:PYTHONIOENCODING="cp1252"` 后跑 pytest 仍须全绿
+# （实测该命令在修复前能逐字复现 3.13 腿的 `3 failed + 14 errors`，是可信的本地代理环境）。
+_os.environ["PYTHONIOENCODING"] = "utf-8"
+_os.environ["PYTHONUTF8"] = "1"
+
+# 父进程**读取**子进程输出时的编码也要固定（同上根因的另一半）。
+#
+# `subprocess.run(..., text=True)` 在未显式传 `encoding=` 时用
+# `locale.getpreferredencoding(False)` —— 在 en-US 的 Windows runner 上是 **cp1252**，
+# 而子进程（已被上面固定为 UTF-8）写出的中文按 cp1252 解出来是**乱码**：
+# 纯 ASCII 断言（`"FAIL" in out`）还能过，任何中文断言（`"未声明" in out`）都会假红。
+#
+# 本仓库有 **38 处** `text=True` 的子进程调用点（10 个测试文件），逐个补
+# `encoding="utf-8"` 既啰嗦又容易漏（且已有部分调用点写了对的、重复传参会 SyntaxError）。
+# 改为在会话级把 `getpreferredencoding` 固定为 UTF-8 —— 一处生效、与 `PYTHONUTF8=1`
+# 在真实进程启动时的效果一致，语义上就是"这个测试会话按 UTF-8 处理文本"。
+import locale as _locale
+
+_locale.getpreferredencoding = lambda do_setlocale=True: "utf-8"  # noqa: ARG005
+
 import numpy as np
 import pandas as pd
 import pytest

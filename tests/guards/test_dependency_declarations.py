@@ -26,11 +26,19 @@ from __future__ import annotations
 
 import ast
 import sys
-import tomllib
 from importlib.metadata import packages_distributions
 from pathlib import Path
 
 import pytest
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    # Python 3.10：stdlib `tomllib` 仅 3.11+（本项目 `requires-python >= 3.10`），
+    # 而 pytest 在 <3.11 依赖 `tomli`（uv.lock 已锁）。若不回退，本文件在
+    # `full (windows-latest, 3.10)` 腿上会以 `ModuleNotFoundError` **收集失败**
+    # —— 2026-10-10 远端矩阵实测踩到（同族修法见 `test_lint_budget.py:22-28`）。
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / "smartsuite"

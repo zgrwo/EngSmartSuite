@@ -368,7 +368,12 @@ jobs:
     needs: quick
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 审查 2026-10-10：原为 10 分钟 —— 实测**撞上超时**（"The job has exceeded the
+    # maximum execution time of 10m0s"，10m16s 被杀）。原因不是引入慢测试，而是
+    # 测试总量增长（3031 → 3610+，+19%）把这份"全量 + 覆盖率"的作业推过了 10 分钟；
+    # 同一份覆盖率作业在 quality.yml 里实测 12m0s / 12m15s（该 job 未设超时故未暴露）。
+    # 故提到 15 分钟（与 `full` 一致），给增长留出余量而不是"贴着上限跑"。
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
