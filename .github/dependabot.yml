@@ -1,13 +1,26 @@
 # ============================================================================
 # dependabot.yml — 依赖自动更新
 # 使用方式：直接启用（GitHub 自动读取），按项目语言取消注释对应条目
-#   - pip: 需要 pyproject.toml / requirements*.txt（本仓为 pyproject.toml）
+#   - uv: 需要 pyproject.toml + uv.lock（本仓用 uv 锁定）
 #   - github-actions: workflow 文件存在即可
 # ============================================================================
 version: 2
 updates:
   # --- Python 项目：主依赖 + dev/extra 依赖 ---
-  - package-ecosystem: "pip"
+  #
+  # ⚠️ ecosystem 必须是 **`uv`**，不能是 `pip`（2026-10-11 由 PR #54 的 CI 失败定位）。
+  #
+  # 症状：dependabot 的 Python PR 在 `ci.yml` 的 `quick` 第 3 步 **9 秒即红**：
+  #     error: The lockfile at `uv.lock` needs to be updated, but `--check` was provided.
+  # 根因：`pip` ecosystem 只改 `pyproject.toml`，**永远不会动 `uv.lock`** ——
+  # 而本仓的锁文件新鲜度门禁要求两者一致。于是**每一个 Python 依赖 PR 都必然红**，
+  # 且红的原因与该依赖本身是否安全**毫无关系**；看起来像"依赖有问题"，实际是工具错配。
+  #
+  # `uv` ecosystem 会同时更新 `pyproject.toml` 与 `uv.lock`，从根上消除这类假红。
+  # 若 GitHub 侧报 `uv` 不受支持（该 ecosystem 较新），回退方案是：
+  # 改回 `pip`，并仿照 release-please 的做法加一个"给 dependabot 分支补 uv.lock"的工作流
+  # （先例见 `ci(release): 发版 PR 自动同步 uv.lock 根包版本`）。
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
