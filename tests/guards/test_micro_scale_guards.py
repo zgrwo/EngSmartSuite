@@ -1001,12 +1001,18 @@ _MICRO_RUNNERS = {
 
 
 def _visible_texts(res) -> list[str]:
-    """收集一个 `AnalysisResult` 的**全部用户可见文本通道**（summary / 表 / 图）。"""
+    """收集一个 `AnalysisResult` 的**全部用户可见文本通道**（summary / 表 / 图）。
+
+    ⚠️ 表单元格**必须带行标签**（`表名[行].列=值`）——2026-10-10 修：
+    原写法只出 `表名.列=值`，把**行**丢了，于是调用方无法区分
+    「均值被固定小数位吞成 0」和「偏度本来就恰好是 0」。3.10 腿就因此在
+    `process_capability` 上假红（见 `_ZERO_IS_LEGITIMATE_ROWS`）。
+    """
     out = [f"summary: {res.summary}"]
     for name, frame in (res.tables or {}).items():
-        for col in frame.columns:
-            for value in frame[col].tolist():
-                out.append(f"{name}.{col}={value}")
+        for idx, row in frame.iterrows():
+            for col in frame.columns:
+                out.append(f"{name}[{idx}].{col}={row[col]}")
     for fig in res.figures or []:
         for ax in fig.axes:
             out.extend([ax.get_title(), ax.get_xlabel(), ax.get_ylabel()])
@@ -1015,6 +1021,18 @@ def _visible_texts(res) -> list[str]:
                 out.extend(t.get_text() for t in legend.get_texts())
             out.extend(t.get_text() for t in ax.texts)
     return out
+
+
+#: **「0 是合法值」的统计量**：无量纲形状量。
+#:
+#: 为什么必须豁免（2026-10-10，三条 3.10 腿假红后定位）：
+#: `process_capability` 的 `descriptive_stats` 表里，偏度/峰度按项目既定口径
+#: 用固定小数位（`capability.py:717-718` 注释：「偏度/峰度是无量纲形状量」）。
+#: 而 pandas 2.x 分叉上，×1e-9 数据的**三/四阶矩会下溢**（`(x-μ)³ ~ 1e-27`，
+#: 相减后有效位丢失）⇒ `skew()` / `kurtosis()` 返回恰好 0 ⇒ 渲染 `0.0000`。
+#: 这**不是显示层塌缩**（显示忠实反映了算出来的 0），而是统计量本身的数值精度问题。
+#: 把"0.0000"一律当塌缩，等于要求无量纲量永远不等于 0 —— 那是错的断言。
+_ZERO_IS_LEGITIMATE_ROWS = ("偏度", "峰度")
 
 
 @pytest.mark.parametrize("task", sorted(_MICRO_RUNNERS))
@@ -1031,7 +1049,13 @@ def test_micro_scale_display_has_no_collapsed_zero(task):
     """
     res = _MICRO_RUNNERS[task](_micro_frame())
     assert res.status == "ok", res.messages
-    bad = [t for t in _visible_texts(res) if "0.0000" in t or "0.000" in t]
+    bad = [
+        t
+        for t in _visible_texts(res)
+        if ("0.0000" in t or "0.000" in t)
+        # 无量纲形状量恰好为 0 是**合法值**，不是塌缩（理由见 _ZERO_IS_LEGITIMATE_ROWS）
+        and not any(row in t for row in _ZERO_IS_LEGITIMATE_ROWS)
+    ]
     assert not bad, f"{task} 在 ×{_MICRO_SCALE:g} 下展示塌缩为 0（固定小数位吞没微尺度值）: {bad}"
 
 
