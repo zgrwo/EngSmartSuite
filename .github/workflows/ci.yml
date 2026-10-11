@@ -333,14 +333,17 @@ jobs:
     needs: quick
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
-    # 审查 2026-10-11：原为 15 → 20 仍不够。远端实测（15 条腿）：
-    #   windows 3.14 = 20m09s、windows 3.11 = 20m10s、windows 3.12 = 20m11s、
-    #   ubuntu  3.11 = 20m16s —— **四条腿全是"撞上限被杀"**（整数分钟 + 2 秒的偏移即超时特征）；
-    #   而**通过的**腿也已经跑到 ubuntu 3.12/3.13/3.14 ≈ 19m30s–19m50s。
-    # 即：全量套件在这些 runner 上本来就要 ~20 分钟，20 分钟的上限是"压线跑、随机被杀"。
-    # 提到 30 分钟（1.5 倍余量）。矩阵是 `fail-fast: false`，单腿被杀不影响其它腿，
-    # 但会让整条 CI 红 —— 用"多占几分钟 runner"换"结论完整"是划算的。
-    timeout-minutes: 30
+    # 审查 2026-10-11：15 → 20 → **45**，连续两次上调都是被实测推着走：
+    #   · 20 分钟时：windows 3.14/3.11/3.12 与 ubuntu 3.11 **四条腿"撞上限被杀"**
+    #     （20m09s–20m16s，整数分 +2 秒即超时特征），而通过的腿也已跑到 19m50s；
+    #   · 30 分钟时：仅剩 `windows 3.10` 撞上限（30m13s），而同批**通过的 Windows 腿**
+    #     是 28m37s(3.11) / 26m14s(3.14) / 25m42s(3.12) / 23m17s(3.13) ——
+    #     即 Windows runner 上全量套件本就要 ~25–30 分钟，30 分钟仍然压线。
+    # 提到 45 分钟（约 1.5 倍于最慢实测），把"随机被杀"这一不确定性去掉。
+    # 说明：矩阵 `fail-fast: false`，单腿被杀不影响其它腿，但会让整条 CI 红；
+    # 而这些**都不是测试失败**（被杀时套件仍在正常推进），纯属预算不足。
+    # 用"多占几分钟 runner"换"发版能拿到完整矩阵结论"是划算的。
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
