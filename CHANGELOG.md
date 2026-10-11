@@ -2,6 +2,90 @@
 
 本文件记录 SmartSuite 的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.0.0](https://github.com/zgrwo/EngSmartSuite/compare/v1.5.1...v2.0.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **web:** CSP 收紧后页面内注入的自定义脚本/内联样式会被拦截； 10 处原先静默降级为非法的参数值改为明确拒绝；参数错误文案现在包含参数名； box_chart.show_stats 的默认值表示由布尔 True 改为字符串 "true"（二者等价）。
+* **engine:** 旧清洗函数已删除（对 engine 内部 API 而言是破坏性变更）； ttest_ind 默认口径由 Student 改为 Welch，**p 值与自由度会变**； ANOVA 的 η² 数值变小；生存分析与属性图对原先"静默接受"的输入改为拒绝。
+
+### ✨ 新功能
+
+* **params:** 参数可达性补齐 6 项 + 未知参数检测 + CLI 任务数断言收紧（审查 P2-8/P2-5/P3-1） ([24efd9b](https://github.com/zgrwo/EngSmartSuite/commit/24efd9b8b5b066c530cc2a594733fb8d8e743b0d))
+* **scripts:** 指标改为「分析类数值真值覆盖率」并做成门禁 ([a40b2ad](https://github.com/zgrwo/EngSmartSuite/commit/a40b2addc79d85c614b81355b41ea07f2d3ade42))
+* **scripts:** 真浏览器冒烟（系统 Edge + CDP，零依赖） ([d5e4c67](https://github.com/zgrwo/EngSmartSuite/commit/d5e4c679eb355a75cb737b20b3aadc32d72a0729))
+* **web:** 参数契约收口、Web 安全加固与错误归因治理 ([32ca5b8](https://github.com/zgrwo/EngSmartSuite/commit/32ca5b80cfe8dd239cc0a4c13d7500a1f47c0101))
+
+
+### 🐛 Bug 修复
+
+* **ci:** dependabot 改用 uv ecosystem，消除 Python 依赖 PR 的必然假红 ([6c99674](https://github.com/zgrwo/EngSmartSuite/commit/6c99674b1760d62b7fe29dd2a089a0e2a50a261a))
+* **ci:** full 矩阵超时 30→45 分钟（Windows runner 全量套件实测需 25-30 分钟） ([db60fb2](https://github.com/zgrwo/EngSmartSuite/commit/db60fb2e82f4eede2e7b71e2f6366b8a6e0d0245))
+* **ci:** main 的 CI 不再互相取消 —— 组名唯一化，绕开布尔强制转换陷阱 ([ffe313e](https://github.com/zgrwo/EngSmartSuite/commit/ffe313e5e90799aa07555eb2c5f9cd4e9597f54f))
+* **ci:** 三个作业的超时按实测放宽（quick 10→20 / full 15→20 / quality 15→20） ([b00e24f](https://github.com/zgrwo/EngSmartSuite/commit/b00e24fdb35427e180cbcc8588d2d4edb6b5c999))
+* **ci:** 补登记新测试文件到目录树，并给新 except 块补日志（红线） ([69cf33b](https://github.com/zgrwo/EngSmartSuite/commit/69cf33bbb01e6637a2764698e9091d2abbadf662))
+* **deps:** 升 werkzeug 至 3.1.9 修 CVE-2026-102598，并按实测再放宽矩阵腿超时 ([36bdbe2](https://github.com/zgrwo/EngSmartSuite/commit/36bdbe2bbfa7ec8d8f3041b364b1b40aaff650db))
+* **engine:** anova.interactions 补 Choice 别名，修 Web 端 ANOVA 不可用（审查 P0-2） ([4975d72](https://github.com/zgrwo/EngSmartSuite/commit/4975d72e6bfcb817740cde06d333d4bbe702338d))
+* **engine:** NaN 免披露、±Inf 必披露 —— 契约拆 L4/B1 并落地（口径裁定） ([a7bcf75](https://github.com/zgrwo/EngSmartSuite/commit/a7bcf75ca29512ed75a0bcb24d7900616102696a))
+* **engine:** P2-8 收口 —— 最后 4 个参数可达，并修正 1 处 Spec 死声明 ([9c8dc7c](https://github.com/zgrwo/EngSmartSuite/commit/9c8dc7c2080d5dde68219c8e0e4023418e9f156e))
+* **engine:** process_capability.transform 面板可达且不强制开启 Box-Cox（审查 P2-8 收口） ([ae5db2d](https://github.com/zgrwo/EngSmartSuite/commit/ae5db2d3c5de8bb8e22ffeb395ce9baea8a851f4))
+* **engine:** proportion_ci 成功值必须真实存在，修静默 0% 结论（审查 P2-6） ([c0d82b7](https://github.com/zgrwo/EngSmartSuite/commit/c0d82b7b73547b9223db0e8751db31bb8ceae83b))
+* **engine:** shapiro_p 不可计算时返回 NaN，修正态性判决随量级翻转（审查 P0-3） ([a3038b6](https://github.com/zgrwo/EngSmartSuite/commit/a3038b699e6d2364840ebccbbf9acfdc1eb4b946))
+* **engine:** shapiro_p 的"不可判定"改为确定性判定，不再外包给 scipy ([5297465](https://github.com/zgrwo/EngSmartSuite/commit/529746595a7e0527e3fc864a1e50be83405b2f7b))
+* **engine:** 修远端 CI 分叉暴露的两类环境耦合缺陷（A-D 口径 / 未收敛告警） ([dc01e58](https://github.com/zgrwo/EngSmartSuite/commit/dc01e589ea249465b8e75f483a4a724506a62489))
+* **engine:** 兑现契约 [#16](https://github.com/zgrwo/EngSmartSuite/issues/16)/[#20](https://github.com/zgrwo/EngSmartSuite/issues/20) —— PPF 回退与多组 log-rank 的降级必须用户可见 ([aebf68c](https://github.com/zgrwo/EngSmartSuite/commit/aebf68c447f151398bd0ac16fbe2211a174ebc08))
+* **engine:** 收口 P1-4 两个具名缺口 + 参数标签/面板断言同步（审查 P1-4/P2-8 收尾） ([215fc2d](https://github.com/zgrwo/EngSmartSuite/commit/215fc2de83ad50c803bd0e44533a209e6b084a4c))
+* **engine:** 生存分析收口 _guard，修 ±Inf 静默降级与点估计污染 ([9e02717](https://github.com/zgrwo/EngSmartSuite/commit/9e02717de3e40a0fa6c79daa4ae9e12524798689))
+* **engine:** 趋势预测接 _guard 并消除错误归因；披露文案与计数口径对齐 ([36953d8](https://github.com/zgrwo/EngSmartSuite/commit/36953d8f93493d24235b3c2bdb231caf40e96f30))
+* **engine:** 边界契约收口（错误归因 / ±Inf 披露 / 量级守卫） ([cc0de62](https://github.com/zgrwo/EngSmartSuite/commit/cc0de622cbf4efc2fd3074578d07cb9498961efb))
+* **engine:** 非有限统计量不再被表述为结论，±Inf 入口清洗并披露（审查 P0-4/P0-5/P0-7） ([401a2be](https://github.com/zgrwo/EngSmartSuite/commit/401a2bee6e2746d78e9a70fd5199884c7e9dcce5))
+* **scripts:** 断链检查改判「目标是否入库」，修本地假绿（审查 P0-9） ([e2f3ebd](https://github.com/zgrwo/EngSmartSuite/commit/e2f3ebd3010cca2654ca78907760e0d859b99f87))
+* **scripts:** 本地验证复用 CI 口径；质量守卫消 89 → 11 条 WARN ([e84e78d](https://github.com/zgrwo/EngSmartSuite/commit/e84e78d6313b052c1bcbe55bfb25692ed24a6ac0))
+* **scripts:** 门禁加固（风险分级/分母守恒/接线守卫/陈旧豁免） ([33ef95e](https://github.com/zgrwo/EngSmartSuite/commit/33ef95e8c8166722f2d01b4b5a0f97841251d41f))
+* **scripts:** 门禁解释器跨平台探测，修 ubuntu CI 必红（审查 P0-11/P1-13） ([1d2020b](https://github.com/zgrwo/EngSmartSuite/commit/1d2020b672f8058ca61392a49e3944b0758211c1))
+* **tests:** 依赖声明守卫的反空转下限按实测标定（修三条 3.10 腿假红） ([0ff7a49](https://github.com/zgrwo/EngSmartSuite/commit/0ff7a493025977473e5822becfc89d20a927770e))
+* **tests:** 子进程 stdio 与会话解码统一 UTF-8，修 Windows runner 上的成片假红 ([83417a6](https://github.com/zgrwo/EngSmartSuite/commit/83417a68f7d6d1b617d3d8812338839b0b3dbd64))
+* **tests:** 微尺度展示守卫补行标签并豁免无量纲形状量（修 3.10 腿假红） ([b597053](https://github.com/zgrwo/EngSmartSuite/commit/b597053cdc44d15c7e2b688cf8ea8aa03b59b072))
+* **web:** 相关性矩阵改用 fmtCellNum，微尺度不再渲染成 0.000（审查 P1-7） ([fcd0b7b](https://github.com/zgrwo/EngSmartSuite/commit/fcd0b7bc2cc2f7889aedad5e606baa95db0fbaf2))
+* **web:** 面板槽位数注释随 event_value 上线同步为 125/125，标签条目 115 ([5929007](https://github.com/zgrwo/EngSmartSuite/commit/5929007cb3eeebc5e5469577206f942774fb65aa))
+* **web:** 面板默认值往返修 null 字面量，并加往返门禁（审查 P0-1/P1-2/P1-10） ([fc61f0a](https://github.com/zgrwo/EngSmartSuite/commit/fc61f0aa8a2ac10b18ccb968078e8389c5952855))
+* 修 P2-5 的错误归因误报 + 三处遗留（惰性门禁/归因不一致） ([a9c90cf](https://github.com/zgrwo/EngSmartSuite/commit/a9c90cf2ea1e52a43c77a51385e2f9bf03fafa93))
+* 收口非 P0 中复核为真的剩余项（P1-3/P1-8/P2-5/P2-15/P3-5/P3-6/P3-7/P3-11） ([3d09776](https://github.com/zgrwo/EngSmartSuite/commit/3d09776a5d1f96871581dbf2864692981148b39b))
+* 第二轮全量深度审查修复（2×P0 / 11×P1 / 21×P2 / 21×P3 全部处置） ([b96a57e](https://github.com/zgrwo/EngSmartSuite/commit/b96a57e99ce8fd20d0b658c22aa9c7f8444fbdb4))
+
+
+### 📄 文档
+
+* 手册数值/治理文档按实跑复核，并补 §5.3/§5.4 的 CLAIM 门禁（审查 P0-10/P1-5 等） ([ab9e936](https://github.com/zgrwo/EngSmartSuite/commit/ab9e936994900496e3a5e042aaa55936bd40b4ec))
+* 治理文档与 skill 同步单一来源架构（审查 P2-2） ([1cc5f62](https://github.com/zgrwo/EngSmartSuite/commit/1cc5f6298a4e1a2471ce2b8aaa042d6970d63061))
+* 清空第二轮登记的文档债（契约码列如实化、渲染缺陷、覆盖数失真、CLAIM 逐值捕获） ([7c772b6](https://github.com/zgrwo/EngSmartSuite/commit/7c772b61ffd5867630a95f6ebef1ff96898f71f6))
+* 登记 test_trend_nonfinite.py 到目录树（verify_docs --strict） ([2adf27b](https://github.com/zgrwo/EngSmartSuite/commit/2adf27bf5d20a733abc742409d4908e596fdb0cc))
+* 补齐改善计划、边界契约、Minitab 对照与手册口径 ([44cdace](https://github.com/zgrwo/EngSmartSuite/commit/44cdacecf89b85eff91fbb5e22eb4669ee0b6085))
+
+
+### 🔧 重构
+
+* **engine:** 边界处置统一走 _guard，删除手抄清洗实现 ([2913658](https://github.com/zgrwo/EngSmartSuite/commit/2913658429730ccf79b2adb173ea3312b85593d6))
+* 消灭前端手写任务集合，新增方法成本 8 步 → 1 步 ([1492e7c](https://github.com/zgrwo/EngSmartSuite/commit/1492e7c7175b5d508b809d3268526fa50478599f))
+
+
+### ✅ 测试
+
+* **params:** 补 global_param_vocabulary 的守卫（被质量门禁催收） ([f40fb49](https://github.com/zgrwo/EngSmartSuite/commit/f40fb496d078a176d77463925e730a3aebc0fe4c))
+* 为 21 个零真值断言的任务补解析真值 ([7646c83](https://github.com/zgrwo/EngSmartSuite/commit/7646c83da28a529e1079d53be724a0c9b36d62dd))
+* 手册对照与 DOE 效应量的弱界换成解析真值 ([ddf3258](https://github.com/zgrwo/EngSmartSuite/commit/ddf3258709f9a146b9cd53a5d887f478f1693337))
+* 把区间断言换成精确真值，并实测 25% 目标的不可达性 ([5e7b75d](https://github.com/zgrwo/EngSmartSuite/commit/5e7b75dc864c23ad4f205e7a928bf8c6f322c2ba))
+* 补 Gage R&R 的 ANOVA 恒等式（对任意数据成立的真值） ([366fb19](https://github.com/zgrwo/EngSmartSuite/commit/366fb197b529681a3a467fe7abfda7b7b12eec3f))
+* 补齐四层防线、真值断言与边界披露守卫 ([39660d3](https://github.com/zgrwo/EngSmartSuite/commit/39660d3e2c6b211b2e58a62d67e10b468d89175a))
+
+
+### 🧹 维护
+
+* **scripts:** 新增前端与半运行时冒烟门禁并强化文档校验 ([4318fa2](https://github.com/zgrwo/EngSmartSuite/commit/4318fa20234dbb2242a6a052351086326b89f08e))
+* 修复日志落点、扩展 CI 门禁并同步仓库元数据 ([86cd9ea](https://github.com/zgrwo/EngSmartSuite/commit/86cd9ea58ef99dcf20b37be5e40a9ce5dc5b04ff))
+* 合并远端 v1.5.1 发布提交，解除发行拓扑分叉 ([e51de60](https://github.com/zgrwo/EngSmartSuite/commit/e51de60b87c0ae95fd102c18d6990154ed2a6cf8))
+
 ## [1.5.1](https://github.com/zgrwo/EngSmartSuite/compare/v1.5.0...v1.5.1) (2026-09-24)
 
 
