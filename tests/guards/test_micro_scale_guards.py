@@ -1010,9 +1010,20 @@ def _visible_texts(res) -> list[str]:
     """
     out = [f"summary: {res.summary}"]
     for name, frame in (res.tables or {}).items():
+        # 行标签优先取**表格自己的名称列**（本项目的中文表第一列即行名，如「统计量」），
+        # 取不到才退回整数索引。用整数索引会让调用方无法按名称豁免 —— 3.10 腿实测：
+        # 偏度/峰度落在 `[4]`/`[5]`，守卫文案里根本没有「偏度」二字，豁免规则匹配不上。
+        label_col = frame.columns[0] if len(frame.columns) else None
         for idx, row in frame.iterrows():
+            label = idx
+            if label_col is not None:
+                cand = row[label_col]
+                if isinstance(cand, str) and cand:
+                    label = cand
             for col in frame.columns:
-                out.append(f"{name}[{idx}].{col}={row[col]}")
+                if col == label_col and label is not idx:
+                    continue  # 名称列本身不作为「值」重复计入
+                out.append(f"{name}[{label}].{col}={row[col]}")
     for fig in res.figures or []:
         for ax in fig.axes:
             out.extend([ax.get_title(), ax.get_xlabel(), ax.get_ylabel()])

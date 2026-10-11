@@ -53,7 +53,10 @@ web = [
     "flask>=3.0",
     # 审查 2026-10-09 P3-6：`web/app.py` 直接 `from werkzeug.exceptions import HTTPException`
     # （全局异常处理器），此前靠 flask 的传递依赖带入 —— 直接 import 必须直接声明。
-    "werkzeug>=3.0",
+    # 审查 2026-10-11：下限由 `>=3.0` 提到 **`>=3.1.9`** —— 远端 CI 的 `quality` 腿
+    # `pip-audit` 实测 `werkzeug 3.1.8` 命中 **CVE-2026-102598**（修复版本 3.1.9）。
+    # 下限跟着安全修复走，避免将来重新锁定时又悄悄退回有漏洞的版本。
+    "werkzeug>=3.1.9",
     "pyarrow>=14.0",
 ]
 report = [
@@ -77,7 +80,8 @@ dev = [
 ]
 all = [
     "flask>=3.0",
-    "werkzeug>=3.0",
+    # 同 `web` extra：下限跟安全修复走（CVE-2026-102598，修复版本 3.1.9）
+    "werkzeug>=3.1.9",
     "pyarrow>=14.0",
     "python-pptx>=0.6",
     "reportlab>=4.0",

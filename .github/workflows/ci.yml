@@ -333,7 +333,14 @@ jobs:
     needs: quick
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # 审查 2026-10-11：原为 15 → 20 仍不够。远端实测（15 条腿）：
+    #   windows 3.14 = 20m09s、windows 3.11 = 20m10s、windows 3.12 = 20m11s、
+    #   ubuntu  3.11 = 20m16s —— **四条腿全是"撞上限被杀"**（整数分钟 + 2 秒的偏移即超时特征）；
+    #   而**通过的**腿也已经跑到 ubuntu 3.12/3.13/3.14 ≈ 19m30s–19m50s。
+    # 即：全量套件在这些 runner 上本来就要 ~20 分钟，20 分钟的上限是"压线跑、随机被杀"。
+    # 提到 30 分钟（1.5 倍余量）。矩阵是 `fail-fast: false`，单腿被杀不影响其它腿，
+    # 但会让整条 CI 红 —— 用"多占几分钟 runner"换"结论完整"是划算的。
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
