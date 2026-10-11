@@ -8,7 +8,7 @@ import tempfile
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 
-__version__ = "1.5.1"
+__version__ = "2.0.0"
 
 
 LOG_DIR_ENV = "SMARTSUITE_LOG_DIR"
