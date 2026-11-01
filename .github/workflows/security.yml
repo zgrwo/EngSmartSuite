@@ -29,7 +29,7 @@ jobs:
         language: [python]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.3.3
       - name: 依赖漏洞扫描（pip-audit）
         # 检查项目已解析依赖是否含已知 CVE（补 CodeQL 静态分析盲区；来源：VibeCodingTemplate）。
         # 关键：先安装项目依赖再 audit（否则审计的是 runner 环境而非项目依赖 = no-op）。
